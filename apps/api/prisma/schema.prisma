@@ -49,6 +49,10 @@ model User {
   currentProject   Project?    @relation("UserCurrentProject", fields: [currentProjectId], references: [id])
 
   leadActivitiesCreated LeadActivity[]
+  /// מספר עובד (20260327000000_add_employee_number)
+  employeeNumber        String?
+  salesRepQuotes        Quote[] @relation("QuoteSalesRep")
+  performerQuotes       Quote[] @relation("QuotePerformer")
 }
 
 model Project {
@@ -610,9 +614,61 @@ model Quote {
   /// פריטי שורה שנשמרו מהתבנית/עריכה
   lineItemsJson   Json?
 
-  salesOrders SalesOrder[]
+  // ── Fields added by migrations 20260325181000 / 183500 / 190000 ──────────
+  customerName            String?
+  quoteDate               DateTime?
+  followupDate            DateTime?
+  salesRepresentativeName String?
+  executorName            String?
+  linkedEntityId          String?
+  orderReferenceNumber    String?
+  copiedFromOrder         String?
+  priceList               String?
+  exchangeRate            Decimal?  @db.Decimal(18, 4)
+  accountingNumber        String?
+  companyRegNumber        String?
+  addressSummary          String?
+  phoneSummary            String?
+  faxSummary              String?
+  validityDays            Int?
+  paymentsCount           Int?
+  paymentAmount           Decimal?  @db.Decimal(18, 2)
+  paymentFactor           Decimal?  @db.Decimal(18, 4)
+  paymentTotal            Decimal?  @db.Decimal(18, 2)
+  paymentReference        String?
+  paymentDueDate          DateTime?
+  paymentStatus           String?
+  internalNotes           String?
+  openingText             String?
+  closingText             String?
+  orderSource             String?
+  functionalLabel         String?
+  closeProbabilityPercent String?
+  closeColor              String?
+  lastUpdatedBy           String?
+  lastUpdatedDate         DateTime?
+  lastUpdatedTime         String?
+  forecastFunctionalLabel String?
+  forecastClosePercent    String?
+  forecastColor           String?
+  forecastUpdatedAt       DateTime?
+  forecastUpdatedBy       String?
+  forecastUpdatedTime     String?
+
+  // ── User FK relations for sales rep + performer (20260328190000) ─────────
+  salesRepresentativeId   String?
+  salesRepresentative     User?   @relation("QuoteSalesRep", fields: [salesRepresentativeId], references: [id], onDelete: SetNull)
+  performerUserId         String?
+  performerUser           User?   @relation("QuotePerformer", fields: [performerUserId], references: [id], onDelete: SetNull)
+  performerName           String?
+
+  salesOrders     SalesOrder[]
+  quoteItems      CustomerQuoteItem[]
+  quoteDocuments  QuoteDocument[]
 
   @@index([importLegacyId])
+  @@index([salesRepresentativeId])
+  @@index([performerUserId])
 }
 
 model Task {
@@ -757,6 +813,56 @@ model QuoteItemCatalog {
   notes            String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+
+/// תנאי תשלום (20260328120000_payment_terms)
+model PaymentTerm {
+  id        String   @id @default(uuid())
+  label     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// שורות פריטי ההצעה (20260325181000)
+model CustomerQuoteItem {
+  id                  String   @id @default(uuid())
+  quoteId             String
+  quote               Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  rowOrder            Int      @default(0)
+  productCode         String?
+  sku                 String?
+  productDescription  String?
+  distributionChannel String?
+  quantity            Decimal? @db.Decimal(18, 4)
+  price               Decimal? @db.Decimal(18, 2)
+  discountPercent     Decimal? @db.Decimal(6, 2)
+  total               Decimal? @db.Decimal(18, 2)
+  totalIls            Decimal? @db.Decimal(18, 2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([quoteId])
+  @@index([rowOrder])
+}
+
+/// מסמכים מקושרים להצעה (20260325183500)
+model QuoteDocument {
+  id                  String    @id @default(uuid())
+  quoteId             String
+  quote               Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  importLegacyId      String?
+  rowOrder            Int       @default(0)
+  documentDescription String?
+  documentType        String?
+  fileName            String?
+  filePath            String?
+  documentDate        DateTime?
+  uploadedBy          String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([quoteId])
+  @@index([importLegacyId])
 }
 
 enum ReportType {

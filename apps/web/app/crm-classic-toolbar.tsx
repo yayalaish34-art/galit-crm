@@ -282,6 +282,10 @@ export function CrmLegacyTopNav({
   onOpenQuickCreate,
   onJumpSettingsTab,
   onLogout,
+  onSearchCustomer,
+  onSearchQuote,
+  onNewCustomer,
+  isCustomerCard = false,
 }: {
   current: string;
   currentUserRole: string;
@@ -293,6 +297,14 @@ export function CrmLegacyTopNav({
   onJumpSettingsTab: (tab: SettingsToolbarJumpTab) => void;
   /** יציאה מתפריט קובץ */
   onLogout: () => void;
+  /** פתיחת חלון חיפוש לקוח מודרני */
+  onSearchCustomer?: () => void;
+  /** פתיחת חלון חיפוש הצעות מחיר מודרני */
+  onSearchQuote?: () => void;
+  /** חדש → לקוח — פתיחת כרטיס לקוח חדש (מצב יצירה) */
+  onNewCustomer?: () => void;
+  /** When true, render the toolbar with a premium light style instead of the dark green */
+  isCustomerCard?: boolean;
 }) {
   const role = currentUserRole;
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>('main');
@@ -533,23 +545,22 @@ export function CrmLegacyTopNav({
             <DropdownRow
               label="לקוח"
               disabled={!canAccess(role, 'customers')}
-              title={!canAccess(role, 'customers') ? 'אין הרשאה' : 'מעבר ללקוחות — יצירה מהרשימה'}
+              title={!canAccess(role, 'customers') ? 'אין הרשאה' : 'פתיחת כרטיס לקוח חדש'}
               onPick={() => {
                 closeMenus();
-                go('customers');
+                if (onNewCustomer) {
+                  onNewCustomer();
+                } else {
+                  go('customers');
+                }
               }}
             />
             <DropdownRow
               label="התקשרות"
-              disabled={!canAccess(role, 'tasks')}
-              title={
-                !canAccess(role, 'tasks')
-                  ? 'אין הרשאה'
-                  : 'משימות / מעקב — הקרוב ביותר לרישום התקשרות'
-              }
+              title="פתיחת טופס התקשרות חדשה"
               onPick={() => {
                 closeMenus();
-                go('tasks');
+                onNavigate('interaction-new');
               }}
             />
             <DropdownRow
@@ -563,16 +574,18 @@ export function CrmLegacyTopNav({
             />
             <DropdownRow
               label="הזמנה"
-              disabled
-              title="הזמנות — מודול מלא לא זמין בשלב מעבר (placeholder)"
-              onPick={() => {}}
+              title="פתיחת הזמנה חדשה"
+              onPick={() => {
+                closeMenus();
+                onNavigate('order-new');
+              }}
             />
             <DropdownRow
               label="פנייה"
               title="פתיחת טופס פנייה חדשה (לקוח/ליד)"
               onPick={() => {
                 closeMenus();
-                onOpenQuickCreate();
+                onNavigate('interaction-new');
               }}
             />
           </>
@@ -585,21 +598,21 @@ export function CrmLegacyTopNav({
             <DropdownRow
               label="לקוח"
               disabled={!canAccess(role, 'customers')}
-              title={!canAccess(role, 'customers') ? 'אין הרשאה' : 'לקוחות + מיקוד חיפוש גלובלי'}
+              title={!canAccess(role, 'customers') ? 'אין הרשאה' : 'חיפוש לקוח'}
               onPick={() => {
                 closeMenus();
-                go('customers');
-                onFocusSearch();
+                if (onSearchCustomer) { onSearchCustomer(); }
+                else { go('customers'); onFocusSearch(); }
               }}
             />
             <DropdownRow
               label="הצעה"
               disabled={!canAccess(role, 'quotes')}
-              title={!canAccess(role, 'quotes') ? 'אין הרשאה' : 'הצעות מחיר + מיקוד חיפוש'}
+              title={!canAccess(role, 'quotes') ? 'אין הרשאה' : 'חיפוש הצעות מחיר'}
               onPick={() => {
                 closeMenus();
-                go('quotes');
-                onFocusSearch();
+                if (onSearchQuote) { onSearchQuote(); }
+                else { go('quotes'); onFocusSearch(); }
               }}
             />
             <DropdownRow
@@ -626,11 +639,18 @@ export function CrmLegacyTopNav({
 
   const greenBar = (
     <div
-      className="w-full border-b-2 shadow-md"
-      style={{
-        background: `linear-gradient(180deg, ${GALIT_GREEN} 0%, ${GALIT_GREEN_DARK} 100%)`,
-        borderColor: GALIT_GREEN_DARK,
-      }}
+      className={cn('w-full border-b-2 shadow-md', isCustomerCard && 'galit-premium-bar')}
+      style={isCustomerCard
+        ? {
+            background: 'linear-gradient(180deg, #EAF5EA 0%, #F6FBF6 100%)',
+            borderColor: '#DCE7D9',
+            boxShadow: '0 2px 8px rgba(100,140,100,0.08)',
+          }
+        : {
+            background: `linear-gradient(180deg, ${GALIT_GREEN} 0%, ${GALIT_GREEN_DARK} 100%)`,
+            borderColor: GALIT_GREEN_DARK,
+          }
+      }
     >
       <div className="flex min-h-[4.5rem] w-full items-stretch sm:min-h-[4.75rem]">
         <div className="flex shrink-0 items-center justify-center border-e border-white/30 px-2 sm:px-4">
@@ -882,33 +902,54 @@ export function CrmLegacyTopNav({
 
   return (
     <>
+      {isCustomerCard && (
+        <style>{`
+          .galit-premium-bar button { color: #2E4A2D !important; }
+          .galit-premium-bar button svg { color: #3D6B3A !important; }
+          .galit-premium-bar button span { color: #2E4A2D !important; }
+          .galit-premium-bar button:hover { background: rgba(76,140,70,0.10) !important; border-color: rgba(76,140,70,0.25) !important; }
+          .galit-premium-bar button[class*="bg-black"] { background: rgba(76,140,70,0.15) !important; border-color: rgba(76,140,70,0.35) !important; }
+          .galit-premium-bar span[class*="bg-white"] { background: #C8DCC5 !important; }
+          .galit-premium-bar .border-e { border-color: #C8DCC5 !important; }
+          .galit-premium-ribbon { background: #F0F5EF !important; border-color: #C8DCC5 !important; }
+          .galit-premium-ribbon button { color: #3D6B3A !important; }
+          .galit-premium-ribbon button[class*="bg-[#f2efe8]"] { background: #FFFFFF !important; border-color: #C8DCC5 !important; color: #2E4A2D !important; }
+          .galit-premium-ribbon button[class*="bg-[#d8d4cc]"] { background: #E4EDE3 !important; color: #4A7047 !important; }
+          .galit-premium-ribbon button:hover { background: #E8F0E7 !important; }
+        `}</style>
+      )}
       <div ref={rootRef} className="fixed inset-x-0 top-0 z-[200] w-full" dir="rtl">
-        <div className="flex w-full flex-nowrap items-end border-b border-slate-500 bg-[#e4e0d8] px-1 pt-1 sm:px-2">
-          <RibbonTabButton
-            ref={fileTabRef}
-            label="קובץ"
-            active={ribbonTab === 'file'}
-            onClick={onFileTabClick}
-          />
-          <span className="w-1 shrink-0" aria-hidden />
-          <RibbonTabButton
-            label="ראשי"
-            active={ribbonTab === 'main'}
-            onClick={() => {
-              setRibbonTab('main');
-              setFilePanelOpen(false);
-            }}
-          />
-          <span className="w-1 shrink-0" aria-hidden />
-          <RibbonTabButton
-            label="תוספות"
-            active={ribbonTab === 'extras'}
-            onClick={() => {
-              setRibbonTab('extras');
-              setFilePanelOpen(false);
-            }}
-          />
-        </div>
+        {current !== 'interaction-new' && (
+          <div className={cn(
+            "flex w-full flex-nowrap items-end border-b border-slate-500 bg-[#e4e0d8] px-1 pt-1 sm:px-2",
+            isCustomerCard && 'galit-premium-ribbon'
+          )}>
+            <RibbonTabButton
+              ref={fileTabRef}
+              label="קובץ"
+              active={ribbonTab === 'file'}
+              onClick={onFileTabClick}
+            />
+            <span className="w-1 shrink-0" aria-hidden />
+            <RibbonTabButton
+              label="ראשי"
+              active={ribbonTab === 'main'}
+              onClick={() => {
+                setRibbonTab('main');
+                setFilePanelOpen(false);
+              }}
+            />
+            <span className="w-1 shrink-0" aria-hidden />
+            <RibbonTabButton
+              label="תוספות"
+              active={ribbonTab === 'extras'}
+              onClick={() => {
+                setRibbonTab('extras');
+                setFilePanelOpen(false);
+              }}
+            />
+          </div>
+        )}
         {greenBar}
       </div>
       {filePanelPortal}

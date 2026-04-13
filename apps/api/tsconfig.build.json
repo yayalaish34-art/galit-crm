@@ -1,4 +1,18 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["node_modules", "dist", "test", "**/*spec.ts", "apps", "web"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*spec.ts",
+    "apps",
+    "web",
+    "src/events-history",
+    "src/execution-calendar",
+    "src/inquiries",
+    "src/orders",
+    "src/payment-terms",
+    "src/sales-calendar",
+    "src/transactions"
+  ]
 }

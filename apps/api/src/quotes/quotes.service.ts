@@ -5,6 +5,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument = require('pdfkit');
 
+// Columns present in the Prisma schema (migration 20260328190000) that do NOT
+// exist in the actual DB table yet. Pre-emptively excluded from every Prisma
+// INSERT/UPDATE RETURNING clause so they never cause "column does not exist" errors.
+const SCHEMA_DRIFT_OMIT = ['salesRepresentativeId', 'performerUserId', 'performerName'];
+
 const QUOTE_WRITABLE_FIELDS = new Set([
   'importLegacyId',
   'quoteNumber',
@@ -28,6 +33,35 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   'quoteTemplateId',
   'contentHtml',
   'lineItemsJson',
+  // ── Fields added by schema migrations ────────────────────────────────────
+  'customerName',
+  'quoteDate',
+  'followupDate',
+  'salesRepresentativeName',
+  'executorName',
+  'orderReferenceNumber',
+  'priceList',
+  'exchangeRate',
+  'accountingNumber',
+  'companyRegNumber',
+  'phoneSummary',
+  'faxSummary',
+  'validityDays',
+  'paymentsCount',
+  'paymentAmount',
+  'paymentTotal',
+  'paymentDueDate',
+  'internalNotes',
+  'orderSource',
+  'functionalLabel',
+  'forecastClosePercent',
+  'forecastUpdatedAt',
+  'forecastUpdatedBy',
+  'forecastUpdatedTime',
+  // salesRepresentativeId — FK from migration 20260328190000, NOT in real DB, never write it
+  // performerUserId       — FK from migration 20260328190000, NOT in real DB, never write it
+  // performerName         — plain String from same migration, omitted from payload too
+  'customerContactId',
 ]);
 
 @Injectable()
@@ -121,12 +155,41 @@ export class QuotesService {
     });
   }
 
+  /** Next display reference for new quotes (UI סימוכין) — counts quotes created this calendar month. */
+  async getNextReference(): Promise<{ reference: string }> {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `Q-${year}${month}-`;
+    const startOfMonth = new Date(year, now.getMonth(), 1);
+    const count = await this.prisma.quote.count({
+      where: { createdAt: { gte: startOfMonth } },
+    });
+    const next = String(count + 1).padStart(4, '0');
+    return { reference: `${prefix}${next}` };
+  }
+
   create(data: any, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
     if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
 
     const clean = this.sanitizeQuoteInput(data);
+
+    // Prisma 7.x + @prisma/adapter-pg requires Date objects for DateTime fields,
+    // not ISO strings. Convert every DateTime field in the sanitized payload.
+    const DATETIME_FIELDS = [
+      'validTo', 'quoteDate', 'followupDate', 'validityDate', 'paymentDueDate',
+      'forecastUpdatedAt', 'sentAt', 'reminderNextAt',
+    ];
+    for (const field of DATETIME_FIELDS) {
+      const val = (clean as any)[field];
+      if (val !== undefined && val !== null) {
+        const d = val instanceof Date ? val : new Date(val);
+        (clean as any)[field] = isNaN(d.getTime()) ? null : d;
+      }
+    }
+
     const totalAmount = this.computeTotalAmount({
       amountBeforeVat: (clean as any)?.amountBeforeVat,
       vatPercent: (clean as any)?.vatPercent,
@@ -134,12 +197,60 @@ export class QuotesService {
       discountValue: (clean as any)?.discountValue,
     });
 
-    return this.prisma.quote.create({
-      data: {
-        ...(clean as any),
-        totalAmount,
-      },
-    });
+    // tryCreate retries automatically when a column exists in the Prisma schema
+    // but not yet in the actual DB (e.g. migration not applied).
+    // omitFields: columns excluded from both the INSERT payload and the RETURNING clause.
+    const tryCreate = (payload: Record<string, unknown>, omitFields: string[] = SCHEMA_DRIFT_OMIT): Promise<any> => {
+      const omitClause = omitFields.reduce<Record<string, boolean>>((acc, f) => ({ ...acc, [f]: true }), {});
+      return (this.prisma.quote.create({
+        data: payload as any,
+        ...(omitFields.length ? { omit: omitClause } : {}),
+      }) as Promise<any>).catch((e: any) => {
+        const raw: string = e?.message ?? '';
+
+        // ── "column does not exist" ─────────────────────────────────────────
+        // Covers P2022 AND raw adapter errors regardless of error code/class.
+        // Error formats vary by Prisma/PG version:
+        //   "The column `Quote.salesRepresentativeId` does not exist in the current database."
+        //   "column Quote.salesRepresentativeId does not exist"
+        //   "column \"salesRepresentativeId\" does not exist"
+        const missingColMatch = /column [`'"]?(?:[A-Za-z_"]+\.)?([A-Za-z_]+)[`'"]? does not exist/i.exec(raw);
+        const missingCol = missingColMatch?.[1];
+        if (missingCol && !omitFields.includes(missingCol)) {
+          // Drop from payload if present; always add to omit so RETURNING skips it too.
+          let newPayload = payload;
+          if (missingCol in payload) {
+            const { [missingCol]: _dropped, ...rest } = payload;
+            newPayload = rest;
+          }
+          return tryCreate(newPayload, [...omitFields, missingCol]);
+        }
+
+        // ── PrismaClientValidationError ─────────────────────────────────────
+        // Field not in generated client yet (run prisma generate).
+        // Handles multiple Prisma version message formats:
+        //   v4/5: "Unknown argument `fieldName`"
+        //   v6/7: "Argument `fieldName` does not exist" / "Invalid argument: `fieldName`"
+        //   v7:   "Argument `fieldName`: Invalid value provided"
+        if (e?.name === 'PrismaClientValidationError') {
+          const col = (
+            /Unknown argument `([^`]+)`/.exec(raw)?.[1] ??
+            /Argument `([^`]+)` does not exist/.exec(raw)?.[1] ??
+            /Invalid argument: `([^`]+)`/.exec(raw)?.[1] ??
+            /Argument `([^`]+)`: Invalid value/.exec(raw)?.[1]
+          );
+          if (col && col in payload) {
+            const { [col]: _dropped, ...rest } = payload;
+            return tryCreate(rest, omitFields);
+          }
+        }
+
+        console.error('QUOTE CREATE ERROR', e?.code, e?.message ?? e);
+        throw e;
+      });
+    };
+
+    return tryCreate({ ...(clean as any), totalAmount });
   }
 
   async update(id: string, data: any, user?: { id?: string; role?: string }) {
@@ -212,7 +323,44 @@ export class QuotesService {
       }
     }
 
-    return this.prisma.quote.update({ where: { id }, data: next });
+    const tryUpdate = (payload: Record<string, unknown>, omitFields: string[] = SCHEMA_DRIFT_OMIT): Promise<any> => {
+      const omitClause = omitFields.reduce<Record<string, boolean>>((acc, f) => ({ ...acc, [f]: true }), {});
+      return (this.prisma.quote.update({
+        where: { id },
+        data: payload as any,
+        ...(omitFields.length ? { omit: omitClause } : {}),
+      }) as Promise<any>).catch((e: any) => {
+        const raw: string = e?.message ?? '';
+
+        // Covers P2022 AND raw adapter errors regardless of error class.
+        const missingColMatch = /column [`'"]?(?:[A-Za-z_"]+\.)?([A-Za-z_]+)[`'"]? does not exist/i.exec(raw);
+        const missingCol = missingColMatch?.[1];
+        if (missingCol && !omitFields.includes(missingCol)) {
+          let newPayload = payload;
+          if (missingCol in payload) {
+            const { [missingCol]: _dropped, ...rest } = payload;
+            newPayload = rest;
+          }
+          return tryUpdate(newPayload, [...omitFields, missingCol]);
+        }
+
+        if (e?.name === 'PrismaClientValidationError') {
+          const col = (
+            /Unknown argument `([^`]+)`/.exec(raw)?.[1] ??
+            /Argument `([^`]+)` does not exist/.exec(raw)?.[1] ??
+            /Invalid argument: `([^`]+)`/.exec(raw)?.[1] ??
+            /Argument `([^`]+)`: Invalid value/.exec(raw)?.[1]
+          );
+          if (col && col in payload) {
+            const { [col]: _dropped, ...rest } = payload;
+            return tryUpdate(rest, omitFields);
+          }
+        }
+
+        throw e;
+      });
+    };
+    return tryUpdate(next);
   }
 
   remove(id: string, user?: { id?: string; role?: string }) {
@@ -277,7 +425,7 @@ export class QuotesService {
       if (descriptionSource) {
         doc
           .fontSize(12)
-          .text('תיאור השירות:', { align: 'right' })
+          .text('\u05ea\u05d9\u05d0\u05d5\u05e8 \u05d4\u05e9\u05d9\u05e8\u05d5\u05ea:', { align: 'right' })
           .moveDown(0.5)
           .text(descriptionSource.slice(0, 8000), { align: 'right' });
       }
@@ -298,4 +446,3 @@ export class QuotesService {
     return updated;
   }
 }
-

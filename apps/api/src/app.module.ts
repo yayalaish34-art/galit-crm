@@ -19,9 +19,10 @@ import { QuoteTemplatesModule } from './quote-templates/quote-templates.module';
 import { CustomerClassificationsModule } from './customer-classifications/customer-classifications.module';
 import { FollowupImportModule } from './followup-import/followup-import.module';
 import { AuthModule } from './auth/auth.module';
+import { PaymentTermsModule } from './payment-terms/payment-terms.module';
 
 @Module({
-  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule],
+  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule],
   controllers: [AppController],
   providers: [AppService],
 })

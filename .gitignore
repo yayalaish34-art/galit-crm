@@ -1,0 +1,14 @@
+_backups/
+project-export-ai.zip
+project-export-ai/
+apps/api/storage/
+.env
+.env.local
+.env.production
+node_modules/
+.next/
+dist/
+do
+*.bat
+/‏‏מסמך טקסט חדש.txt
+apps/api/scripts/repro-*.json

@@ -173,6 +173,87 @@ function customerEmailLooksValid(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
+/** Israeli phone validation — accepts landlines (0X-XXXXXXX) and mobiles (05X-XXXXXXX) */
+function israeliPhoneLooksValid(phone: string): boolean {
+  const t = phone.trim().replace(/[\s\-()]+/g, '');
+  if (!t) return true; // empty is OK — separate required check
+  // landline: 02-9 followed by 7 digits; mobile: 05X followed by 7 digits
+  return /^0[2-9]\d{7,8}$/.test(t);
+}
+
+/** סיווג לקוח — classification dropdown options */
+const CUSTOMER_CLASSIFICATION_OPTIONS: string[] = [
+  'אדריכלים',
+  'חשמלאים',
+  'קבלנים',
+  'יזמים',
+  'מהנדסים',
+  'אינסטלטורים',
+  'שמאים',
+  'עורכי דין',
+  'רואי חשבון',
+  'יועצים',
+  'קבלני שלד',
+  'קבלני גמר',
+  'מפקחי בנייה',
+  'אחר',
+];
+
+const LEAD_SOURCE_OPTIONS: string[] = [
+  'פייסבוק',
+  'טיק טוק',
+  'גוגל אדס',
+  'אינסטגרם',
+  'אתר',
+  'המלצה',
+  'לקוח חוזר',
+  'אחר',
+];
+
+/** Israeli cities list for autocomplete */
+const ISRAEL_CITIES: string[] = [
+  'אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון',
+  'באר שבע','בית שאן','בית שמש','בני ברק','בת ים',
+  'גבעת שמואל','גבעתיים',
+  'דימונה',
+  'הוד השרון','הרצליה',
+  'חדרה','חולון','חיפה',
+  'טבריה','טירה','טירת כרמל',
+  'יבנה','יהוד-מונוסון','ירושלים',
+  'כפר יונה','כפר סבא','כרמיאל',
+  'לוד',
+  'מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מעלה אדומים','מעלות-תרשיחא',
+  'נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה',
+  'עכו','עפולה','ערד',
+  'פתח תקווה',
+  'צפת',
+  'קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה',
+  'ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה',
+  'שדרות','שפרעם',
+  'תל אביב-יפו',
+  'גדרה','זכרון יעקב','פרדס חנה-כרכור','יקנעם','מגדל','קצרין','אבו גוש','כפר קרע','טמרה','סח\'נין',
+  'באקה אל-גרביה','ג\'סר א-זרקא','ג\'לג\'וליה','דאלית אל-כרמל','עספיא','ירכא','כסיפה','לקיה','רהט','שגב-שלום',
+  'גני תקווה','כוכב יאיר','מזכרת בתיה','מיתר','עומר','להבים','שהם','גבעת זאב','ביתר עילית',
+  'הרצליה','תל אביב','חיפה','ירושלים','באר שבע','נתניה','ראשון לציון','פתח תקווה','אשדוד','חולון',
+].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a.localeCompare(b, 'he'));
+
+/*
+ * Module-level Field component — avoids re-creating component identity
+ * on every render (which would unmount/remount inputs and lose focus).
+ */
+const FIELD_BOX = 'space-y-1.5';
+const FIELD_BOX_CONNECTED = 'space-y-1.5';
+const FIELD_LABEL = 'block text-[12px] font-semibold text-[#24364B]';
+
+function CardField({ label, children }: { label: string; children: React.ReactNode; connected?: boolean }) {
+  return (
+    <div className={FIELD_BOX}>
+      <div className={FIELD_LABEL}><span className="block">{label}</span></div>
+      {children}
+    </div>
+  );
+}
+
 function toIsoDateInputValue(v: unknown): string {
   if (v == null || v === '') return '';
   const d = new Date(typeof v === 'string' ? v : String(v));
@@ -733,16 +814,9 @@ type LowerTabKey =
 const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'contacts', label: 'אנשי קשר' },
   { key: 'finance', label: 'נתונים כספיים' },
-  { key: 'source', label: 'מקור הגעה' },
-  { key: 'questionnaires', label: 'שאלונים' },
-  { key: 'copy', label: 'העתק' },
-  { key: 'mailing', label: 'פרטי דיוור' },
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
   { key: 'documents', label: 'מסמכים' },
-  { key: 'additionalData', label: 'נתונים נוספים' },
-  { key: 'moreDetails', label: 'פרטים נוספים' },
-  { key: 'externalData', label: 'נתונים חיצוניים' },
 ];
 
 function formatLegacyDate(v: unknown): string {
@@ -760,26 +834,57 @@ export function CustomerLegacyCard({
   currentUser,
   onCustomerUpdated,
   onFullReload,
+  onNewQuote,
+  onNewInteraction,
+  onContactSelected,
   typeLabelMap = PRESET_CUSTOMER_TYPE_LABELS,
   classifications = [],
   primaryColor,
+  isNew = false,
+  onCustomerCreated,
+  onBack,
 }: {
   customer: CustomerCardCustomer;
   full: CustomerFull | null;
   currentUser: AppUser;
   onCustomerUpdated: (next: CustomerCardCustomer) => void;
   onFullReload: () => Promise<void>;
+  /** Called when the user clicks "חדש הצעה" from the contacts panel.
+   *  contactId is the ID of the currently selected contact (null if none selected). */
+  onNewQuote?: (contactId?: string | null) => void;
+  /** Called when the user clicks "פנייה חדשה" from the contacts panel. */
+  onNewInteraction?: (contactId?: string | null) => void;
+  /** Called whenever a contact row is selected (or deselected — null).
+   *  Allows the parent to know which contact is active for toolbar actions. */
+  onContactSelected?: (contactId: string | null, contactName?: string | null) => void;
   typeLabelMap?: Record<string, string>;
   classifications?: CustomerClassificationOption[];
   primaryColor: string;
+  /** כרטיס במצב יצירת לקוח חדש — שמירה ראשונה תעשה POST במקום PATCH */
+  isNew?: boolean;
+  /** נקרא אחרי POST מוצלח — מאפשר ל-dashboard לעדכן את ה-state עם הלקוח שנוצר */
+  onCustomerCreated?: (created: CustomerCardCustomer) => void;
+  /** Navigate back to the previous page (e.g. customers list) */
+  onBack?: () => void;
 }) {
-  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  console.log('CUSTOMER LEGACY CARD RUNTIME MARKER', customer?.id);
+  /** true while we're creating a brand-new customer (POST). Flips to false after first save. */
+  const [isNewMode, setIsNewMode] = useState(isNew);
+  /** Parent `isNew` must win when the same card instance goes from existing customer → new (no remount). */
+  useEffect(() => {
+    setIsNewMode(isNew);
+  }, [isNew]);
+  const [mode, setMode] = useState<'view' | 'edit'>('edit');
   const [activeLowerTab, setActiveLowerTab] = useState<LowerTabKey>('contacts');
   const [savingCustomer, setSavingCustomer] = useState(false);
   const saveMainInFlightRef = useRef(false);
   const [contactBusy, setContactBusy] = useState(false);
   const [contactEdit, setContactEdit] = useState<CustomerLegacyContact | null>(null);
   const [contacts, setContacts] = useState<CustomerLegacyContact[]>(Array.isArray(full?.contacts) ? full!.contacts! : []);
+  const [contactsKey, setContactsKey] = useState(0);
+  /** Pending contacts for new (unsaved) customers — stored locally until customer is created */
+  const [pendingContacts, setPendingContacts] = useState<CustomerLegacyContact[]>([]);
+  const pendingIdCounter = useRef(0);
   const [legacyMsg, setLegacyMsg] = useState('');
 
   const buildFormFromCustomer = useCallback((c: CustomerCardCustomer) => {
@@ -815,14 +920,21 @@ export function CustomerLegacyCard({
       topDate: formatLegacyDate(c.legacyUpdatedAt),
       notes: (c.notes as string) || '',
       internalNotes: (c.internalNotes as string) || '',
+      leadSource: (x.leadSource as string) || '',
     };
   }, []);
 
   const [customerForm, setCustomerForm] = useState(() => buildFormFromCustomer(customer));
 
+  const prevCustomerIdRef = useRef(customer?.id);
   useEffect(() => {
+    // Only reset form when the customer ID actually changes (e.g. switching customers).
+    // Skip in new mode to avoid wiping the form while user is typing.
+    if (isNewMode) return;
+    if (prevCustomerIdRef.current === customer?.id) return;
+    prevCustomerIdRef.current = customer?.id;
     setCustomerForm(buildFormFromCustomer(customer));
-  }, [customer, buildFormFromCustomer]);
+  }, [customer, buildFormFromCustomer, isNewMode]);
 
   const [financeForm, setFinanceForm] = useState<CustomerFinanceTabForm>(() => buildFinanceFormFromCustomer(customer));
 
@@ -830,9 +942,44 @@ export function CustomerLegacyCard({
     setFinanceForm(buildFinanceFormFromCustomer(customer));
   }, [customer]);
 
+  // Direct contacts fetch — fires whenever the customer changes.
+  // This is the sole source of truth for contacts; full?.contacts is NOT used
+  // because /full may return contacts:[] which would wipe the fetched data.
   useEffect(() => {
-    setContacts(Array.isArray(full?.contacts) ? full!.contacts! : []);
-  }, [full?.contacts, customer.id]);
+    console.log('contacts effect running', customer?.id, currentUser);
+    if (!customer?.id) {
+      console.log('contacts effect: early return — no customer.id');
+      return;
+    }
+    if (isNewMode || customer.id === '__new__') {
+      setContacts([]);
+      console.log('contacts effect: new customer — clear stale list');
+      return;
+    }
+    if (!currentUser) {
+      console.log('contacts effect: early return — no currentUser');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        console.log('fetching contacts', `/customers/${customer.id}/contacts`);
+        const res = await apiFetch(apiUrl(`/customers/${customer.id}/contacts`), {
+          method: 'GET',
+          authUser: currentUser,
+        });
+        console.log('contacts response status', res.status);
+        const data = await res.json();
+        console.log('contacts response data', data);
+        if (!cancelled && Array.isArray(data)) {
+          setContacts(data as CustomerLegacyContact[]);
+        }
+      } catch (e) {
+        console.error('contacts fetch failed', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [customer?.id, currentUser, contactsKey, isNewMode]);
 
   const [leadSourceRows, setLeadSourceRows] = useState<CustomerLeadSourceRow[]>(() =>
     buildLeadSourceRowsFromFull(full, customer),
@@ -907,18 +1054,22 @@ export function CustomerLegacyCard({
     [classifications],
   );
 
-  const sectionShell = 'rounded-lg border-2 border-blue-700/85 bg-white shadow-sm overflow-hidden';
-  const sectionHeader = 'border-b-2 border-blue-100 bg-gradient-to-l from-blue-50 to-white px-3 py-2 text-sm font-bold text-blue-950';
-  const briefBoxClass = 'rounded border border-slate-200 bg-white p-2';
-  const briefBoxConnected = 'rounded border border-blue-200/80 bg-slate-50/80 p-2';
-  const labelClass = 'mb-1 text-[11px] font-semibold text-slate-700';
+  const sectionShell = 'rounded-3xl border border-white/65 overflow-hidden';
+  const sectionHeader = 'px-6 py-3 text-base font-bold text-[#23364B]';
+  const briefBoxClass = 'space-y-1.5';
+  const briefBoxConnected = 'space-y-1.5';
+  const labelClass = 'block text-[12px] font-semibold text-[#24364B]';
   const inputClass =
-    'min-h-[1.85rem] w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm text-right outline-none ring-blue-200 focus:border-blue-500 focus:ring-1';
-  const inputConnected = 'min-h-[1.85rem] w-full rounded border border-blue-200 bg-amber-50/50 px-2 py-1.5 text-sm text-right outline-none focus:border-blue-500 focus:ring-1';
+    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] placeholder-[#8A9BB0] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
+  const inputConnected =
+    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] placeholder-[#8A9BB0] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
   const viewClass =
-    'min-h-[1.85rem] rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-right text-slate-800';
+    'h-[44px] rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] flex items-center';
 
   const isEdit = mode === 'edit';
+
+  /** Combined contacts: real (from DB) + pending (local, for new customers) */
+  const allContacts = useMemo(() => [...contacts, ...pendingContacts], [contacts, pendingContacts]);
 
   const onSaveCustomerMain = async () => {
     if (saveMainInFlightRef.current) return;
@@ -931,8 +1082,13 @@ export function CustomerLegacyCard({
 
     const typeVal = (customerForm.type || customer.type || '').trim();
     const nameVal = (customerForm.name || customer.name || '').trim();
-    const contactNameVal = (customerForm.contactName || customer.contactName || '').trim();
+    // contactName: auto-derive from name for private customers, or from first contact
+    const isPrivate = typeVal === 'PRIVATE';
+    const contactNameVal = isPrivate
+      ? nameVal
+      : (allContacts.length > 0 ? allContacts[0].fullName || '' : (customerForm.contactName || customer.contactName || '')).trim();
     const phoneVal = (customerForm.phone || '').trim();
+    const phone2Val = (customerForm.phone2 || '').trim();
     const emailVal = (customerForm.email || '').trim();
     const cityVal = (customerForm.city || '').trim();
 
@@ -945,20 +1101,30 @@ export function CustomerLegacyCard({
         setLegacyMsg('שם לקוח הוא שדה חובה.');
         return;
       }
-      if (!contactNameVal) {
-        setLegacyMsg('שם איש קשר הוא שדה חובה.');
+      /* At least one phone required: סלולארי OR קווי */
+      if (!phoneVal && !phone2Val) {
+        setLegacyMsg('חובה למלא לפחות טלפון סלולארי או טלפון קווי.');
         return;
       }
-      if (!phoneVal) {
-        setLegacyMsg('טלפון הוא שדה חובה.');
+      if (phoneVal && !israeliPhoneLooksValid(phoneVal)) {
+        setLegacyMsg('פורמט טלפון סלולארי לא תקין (דוגמה: 050-1234567).');
+        setPhoneWarn('פורמט טלפון לא תקין');
         return;
       }
-      if (!emailVal) {
-        setLegacyMsg('דוא״ל הוא שדה חובה.');
+      if (phone2Val && !israeliPhoneLooksValid(phone2Val)) {
+        setLegacyMsg('פורמט טלפון קווי לא תקין (דוגמה: 09-9621006).');
+        setPhone2Warn('פורמט טלפון לא תקין');
         return;
       }
-      if (!customerEmailLooksValid(emailVal)) {
+      if (emailVal && !customerEmailLooksValid(emailVal)) {
         setLegacyMsg('כתובת הדוא״ל אינה תקינה.');
+        setEmailWarn('כתובת דוא״ל אינה תקינה');
+        return;
+      }
+      /* Fix 6: at least one contact must exist (or will be auto-created for private) */
+      if (allContacts.length === 0 && !isPrivate) {
+        setLegacyMsg('חובה להוסיף לפחות איש קשר אחד לפני שמירה.');
+        setActiveLowerTab('contacts');
         return;
       }
       if (!cityVal) {
@@ -967,12 +1133,13 @@ export function CustomerLegacyCard({
       }
 
       /** Body keys align with API UpdateCustomerDto + customers.service patch whitelist */
+      const primaryPhone = phoneVal || phone2Val; // at least one guaranteed by validation above
       const body: Record<string, unknown> = {
         type: typeVal,
         name: nameVal,
         contactName: contactNameVal,
-        phone: phoneVal,
-        phone2: (customerForm.phone2 || '').trim() || null,
+        phone: primaryPhone,
+        phone2: phone2Val || null,
         phone3: (customerForm.phone3 || '').trim() || null,
         fax: (customerForm.fax || '').trim() || null,
         address: (customerForm.address || '').trim() || null,
@@ -1051,96 +1218,154 @@ export function CustomerLegacyCard({
         if (!r.ok) throw new Error(`${stepLabel}: ${await parseApiErrorResponse(r)}`);
       };
 
-      const res = await apiFetch(apiUrl(`/customers/${customer.id}`), {
-        method: 'PATCH',
-        authUser: currentUser,
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await parseApiErrorResponse(res));
-      const updated = (await res.json()) as CustomerCardCustomer;
-      onCustomerUpdated(updated);
+      /* ─── NEW customer: POST to create ─── */
+      if (isNewMode) {
+        const res = await apiFetch(apiUrl('/customers'), {
+          method: 'POST',
+          authUser: currentUser,
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(await parseApiErrorResponse(res));
+        const created = (await res.json()) as CustomerCardCustomer;
 
-      await putTab(
-        `/customers/${customer.id}/referral-sources`,
-        {
-          items: leadSourceRows.map((r) => ({
-            date: r.date ? isoNoon(r.date) : null,
-            sourceName: r.sourceName || null,
-          })),
-        },
-        'מקורות הגעה',
-      );
-      await putTab(
-        `/customers/${customer.id}/questionnaires`,
-        {
-          items: questionnaireRows.map((r) => ({
-            questionnaireCode: r.code || null,
-            questionnaireName: r.name || null,
-          })),
-        },
-        'שאלונים',
-      );
-      await putTab(
-        `/customers/${customer.id}/relations`,
-        {
-          items: relationRows.map((r) => ({
-            relatedCustomerName: r.customerName || null,
-            relationType: r.relationType || null,
-          })),
-        },
-        'קשרים',
-      );
-      await putTab(
-        `/customers/${customer.id}/additional-data-rows`,
-        {
-          items: additionalDataRows.map((r) => ({
-            numberValue: r.number || null,
-            dValue: r.d || null,
-            dateValue: r.dateStr ? isoNoon(r.dateStr) : null,
-            text1: r.text1 || null,
-            text2: r.text2 || null,
-          })),
-        },
-        'נתונים נוספים',
-      );
-      await putTab(
-        `/customers/${customer.id}/external-data-rows`,
-        {
-          items: externalDataRows.map((r) => ({
-            colA: r.A || null,
-            colB: r.B || null,
-            colC: r.C || null,
-            colD: r.D || null,
-            colE: r.E || null,
-            colF: r.F || null,
-            colG: r.G || null,
-            colH: r.H || null,
-            colI: r.I || null,
-            colJ: r.J || null,
-          })),
-        },
-        'נתונים חיצוניים',
-      );
+        /* Save pending contacts (added locally before customer existed) */
+        if (pendingContacts.length > 0) {
+          for (const pc of pendingContacts) {
+            try {
+              await apiFetch(apiUrl(`/customers/${created.id}/contacts`), {
+                method: 'POST',
+                authUser: currentUser,
+                body: JSON.stringify({
+                  fullName: pc.fullName,
+                  department: pc.department,
+                  roleTitle: pc.roleTitle,
+                  mobile: pc.mobile,
+                  phone: pc.phone,
+                  fax: pc.fax,
+                  email: pc.email,
+                  isPrimary: Boolean(pc.isPrimary),
+                  isActive: pc.isActive !== false,
+                  notes: pc.notes,
+                }),
+              });
+            } catch { /* non-critical — customer was already created */ }
+          }
+          setPendingContacts([]);
+        } else if (isPrivate) {
+          /* Fix 5: auto-create first contact for private customer when no pending contacts */
+          try {
+            await apiFetch(apiUrl(`/customers/${created.id}/contacts`), {
+              method: 'POST',
+              authUser: currentUser,
+              body: JSON.stringify({
+                fullName: nameVal,
+                phone: phoneVal,
+                email: emailVal,
+                mobile: (customerForm.phone2 || '').trim() || null,
+                isPrimary: true,
+                isActive: true,
+              }),
+            });
+          } catch { /* non-critical — customer was already created */ }
+        }
 
-      for (const row of documentRows) {
-        if (!looksLikeUuid(row.id)) continue;
-        const patchBody: Record<string, unknown> = {
-          description: (row.description || '').trim() || null,
-          documentType: row.docType || 'OTHER',
-          documentDate: row.dateStr ? isoNoon(row.dateStr) : null,
-        };
-        const fn = row.fileName?.trim();
-        if (fn) patchBody.name = fn;
-        const dr = await apiFetch(apiUrl(`/customers/${customer.id}/documents/${row.id}`), {
+        setIsNewMode(false);
+        if (onCustomerCreated) onCustomerCreated(created);
+        onCustomerUpdated(created);
+        setLegacyMsg('הלקוח נוצר בהצלחה');
+      } else {
+        /* ─── EXISTING customer: PATCH to update ─── */
+        const res = await apiFetch(apiUrl(`/customers/${customer.id}`), {
           method: 'PATCH',
           authUser: currentUser,
-          body: JSON.stringify(patchBody),
+          body: JSON.stringify(body),
         });
-        if (!dr.ok) throw new Error(`מסמכים: ${await parseApiErrorResponse(dr)}`);
-      }
+        if (!res.ok) throw new Error(await parseApiErrorResponse(res));
+        const updated = (await res.json()) as CustomerCardCustomer;
+        onCustomerUpdated(updated);
 
-      await onFullReload();
-      setLegacyMsg('הלקוח נשמר בהצלחה');
+        await putTab(
+          `/customers/${customer.id}/referral-sources`,
+          {
+            items: leadSourceRows.map((r) => ({
+              date: r.date ? isoNoon(r.date) : null,
+              sourceName: r.sourceName || null,
+            })),
+          },
+          'מקורות הגעה',
+        );
+        await putTab(
+          `/customers/${customer.id}/questionnaires`,
+          {
+            items: questionnaireRows.map((r) => ({
+              questionnaireCode: r.code || null,
+              questionnaireName: r.name || null,
+            })),
+          },
+          'שאלונים',
+        );
+        await putTab(
+          `/customers/${customer.id}/relations`,
+          {
+            items: relationRows.map((r) => ({
+              relatedCustomerName: r.customerName || null,
+              relationType: r.relationType || null,
+            })),
+          },
+          'קשרים',
+        );
+        await putTab(
+          `/customers/${customer.id}/additional-data-rows`,
+          {
+            items: additionalDataRows.map((r) => ({
+              numberValue: r.number || null,
+              dValue: r.d || null,
+              dateValue: r.dateStr ? isoNoon(r.dateStr) : null,
+              text1: r.text1 || null,
+              text2: r.text2 || null,
+            })),
+          },
+          'נתונים נוספים',
+        );
+        await putTab(
+          `/customers/${customer.id}/external-data-rows`,
+          {
+            items: externalDataRows.map((r) => ({
+              colA: r.A || null,
+              colB: r.B || null,
+              colC: r.C || null,
+              colD: r.D || null,
+              colE: r.E || null,
+              colF: r.F || null,
+              colG: r.G || null,
+              colH: r.H || null,
+              colI: r.I || null,
+              colJ: r.J || null,
+            })),
+          },
+          'נתונים חיצוניים',
+        );
+
+        for (const row of documentRows) {
+          if (!looksLikeUuid(row.id)) continue;
+          const patchBody: Record<string, unknown> = {
+            description: (row.description || '').trim() || null,
+            documentType: row.docType || 'OTHER',
+            documentDate: row.dateStr ? isoNoon(row.dateStr) : null,
+          };
+          const fn = row.fileName?.trim();
+          if (fn) patchBody.name = fn;
+          const dr = await apiFetch(apiUrl(`/customers/${customer.id}/documents/${row.id}`), {
+            method: 'PATCH',
+            authUser: currentUser,
+            body: JSON.stringify(patchBody),
+          });
+          if (!dr.ok) throw new Error(`מסמכים: ${await parseApiErrorResponse(dr)}`);
+        }
+
+        await onFullReload();
+        setLegacyMsg('הלקוח נשמר בהצלחה');
+      }
       setMode('view');
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
@@ -1168,7 +1393,28 @@ export function CustomerLegacyCard({
 
   const onSaveContact = async () => {
     if (!contactEdit) return;
-    if (!isEdit) return;
+    if (!isEdit && contactEdit.id) return;
+
+    /* ── New-customer mode: store contact locally in pendingContacts ── */
+    if (isNewMode) {
+      const isPendingEdit = contactEdit.id.startsWith('pending-');
+      if (isPendingEdit) {
+        // editing an existing pending contact
+        setPendingContacts((prev) => prev.map((pc) => (pc.id === contactEdit.id ? { ...contactEdit } : pc)));
+      } else {
+        // adding a new pending contact
+        pendingIdCounter.current += 1;
+        setPendingContacts((prev) => [
+          ...prev,
+          { ...contactEdit, id: `pending-${pendingIdCounter.current}`, isPrimary: prev.length === 0 },
+        ]);
+      }
+      setContactEdit(null);
+      setLegacyMsg('איש קשר נוסף (ישמר עם יצירת הלקוח)');
+      return;
+    }
+
+    /* ── Existing customer: save via API ── */
     setContactBusy(true);
     setLegacyMsg('');
     try {
@@ -1195,6 +1441,7 @@ export function CustomerLegacyCard({
       });
       if (!res.ok) throw new Error(await parseApiErrorResponse(res));
       await onFullReload();
+      setContactsKey((k) => k + 1);
       setContactEdit(null);
       setLegacyMsg('איש קשר נשמר בהצלחה');
     } catch (e) {
@@ -1208,6 +1455,15 @@ export function CustomerLegacyCard({
   const onDeleteContact = async (contactId: string) => {
     if (!isEdit) return;
     if (!window.confirm('למחוק איש קשר?')) return;
+
+    /* Pending contact (new-customer mode) — remove from local state */
+    if (contactId.startsWith('pending-')) {
+      setPendingContacts((prev) => prev.filter((pc) => pc.id !== contactId));
+      setContactEdit(null);
+      setLegacyMsg('איש קשר הוסר');
+      return;
+    }
+
     setContactBusy(true);
     setLegacyMsg('');
     try {
@@ -1226,548 +1482,563 @@ export function CustomerLegacyCard({
     }
   };
 
-  const Field = ({
-    label,
-    children,
-    connected,
-  }: {
-    label: string;
-    children: React.ReactNode;
-    connected?: boolean;
-  }) => (
-    <div className={connected ? briefBoxConnected : briefBoxClass}>
-      <div className={labelClass}>
-        <span className="block">{label}</span>
-      </div>
-      {children}
-    </div>
-  );
+  // Field component moved to module scope as CardField to prevent focus-loss bug
+  const Field = CardField;
+
+  /* ── Inline validation warnings ── */
+  const [phoneWarn, setPhoneWarn] = useState('');
+  const [phone2Warn, setPhone2Warn] = useState('');
+  const [emailWarn, setEmailWarn] = useState('');
+  /* ── City autocomplete ── */
+  const [cityOpen, setCityOpen] = useState(false);
+  const [cityFilter, setCityFilter] = useState('');
+  const cityRef = useRef<HTMLDivElement>(null);
+  const filteredCities = useMemo(() => {
+    const q = (cityFilter || customerForm.city || '').trim();
+    if (!q) return ISRAEL_CITIES;
+    return ISRAEL_CITIES.filter((c) => c.includes(q));
+  }, [cityFilter, customerForm.city]);
+
+  // close city dropdown on outside click
+  useEffect(() => {
+    if (!cityOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (cityRef.current && !cityRef.current.contains(e.target as Node)) setCityOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [cityOpen]);
+
+  /* Fix 5: when type becomes PRIVATE and no contacts exist, auto-populate first contact from top fields */
+  const prevTypeRef = useRef(customerForm.type);
+  useEffect(() => {
+    if (customerForm.type === 'PRIVATE' && prevTypeRef.current !== 'PRIVATE' && allContacts.length === 0) {
+      setContactEdit({
+        id: '',
+        fullName: customerForm.name || '',
+        department: '',
+        roleTitle: '',
+        mobile: (customerForm.phone2 || '').trim() || '',
+        phone: customerForm.phone || '',
+        fax: '',
+        email: customerForm.email || '',
+        isPrimary: true,
+        isActive: true,
+        notes: '',
+      });
+      setActiveLowerTab('contacts');
+    }
+    prevTypeRef.current = customerForm.type;
+  }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
 
   return (
-    <div className="space-y-4" dir="rtl">
-      <div className={cn(sectionShell, 'bg-slate-50/90 p-3')}>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b-2 border-blue-200/80 pb-2">
-          <div className="text-sm font-bold text-slate-900">כרטיס לקוח — מבנה מערכת ישנה</div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-500">#{customer.id.slice(0, 8)}</span>
-            <div className="flex flex-row-reverse rounded border border-slate-300 bg-white text-xs shadow-sm">
-              <button
-                type="button"
-                className={cn('px-3 py-1.5', mode === 'view' && 'bg-slate-700 text-white')}
-                onClick={() => setMode('view')}
-              >
-                צפייה
-              </button>
-              <button
-                type="button"
-                className={cn('px-3 py-1.5', mode === 'edit' && 'bg-slate-700 text-white')}
-                onClick={() => setMode('edit')}
-              >
-                עריכה
-              </button>
+    <div className="space-y-0" dir="rtl" style={{ minHeight: '100vh', background: '#F2F6FA' }}>
+
+      {/* ══════ PAGE HEADER ══════ */}
+      <div
+        style={{
+          background: 'linear-gradient(180deg, #EEF3F8 0%, #F7FAFC 100%)',
+          borderBottom: '1px solid rgba(200,215,230,0.40)',
+          padding: '18px 28px 14px 28px',
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#24364B', lineHeight: 1.2, margin: 0 }}>
+              {isNewMode ? 'הוספת לקוח חדש' : 'כרטיס לקוח'}
+            </h1>
+            <div style={{ fontSize: 13, color: '#8A9BB0', marginTop: 3 }}>
+              {!isNewMode && customer.name ? <span style={{ color: '#5E7186' }}>{customer.name}</span> : null}
+              {!isNewMode && customer.name && <span style={{ margin: '0 6px', opacity: 0.5 }}>·</span>}
+              {!isNewMode && <span style={{ fontFamily: 'monospace', fontSize: 12, opacity: 0.7 }}>#{customer.id.slice(0, 8)}</span>}
             </div>
           </div>
-        </div>
-
-        {isEdit && (
-          <div className="mb-3 rounded border border-blue-200 bg-blue-50/60 px-3 py-2 text-xs text-blue-950">
-            בעריכה: לחיצה על &quot;שמור כרטיס לקוח&quot; מעדכנת את הלקוח ואת כל הטאבים הטבלאיים.
+          <div className="flex items-center gap-2.5">
+            {!isNewMode && (
+              <button
+                type="button"
+                onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
+                className="h-[38px] rounded-[14px] border border-[#DCE7F2] bg-white/70 px-4 text-[13px] font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+              >
+                {mode === 'edit' ? 'ביטול' : 'עריכה'}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={savingCustomer}
+              onClick={onSaveCustomerMain}
+              className="h-[38px] rounded-[16px] px-6 text-[13px] font-bold text-[#2E4A2D] disabled:opacity-50 transition-all hover:brightness-105"
+              style={{
+                background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)',
+                boxShadow: '0 4px 14px rgba(143,191,143,0.28)',
+              }}
+            >
+              {savingCustomer ? 'שומר...' : isNewMode ? 'צור לקוח' : 'שמור'}
+            </button>
           </div>
-        )}
+        </div>
+      </div>
+      {/* ══════ END PAGE HEADER ══════ */}
 
-        {/* כללי */}
-        <div className={cn(sectionShell, 'mb-3')}>
-          <div className={sectionHeader}>כללי</div>
-          <div className="grid gap-2 p-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-            <Field label="סוג לקוח" connected>
-              {isEdit ? (
-                sortedClassifications.length ? (
-                  <select
-                    className={inputConnected}
-                    value={customerForm.type}
-                    onChange={(e) =>
-                      setCustomerForm((p) => ({ ...p, type: e.target.value, classificationCode: e.target.value }))
-                    }
-                  >
-                    <option value="">—</option>
-                    {sortedClassifications.map((cl) => (
-                      <option key={cl.id} value={cl.code}>
-                        {cl.labelHe} ({cl.code})
-                      </option>
-                    ))}
+      {/* ── Card body with spacing ── */}
+      <div style={{ padding: '20px 24px' }}>
+      <div className={cn(sectionShell)} style={{ background: 'rgba(255,255,255,0.78)', boxShadow: '0 10px 30px rgba(135,160,190,0.18)', backdropFilter: 'blur(12px)', padding: '24px 28px' }}>
+
+        {/* ── TOP SECTION: Main area + Left side column ── */}
+        <div className="flex gap-6">
+          {/* ── Right side: main rows ── */}
+          <div className="flex-1 space-y-4">
+            {/* ── Row 1: סוג לקוח + סיווג לקוח + מקור הגעה — same row, 3 columns ── */}
+            <div className="grid grid-cols-3 gap-4">
+              <Field label="סוג לקוח *">
+                {isEdit ? (
+                  <select className={inputClass} value={customerForm.type} onChange={(e) => setCustomerForm((p) => ({ ...p, type: e.target.value, classificationCode: e.target.value }))}>
+                    <option value="">— בחר סוג —</option>
+                    {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
                   </select>
                 ) : (
-                  <input
-                    className={inputConnected}
-                    value={customerForm.type}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, type: e.target.value }))}
-                  />
-                )
-              ) : (
-                <div className={viewClass}>{customerForm.type || '—'}</div>
-              )}
-            </Field>
-            <Field label="שם לקוח" connected>
-              {isEdit ? (
-                <input
-                  className={cn(inputConnected, 'bg-amber-50/80')}
-                  value={customerForm.name}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, name: e.target.value }))}
-                />
-              ) : (
-                <div className={cn(viewClass, 'bg-amber-50/80')}>{customerForm.name || '—'}</div>
-              )}
-            </Field>
-            <Field label="סיווג (תצוגה)">
-              <div className={viewClass}>{resolveCustomerTypeLabel(customerForm.classificationCode || customer.type, typeLabelMap)}</div>
-            </Field>
-            <Field label="מס סיווג (מערכת ישנה)" connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.classificationNumber}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, classificationNumber: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.classificationNumber || '—'}</div>
-              )}
-            </Field>
-            <Field label="נציג מכירה" connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.salesRep}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, salesRep: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.salesRep || '—'}</div>
-              )}
-            </Field>
-            <Field label="פונקציונאלי" connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.functional}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, functional: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.functional || '—'}</div>
-              )}
-            </Field>
-            <Field label='מספר בהנה"ח' connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.accountNumber}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, accountNumber: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.accountNumber || '—'}</div>
-              )}
-            </Field>
-            <Field label="מספר ח.פ / רישום" connected>
-              {isEdit ? (
-                <input
-                  className={inputConnected}
-                  value={customerForm.companyRegNumber}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, companyRegNumber: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.companyRegNumber || '—'}</div>
-              )}
-            </Field>
-            <Field label="גודל לקוח" connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.customerSize}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, customerSize: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.customerSize || '—'}</div>
-              )}
-            </Field>
-            <Field label="פרופיל ניהול" connected>
-              {isEdit ? (
-                <input
-                  className={inputClass}
-                  value={customerForm.managementProfile}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, managementProfile: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.managementProfile || '—'}</div>
-              )}
-            </Field>
-            <Field label="שם איש קשר ראשי" connected>
-              {isEdit ? (
-                <input
-                  className={inputConnected}
-                  value={customerForm.contactName}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, contactName: e.target.value }))}
-                />
-              ) : (
-                <div className={viewClass}>{customerForm.contactName || '—'}</div>
-              )}
-            </Field>
-          </div>
-        </div>
-
-        {/* טלפונים | תקשורת | כתובת */}
-        <div className="grid gap-3 lg:grid-cols-3">
-          <div className={sectionShell}>
-            <div className={sectionHeader}>טלפונים</div>
-            <div className="grid grid-cols-1 gap-2 p-2 sm:grid-cols-2">
-              <Field label="טלפון ראשי (סלולארי במערכת ישנה)" connected>
-                {isEdit ? (
-                  <input
-                    className={cn(inputConnected, 'bg-amber-50/70')}
-                    value={customerForm.phone}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, phone: e.target.value }))}
-                  />
-                ) : (
-                  <div className={cn(viewClass, 'bg-amber-50/70')}>{customerForm.phone || '—'}</div>
+                  <div className={viewClass}>{typeLabelMap[customerForm.type] || customerForm.type || '—'}</div>
                 )}
               </Field>
-              <Field label="טלפון נוסף (בית)" connected>
+
+              <Field label="סיווג לקוח">
                 {isEdit ? (
-                  <input
-                    className={inputConnected}
-                    value={customerForm.phone2}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, phone2: e.target.value }))}
-                  />
+                  <select className={inputClass} value={customerForm.classificationNumber} onChange={(e) => setCustomerForm((p) => ({ ...p, classificationNumber: e.target.value }))}>
+                    <option value="">— בחר סיווג —</option>
+                    {CUSTOMER_CLASSIFICATION_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                ) : (
+                  <div className={viewClass}>{customerForm.classificationNumber || '—'}</div>
+                )}
+              </Field>
+
+              <Field label="מקור הגעה">
+                {isEdit ? (
+                  <select className={inputClass} value={customerForm.leadSource} onChange={(e) => setCustomerForm((p) => ({ ...p, leadSource: e.target.value }))}>
+                    <option value="">— בחר מקור —</option>
+                    {LEAD_SOURCE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                ) : (
+                  <div className={viewClass}>{customerForm.leadSource || '—'}</div>
+                )}
+              </Field>
+            </div>
+
+            {/* ── Row 2: שם הלקוח + טלפון סלולארי + טלפון קווי + פקס + מייל — same row, 5 columns ── */}
+            <div className="grid grid-cols-5 gap-4">
+              <Field label="שם לקוח *" connected>
+                {isEdit ? (
+                  <input className={inputConnected} value={customerForm.name} onChange={(e) => setCustomerForm((p) => ({ ...p, name: e.target.value }))} />
+                ) : (
+                  <div className={viewClass}>{customerForm.name || '—'}</div>
+                )}
+              </Field>
+
+              <Field label="טלפון סלולארי" connected>
+                {isEdit ? (
+                  <div>
+                    <input
+                      className={cn(inputConnected, phoneWarn && 'border-red-400 bg-red-50/50')}
+                      value={customerForm.phone}
+                      onChange={(e) => { setCustomerForm((p) => ({ ...p, phone: e.target.value })); if (phoneWarn) setPhoneWarn(''); }}
+                      onBlur={() => { if (customerForm.phone.trim() && !israeliPhoneLooksValid(customerForm.phone)) setPhoneWarn('פורמט לא תקין'); else setPhoneWarn(''); }}
+                      placeholder="050-1234567"
+                    />
+                    {phoneWarn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phoneWarn}</div>}
+                  </div>
+                ) : (
+                  <div className={viewClass}>{customerForm.phone || '—'}</div>
+                )}
+              </Field>
+
+              <Field label="טלפון קווי" connected>
+                {isEdit ? (
+                  <div>
+                    <input
+                      className={cn(inputConnected, phone2Warn && 'border-red-400 bg-red-50/50')}
+                      value={customerForm.phone2}
+                      onChange={(e) => { setCustomerForm((p) => ({ ...p, phone2: e.target.value })); if (phone2Warn) setPhone2Warn(''); }}
+                      onBlur={() => { if (customerForm.phone2.trim() && !israeliPhoneLooksValid(customerForm.phone2)) setPhone2Warn('פורמט לא תקין'); else setPhone2Warn(''); }}
+                      placeholder="09-9621006"
+                    />
+                    {phone2Warn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phone2Warn}</div>}
+                  </div>
                 ) : (
                   <div className={viewClass}>{customerForm.phone2 || '—'}</div>
                 )}
               </Field>
-              <Field label="טלפון נוסף (עבודה)" connected>
-                {isEdit ? (
-                  <input
-                    className={inputConnected}
-                    value={customerForm.phone3}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, phone3: e.target.value }))}
-                  />
-                ) : (
-                  <div className={viewClass}>{customerForm.phone3 || '—'}</div>
-                )}
-              </Field>
+
               <Field label="פקס" connected>
                 {isEdit ? (
                   <input
                     className={inputConnected}
                     value={customerForm.fax}
                     onChange={(e) => setCustomerForm((p) => ({ ...p, fax: e.target.value }))}
+                    placeholder="09-9621007"
                   />
                 ) : (
                   <div className={viewClass}>{customerForm.fax || '—'}</div>
                 )}
               </Field>
-            </div>
-          </div>
 
-          <div className={sectionShell}>
-            <div className={sectionHeader}>תקשורת</div>
-            <div className="grid gap-2 p-2">
-              <Field label="תאריך עדכון (ייבוא)">
-                <div className={viewClass}>{customerForm.topDate || '—'}</div>
-              </Field>
-              <Field label="דואר אלקטרוני" connected>
+              <Field label="מייל" connected>
                 {isEdit ? (
-                  <input
-                    className={inputConnected}
-                    type="email"
-                    value={customerForm.email}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, email: e.target.value }))}
-                  />
+                  <div>
+                    <input
+                      className={cn(inputConnected, emailWarn && 'border-red-400 bg-red-50/50')}
+                      type="email"
+                      value={customerForm.email}
+                      onChange={(e) => { setCustomerForm((p) => ({ ...p, email: e.target.value })); if (emailWarn) setEmailWarn(''); }}
+                      onBlur={() => { if (customerForm.email.trim() && !customerEmailLooksValid(customerForm.email)) setEmailWarn('כתובת דוא״ל אינה תקינה'); else setEmailWarn(''); }}
+                      placeholder="name@example.com"
+                    />
+                    {emailWarn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{emailWarn}</div>}
+                  </div>
                 ) : (
                   <div className={viewClass}>{customerForm.email || '—'}</div>
                 )}
               </Field>
-              <Field label="אתר אינטרנט" connected>
-                {isEdit ? (
-                  <input
-                    className={inputConnected}
-                    value={customerForm.website}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, website: e.target.value }))}
-                  />
-                ) : (
-                  <div className={viewClass}>{customerForm.website || '—'}</div>
-                )}
-              </Field>
-              <Field label="הערות כלליות" connected>
-                {isEdit ? (
-                  <textarea
-                    className={cn(inputConnected, 'min-h-[3.5rem] resize-y')}
-                    value={customerForm.notes}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, notes: e.target.value }))}
-                  />
-                ) : (
-                  <div className={cn(viewClass, 'min-h-[3.5rem] whitespace-pre-wrap')}>{customerForm.notes || '—'}</div>
-                )}
-              </Field>
             </div>
-          </div>
 
-          <div className={sectionShell}>
-            <div className={sectionHeader}>כתובת</div>
-            <div className="grid gap-2 p-2">
+            {/* ── Row 3: כתובת + עיר — same row, 2 columns ── */}
+            <div className="grid grid-cols-2 gap-4">
               <Field label="כתובת" connected>
                 {isEdit ? (
-                  <textarea
-                    className={cn(inputConnected, 'min-h-[4rem] resize-y')}
-                    value={customerForm.address}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, address: e.target.value }))}
-                  />
+                  <input className={inputConnected} value={customerForm.address} onChange={(e) => setCustomerForm((p) => ({ ...p, address: e.target.value }))} />
                 ) : (
-                  <div className={cn(viewClass, 'min-h-[4rem] whitespace-pre-wrap')}>{customerForm.address || '—'}</div>
+                  <div className={viewClass}>{customerForm.address || '—'}</div>
                 )}
               </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="עיר" connected>
-                  {isEdit ? (
+
+              <Field label="עיר" connected>
+                {isEdit ? (
+                  <div className="relative" ref={cityRef}>
                     <input
                       className={inputConnected}
                       value={customerForm.city}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, city: e.target.value }))}
+                      onChange={(e) => { setCustomerForm((p) => ({ ...p, city: e.target.value })); setCityFilter(e.target.value); setCityOpen(true); }}
+                      onFocus={() => setCityOpen(true)}
+                      placeholder="הקלד שם עיר..."
                     />
-                  ) : (
-                    <div className={viewClass}>{customerForm.city || '—'}</div>
-                  )}
-                </Field>
-                <Field label="מיקוד (ייבוא)" connected>
-                  {isEdit ? (
-                    <input
-                      className={cn(inputConnected, 'bg-amber-50/50')}
-                      value={customerForm.zipLegacy}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, zipLegacy: e.target.value }))}
-                    />
-                  ) : (
-                    <div className={cn(viewClass, 'bg-amber-50/50')}>{customerForm.zipLegacy || '—'}</div>
-                  )}
-                </Field>
-              </div>
-              <Field label="קוד עיר (ייבוא)" connected>
-                {isEdit ? (
-                  <input
-                    className={inputConnected}
-                    value={customerForm.cityCodeLegacy}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, cityCodeLegacy: e.target.value }))}
-                  />
+                    {cityOpen && (
+                      <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border border-[#D9E4EF] bg-white" style={{ boxShadow: '0 8px 24px rgba(135,160,190,0.18)' }}>
+                        {filteredCities.length === 0 && customerForm.city.trim() ? (
+                          <button
+                            type="button"
+                            className="w-full px-3 py-2 text-right text-sm text-[#2E7D32] hover:bg-[#F0F7EF] rounded-lg transition-colors"
+                            onClick={() => { setCityOpen(false); }}
+                          >
+                            + הוסף &quot;{customerForm.city.trim()}&quot; כעיר חדשה
+                          </button>
+                        ) : (
+                          filteredCities.slice(0, 50).map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              className={cn('w-full px-3 py-1.5 text-right text-sm hover:bg-[#F0F7EF] rounded-lg transition-colors', c === customerForm.city && 'bg-[#E8F5E9] font-medium')}
+                              onClick={() => { setCustomerForm((p) => ({ ...p, city: c })); setCityOpen(false); setCityFilter(''); }}
+                            >
+                              {c}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ) : (
-                  <div className={viewClass}>{customerForm.cityCodeLegacy || '—'}</div>
-                )}
-              </Field>
-              <Field label="מדינה / אזור" connected>
-                {isEdit ? (
-                  <input
-                    className={inputClass}
-                    value={customerForm.countryRegion}
-                    onChange={(e) => setCustomerForm((p) => ({ ...p, countryRegion: e.target.value }))}
-                  />
-                ) : (
-                  <div className={viewClass}>{customerForm.countryRegion || '—'}</div>
+                  <div className={viewClass}>{customerForm.city || '—'}</div>
                 )}
               </Field>
             </div>
           </div>
-        </div>
 
-        <div className={cn(sectionShell, 'mt-3')}>
-          <div className={sectionHeader}>הערות פנימיות</div>
-          <div className="p-2">
-            <Field label="הערות פנימיות" connected>
+          {/* ── Left side column: ח.פ, איש מכירות, הערות ── */}
+          <div className="w-[280px] shrink-0 space-y-4">
+            <Field label="ח.פ / עוסק מורשה" connected>
               {isEdit ? (
-                <textarea
-                  className={cn(inputConnected, 'min-h-[5rem] resize-y')}
-                  value={customerForm.internalNotes}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, internalNotes: e.target.value }))}
-                />
+                <input className={inputConnected} value={customerForm.companyRegNumber} onChange={(e) => setCustomerForm((p) => ({ ...p, companyRegNumber: e.target.value }))} />
               ) : (
-                <div className={cn(viewClass, 'min-h-[5rem] whitespace-pre-wrap')}>{customerForm.internalNotes || '—'}</div>
+                <div className={viewClass}>{customerForm.companyRegNumber || '—'}</div>
+              )}
+            </Field>
+
+            <Field label="איש מכירות" connected>
+              {isEdit ? (
+                <input className={inputConnected} value={customerForm.salesRep} onChange={(e) => setCustomerForm((p) => ({ ...p, salesRep: e.target.value }))} />
+              ) : (
+                <div className={viewClass}>{customerForm.salesRep || '—'}</div>
+              )}
+            </Field>
+
+            <Field label="הערות" connected>
+              {isEdit ? (
+                <textarea className={cn(inputConnected, 'min-h-[96px] resize-y !rounded-[16px] !h-auto')} value={customerForm.notes} onChange={(e) => setCustomerForm((p) => ({ ...p, notes: e.target.value }))} />
+              ) : (
+                <div className={cn(viewClass, 'min-h-[96px] whitespace-pre-wrap !h-auto !rounded-[16px]')}>{customerForm.notes || '—'}</div>
               )}
             </Field>
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className={cn(
-              'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium text-white transition hover:opacity-90',
-              savingCustomer || !isEdit ? 'cursor-not-allowed opacity-60' : '',
+        {/* ── Hidden fields preserved in form for save — required by API validation ── */}
+        {isEdit && (
+          <div className="hidden">
+            <select value={customerForm.type} onChange={(e) => setCustomerForm((p) => ({ ...p, type: e.target.value, classificationCode: e.target.value }))}>
+              <option value="">—</option>
+              {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
+            </select>
+            <input value={customerForm.contactName} onChange={(e) => setCustomerForm((p) => ({ ...p, contactName: e.target.value }))} />
+          </div>
+        )}
+
+        {/* ── Save button ── */}
+        {isEdit && (
+          <div className="mt-5 flex items-center justify-between pt-4" style={{ borderTop: '1px solid #E8EFF6' }}>
+            {legacyMsg && (
+              <span className={cn('text-sm font-medium', legacyMsg.includes('בהצלחה') ? 'text-green-700' : 'text-red-600')}>
+                {legacyMsg}
+              </span>
             )}
-            style={{ backgroundColor: primaryColor }}
-            onClick={() => void onSaveCustomerMain()}
-            disabled={savingCustomer || !isEdit}
-          >
-            שמור כרטיס לקוח
-          </button>
-          {!isEdit && (
-            <span className="text-xs text-slate-500">מצב צפייה — עבור לעריכה כדי לשמור שינויים.</span>
-          )}
-          {legacyMsg && <div className="rounded border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700">{legacyMsg}</div>}
-        </div>
+            <div className="flex items-center gap-3 mr-auto">
+              <button
+                type="button"
+                disabled={savingCustomer}
+                onClick={onSaveCustomerMain}
+                className="h-[44px] rounded-[18px] px-6 text-sm font-bold text-[#2E4A2D] disabled:opacity-50 transition-all"
+                style={{ background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)', boxShadow: '0 8px 18px rgba(143,191,143,0.28)' }}
+              >
+                {savingCustomer ? 'שומר...' : isNewMode ? 'צור לקוח' : 'שמור כרטיס לקוח'}
+              </button>
+              {!isNewMode && (
+                <button
+                  type="button"
+                  onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
+                  className="h-[44px] rounded-[16px] border border-[#D9E4EF] bg-[#EEF4F8] px-5 text-sm font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+                >
+                  {mode === 'edit' ? 'ביטול' : 'עריכה'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* טאבים תחתונים */}
-      <div className={cn(sectionShell, 'p-0')}>
-        <div className={sectionHeader}>אזור תחתון</div>
-        <div className="flex flex-wrap justify-end gap-1 border-b border-slate-200 bg-slate-50/80 px-2 py-2">
+      <div className={cn(sectionShell)} style={{ background: 'rgba(255,255,255,0.78)', boxShadow: '0 10px 30px rgba(135,160,190,0.18)', backdropFilter: 'blur(12px)' }}>
+        <div className="flex flex-wrap justify-start gap-2 px-6 pt-5 pb-3">
           {LOWER_TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               className={cn(
-                'rounded border px-2.5 py-1.5 text-xs font-medium transition',
+                'h-[42px] rounded-[16px] px-[18px] text-[13px] font-medium transition-all',
                 activeLowerTab === t.key
-                  ? 'border-blue-800 bg-blue-800 text-white shadow-sm'
-                  : 'border-slate-300 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50/80',
+                  ? 'bg-white text-[#2C3F55] border border-[#DCE7F2]'
+                  : 'bg-[#EDF3F8] text-[#5E7186] border border-transparent hover:bg-[#E5ECF3]',
               )}
+              style={activeLowerTab === t.key ? { boxShadow: '0 2px 8px rgba(135,160,190,0.15)' } : undefined}
               onClick={() => setActiveLowerTab(t.key)}
             >
               {t.label}
             </button>
           ))}
         </div>
-        <div className="p-2">
+        <div className="px-6 pb-5">
 
         {activeLowerTab === 'contacts' && (
-          <div className="grid gap-2 lg:grid-cols-[1fr_auto]">
-            <div className="overflow-x-auto rounded border-2 border-slate-200 bg-white">
-              <table className="w-full min-w-[52rem] border-collapse text-sm" dir="rtl">
-                <thead className="border-b-2 border-blue-100 bg-blue-50/90">
-                  <tr className="text-right text-xs font-semibold text-slate-700">
-                    <th className="border-b border-slate-200 px-2 py-2.5">שם</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5">מחלקה</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5">תפקיד</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5">סלולארי</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5">טלפון</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5">פקס</th>
-                    <th className="border-b border-slate-200 px-2 py-2.5" dir="ltr">
-                      Email
-                    </th>
+          <div className="space-y-2">
+            {/* Header row: title + action buttons */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-bold text-[#23364B]">
+                אנשי קשר ({allContacts.length})
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="h-[40px] w-[40px] flex items-center justify-center rounded-full text-white text-xl font-bold transition-all hover:scale-105"
+                  style={{ background: 'linear-gradient(180deg, #BFE3B8 0%, #7CC06E 100%)', boxShadow: '0 4px 12px rgba(124,192,110,0.35)' }}
+                  onClick={resetContactEdit}
+                  title="הוסף איש קשר"
+                >
+                  +
+                </button>
+                {onNewQuote && (
+                  <button
+                    type="button"
+                    className="h-[36px] rounded-[14px] px-4 text-xs font-medium text-white hover:opacity-90 transition-all"
+                    style={{ backgroundColor: primaryColor }}
+                    title={contactEdit ? `חדש הצעה עבור ${contactEdit.fullName}` : 'חדש הצעה'}
+                    onClick={() => { onNewQuote(contactEdit?.id ?? null); }}
+                  >
+                    חדש הצעה
+                  </button>
+                )}
+                {onNewInteraction && (
+                  <button
+                    type="button"
+                    className="h-[36px] rounded-[14px] bg-amber-500 px-4 text-xs font-medium text-white hover:bg-amber-600 transition-all"
+                    title={contactEdit ? `פנייה חדשה עבור ${contactEdit.fullName}` : 'פנייה חדשה'}
+                    onClick={() => { onNewInteraction(contactEdit?.id ?? null); }}
+                  >
+                    פנייה חדשה
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Inline form — shown when adding or editing a contact */}
+            {contactEdit && (isEdit || contactEdit.id === '') && (
+              <div className="rounded-2xl border border-[#D9E4EF] bg-[#F8FBFF] p-5" style={{ boxShadow: '0 4px 16px rgba(135,160,190,0.10)' }}>
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full bg-[#EDF3F8] flex items-center justify-center text-xl">
+                    👤
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-[#23364B]">
+                      {contactEdit.id ? 'עריכת איש קשר' : 'איש קשר חדש'}
+                    </div>
+                    <div className="text-xs text-[#7A8CA3]">איש קשר חיישן</div>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-semibold text-[#24364B]">Full Name</label>
+                    <input
+                      className={inputClass}
+                      placeholder="שם מלא"
+                      value={contactEdit.fullName || ''}
+                      onChange={(e) => setContactEdit((p) => (p ? { ...p, fullName: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-semibold text-[#24364B]">Role</label>
+                    <input
+                      className={inputClass}
+                      placeholder="תפקיד"
+                      value={contactEdit.roleTitle || ''}
+                      onChange={(e) => setContactEdit((p) => (p ? { ...p, roleTitle: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-semibold text-[#24364B]">Phone</label>
+                    <input
+                      className={inputClass}
+                      placeholder="טלפון"
+                      value={contactEdit.phone || ''}
+                      onChange={(e) => setContactEdit((p) => (p ? { ...p, phone: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-semibold text-[#24364B]">Mobile</label>
+                    <input
+                      className={inputClass}
+                      placeholder="סלולארי"
+                      value={contactEdit.mobile || ''}
+                      onChange={(e) => setContactEdit((p) => (p ? { ...p, mobile: e.target.value } : p))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block text-[12px] font-semibold text-[#24364B]">Email</label>
+                    <input
+                      className={inputClass}
+                      placeholder="Email"
+                      value={contactEdit.email || ''}
+                      onChange={(e) => setContactEdit((p) => (p ? { ...p, email: e.target.value } : p))}
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    className="h-[36px] rounded-[14px] border border-[#D9E4EF] bg-[#EEF4F8] px-4 text-xs font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+                    onClick={() => setContactEdit(null)}
+                  >
+                    ביטול
+                  </button>
+                  <button
+                    type="button"
+                    className="h-[36px] rounded-[14px] px-5 text-xs font-bold text-[#2E4A2D] disabled:opacity-40 transition-all"
+                    style={{ background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)', boxShadow: '0 4px 12px rgba(143,191,143,0.25)' }}
+                    disabled={(!isEdit && !!contactEdit.id) || contactBusy || !contactEdit.fullName?.trim()}
+                    onClick={onSaveContact}
+                  >
+                    {contactBusy ? 'שומר...' : contactEdit.id ? 'עדכן איש קשר' : 'הוסף איש קשר'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Contacts table */}
+            <div className="overflow-x-auto rounded-2xl border border-[#E4ECF4] bg-white" style={{ boxShadow: '0 2px 8px rgba(135,160,190,0.08)' }}>
+              <table className="w-full min-w-[36rem] border-collapse text-sm" dir="rtl">
+                <thead>
+                  <tr className="text-right text-xs font-semibold text-[#5E7186]" style={{ background: '#F5F9FC' }}>
+                    <th className="px-4 py-3">פעולות</th>
+                    <th className="px-4 py-3">חותמה</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3">שם סלא</th>
+                    <th className="px-4 py-3">טלפון</th>
+                    <th className="px-4 py-3">נייד</th>
+                    <th className="px-4 py-3">אימייל</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {contacts.length === 0 ? (
+                  {allContacts.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-2 py-6 text-center text-sm text-slate-500">
-                        אין אנשי קשר ללקוח זה
+                      <td colSpan={7} className="px-4 py-6 text-center text-sm text-[#8A9BB0]">
+                        אין אנשי קשר — לחץ &quot;+&quot; להוספה
                       </td>
                     </tr>
                   ) : (
-                    contacts.map((c) => (
+                    allContacts.map((c) => (
                       <tr
                         key={c.id}
                         className={cn(
-                          'border-b border-slate-100 text-right hover:bg-slate-50/90',
-                          isEdit && 'cursor-pointer',
+                          'text-right transition-colors cursor-pointer',
+                          contactEdit?.id === c.id
+                            ? 'bg-[#F0F7EF]'
+                            : 'hover:bg-[#F8FBFF]',
                         )}
-                        onClick={() => isEdit && setContactEdit(c)}
+                        style={{ borderBottom: '1px solid #EDF2F8' }}
+                        onClick={() => { setContactEdit(c); onContactSelected?.(c.id, c.fullName); }}
                       >
-                        <td className="px-2 py-2">{c.fullName || '—'}</td>
-                        <td className="px-2 py-2">{c.department || '—'}</td>
-                        <td className="px-2 py-2">{c.roleTitle || '—'}</td>
-                        <td className="px-2 py-2">{c.mobile || '—'}</td>
-                        <td className="px-2 py-2">{c.phone || '—'}</td>
-                        <td className="px-2 py-2">{c.fax || '—'}</td>
-                        <td className="px-2 py-2 text-left" dir="ltr">
-                          {c.email || '—'}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="w-7 h-7 rounded-lg bg-[#EDF3F8] flex items-center justify-center text-[#5E7186] hover:bg-[#DCE7F2] transition-all text-xs"
+                              onClick={(e) => { e.stopPropagation(); setContactEdit(c); }}
+                              title="ערוך"
+                            >
+                              ✎
+                            </button>
+                            {isEdit && (
+                              <button
+                                type="button"
+                                className="w-7 h-7 rounded-lg bg-[#FDF2F2] flex items-center justify-center text-red-500 hover:bg-red-100 transition-all text-xs disabled:opacity-40"
+                                disabled={contactBusy}
+                                onClick={(e) => { e.stopPropagation(); onDeleteContact(c.id); }}
+                                title="מחק"
+                              >
+                                🗑
+                              </button>
+                            )}
+                          </div>
                         </td>
+                        <td className="px-4 py-3">
+                          <div className="w-8 h-8 rounded-full bg-[#EDF3F8] flex items-center justify-center text-sm">👤</div>
+                        </td>
+                        <td className="px-4 py-3 text-[#66768B]">{c.roleTitle || '—'}</td>
+                        <td className="px-4 py-3 font-semibold text-[#24364B]">{c.fullName || '—'}</td>
+                        <td className="px-4 py-3 text-[#24364B]">{c.phone || '—'}</td>
+                        <td className="px-4 py-3 text-[#24364B]">{c.mobile || '—'}</td>
+                        <td className="px-4 py-3 text-[#24364B]" dir="ltr">{c.email || '—'}</td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
             </div>
-            <div className="flex min-w-[11rem] flex-col gap-2 rounded border border-slate-300 bg-slate-50 p-2">
-              <button
-                type="button"
-                className="rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-40"
-                disabled={!isEdit}
-                onClick={resetContactEdit}
-              >
-                הוספה
-              </button>
-              <button
-                type="button"
-                className="rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-40"
-                disabled={!isEdit || !contactEdit || !contactEdit.id}
-                onClick={() => contactEdit && setContactEdit(contactEdit)}
-              >
-                עריכה
-              </button>
-              <button
-                type="button"
-                className="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100 disabled:opacity-40"
-                disabled={!isEdit || !contactEdit?.id || contactBusy}
-                onClick={() => contactEdit?.id && onDeleteContact(contactEdit.id)}
-              >
-                מחיקה
-              </button>
-              <button
-                type="button"
-                className="rounded border border-slate-700 bg-slate-700 px-3 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-40"
-                disabled={!isEdit || !contactEdit || contactBusy}
-                onClick={onSaveContact}
-              >
-                שמור איש קשר
-              </button>
-            </div>
-            {contactEdit && isEdit && (
-              <div className="rounded border border-slate-300 bg-white p-2 lg:col-span-2">
-                <div className="mb-2 text-xs font-semibold text-slate-700">כרטיס איש קשר</div>
-                <div className="grid gap-2 md:grid-cols-4">
-                  <input
-                    className={inputClass}
-                    placeholder="שם"
-                    value={contactEdit.fullName || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, fullName: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="מחלקה"
-                    value={contactEdit.department || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, department: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="תפקיד"
-                    value={contactEdit.roleTitle || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, roleTitle: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="סלולארי"
-                    value={contactEdit.mobile || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, mobile: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="טלפון"
-                    value={contactEdit.phone || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, phone: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="פקס"
-                    value={contactEdit.fax || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, fax: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="Email"
-                    value={contactEdit.email || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, email: e.target.value } : p))}
-                  />
-                  <input
-                    className={inputClass}
-                    placeholder="הערות"
-                    value={contactEdit.notes || ''}
-                    onChange={(e) => setContactEdit((p) => (p ? { ...p, notes: e.target.value } : p))}
-                  />
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -3178,6 +3449,7 @@ export function CustomerLegacyCard({
         )}
         </div>
       </div>
+      </div>{/* end padding wrapper */}
     </div>
   );
 }

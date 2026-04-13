@@ -1,8 +1,11 @@
 'use client';
 
-import { apiUrl, getApiBaseUrl, apiFetch } from './lib/api-base';
-import { parseApiErrorResponse } from './lib/api-error';
-import { CustomerLegacyCard } from './customer-legacy-card';
+import { apiUrl, getApiBaseUrl, apiFetch } from '../lib/api-base';
+import { parseApiErrorResponse } from '../lib/api-error';
+import { CustomerLegacyCard } from '../customer-legacy-card';
+import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
+import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
+import { OrderNewScreen, OrderOldStyleToolbar } from '../orders/new/order-new-screen';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildQuoteTemplateContext,
@@ -11,7 +14,7 @@ import {
   QUOTE_SERVICE_TYPE_OPTIONS,
   QUOTE_TEMPLATE_VARIABLES_HELP,
   type QuoteTemplateLineItem,
-} from './lib/quote-template-merge';
+} from '../lib/quote-template-merge';
 import {
   Users,
   FileText,
@@ -42,15 +45,15 @@ import {
   Loader2,
 } from 'lucide-react';
 
-import { DataImportWizard } from './data-import-wizard';
-import { FollowupImportPanel } from './followup-import-panel';
-import { isAdminRole } from './lib/roles';
+import { DataImportWizard } from '../data-import-wizard';
+import { FollowupImportPanel } from '../followup-import-panel';
+import { isAdminRole } from '../lib/roles';
 import {
   CrmLegacyTopNav,
   GLOBAL_SEARCH_INPUT_ID,
   GALIT_TOPBAR_SPACER_CLASS,
   type SettingsToolbarJumpTab,
-} from './crm-classic-toolbar';
+} from '../crm-classic-toolbar';
 
 import {
   ResponsiveContainer,
@@ -1226,6 +1229,340 @@ function Modal({
   );
 }
 
+/* ─── Customer Search Modal (חפש → לקוח) ───────────────────────────── */
+function CustomerSearchModal({
+  open,
+  customers,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  customers: Customer[];
+  onClose: () => void;
+  onSelect: (customer: Customer) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? customers.filter((c) =>
+        (c.name || '').toLowerCase().includes(q) ||
+        (c.contactName || '').toLowerCase().includes(q) ||
+        (c.phone || '').includes(q) ||
+        (c.phone2 || '').includes(q) ||
+        (c.phone3 || '').includes(q) ||
+        (c.email || '').toLowerCase().includes(q) ||
+        (c.city || '').toLowerCase().includes(q) ||
+        (c.address || '').toLowerCase().includes(q) ||
+        (c.companyRegNumber || '').toLowerCase().includes(q) ||
+        (c.importLegacyId || '').toLowerCase().includes(q) ||
+        (c.fax || '').includes(q) ||
+        (c.website || '').toLowerCase().includes(q) ||
+        (c.status || '').toLowerCase().includes(q)
+      )
+    : customers;
+  const results = filtered.slice(0, 50);
+
+  return (
+    <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        dir="rtl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h3 className="text-base font-bold text-slate-800">חיפוש לקוח</h3>
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="סגור">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Large smart search input */}
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200">
+            <Search className="h-5 w-5 shrink-0 text-slate-400" />
+            <input
+              ref={inputRef}
+              className="flex-1 bg-transparent text-base outline-none placeholder:text-slate-400"
+              placeholder="חיפוש לפי שם לקוח / איש קשר / טלפון / נייד / מייל / עיר / כתובת / ח.פ / סימוכין"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') onClose();
+              }}
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            {q ? `${results.length} תוצאות${filtered.length > 50 ? ` מתוך ${filtered.length}` : ''}` : `${customers.length} לקוחות`}
+          </div>
+        </div>
+
+        {/* Results table */}
+        <div className="max-h-[55vh] overflow-y-auto">
+          {results.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-slate-400">
+              {q ? 'לא נמצאו לקוחות תואמים' : 'אין לקוחות'}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50">
+                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+                  <th className="px-3 py-2 text-right">שם לקוח</th>
+                  <th className="px-3 py-2 text-right">איש קשר</th>
+                  <th className="px-3 py-2 text-right">עיר</th>
+                  <th className="px-3 py-2 text-right">טלפון</th>
+                  <th className="px-3 py-2 text-right">מייל</th>
+                  <th className="px-3 py-2 text-right">ח.פ</th>
+                  <th className="px-3 py-2 text-right">סטטוס</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((c) => (
+                  <tr
+                    key={c.id}
+                    className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-emerald-50"
+                    onClick={() => onSelect(c)}
+                    onDoubleClick={() => onSelect(c)}
+                  >
+                    <td className="px-3 py-2 font-medium text-slate-800">{c.name}</td>
+                    <td className="px-3 py-2 text-slate-600">{c.contactName || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600">{c.city || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600" dir="ltr">{c.phone || '—'}</td>
+                    <td className="px-3 py-2 text-slate-500 text-xs" dir="ltr">{c.email || '—'}</td>
+                    <td className="px-3 py-2 text-slate-500 text-xs" dir="ltr">{c.companyRegNumber || '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className={cn(
+                        'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
+                        c.status === 'פעיל' ? 'bg-emerald-100 text-emerald-700' :
+                        c.status === 'לא פעיל' ? 'bg-slate-100 text-slate-500' :
+                        'bg-slate-100 text-slate-600'
+                      )}>{c.status || '—'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-200 px-5 py-2.5 text-left">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded bg-slate-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+          >
+            סגור
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuoteSearchModal({
+  open,
+  quotes,
+  customers,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  quotes: Quote[];
+  customers: Customer[];
+  onClose: () => void;
+  onSelect: (quote: Quote) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  /* Build lookup maps from customers so we can search contact-level fields on quotes */
+  const customerMap = useMemo(() => {
+    const m: Record<string, Customer> = {};
+    for (const c of customers) { if (c.id) m[c.id] = c; }
+    return m;
+  }, [customers]);
+
+  useEffect(() => {
+    if (open) {
+      setQuery('');
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const q = query.trim().toLowerCase();
+
+  const filtered = q
+    ? quotes.filter((qt) => {
+        const cust = qt.customerId ? customerMap[qt.customerId] : null;
+        return (
+          (qt.quoteNumber || '').toLowerCase().includes(q) ||
+          (qt.importLegacyId || '').toLowerCase().includes(q) ||
+          (qt.customerName || qt.client || '').toLowerCase().includes(q) ||
+          (qt.service || '').toLowerCase().includes(q) ||
+          (qt.description || '').toLowerCase().includes(q) ||
+          (qt.status || '').toLowerCase().includes(q) ||
+          (qt.notes || '').toLowerCase().includes(q) ||
+          (qt.opportunityName || '').toLowerCase().includes(q) ||
+          /* contact-level fields via customer lookup */
+          (cust ? (cust.contactName || '').toLowerCase().includes(q) : false) ||
+          (cust ? (cust.city || '').toLowerCase().includes(q) : false) ||
+          (cust ? (cust.phone || '').includes(q) : false) ||
+          (cust ? (cust.phone2 || '').includes(q) : false) ||
+          (cust ? (cust.email || '').toLowerCase().includes(q) : false) ||
+          (cust ? (cust.address || '').toLowerCase().includes(q) : false) ||
+          (cust ? (cust.companyRegNumber || '').toLowerCase().includes(q) : false)
+        );
+      })
+    : quotes;
+  const results = filtered.slice(0, 80);
+
+  const getValidity = (qt: Quote) => {
+    const vd = qt.validityDate || qt.validTo || '';
+    if (!vd) return { label: '—', expired: false };
+    const d = vd.slice(0, 10);
+    return { label: d, expired: d < today };
+  };
+
+  return (
+    <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        dir="rtl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <h3 className="text-base font-bold text-slate-800">חיפוש הצעות מחיר</h3>
+          <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="סגור">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Large smart search input */}
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200">
+            <Search className="h-5 w-5 shrink-0 text-slate-400" />
+            <input
+              ref={inputRef}
+              className="flex-1 bg-transparent text-base outline-none placeholder:text-slate-400"
+              placeholder="חיפוש לפי מספר הצעה / סימוכין / לקוח / איש קשר / עיר / טלפון / מייל / סטטוס / תיאור"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') onClose();
+              }}
+            />
+            {query && (
+              <button type="button" onClick={() => setQuery('')} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <div className="mt-2 text-xs text-slate-400">
+            {q ? `${results.length} תוצאות${filtered.length > 80 ? ` מתוך ${filtered.length}` : ''}` : `${quotes.length} הצעות`}
+          </div>
+        </div>
+
+        {/* Results table */}
+        <div className="max-h-[50vh] overflow-y-auto">
+          {results.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-slate-400">
+              {q ? 'לא נמצאו הצעות תואמות' : 'אין הצעות'}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-50">
+                <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500">
+                  <th className="px-3 py-2 text-right">מספר הצעה</th>
+                  <th className="px-3 py-2 text-right">סימוכין</th>
+                  <th className="px-3 py-2 text-right">תאריך</th>
+                  <th className="px-3 py-2 text-right">שם לקוח</th>
+                  <th className="px-3 py-2 text-right">איש קשר</th>
+                  <th className="px-3 py-2 text-right">עיר</th>
+                  <th className="px-3 py-2 text-right">סטטוס</th>
+                  <th className="px-3 py-2 text-right">תוקף הצעה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((qt) => {
+                  const { label: validLabel, expired } = getValidity(qt);
+                  const cust = qt.customerId ? customerMap[qt.customerId] : null;
+                  const city = cust?.city || '';
+                  const contact = cust?.contactName || '';
+                  return (
+                    <tr
+                      key={qt.id}
+                      className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-emerald-50"
+                      onClick={() => onSelect(qt)}
+                      onDoubleClick={() => onSelect(qt)}
+                    >
+                      <td className="px-3 py-2 font-medium text-slate-800">{qt.quoteNumber || '—'}</td>
+                      <td className="px-3 py-2 text-slate-600">{qt.importLegacyId || '—'}</td>
+                      <td className="px-3 py-2 text-slate-600">{qt.createdAt ? qt.createdAt.slice(0, 10) : '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{qt.customerName || qt.client || '—'}</td>
+                      <td className="px-3 py-2 text-slate-600">{contact || '—'}</td>
+                      <td className="px-3 py-2 text-slate-600">{city || '—'}</td>
+                      <td className="px-3 py-2">
+                        <span className={cn(
+                          'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
+                          qt.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
+                          qt.status === 'SENT' ? 'bg-blue-100 text-blue-700' :
+                          qt.status === 'DRAFT' ? 'bg-slate-100 text-slate-600' :
+                          qt.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
+                          'bg-slate-100 text-slate-600'
+                        )}>{qt.status || '—'}</span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span className={cn(
+                          'inline-block rounded-full px-2 py-0.5 text-xs font-bold',
+                          expired ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                        )}>
+                          {validLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-200 px-5 py-2.5 text-left">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded bg-slate-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-slate-700"
+          >
+            סגור
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LogoMark({ size = 40 }: { size?: number }) {
   return (
     <div className="flex items-center gap-2">
@@ -1490,12 +1827,12 @@ function normalizeLeadRowFromApi(lead: any, index: number): Lead {
 
 function canAccess(role: AppUserRole, key: string) {
   const accessMap: Record<AppUserRole, string[]> = {
-    admin: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule'],
-    manager: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule'],
-    sales: ['leads', 'pipeline', 'customers', 'quotes', 'tasks'],
-    technician: ['projects', 'tasks', 'fieldSchedule', 'lab'],
-    expert: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'tasks', 'fieldSchedule'],
-    billing: ['quotes'],
+    admin: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'],
+    manager: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'],
+    sales: ['leads', 'pipeline', 'customers', 'quotes', 'tasks', 'interaction-new', 'order-new'],
+    technician: ['projects', 'tasks', 'fieldSchedule', 'lab', 'interaction-new', 'order-new'],
+    expert: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'tasks', 'fieldSchedule', 'interaction-new', 'order-new'],
+    billing: ['quotes', 'interaction-new', 'order-new'],
   };
   return accessMap[role].includes(key);
 }
@@ -5257,476 +5594,269 @@ function CustomersPage({
     setOpen(true);
   };
 
-  const leavesDecor = (
-    <div className="pointer-events-none absolute -left-3 -top-3 h-16 w-16 opacity-25">
-      <div className="absolute left-5 top-1 h-7 w-4 rotate-[-20deg] rounded-full bg-emerald-400" />
-      <div className="absolute left-10 top-5 h-6 w-4 rotate-[18deg] rounded-full bg-emerald-500" />
-      <div className="absolute left-1 top-6 h-5 w-3 rotate-[-35deg] rounded-full bg-emerald-300" />
-    </div>
-  );
-
-  const activeCustomers = customers.filter((c) => (c.status || '').toUpperCase() === 'ACTIVE').length;
-  const estimatedPortfolioValue = customers.reduce((sum, c) => sum + ((c.services?.length || 0) * 3200), 0);
-  const csat = 92;
-  const atRiskCustomers = Math.max(0, customers.length - activeCustomers);
-
   const totalListPages = Math.max(1, Math.ceil(pagedTotal / CUSTOMER_PAGE_SIZE) || 1);
   const rangeStart = pagedTotal === 0 ? 0 : (listPage - 1) * CUSTOMER_PAGE_SIZE + 1;
   const rangeEnd = pagedTotal === 0 ? 0 : Math.min(listPage * CUSTOMER_PAGE_SIZE, pagedTotal);
 
-  const formatSalesCompactILS = (n: number) => {
-    if (!Number.isFinite(n)) return '₪0';
-    if (n >= 1_000_000) return `₪${(n / 1_000_000).toFixed(2)}M`;
-    if (n >= 1_000) return `₪${(n / 1_000).toFixed(2)}K`;
-    return formatCurrencyILS(n);
-  };
-
   const customerFormControlClass =
     '!text-lg h-14 rounded-2xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
 
-  const {
-    typePie: customerTypePieData,
-    typePieTotal: customerTypePieTotal,
-    statusRows: customerStatusRows,
-    salesRows: salesTeamRows,
-  } = useMemo(
-    () =>
-      computeCustomersPageAnalytics(
-        customers,
-        leads,
-        quotes,
-        projects,
-        tasks,
-        opportunities,
-        users,
-        (code) => resolveCustomerTypeLabel(code, typeLabelMap),
-      ),
-    [customers, leads, quotes, projects, tasks, opportunities, users, typeLabelMap],
-  );
-
   return (
-    <div className="rounded-[30px] bg-[#f7fbf5] p-6 md:p-8 space-y-5" dir="rtl">
+    <div className="bg-[#f7fbf5] p-4 md:p-6 space-y-4" dir="rtl">
       {loadError && (
-        <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
           {loadError}
         </div>
       )}
 
-      <div className="flex flex-col gap-5">
-        <div className="order-1 grid gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4">
-        {[
-          { title: 'סה"כ לקוחות פעילים', value: activeCustomers, sub: 'לקוחות במצב פעיל' },
-          { title: 'שווי תיק לקוחות', value: formatCurrencyILS(estimatedPortfolioValue), sub: 'הערכה על בסיס שירותים' },
-          { title: 'מדד שביעות רצון (CSAT)', value: `${csat}%`, sub: 'סקרי שירות תקופתיים' },
-          { title: 'לקוחות בסיכון', value: atRiskCustomers, sub: 'דורשים מעקב מוגבר' },
-        ].map((kpi) => (
-          <Card key={kpi.title} className="relative overflow-hidden rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
-            {leavesDecor}
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold text-slate-500">{kpi.title}</div>
-              <div className="mt-2 text-3xl font-black text-slate-900">{kpi.value}</div>
-              <div className="mt-1 text-xs text-emerald-700">{kpi.sub}</div>
-            </CardContent>
-          </Card>
-        ))}
+      {/* Search bar + add customer button */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            className="h-10 rounded-lg border-slate-300 bg-white pr-10 text-sm placeholder:text-sm placeholder:text-slate-400"
+            placeholder="חיפוש לפי שם לקוח, טלפון או ח.פ"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Button
+          className="h-10 rounded-lg px-4 text-sm font-semibold text-white whitespace-nowrap"
+          style={{ background: galit.primary }}
+          onClick={() => openCreateCustomerModal(search.trim())}
+        >
+          <Plus className="ml-1 h-4 w-4" />
+          לקוח חדש
+        </Button>
       </div>
 
-        <Card className="order-2 rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-xl font-bold text-slate-900">חפש לקוח</CardTitle>
+      {/* Info row: loading indicator + count */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
+        <div className="inline-flex min-h-[1.25rem] items-center gap-2">
+          {listLoading ? (
+            <>
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              <span>טוען...</span>
+            </>
+          ) : null}
+        </div>
+        {!listLoading && pagedTotal > 0 ? (
+          <span className="tabular-nums text-xs">
+            {rangeStart}–{rangeEnd} מתוך {pagedTotal}
+          </span>
+        ) : null}
+      </div>
 
-          <div className="mt-3 flex items-center gap-2">
-            <div className="relative w-full md:w-[52%]">
-              <Search className="absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <Input
-                className={cn(
-                  'h-16 rounded-2xl bg-emerald-50 border-emerald-200 pr-11 px-6 shadow-sm focus-visible:ring-emerald-300',
-                  'py-3 font-semibold leading-7',
-                  search.trim()
-                    ? 'text-xl placeholder:text-base placeholder:text-slate-500'
-                    : 'text-lg placeholder:text-base placeholder:text-slate-400',
-                )}
-                placeholder="חיפוש לפי שם לקוח או טלפון"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <Button
-              className="h-16 rounded-2xl px-12 py-0 text-base font-semibold shadow-md hover:shadow-lg text-white whitespace-nowrap"
-              style={{ background: galit.primary }}
-              onClick={() => openCreateCustomerModal(search.trim())}
-            >
-              <Plus className="ml-2 h-4 w-4" />
-              הוספת לקוח חדש
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="p-3 sm:p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
-            <div className="inline-flex min-h-[1.25rem] items-center gap-2">
-              {listLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
-                  <span>טוען רשימת לקוחות...</span>
-                </>
-              ) : null}
-            </div>
-            {!listLoading && pagedTotal > 0 ? (
-              <span className="tabular-nums">
-                מציג {rangeStart}–{rangeEnd} מתוך {pagedTotal}
-              </span>
-            ) : null}
-          </div>
-          <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-emerald-50">
-                  <TableHead>שם לקוח</TableHead>
-                  <TableHead>איש קשר</TableHead>
-                  <TableHead>סוג לקוח</TableHead>
-                  <TableHead>ACV משוער</TableHead>
-                  <TableHead>סטטוס פעילות</TableHead>
-                  <TableHead>פעילות אחרונה</TableHead>
-                  <TableHead>מדד נאמנות</TableHead>
-                  <TableHead>פעולות</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {listLoading && pagedRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                        טוען...
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                ) : !listLoading && pagedRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-sm text-slate-500">
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <div>לא נמצאו לקוחות{debouncedSearch ? ' התואמים לחיפוש' : ''}</div>
-                        <Button
-                          className="rounded-2xl px-4 py-2 text-sm font-semibold text-white"
-                          style={{ background: galit.primary }}
-                          onClick={() => openCreateCustomerModal(search.trim())}
-                        >
-                          הוסף לקוח חדש
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  pagedRows.map((customer, idx) => {
-                  const loyalty = Math.max(58, 92 - idx * 4);
-                  const acv = formatCurrencyILS(Math.max(4200, (customer.services?.length || 1) * 3900));
-                  const statusRaw = (customer.status || 'ACTIVE').toUpperCase();
-                  const statusUi =
-                    statusRaw === 'ACTIVE'
-                      ? { label: 'Active', cls: 'bg-emerald-100 text-emerald-800' }
-                      : statusRaw === 'INACTIVE'
-                        ? { label: 'At Risk', cls: 'bg-red-100 text-red-700' }
-                        : { label: 'Handling', cls: 'bg-amber-100 text-amber-800' };
-                  return (
-                  <TableRow
-                    key={customer.id}
-                    className="cursor-pointer hover:bg-slate-50"
-                    onClick={() => onOpenCustomer(customer)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-full bg-emerald-100" />
-                        <div className="font-medium">{customer.name}</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>{customer.contactName || '-'}</TableCell>
-                    <TableCell>{customerTypeLabel(customer.type)}</TableCell>
-                    <TableCell className="font-semibold">{acv}</TableCell>
-                    <TableCell>
-                      <Badge className={statusUi.cls}>{statusUi.label}</Badge>
-                    </TableCell>
-                    <TableCell>{new Date(Date.now() - idx * 86400000).toLocaleDateString('he-IL')}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="h-2 w-24 rounded-full bg-slate-100">
-                          <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${loyalty}%` }} />
-                        </div>
-                        <span className="text-xs font-semibold text-emerald-700">{loyalty}%</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          className="px-2 py-1 text-xs"
-                          onClick={() => startEditCustomer(customer)}
-                        >
-                          עריכה
-                        </Button>
-                        {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.canDeleteCustomers) && (
-                          <Button
-                            variant="outline"
-                            className="px-2 py-1 text-xs text-red-700"
-                            onClick={() => deleteCustomer(customer)}
-                          >
-                            מחיקה
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )})
-                )}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="space-y-3 md:hidden">
+      {/* Desktop table */}
+      <div className="hidden md:block rounded-lg border border-slate-200 bg-white overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-slate-50">
+              <TableHead className="text-right">שם לקוח</TableHead>
+              <TableHead className="text-right">ח.פ</TableHead>
+              <TableHead className="text-right">טלפון</TableHead>
+              <TableHead className="text-right">מייל</TableHead>
+              <TableHead className="text-right">עיר</TableHead>
+              <TableHead className="text-right">סטטוס</TableHead>
+              <TableHead className="text-right">פעולות</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {listLoading && pagedRows.length === 0 ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                טוען...
-              </div>
+              <TableRow>
+                <TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                    טוען...
+                  </span>
+                </TableCell>
+              </TableRow>
             ) : !listLoading && pagedRows.length === 0 ? (
-              <div className="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                <div className="font-semibold text-slate-700">
-                  לא נמצאו לקוחות{debouncedSearch ? ' התואמים לחיפוש' : ''}
-                </div>
-                <div className="mt-3">
-                  <Button
-                    className="w-full rounded-2xl px-4 py-2 text-sm font-semibold text-white"
-                    style={{ background: galit.primary }}
-                    onClick={() => openCreateCustomerModal(search.trim())}
-                  >
-                    הוסף לקוח חדש
-                  </Button>
-                </div>
-              </div>
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center text-sm text-slate-500">
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <div>לא נמצאו לקוחות{debouncedSearch ? ' התואמים לחיפוש' : ''}</div>
+                    <Button
+                      className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white"
+                      style={{ background: galit.primary }}
+                      onClick={() => openCreateCustomerModal(search.trim())}
+                    >
+                      הוסף לקוח חדש
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
             ) : (
-              pagedRows.map((customer) => (
-              <button
+              pagedRows.map((customer) => {
+              const statusRaw = (customer.status || 'ACTIVE').toUpperCase();
+              const statusUi =
+                statusRaw === 'ACTIVE'
+                  ? { label: 'פעיל', cls: 'bg-emerald-100 text-emerald-800' }
+                  : statusRaw === 'INACTIVE'
+                    ? { label: 'לא פעיל', cls: 'bg-red-100 text-red-700' }
+                    : { label: 'בטיפול', cls: 'bg-amber-100 text-amber-800' };
+              return (
+              <TableRow
                 key={customer.id}
+                className="cursor-pointer hover:bg-slate-50"
                 onClick={() => onOpenCustomer(customer)}
-                className="w-full rounded-2xl border p-4 text-right transition hover:bg-slate-50"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-semibold">{customer.name}</div>
-                      <div className="mt-1 text-sm text-slate-500">{customerTypeLabel(customer.type)}</div>
+                <TableCell className="font-medium">{customer.name}</TableCell>
+                <TableCell className="tabular-nums text-slate-600">{customer.companyRegNumber || '-'}</TableCell>
+                <TableCell>
+                  {customer.phone ? (
+                    <a
+                      href={phoneToTelHref(customer.phone) || undefined}
+                      className="hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {phoneToDisplay(customer.phone)}
+                    </a>
+                  ) : '-'}
+                </TableCell>
+                <TableCell className="text-slate-600 break-all">
+                  {customer.email ? (
+                    <a
+                      href={emailToMailtoHref(customer.email) || undefined}
+                      className="hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {customer.email}
+                    </a>
+                  ) : '-'}
+                </TableCell>
+                <TableCell>{customer.city || '-'}</TableCell>
+                <TableCell>
+                  <Badge className={statusUi.cls}>{statusUi.label}</Badge>
+                </TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="outline"
+                      className="px-2 py-1 text-xs"
+                      onClick={(e) => { e.stopPropagation(); startEditCustomer(customer); }}
+                    >
+                      עריכה
+                    </Button>
+                    {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.canDeleteCustomers) && (
+                      <Button
+                        variant="outline"
+                        className="px-2 py-1 text-xs text-red-700"
+                        onClick={(e) => { e.stopPropagation(); deleteCustomer(customer); }}
+                      >
+                        מחיקה
+                      </Button>
+                    )}
                   </div>
-                    <Badge className="bg-green-100 text-green-700">{customerStatusLabel(customer.status)}</Badge>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <div className="text-slate-400">איש קשר</div>
-                    <div className="font-medium">{customer.contactName || '-'}</div>
-                  </div>
-                    <div>
-                      <div className="text-slate-400">טלפון</div>
-                      <div className="font-medium">
-                        {customer.phone ? (
-                          <div className="space-y-1">
-                            <a
-                              href={phoneToTelHref(customer.phone) || undefined}
-                              className="hover:underline"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {phoneToDisplay(customer.phone)}
-                            </a>
-                            <div className="text-xs">
-                              <a
-                                href={phoneToWhatsAppHref(customer.phone) || undefined}
-                                className="text-sky-700 hover:underline"
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                וואטסאפ
-                              </a>
-                            </div>
-                          </div>
-                        ) : (
-                          '-'
-                        )}
-                      </div>
-                    </div>
-                    <div className="col-span-2">
-                      <div className="text-slate-400">אימייל</div>
-                      <div className="font-medium break-all">
-                        {customer.email ? (
-                          <a
-                            href={emailToMailtoHref(customer.email) || undefined}
-                            className="hover:underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {customer.email}
-                          </a>
-                        ) : (
-                          '-'
-                        )}
-                      </div>
-                    </div>
-                  <div>
-                    <div className="text-slate-400">עיר</div>
-                    <div className="font-medium">{customer.city || '-'}</div>
-                  </div>
-                  <div>
-                    <div className="text-slate-400">שירותים</div>
-                    <div className="font-medium">{customer.services.map(customerServiceLabel).join(' / ') || '-'}</div>
-                  </div>
-                </div>
-              </button>
-            ))
+                </TableCell>
+              </TableRow>
+            )})
             )}
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-3 border-t border-slate-100 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={listLoading || listPage <= 1}
-              onClick={() => setListPage((p) => Math.max(1, p - 1))}
-            >
-              עמוד קודם
-            </Button>
-            <span className="text-sm tabular-nums text-slate-600">
-              {listPage} / {totalListPages}
-            </span>
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-2xl"
-              disabled={listLoading || listPage >= totalListPages || pagedTotal === 0}
-              onClick={() => setListPage((p) => p + 1)}
-            >
-              עמוד הבא
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
+          </TableBody>
+        </Table>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="rounded-2xl border border-slate-100/90 bg-white p-4 shadow-[0_4px_24px_rgba(15,23,42,0.07)]">
-          <CardHeader className="p-0 pb-3">
-            <CardTitle className="text-lg font-bold text-slate-900">סוג הלקוחות</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {customerTypePieData.length === 0 ? (
-              <div className="py-10 text-center text-sm text-slate-500">אין לקוחות להצגת פילוח</div>
-            ) : (
-              <>
-                <div className="h-[220px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={customerTypePieData}
-                        dataKey="value"
-                        nameKey="name"
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={58}
-                        outerRadius={88}
-                        paddingAngle={2}
-                      >
-                        {customerTypePieData.map((entry) => (
-                          <Cell key={entry.code} fill={entry.color} stroke="white" strokeWidth={1} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        formatter={(value, name) => {
-                          const v = Number(value ?? 0);
-                          const pct = ((v / customerTypePieTotal) * 100).toFixed(1);
-                          return [`${pct}%`, String(name ?? '')];
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
-                  {customerTypePieData.map((entry) => (
-                    <div key={entry.code} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="flex min-w-0 items-center gap-2 text-slate-700">
-                        <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: entry.color }} />
-                        <span className="truncate">{entry.name}</span>
-                      </span>
-                      <span className="shrink-0 tabular-nums font-semibold text-emerald-800">
-                        {((entry.value / customerTypePieTotal) * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border border-slate-100/90 bg-white p-4 shadow-[0_4px_24px_rgba(15,23,42,0.07)]">
-          <CardHeader className="p-0 pb-3">
-            <CardTitle className="text-lg font-bold text-slate-900">סיכום סטטוס לקוחות (גלית)</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-hidden rounded-xl border border-slate-100">
-              <div className="grid grid-cols-2 gap-0 bg-emerald-50/80 px-3 py-2.5 text-xs font-semibold text-slate-600">
-                <div className="text-right">תיאור התיק</div>
-                <div className="text-right tabular-nums">כמות</div>
+      {/* Mobile card view */}
+      <div className="space-y-2 md:hidden">
+        {listLoading && pagedRows.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+            טוען...
+          </div>
+        ) : !listLoading && pagedRows.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+            <div>לא נמצאו לקוחות{debouncedSearch ? ' התואמים לחיפוש' : ''}</div>
+            <div className="mt-2">
+              <Button
+                className="w-full rounded-lg px-4 py-2 text-sm font-semibold text-white"
+                style={{ background: galit.primary }}
+                onClick={() => openCreateCustomerModal(search.trim())}
+              >
+                הוסף לקוח חדש
+              </Button>
+            </div>
+          </div>
+        ) : (
+          pagedRows.map((customer) => {
+          const statusRaw = (customer.status || 'ACTIVE').toUpperCase();
+          const mobileStatusUi =
+            statusRaw === 'ACTIVE'
+              ? { label: 'פעיל', cls: 'bg-emerald-100 text-emerald-800' }
+              : statusRaw === 'INACTIVE'
+                ? { label: 'לא פעיל', cls: 'bg-red-100 text-red-700' }
+                : { label: 'בטיפול', cls: 'bg-amber-100 text-amber-800' };
+          return (
+          <button
+            key={customer.id}
+            onClick={() => onOpenCustomer(customer)}
+            className="w-full rounded-lg border border-slate-200 bg-white p-3 text-right transition hover:bg-slate-50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-semibold text-sm">{customer.name}</div>
+              <Badge className={mobileStatusUi.cls}>{mobileStatusUi.label}</Badge>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+              <div>
+                <span className="text-slate-400">ח.פ: </span>
+                {customer.companyRegNumber || '-'}
               </div>
-              <div className="divide-y divide-slate-100">
-                {customerStatusRows.map((row) => (
-                  <div
-                    key={row.label}
-                    className="grid grid-cols-2 items-center gap-2 px-3 py-2.5 text-sm text-slate-800"
+              <div>
+                <span className="text-slate-400">טלפון: </span>
+                {customer.phone ? (
+                  <a
+                    href={phoneToTelHref(customer.phone) || undefined}
+                    className="hover:underline"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="text-right">{row.label}</div>
-                    <div className="text-right font-semibold tabular-nums text-slate-900">{row.count}</div>
-                  </div>
-                ))}
+                    {phoneToDisplay(customer.phone)}
+                  </a>
+                ) : '-'}
+              </div>
+              <div className="col-span-2">
+                <span className="text-slate-400">מייל: </span>
+                {customer.email ? (
+                  <a
+                    href={emailToMailtoHref(customer.email) || undefined}
+                    className="hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {customer.email}
+                  </a>
+                ) : '-'}
+              </div>
+              <div>
+                <span className="text-slate-400">עיר: </span>
+                {customer.city || '-'}
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </button>
+        )})
+        )}
+      </div>
 
-        <Card className="rounded-2xl border border-slate-100/90 bg-white p-4 shadow-[0_4px_24px_rgba(15,23,42,0.07)]">
-          <CardHeader className="p-0 pb-3">
-            <CardTitle className="text-lg font-bold text-slate-900">ביצועי צוות מכירות</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 p-0">
-            {salesTeamRows.length === 0 ? (
-              <div className="py-6 text-center text-sm text-slate-500">אין נתוני מכירות משויכים (הצעות עם איש צוות)</div>
-            ) : (
-            salesTeamRows.map((row) => (
-              <div key={row.userId} className="flex items-start gap-3">
-                <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-800 ring-2 ring-white shadow-sm"
-                  aria-hidden
-                >
-                  {row.initials}
-                </div>
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-slate-900">{row.name}</span>
-                    <span className="text-sm font-semibold tabular-nums text-slate-700">
-                      {formatSalesCompactILS(row.amount)}
-                    </span>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-l from-emerald-600 to-emerald-500"
-                      style={{ width: `${Math.min(100, row.percent)}%` }}
-                    />
-                  </div>
-                  <div className="text-xs font-medium text-emerald-700">
-                    {row.percent.toFixed(1)}% יחסי למוביל בצוות
-                  </div>
-                </div>
-              </div>
-            ))
-            )}
-          </CardContent>
-        </Card>
+      {/* Pagination */}
+      <div className="flex flex-wrap items-center justify-center gap-3 border-t border-slate-100 pt-3">
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-lg text-sm"
+          disabled={listLoading || listPage <= 1}
+          onClick={() => setListPage((p) => Math.max(1, p - 1))}
+        >
+          עמוד קודם
+        </Button>
+        <span className="text-sm tabular-nums text-slate-600">
+          {listPage} / {totalListPages}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          className="rounded-lg text-sm"
+          disabled={listLoading || listPage >= totalListPages || pagedTotal === 0}
+          onClick={() => setListPage((p) => p + 1)}
+        >
+          עמוד הבא
+        </Button>
       </div>
 
       <Modal
@@ -5848,12 +5978,15 @@ function QuotesPage({
   opportunities,
   currentUser,
   onQuotesChange,
+  initialCustomerId = null,
 }: {
   quotes: Quote[];
   customers: Customer[];
   opportunities: Opportunity[];
   currentUser: AppUser;
   onQuotesChange: (next: Quote[]) => void;
+  /** When set (from customer card "חדש הצעה"), pre-fills the customer selector */
+  initialCustomerId?: string | null;
 }) {
   type AIDraftLineItem = {
     name: string;
@@ -5905,7 +6038,7 @@ function QuotesPage({
 
   const [form, setForm] = useState({
     quoteNumber: '',
-    customerId: '',
+    customerId: initialCustomerId ?? '',
     opportunityId: '',
     projectId: '',
     service: 'אקוסטיקה / רעש',
@@ -12214,6 +12347,15 @@ export default function GalitCRMPrototype() {
   const [timeline] = useState<TimelineEvent[]>(timelineSeed);
   const [customerFull, setCustomerFull] = useState<any | null>(null);
   const [customerFullLoading, setCustomerFullLoading] = useState(false);
+  /** Set before navigating to 'quotes' from customer card — pre-fills the customer picker */
+  const [newQuoteCustomerId, setNewQuoteCustomerId] = useState<string | null>(null);
+  /** Set when opening QuoteNewScreen from customer card contact — pre-fills contact field */
+  const [newQuoteContactId, setNewQuoteContactId] = useState<string | null>(null);
+  const [newInteractionContactId, setNewInteractionContactId] = useState<string | null>(null);
+  const [customerCardContactName, setCustomerCardContactName] = useState<string | null>(null);
+  /** Tracks whichever contact row the user last clicked inside the customer card.
+   *  Kept in sync via onContactSelected callback — used when toolbar "חדש → הצעה" fires. */
+  const [customerCardContactId, setCustomerCardContactId] = useState<string | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -12225,6 +12367,10 @@ export default function GalitCRMPrototype() {
   const [customerClassifications, setCustomerClassifications] = useState<CustomerClassificationDto[]>([]);
   const [usersError, setUsersError] = useState('');
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [quoteSearchOpen, setQuoteSearchOpen] = useState(false);
+  /** true when we opened the customer card in "new customer" creation mode */
+  const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
   const [quickCreateSuccess, setQuickCreateSuccess] = useState('');
@@ -12705,6 +12851,9 @@ export default function GalitCRMPrototype() {
       const view = params.get('view');
       const id = params.get('id');
 
+      /* חדש → לקוח: URL has view=new-customer — skip all sync logic */
+      if (view === 'new-customer') return;
+
       if (view === 'customer' && id) {
         const customer = customers.find((item) => item.id === id);
         if (customer) {
@@ -12782,6 +12931,7 @@ export default function GalitCRMPrototype() {
   const openCustomerPage = (customer: Customer) => {
     setSelectedCustomer(customer);
     setSelectedLead(null);
+    setIsNewCustomerMode(false);
     setCurrent('customer-profile');
     setCustomerFull(null);
 
@@ -12793,6 +12943,32 @@ export default function GalitCRMPrototype() {
     void loadCustomerFull(customer.id).catch(() => {
       // keep existing preview-only behavior if API not available
     });
+  };
+
+  /** חדש → לקוח: פתיחת כרטיס לקוח חדש ריק */
+  const handleNewCustomer = () => {
+    const emptyCustomer: Customer = {
+      id: '__new__',
+      name: '',
+      type: '',
+      contactName: '',
+      phone: '',
+      email: '',
+      city: '',
+      address: '',
+      status: 'active',
+      services: [],
+      notes: '',
+    };
+    setSelectedCustomer(emptyCustomer);
+    setSelectedLead(null);
+    setCustomerFull(null);
+    setIsNewCustomerMode(true);
+    setCurrent('customer-profile');
+    if (typeof window !== 'undefined') {
+      const url = `${window.location.pathname}?view=new-customer`;
+      window.history.pushState({}, '', url);
+    }
   };
 
   const openLeadPage = (lead: Lead) => {
@@ -13084,9 +13260,45 @@ export default function GalitCRMPrototype() {
   const navigateSafely = (target: string) => {
     if (!currentUser) return;
     if (!canAccess(currentUser.role, target)) return;
+
+    // When the toolbar "חדש → הצעה" fires while a customer card is open,
+    // redirect to the real QuoteNewScreen instead of QuotesPage.
+    // selectedCustomer must NOT be cleared — QuoteNewScreen needs it for prefill.
+    if (target === 'quotes' && current === 'customer-profile' && selectedCustomer) {
+      setNewQuoteContactId(customerCardContactId);
+      setCurrent('quote-new');
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', window.location.pathname);
+      }
+      return;
+    }
+
+    if (target === 'interaction-new' && current === 'customer-profile' && selectedCustomer) {
+      setNewInteractionContactId(customerCardContactId);
+      // customerCardContactName is already in state from the last onContactSelected call
+      setCurrent('interaction-new');
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', window.location.pathname);
+      }
+      return;
+    }
+
+    if (target === 'order-new' && current === 'customer-profile' && selectedCustomer) {
+      // customerCardContactId / customerCardContactName already in state
+      setCurrent('order-new');
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', window.location.pathname);
+      }
+      return;
+    }
+
     setCurrent(target);
     setSelectedCustomer(null);
     setSelectedLead(null);
+    setIsNewCustomerMode(false);
+    // When navigating to quotes via the toolbar (not from customer card),
+    // clear any stale prefill so QuotesPage opens with an empty customer field.
+    if (target === 'quotes') setNewQuoteCustomerId(null);
     if (typeof window !== 'undefined') {
       window.history.pushState({}, '', window.location.pathname);
     }
@@ -13170,30 +13382,40 @@ export default function GalitCRMPrototype() {
     <div className="min-h-screen bg-slate-50" dir="rtl">
       <div className="flex min-h-0 min-h-screen flex-col">
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className={GALIT_TOPBAR_SPACER_CLASS} aria-hidden />
-          <CrmLegacyTopNav
-            current={current}
-            currentUserRole={currentUser.role}
-            canAccess={(role, key) => canAccess(role as AppUserRole, key)}
-            onNavigate={navigateSafely}
-            onFocusSearch={focusGlobalSearch}
-              onOpenQuickCreate={() => {
-                resetQuickCreate();
-                setQuickCreateOpen(true);
-              }}
-              onJumpSettingsTab={handleJumpSettingsTab}
-              onLogout={handleLogout}
-            />
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <div className="mb-4 flex flex-col gap-3">
+          {false ? (
+            null
+          ) : (
+            <>
+              <div className={GALIT_TOPBAR_SPACER_CLASS} aria-hidden />
+              <CrmLegacyTopNav
+                current={current}
+                currentUserRole={currentUser.role}
+                canAccess={(role, key) => canAccess(role as AppUserRole, key)}
+                onNavigate={navigateSafely}
+                onFocusSearch={focusGlobalSearch}
+                onOpenQuickCreate={() => {
+                  resetQuickCreate();
+                  setQuickCreateOpen(true);
+                }}
+                onJumpSettingsTab={handleJumpSettingsTab}
+                onLogout={handleLogout}
+                onSearchCustomer={() => setCustomerSearchOpen(true)}
+                onSearchQuote={() => setQuoteSearchOpen(true)}
+                onNewCustomer={handleNewCustomer}
+                isCustomerCard={current === 'customer-profile'}
+              />
+            </>
+          )}
+          <div className={cn("min-h-0 flex-1 overflow-y-auto", (current === 'customer-profile' || current === 'interaction-new' || current === 'order-new') ? 'p-2 sm:p-3 lg:p-4' : 'p-4 sm:p-6 lg:p-8')}>
+          <div className={cn("flex flex-col gap-3", (current === 'customer-profile' || current === 'interaction-new' || current === 'order-new') ? 'mb-1' : 'mb-4')}>
             <div className="flex items-center justify-between">
               <div className="hidden lg:block">
-                {current !== 'customers' && (
+                {current !== 'customers' && current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
                   <div className="text-2xl font-bold" style={{ color: galit.text }}>גלית CRM</div>
                 )}
                 <div className="text-xs text-slate-500">{currentUser.name} · {roleLabel(currentUser.role)}</div>
               </div>
-              {current !== 'customers' && (
+              {current !== 'customers' && current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
                 <div className="flex-1 lg:flex lg:justify-center">
                   <GlobalSearchBar
                     inputId={GLOBAL_SEARCH_INPUT_ID}
@@ -13216,6 +13438,7 @@ export default function GalitCRMPrototype() {
                   />
                 </div>
               )}
+              {current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
               <div className="hidden lg:flex lg:items-center lg:gap-2">
                 {current !== 'customers' && (
                   <>
@@ -13275,8 +13498,10 @@ export default function GalitCRMPrototype() {
                 )}
                 <Button variant="outline" onClick={handleLogout}>התנתק</Button>
               </div>
+              )}
             </div>
 
+            {current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
             <div className="flex items-center justify-between lg:hidden">
             <div className="flex items-center gap-3">
               <div className="flex items-center justify-center rounded-full bg-white shadow-sm" style={{ width: 32, height: 32 }}>
@@ -13292,6 +13517,7 @@ export default function GalitCRMPrototype() {
               </div>
             </div>
             </div>
+            )}
           </div>
 
           {topNotice && (
@@ -13449,6 +13675,37 @@ export default function GalitCRMPrototype() {
             </div>
           </Modal>
 
+          {/* ── Customer Search Modal (חפש → לקוח) ──────────────────── */}
+          <CustomerSearchModal
+            open={customerSearchOpen}
+            customers={customers}
+            onClose={() => setCustomerSearchOpen(false)}
+            onSelect={(customer) => {
+              setCustomerSearchOpen(false);
+              setSelectedCustomer(customer);
+              setSelectedLead(null);
+              setCurrent('customer-profile');
+              if (typeof window !== 'undefined') {
+                window.history.pushState({}, '', `${window.location.pathname}?view=customer&id=${customer.id}`);
+              }
+            }}
+          />
+
+          {/* ── Quote Search Modal (חפש → הצעה) ──────────────────── */}
+          <QuoteSearchModal
+            open={quoteSearchOpen}
+            quotes={quotes}
+            customers={customers}
+            onClose={() => setQuoteSearchOpen(false)}
+            onSelect={(quote) => {
+              setQuoteSearchOpen(false);
+              setCurrent('quotes');
+              if (typeof window !== 'undefined') {
+                window.history.pushState({}, '', `${window.location.pathname}?view=quotes`);
+              }
+            }}
+          />
+
           {current === 'dashboard' && (
             currentUser.role === 'admin' || currentUser.role === 'manager' ? (
               <ManagerDashboard
@@ -13516,17 +13773,6 @@ export default function GalitCRMPrototype() {
       )}
           {current === 'customer-profile' && selectedCustomer && (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <Button variant="outline" onClick={closeProfilePage}>
-                  חזרה
-                </Button>
-                {customerFullLoading ? (
-                  <span className="inline-flex items-center gap-2 text-sm text-slate-600">
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    טוען פרטי לקוח מלאים...
-                  </span>
-                ) : null}
-              </div>
               <CustomerLegacyCard
                 customer={selectedCustomer}
                 full={customerFull}
@@ -13536,13 +13782,79 @@ export default function GalitCRMPrototype() {
                   setCustomers((prev) => prev.map((c) => (c.id === next.id ? { ...c, ...(next as Customer) } : c)));
                 }}
                 onFullReload={async () => {
-                  await loadCustomerFull(selectedCustomer.id);
+                  if (selectedCustomer.id && selectedCustomer.id !== '__new__') {
+                    await loadCustomerFull(selectedCustomer.id);
+                  }
+                }}
+                onContactSelected={(id, name) => { setCustomerCardContactId(id ?? null); setCustomerCardContactName(name ?? null); }}
+                onNewQuote={(contactId) => {
+                  setNewQuoteContactId(contactId ?? null);
+                  setCurrent('quote-new');
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState({}, '', window.location.pathname);
+                  }
+                }}
+                onNewInteraction={(contactId) => {
+                  setNewInteractionContactId(contactId ?? null);
+                  setCurrent('interaction-new');
+                  if (typeof window !== 'undefined') {
+                    window.history.pushState({}, '', window.location.pathname);
+                  }
                 }}
                 typeLabelMap={customerTypeLabelMap}
                 classifications={customerClassifications}
                 primaryColor={galit.primary}
+                isNew={isNewCustomerMode}
+                onBack={() => setCurrent('customers')}
+                onCustomerCreated={(created) => {
+                  const c = created as Customer;
+                  setSelectedCustomer(c);
+                  setIsNewCustomerMode(false);
+                  setCustomers((prev) => [...prev, c]);
+                  // Update URL with real customer ID
+                  if (typeof window !== 'undefined') {
+                    const url = `${window.location.pathname}?view=customer&id=${c.id}`;
+                    window.history.pushState({}, '', url);
+                  }
+                  // Load full customer data now that it exists
+                  void loadCustomerFull(c.id).catch(() => {});
+                }}
               />
             </div>
+          )}
+          {current === 'quote-new' && (
+            <QuoteNewScreen
+              embedded
+              prefillCustomer={selectedCustomer ? {
+                id: selectedCustomer.id,
+                name: selectedCustomer.name || '',
+                phone: (selectedCustomer.phone as string | undefined) ?? undefined,
+                fax: (selectedCustomer.fax as string | undefined) ?? undefined,
+                companyRegNumber: (selectedCustomer.companyRegNumber as string | undefined) ?? undefined,
+              } : undefined}
+              prefillContactId={newQuoteContactId}
+              onExit={() => {
+                setCurrent(selectedCustomer ? 'customer-profile' : 'quotes');
+              }}
+            />
+          )}
+          {current === 'interaction-new' && (
+            <InteractionNewScreen
+              embedded
+              prefillCustomer={selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name || '' } : undefined}
+              prefillContactId={newInteractionContactId}
+              prefillContactName={customerCardContactName ?? ''}
+              onExit={() => setCurrent(selectedCustomer ? 'customer-profile' : 'dashboard')}
+            />
+          )}
+          {current === 'order-new' && (
+            <OrderNewScreen
+              embedded
+              prefillCustomer={selectedCustomer ? { id: selectedCustomer.id, name: selectedCustomer.name || '' } : undefined}
+              prefillContactId={customerCardContactId}
+              prefillContactName={customerCardContactName ?? ''}
+              onExit={() => setCurrent(selectedCustomer ? 'customer-profile' : 'dashboard')}
+            />
           )}
           {current === 'lead-profile' && selectedLead && (
             <div className="space-y-4">
@@ -13587,6 +13899,7 @@ export default function GalitCRMPrototype() {
               opportunities={opportunities}
               currentUser={currentUser}
               onQuotesChange={setQuotes}
+              initialCustomerId={newQuoteCustomerId}
             />
           )}
           {current === 'opportunities' && ['admin', 'manager', 'sales'].includes(currentUser.role) && (
@@ -13628,7 +13941,7 @@ export default function GalitCRMPrototype() {
               onSettingsJumpConsumed={consumePendingSettingsTab}
             />
           )}
-          {view === 'fieldSchedule' && (
+          {current === 'fieldSchedule' && canAccess(currentUser.role, 'fieldSchedule') && (
             <FieldSchedulePage
               projects={projects}
               setProjects={setProjects}

@@ -23,6 +23,11 @@ export class QuotesController {
     return this.quotesService.findAll({ projectId, opportunityId, customerId, leadId, user: req.user });
   }
 
+  @Get('next-reference')
+  nextReference() {
+    return this.quotesService.getNextReference();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.quotesService.findOne(id);
