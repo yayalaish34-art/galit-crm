@@ -714,7 +714,7 @@ function Button({
   className?: string;
   variant?: 'default' | 'outline';
   style?: React.CSSProperties;
-  onClick?: () => void | Promise<void>;
+  onClick?: (e?: any) => void | Promise<void>;
   type?: 'button' | 'submit' | 'reset';
   disabled?: boolean;
 }>) {
