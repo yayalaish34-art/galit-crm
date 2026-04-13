@@ -1172,8 +1172,8 @@ function TableBody({ children }: React.PropsWithChildren) {
 function TableRow({ children, className = '', onClick }: React.PropsWithChildren<{ className?: string; onClick?: () => void }>) {
   return <tr onClick={onClick} className={cn('border-b last:border-b-0', className)}>{children}</tr>;
 }
-function TableHead({ children }: React.PropsWithChildren) {
-  return <th className="px-4 py-3 text-right font-semibold text-slate-600">{children}</th>;
+function TableHead({ children, className }: React.PropsWithChildren<{ className?: string }>) {
+  return <th className={`px-4 py-3 text-right font-semibold text-slate-600 ${className || ''}`}>{children}</th>;
 }
 function TableCell({
   children,
