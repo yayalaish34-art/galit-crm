@@ -31,6 +31,7 @@ export class QuoteTemplatesService {
         termsHtml: data.termsHtml ?? null,
         variablesHelp: data.variablesHelp ?? null,
         defaultLineItems: data.defaultLineItems ?? undefined,
+        docxTemplatePath: data.docxTemplatePath ?? null,
       },
     });
   }
@@ -50,6 +51,7 @@ export class QuoteTemplatesService {
         ...(data.termsHtml !== undefined ? { termsHtml: data.termsHtml } : {}),
         ...(data.variablesHelp !== undefined ? { variablesHelp: data.variablesHelp } : {}),
         ...(data.defaultLineItems !== undefined ? { defaultLineItems: data.defaultLineItems } : {}),
+        ...(data.docxTemplatePath !== undefined ? { docxTemplatePath: data.docxTemplatePath } : {}),
       },
     });
   }

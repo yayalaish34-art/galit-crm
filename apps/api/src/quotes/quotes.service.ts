@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import * as fs from 'fs';
@@ -37,6 +37,7 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   'customerName',
   'quoteDate',
   'followupDate',
+  'followUpResponsibleUserId',
   'salesRepresentativeName',
   'executorName',
   'orderReferenceNumber',
@@ -44,6 +45,7 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   'exchangeRate',
   'accountingNumber',
   'companyRegNumber',
+  'addressSummary',
   'phoneSummary',
   'faxSummary',
   'validityDays',
@@ -62,6 +64,7 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   // performerUserId       — FK from migration 20260328190000, NOT in real DB, never write it
   // performerName         — plain String from same migration, omitted from payload too
   'customerContactId',
+  'lastMergedDocPath',
 ]);
 
 @Injectable()
@@ -137,7 +140,13 @@ export class QuotesService {
           ...(leadId ? { leadId } : {}),
         },
         orderBy: [{ createdAt: 'desc' }],
-        include: { customer: true, opportunity: true, project: true, quoteTemplate: true },
+        include: {
+          customer: true,
+          opportunity: true,
+          project: true,
+          quoteTemplate: true,
+          quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        },
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
@@ -151,7 +160,7 @@ export class QuotesService {
   findOne(id: string) {
     return this.prisma.quote.findUnique({
       where: { id },
-      include: { customer: true, quoteTemplate: true },
+      include: { customer: true, quoteTemplate: true, followUpResponsibleUser: true },
     });
   }
 
@@ -266,6 +275,19 @@ export class QuotesService {
 
     const next: any = { ...this.sanitizeQuoteInput(data) };
 
+    // Prisma 7.x + @prisma/adapter-pg requires Date objects for DateTime fields
+    const DATETIME_FIELDS_UPD = [
+      'validTo', 'quoteDate', 'followupDate', 'validityDate', 'paymentDueDate',
+      'forecastUpdatedAt', 'sentAt', 'reminderNextAt',
+    ];
+    for (const field of DATETIME_FIELDS_UPD) {
+      const val = next[field];
+      if (val !== undefined && val !== null) {
+        const d = val instanceof Date ? val : new Date(val);
+        next[field] = isNaN(d.getTime()) ? null : d;
+      }
+    }
+
     // Always keep totalAmount in sync when financial fields change
     const willRecalc =
       'amountBeforeVat' in (data ?? {}) ||
@@ -363,11 +385,20 @@ export class QuotesService {
     return tryUpdate(next);
   }
 
-  remove(id: string, user?: { id?: string; role?: string }) {
+  async remove(id: string, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
     if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
-    return this.prisma.quote.delete({ where: { id } });
+    try {
+      return await this.prisma.quote.delete({ where: { id } });
+    } catch (e: any) {
+      if (e?.code === 'P2003') {
+        throw new BadRequestException(
+          'לא ניתן למחוק הצעת מחיר כי קיימות רשומות מקושרות (הזמנות וכו\').',
+        );
+      }
+      throw e;
+    }
   }
 
   async generatePdf(id: string) {

@@ -381,11 +381,8 @@ export class DashboardService {
         inactivity: 'Lead.updatedAt older than 7 days (no activity log yet)',
       },
     };
-    } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
-        return this.managerEmptyPayload();
-      }
-      throw e;
+    } catch {
+      return this.managerEmptyPayload();
     }
   }
 

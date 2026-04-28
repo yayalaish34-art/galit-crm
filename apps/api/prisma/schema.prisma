@@ -51,8 +51,19 @@ model User {
   leadActivitiesCreated LeadActivity[]
   /// מספר עובד (20260327000000_add_employee_number)
   employeeNumber        String?
+
+  // ── הגדרות SMTP אישיות לשליחת מייל ──
+  mailDisplayName       String?
+  smtpHost              String?
+  smtpPort              Int?
+  smtpUser              String?
+  /// מוצפן ב-AES-256 — לא מוחזר ל-frontend
+  smtpPassword          String?
+  smtpFrom              String?
+  smtpSecure            Boolean   @default(false)
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
+  followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")
 }
 
 model Project {
@@ -547,6 +558,8 @@ model QuoteTemplate {
   variablesHelp   String?  @db.Text
   /// מערך: { name, quantity, unitPrice }[]
   defaultLineItems Json?
+  /// נתיב יחסי לקובץ תבנית DOCX (אם קיים — מסלול מיזוג DOCX במקום HTML)
+  docxTemplatePath String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -662,6 +675,15 @@ model Quote {
   performerUser           User?   @relation("QuotePerformer", fields: [performerUserId], references: [id], onDelete: SetNull)
   performerName           String?
 
+  followUpResponsibleUserId String?
+  followUpResponsibleUser   User?   @relation("QuoteFollowUpResponsible", fields: [followUpResponsibleUserId], references: [id], onDelete: SetNull)
+
+  /// נתיב למסמך הממוזג האחרון שהופק להצעה זו
+  lastMergedDocPath         String?
+  /// מעקב שליחת מייל אחרונה
+  lastEmailedAt             DateTime?
+  lastEmailedTo             String?
+
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]
   quoteDocuments  QuoteDocument[]
@@ -669,6 +691,7 @@ model Quote {
   @@index([importLegacyId])
   @@index([salesRepresentativeId])
   @@index([performerUserId])
+  @@index([followUpResponsibleUserId])
 }
 
 model Task {

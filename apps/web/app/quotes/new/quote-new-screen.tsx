@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { Save, Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil } from 'lucide-react';
+import { Save, Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle } from 'lucide-react';
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
 import { apiUrl, apiFetch } from '../../lib/api-base';
@@ -303,7 +303,14 @@ function toInputDateYmd(d: unknown): string {
   }
 }
 
-type QuoteContactRow = { id: string; fullName: string; isPrimary: boolean };
+type QuoteContactRow = {
+  id: string;
+  fullName: string;
+  isPrimary: boolean;
+  phone: string;
+  mobile: string;
+  email: string;
+};
 
 function normalizeQuoteContacts(raw: unknown): QuoteContactRow[] {
   if (!Array.isArray(raw)) return [];
@@ -313,6 +320,9 @@ function normalizeQuoteContacts(raw: unknown): QuoteContactRow[] {
       id: String(x.id),
       fullName: String(x.fullName ?? ''),
       isPrimary: Boolean(x.isPrimary),
+      phone: String(x.phone ?? ''),
+      mobile: String(x.mobile ?? ''),
+      email: String(x.email ?? ''),
     }))
     .filter((x) => x.id);
 }
@@ -360,6 +370,10 @@ type PrefillCustomer = {
   fax?: string | null;
   companyRegNumber?: string | null;
   contactName?: string;
+  address?: string | null;
+  city?: string | null;
+  email?: string | null;
+  customerType?: string | null;
 };
 
 /* ── Small inline helpers used in the form grid ── */
@@ -390,6 +404,8 @@ export function QuoteNewScreen({
   prefillContactId = null,
   initialQuoteId = null,
   onExit,
+  onQuoteSaved,
+  onQuoteSent,
 }: {
   embedded?: boolean;
   prefillCustomer?: PrefillCustomer | null;
@@ -398,6 +414,10 @@ export function QuoteNewScreen({
   /** When set (or `?quoteId=` in the URL), load quote and restore תנאי תשלום from the server */
   initialQuoteId?: string | null;
   onExit?: () => void;
+  /** Called after a successful save (POST or PATCH) — does not replace `onExit` for navigation/back. */
+  onQuoteSaved?: (quoteId: string) => void;
+  /** Called after a quote is successfully sent via email */
+  onQuoteSent?: (quoteId: string) => void;
 }) {
   const [tab, setTab] = useState<'פרטי תשלום' | 'מלל' | 'הערות' | 'שונות' | 'תחזית' | 'מסמכים מקושרים'>('תחזית');
   const [quoteNo, setQuoteNo] = useState('חדש');
@@ -417,6 +437,9 @@ export function QuoteNewScreen({
   const [copiedFrom, setCopiedFrom] = useState('');
   const [rate, setRate] = useState('1.0000');
   const [phone, setPhone] = useState('');
+  const [customerAddress, setCustomerAddress] = useState('');
+  const [customerCity, setCustomerCity] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [fax, setFax] = useState('');
   const [limitations, setLimitations] = useState('');
   const [accountingNo, setAccountingNo] = useState('');
@@ -463,6 +486,19 @@ export function QuoteNewScreen({
     }
   }, []);
 
+  /* ── Auto-calc: תאריך תוקף ההצעה = תאריך הצעה + ימי תוקף ── */
+  useEffect(() => {
+    const days = parseInt(validityDays) || 30;
+    const baseDate = date ? new Date(date) : new Date();
+    // Guard against invalid date
+    if (isNaN(baseDate.getTime())) return;
+    baseDate.setDate(baseDate.getDate() + days);
+    const yyyy = baseDate.getFullYear();
+    const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(baseDate.getDate()).padStart(2, '0');
+    setPaymentValidityDate(`${yyyy}-${mm}-${dd}`);
+  }, [date, validityDays]);
+
   /* ── Pre-fill from customer card context ── */
   useEffect(() => {
     if (!prefillCustomer) return;
@@ -470,7 +506,26 @@ export function QuoteNewScreen({
     if (prefillCustomer.phone)           setPhone(prefillCustomer.phone);
     if (prefillCustomer.fax)             setFax(prefillCustomer.fax);
     if (prefillCustomer.companyRegNumber) setCompanyNo(prefillCustomer.companyRegNumber);
+    if (prefillCustomer.address)         setCustomerAddress(prefillCustomer.address);
+    if (prefillCustomer.city)            setCustomerCity(prefillCustomer.city);
+    if (prefillCustomer.email)           setCustomerEmail(prefillCustomer.email);
+    if (prefillCustomer.contactName)    setContact(prefillCustomer.contactName);
+    // Auto-set payment terms based on customer type
+    const cType = (prefillCustomer.customerType || '').toUpperCase();
+    if (cType === 'PRIVATE') setPaymentTerms('מזומן');
+    else if (cType === 'COMPANY') setPaymentTerms('שוטף +30');
   }, [prefillCustomer]);
+
+  /* ── Default follow date: 3 days from today (only for new quotes) ── */
+  useEffect(() => {
+    if (initialQuoteId) return; // don't override when editing existing
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    setFollow(`${yyyy}-${mm}-${dd}`);
+  }, [initialQuoteId]);
 
   /* ── רשימת משתמשים / עובדים לנציג מכירה ומבצע ── */
   useEffect(() => {
@@ -617,6 +672,14 @@ export function QuoteNewScreen({
         if (typeof q.priceList === 'string') setPriceList(q.priceList);
         if (typeof q.orderSource === 'string') setOrderSource(q.orderSource);
         if (typeof q.phoneSummary === 'string') setPhone(q.phoneSummary);
+        if (typeof q.addressSummary === 'string') setCustomerAddress(q.addressSummary);
+        // Get city/email from customer relation if available
+        const custRel = q.customer as Record<string, unknown> | undefined;
+        if (custRel) {
+          if (typeof custRel.city === 'string') setCustomerCity(custRel.city);
+          if (typeof custRel.email === 'string') setCustomerEmail(custRel.email);
+          if (!q.addressSummary && typeof custRel.address === 'string') setCustomerAddress(custRel.address);
+        }
         if (typeof q.faxSummary === 'string') setFax(q.faxSummary);
         if (typeof q.accountingNumber === 'string') setAccountingNo(q.accountingNumber);
         if (typeof q.companyRegNumber === 'string') setCompanyNo(q.companyRegNumber);
@@ -629,6 +692,11 @@ export function QuoteNewScreen({
         if (typeof q.forecastUpdatedBy === 'string') setFLastUser(q.forecastUpdatedBy);
         if (typeof q.forecastUpdatedTime === 'string') setFLastTime(q.forecastUpdatedTime);
         if (q.exchangeRate != null) setRate(String(q.exchangeRate));
+        if (q.quoteTemplateId != null && String(q.quoteTemplateId).trim()) {
+          setQuoteTemplateId(String(q.quoteTemplateId).trim());
+        } else {
+          setQuoteTemplateId(null);
+        }
       })
       .catch(() => {});
     return () => {
@@ -693,6 +761,7 @@ export function QuoteNewScreen({
   const [fLastTime, setFLastTime] = useState('');
   /* ── Save / print state ── */
   const [quoteId, _setQuoteId] = useState<string | null>(null);
+  const [quoteTemplateId, setQuoteTemplateId] = useState<string | null>(null);
   const quoteIdRef = useRef<string | null>(null);
   // Keep ref in sync so async closures always see the latest id
   function setQuoteId(id: string | null) { quoteIdRef.current = id; _setQuoteId(id); }
@@ -701,6 +770,7 @@ export function QuoteNewScreen({
   const [customerContactId, setCustomerContactId] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  const [savedIndicator, setSavedIndicator] = useState(false);
 
   /* ── אנשי קשר לפי לקוח נבחר: רענון מ-/customers/:id/contacts, בחירה מחדש אם צריך ── */
   useEffect(() => {
@@ -745,8 +815,13 @@ export function QuoteNewScreen({
       return;
     }
     const row = quoteContactRows.find((r) => r.id === customerContactId);
-    if (row) setContact(row.fullName);
-    else if (!customerContactId) setContact('');
+    if (row) {
+      setContact(row.fullName);
+      if (row.email) setCustomerEmail(row.email);
+      if (row.phone || row.mobile) setPhone(row.phone || row.mobile);
+    } else if (!customerContactId) {
+      setContact('');
+    }
   }, [customerContactId, quoteContactRows]);
 
   /* ── Sync customerId from prefillCustomer ── */
@@ -785,6 +860,17 @@ export function QuoteNewScreen({
       alert('איש הקשר שנבחר אינו שייך ללקוח הנוכחי — נא לבחור איש קשר מחדש.');
       return null;
     }
+    // Required fields validation (except paymentsCount and discountPercent)
+    const missing: string[] = [];
+    if (!customer.trim()) missing.push('לקוח / חברה');
+    if (!phone.trim()) missing.push('טלפון');
+    if (!paymentTerms.trim()) missing.push('תנאי תשלום');
+    if (!validityDays.trim()) missing.push('תוקף (ימים)');
+    if (lineItems.filter((li) => li.description.trim() || parseFloat(li.price) > 0).length === 0) missing.push('פריט אחד לפחות');
+    if (missing.length > 0) {
+      alert(`שדות חובה חסרים:\n${missing.join('\n')}`);
+      return null;
+    }
     const user = getSessionUser();
     if (!user) { alert('אין משתמש מחובר'); return null; }
     setIsBusy(true);
@@ -805,26 +891,82 @@ export function QuoteNewScreen({
             return d.toISOString();
           })();
 
-      // ── Build minimal safe payload — only fields the backend schema accepts ──
+      // ── Build full payload — all fields the backend schema accepts ──
       const safeValidTo = (() => {
         try { const d = new Date(validToDate); if (isNaN(d.getTime())) throw new Error(); return d.toISOString(); }
         catch { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString(); }
       })();
-      const safeItems = lineItems.map((item) => ({
-        description: item.description,
-        price: parseFloat(item.price) || 0,
-        quantity: parseFloat(item.qty) || 0,
-      }));
-      // amount calculated ONLY from items — no external total field
-      const safeAmount = safeItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-      const payload = {
+      // lineItemsJson — store full item objects so they round-trip correctly
+      const lineItemsJsonVal = lineItems
+        .filter((li) => li.description.trim() || parseFloat(li.price) > 0)
+        .map((li) => ({
+          id: li.id,
+          code: li.code,
+          sku: li.sku,
+          description: li.description,
+          channel: li.channel,
+          qty: li.qty,
+          price: li.price,
+          discountPct: li.discountPct,
+        }));
+
+      // amountBeforeVat — sum of line totals (qty × price × (1 - disc/100))
+      const amountBeforeVat = lineItemsJsonVal.reduce((sum, li) => {
+        const q = parseFloat(li.qty) || 0;
+        const p = parseFloat(li.price) || 0;
+        const d = parseFloat(li.discountPct) || 0;
+        return sum + q * p * (1 - d / 100);
+      }, 0);
+
+      const discPct = parseFloat(discountPercent) || 0;
+
+      const payload: Record<string, unknown> = {
         customerId,
+        customerName: customer || null,
+        customerContactId: customerContactId.trim() || null,
         service: 'הצעת מחיר',
-        amount: safeAmount,
+        quoteNumber: quoteNo !== 'חדש' ? quoteNo : undefined,
+        quoteDate: toISO(date) || new Date().toISOString(),
+        followupDate: toISO(follow) || null,
+        status: status || 'DRAFT',
+        orderReferenceNumber: reference || null,
+        salesRepresentativeName: salesRep || null,
+        executorName: contact || null,
+        phoneSummary: phone || null,
+        faxSummary: fax || null,
+        addressSummary: customerAddress || null,
+        accountingNumber: accountingNo || null,
+        companyRegNumber: companyNo || null,
+        priceList: priceList || null,
+        exchangeRate: parseFloat(rate) || null,
+        orderSource: orderSource || null,
+        notes: notes || null,
+        internalNotes: internalNotes || null,
+        lineItemsJson: lineItemsJsonVal,
+        amountBeforeVat: roundMoney2(amountBeforeVat),
+        amount: roundMoney2(amountBeforeVat),
+        vatPercent: parseFloat(vatPercent) || 0,
+        discountType: discPct > 0 ? 'PERCENT' : 'NONE',
+        discountValue: discPct > 0 ? discPct : 0,
         validTo: safeValidTo,
-        items: safeItems,
+        validityDate: toISO(paymentValidityDate) || safeValidTo,
+        validityDays: parseInt(validityDays) || 30,
+        paymentTerms: paymentTerms || null,
+        paymentsCount: parseInt(paymentsCount) || 0,
+        paymentDueDate: toISO(paymentDueDate) || null,
+        functionalLabel: fFunctional || null,
+        forecastClosePercent: fClosePercent || null,
+        forecastUpdatedAt: toISO(fLastDate) || null,
+        forecastUpdatedBy: fLastUser || null,
+        forecastUpdatedTime: fLastTime || null,
+        quoteTemplateId: quoteTemplateId || null,
       };
+
+      // Strip undefined values so the backend doesn't receive them
+      for (const k of Object.keys(payload)) {
+        if (payload[k] === undefined) delete payload[k];
+      }
       console.log('FINAL PAYLOAD', payload);
       const currentId = quoteIdRef.current;
       const url = currentId ? apiUrl(`/quotes/${currentId}`) : apiUrl('/quotes');
@@ -867,11 +1009,14 @@ export function QuoteNewScreen({
           /* keep current input */
         }
       }
-      setStatusMsg('נשמר ✓');
-      setTimeout(() => setStatusMsg(''), 2500);
+      setStatusMsg('');
+      setSavedIndicator(true);
+      setTimeout(() => setSavedIndicator(false), 1000);
+      if (savedId && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
     } catch {
       setStatusMsg('שגיאה בשמירה');
+      setSavedIndicator(false);
       setTimeout(() => setStatusMsg(''), 3000);
       return null;
     } finally {
@@ -1099,18 +1244,64 @@ export function QuoteNewScreen({
 
   async function handleMergeClick() {
     const user = getSessionUser();
+    if (!user) {
+      alert('אין משתמש מחובר');
+      return;
+    }
+    const selectedTemplateId = (quoteTemplateId || '').trim();
+    if (selectedTemplateId) {
+      try {
+        const res = await apiFetch(apiUrl(`/quote-templates/${selectedTemplateId}`), { authUser: user });
+        if (res.ok) {
+          const t = await res.json() as {
+            id?: string; name?: string; serviceType?: string;
+            docxTemplatePath?: string | null;
+            introHtml?: string | null; bodyHtml?: string | null;
+            closingHtml?: string | null; termsHtml?: string | null;
+          };
+          const hasContent =
+            !!(t.docxTemplatePath && String(t.docxTemplatePath).trim()) ||
+            [t.introHtml, t.bodyHtml, t.closingHtml, t.termsHtml].some(
+              (x) => typeof x === 'string' && x.trim().length > 0,
+            );
+          if (hasContent) {
+            await handleTemplateSelected({
+              id: String(t.id ?? selectedTemplateId),
+              label: t.name ?? selectedTemplateId,
+              subLabel: t.serviceType || undefined,
+            });
+            return;
+          }
+          alert(
+            `לתבנית המשויכת להצעה אין תוכן למיזוג (לא DOCX ולא HTML): ${t.name || selectedTemplateId}. בחר תבנית אחרת ושמור את ההצעה.`,
+          );
+        }
+      } catch {
+        /* fallback to picker below */
+      }
+    }
     setMergeTemplateLoading(true);
     setMergeTemplateRows([]);
     try {
       const res = await apiFetch(apiUrl('/quote-templates?activeOnly=true'), { authUser: user });
       const data = res.ok ? await res.json() : [];
-      const rows: QuoteLookupRow[] = (Array.isArray(data) ? data : []).map(
-        (t: { id: string; name?: string; serviceType?: string }) => ({
+      const rows: QuoteLookupRow[] = (Array.isArray(data) ? data : [])
+        .filter(
+          (t: {
+            docxTemplatePath?: string | null;
+            introHtml?: string | null; bodyHtml?: string | null;
+            closingHtml?: string | null; termsHtml?: string | null;
+          }) =>
+            !!(t.docxTemplatePath && String(t.docxTemplatePath).trim()) ||
+            [t.introHtml, t.bodyHtml, t.closingHtml, t.termsHtml].some(
+              (x) => typeof x === 'string' && x.trim().length > 0,
+            )
+        )
+        .map((t: { id: string; name?: string; serviceType?: string }) => ({
           id: String(t.id),
           label: t.name ?? String(t.id),
           subLabel: t.serviceType || undefined,
-        })
-      );
+        }));
       setMergeTemplateRows(rows);
     } catch {
       setMergeTemplateRows([]);
@@ -1122,64 +1313,221 @@ export function QuoteNewScreen({
 
   async function handleTemplateSelected(row: QuoteLookupRow) {
     const user = getSessionUser();
-    let tpl: { introHtml?: string | null; bodyHtml?: string | null; closingHtml?: string | null; termsHtml?: string | null } = {};
+    if (!user) {
+      alert('אין משתמש מחובר');
+      return;
+    }
+    setQuoteTemplateId(row.id);
+    let tpl: {
+      introHtml?: string | null; bodyHtml?: string | null;
+      closingHtml?: string | null; termsHtml?: string | null;
+      docxTemplatePath?: string | null;
+    } = {};
     try {
       const res = await apiFetch(apiUrl(`/quote-templates/${row.id}`), { authUser: user });
       if (res.ok) tpl = await res.json();
     } catch { /* keep empty */ }
 
-    const lineItemsMapped: QuoteTemplateLineItem[] = lineItems.map((li) => ({
-      name: li.description || li.code || li.sku || '',
-      quantity: parseFloat(li.qty) || 1,
-      unitPrice: parseFloat(li.price) || 0,
-    }));
+    // ── DOCX merge ──
+    if (tpl.docxTemplatePath) {
+      await handleDocxMerge(row.id, user);
+      return;
+    }
 
-    const ctx = buildQuoteTemplateContext(
-      {
-        customer: customer
-          ? { name: customer, contactName: contact || null, phone: phone || null, address: null, city: null, email: null }
-          : null,
-        serviceName: 'הצעת מחיר',
-        quoteNumber: reference,
-        quoteDate: date ? new Date(date) : new Date(),
-        notes: notes,
-        lineItems: lineItemsMapped,
-        vatPercent: parseFloat(vatPercent) || 18,
-        discountType: discountPercent && parseFloat(discountPercent) > 0 ? 'PERCENT' : 'NONE',
-        discountValue: parseFloat(discountPercent) || 0,
-      },
-      (n) => `₪${n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-    );
+    // ── HTML fallback merge (when template has content parts) ──
+    const hasHtmlContent = [tpl.introHtml, tpl.bodyHtml, tpl.closingHtml, tpl.termsHtml]
+      .some((x) => typeof x === 'string' && x.trim().length > 0);
+    if (hasHtmlContent) {
+      const fmtMoney = (n: number) =>
+        n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const mappedItems: QuoteTemplateLineItem[] = lineItems.map((li) => {
+        const qty = parseFloat(li.qty) || 1;
+        const price = parseFloat(li.price) || 0;
+        const disc = parseFloat(li.discountPct) || 0;
+        const lineTotal = Math.round(qty * price * (1 - disc / 100) * 100) / 100;
+        return {
+          name: li.description || li.code || li.sku || '',
+          quantity: qty,
+          unitPrice: price,
+          lineTotal,
+          code: li.code || '',
+          sku: li.sku || '',
+          discountPct: disc,
+        };
+      });
+      const ctx = buildQuoteTemplateContext(
+        {
+          customer: {
+            name: customer || '',
+            contactName: contact || '',
+            address: customerAddress || '',
+            city: customerCity || '',
+            email: customerEmail || '',
+            phone: phone || '',
+          },
+          serviceName: row.subLabel || '',
+          quoteNumber: reference || quoteNo || '',
+          quoteDate: date ? new Date(`${date}T12:00:00`) : new Date(),
+          notes: notes || '',
+          lineItems: mappedItems,
+          vatPercent: parseFloat(vatPercent) || 18,
+          discountType: (parseFloat(discountPercent) || 0) > 0 ? 'PERCENT' : 'NONE',
+          discountValue: parseFloat(discountPercent) || 0,
+          paymentTerms: paymentTerms || '',
+          validityDate: paymentValidityDate || '',
+          approverName: contact || '',
+        },
+        fmtMoney,
+      );
+      const merged = mergeQuoteTemplateFull(tpl, ctx);
+      setMergedHtml(merged);
+      setWordDocHtml(buildQuoteWordHtml({
+        mergedHtml: merged,
+        quoteNo: quoteNo || '',
+        reference: reference || '',
+        customer: customer || '',
+        contact: contact || '',
+        phone: phone || '',
+        fax: fax || '',
+        companyNo: companyNo || '',
+        date: date || '',
+        salesRep: salesRep || '',
+        performerName: performerName || '',
+        lineItems,
+        subtotal: subtotal || '',
+        afterDiscount: afterDiscount || '',
+        cashTotal: cashTotal || '',
+        discountPercent: discountPercent || '',
+        vatPercent: vatPercent || '',
+        paymentTerms: paymentTerms || '',
+        paymentsCount: paymentsCount || '',
+        paymentValidityDate: paymentValidityDate || '',
+        notes: notes || '',
+      }));
+      return;
+    }
 
-    const html = mergeQuoteTemplateFull(tpl, ctx);
-    setMergedHtml(html);
-    setTab('מלל');
+    // ── Truly empty template: no DOCX and no HTML ──
+    alert('לתבנית "' + (row.label || '') + '" לא הוגדר תוכן (לא קובץ DOCX ולא תוכן HTML). יש לערוך את התבנית דרך הגדרות התבניות.');
+  }
 
-    // Build Word-compatible HTML and store in state — download triggered by user click on button
-    const wordHtml = buildQuoteWordHtml({
-      mergedHtml: html,
-      quoteNo,
-      reference,
-      customer,
-      contact,
-      phone,
-      fax,
-      companyNo,
-      date,
-      salesRep,
-      performerName,
-      lineItems,
-      subtotal,
-      afterDiscount,
-      cashTotal,
-      discountPercent,
-      vatPercent,
-      paymentTerms,
-      paymentsCount,
-      paymentValidityDate,
-      notes,
+  /**
+   * מסלול מיזוג DOCX אמיתי: שולח בקשה ל-API שמבצע מיזוג בצד השרת
+   * ומחזיר קובץ Word (.docx) אמיתי להורדה ישירה.
+   */
+  async function handleDocxMerge(templateId: string, user: { id: string; role: string }) {
+    const fmtMoney = (n: number) =>
+      n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const vp = parseFloat(vatPercent) || 18;
+    const discPct = parseFloat(discountPercent) || 0;
+
+    // Calculate totals from lineItems
+    const mappedItems = lineItems.map((li, idx) => {
+      const qty = parseFloat(li.qty) || 1;
+      const price = parseFloat(li.price) || 0;
+      const disc = parseFloat(li.discountPct) || 0;
+      const lineTotal = Math.round(qty * price * (1 - disc / 100) * 100) / 100;
+      return {
+        rowNum: String(idx + 1),
+        code: li.code || li.sku || '',
+        name: li.description || li.code || li.sku || '',
+        quantity: String(qty),
+        unitPrice: fmtMoney(price) + ' ₪',
+        discountPct: disc > 0 ? disc + '%' : '0%',
+        lineTotal: fmtMoney(lineTotal) + ' ₪',
+      };
     });
-    setWordDocHtml(wordHtml);
+
+    const rawSubtotal = lineItems.reduce((sum, li) => {
+      const qty = parseFloat(li.qty) || 1;
+      const price = parseFloat(li.price) || 0;
+      const disc = parseFloat(li.discountPct) || 0;
+      return sum + qty * price * (1 - disc / 100);
+    }, 0);
+    const sub = Math.round(rawSubtotal * 100) / 100;
+    const afterDiscountVal = discPct > 0 ? Math.round(sub * (1 - discPct / 100) * 100) / 100 : sub;
+    const vatVal = Math.round(afterDiscountVal * (vp / 100) * 100) / 100;
+    const totalVal = Math.round((afterDiscountVal + vatVal) * 100) / 100;
+
+    const byId = customerContactId.trim()
+      ? quoteContactRows.find((r) => r.id === customerContactId)
+      : undefined;
+    const fallbackContact = quoteContactRows.find((r) => r.isPrimary) ?? quoteContactRows[0];
+    const selectedContact = byId ?? fallbackContact;
+    const contactNameMerged =
+      (contact || '').trim() ||
+      (selectedContact?.fullName || '').trim() ||
+      '';
+    const contactPhoneMerged = selectedContact
+      ? (selectedContact.mobile || '').trim() || (selectedContact.phone || '').trim()
+      : '';
+    const contactEmailMerged = selectedContact ? (selectedContact.email || '').trim() : '';
+
+    const mergeData: Record<string, unknown> = {
+      quoteId: quoteIdRef.current || undefined,
+      quoteNumber: reference || quoteNo || '',
+      contractSurveyNumber: (orderNo || reference || quoteNo || '').trim(),
+      quoteDate: date
+        ? new Date(date).toLocaleDateString('he-IL')
+        : new Date().toLocaleDateString('he-IL'),
+      validUntil: paymentValidityDate
+        ? new Date(paymentValidityDate).toLocaleDateString('he-IL')
+        : '',
+      customerName: customer || '',
+      contactName: contactNameMerged,
+      contactTitle: '',
+      customerAddress: customerAddress || '',
+      customerCity: customerCity || '',
+      customerPhone: phone || '',
+      customerEmail: customerEmail || '',
+      contactPhone: contactPhoneMerged,
+      contactEmail: contactEmailMerged,
+      salesRepName: salesRep || '',
+      approverName: contactNameMerged,
+      subtotal: fmtMoney(sub) + ' ₪',
+      discountPercent: discPct > 0 ? String(discPct) : '0',
+      subtotalAfterDiscount: fmtMoney(afterDiscountVal) + ' ₪',
+      vatAmount: fmtMoney(vatVal) + ' ₪',
+      totalAmount: fmtMoney(totalVal) + ' ₪',
+      vat: fmtMoney(vatVal) + ' ₪',
+      total: fmtMoney(totalVal) + ' ₪',
+      paymentTerms: paymentTerms || '',
+      validityDate: paymentValidityDate
+        ? new Date(paymentValidityDate).toLocaleDateString('he-IL')
+        : '',
+      notes: notes || '',
+      items: mappedItems,
+    };
+
+    try {
+      const res = await apiFetch(apiUrl(`/quote-templates/${templateId}/merge-docx`), {
+        authUser: user,
+        method: 'POST',
+        body: JSON.stringify(mergeData),
+      });
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ message: 'Unknown error' }));
+        alert(`שגיאה במיזוג DOCX: ${errBody.message || res.statusText}`);
+        return;
+      }
+
+      // Download the DOCX blob
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = (customer || 'quote').replace(/[^\u0590-\u05FFa-zA-Z0-9 _-]/g, '').trim() || 'quote';
+      a.href = url;
+      a.download = `הצעת_מחיר_${safeName}_${reference || quoteNo || 'חדש'}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (err) {
+      console.error('DOCX merge error:', err);
+      alert('שגיאה בהורדת קובץ Word');
+    }
   }
 
   function openQuoteLookup(kind: 'contact' | 'salesRep' | 'performer') {
@@ -1275,435 +1623,317 @@ export function QuoteNewScreen({
 
 
   /* ── shared input classes ── */
-  const inp = 'h-8 w-full rounded border border-gray-300 bg-white px-2 text-sm focus:border-blue-400 focus:outline-none';
-  const lbl = 'text-xs font-medium text-gray-600 whitespace-nowrap';
+  const inp = 'h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-colors';
+  const lbl = 'text-sm font-medium text-gray-500 mb-0.5';
 
   return (
-    <main ref={rootRef} className={embedded ? '' : 'min-h-screen bg-gray-100 p-2'} dir="rtl">
-      <div className="flex flex-col bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden" style={{ minHeight: 700 }}>
-
-        {/* ═══ TOP BAR ═══ */}
-        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 gap-3 flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <h1 className="text-base font-bold text-gray-800">הצעת מחיר</h1>
-            <span className="text-sm text-gray-500">#{quoteNo}</span>
-            {statusMsg && (
-              <span className={`text-xs font-semibold ${statusMsg.includes('שגיאה') ? 'text-red-600' : 'text-green-600'}`}>{statusMsg}</span>
-            )}
+    <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
+      {/* ── Header ── */}
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-2">
+          <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold text-sm shadow-md">G</div>
+          <div>
+            <h1 className="text-base font-bold text-gray-800 leading-tight">הצעת מחיר {initialQuoteId ? '' : 'חדשה'}</h1>
+            <p className="text-[10px] text-gray-400 leading-tight">גלית CRM</p>
           </div>
-          <div className="flex items-center gap-1.5">
-            <button type="button" disabled={isBusy} onClick={() => doSave()} className="flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-              <Save size={14} /> שמור
-            </button>
-            <button type="button" disabled={isBusy} onClick={async () => { const id = await doSave(); if (id) onExit?.(); }} className="flex items-center gap-1 rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50">
-              <LogOut size={14} /> שמור וצא
-            </button>
-            <button type="button" disabled={isBusy} onClick={() => handleMergeClick()} className="flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-              <FileText size={14} /> מיזוג
-            </button>
-            {wordDocHtml && (
-              <button type="button" onClick={() => downloadWordDoc(wordDocHtml, customer, quoteNo)} className="flex items-center gap-1 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700">
-                <FileText size={14} /> הורד Word
-              </button>
-            )}
-            <button type="button" disabled={isBusy} onClick={() => handlePrint()} className="flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-              <Printer size={14} /> הדפסה
-            </button>
-            {onExit && (
-              <button type="button" onClick={onExit} className="flex items-center gap-1 rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-50" title="סגור">
-                <X size={14} />
-              </button>
-            )}
+          {quoteNo && <span className="mr-3 rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-500">{quoteNo}</span>}
+          <div className="mr-2 flex items-center gap-1">
+            <span className="text-xs text-gray-400">סימוכין:</span>
+            <input className="h-8 w-28 rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm outline-none focus:border-blue-400" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="מס׳ סימוכין" />
           </div>
+          {statusMsg && (
+            <span className={`mr-2 rounded-full px-3 py-1 text-sm font-semibold ${statusMsg.includes('שגיאה') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>{statusMsg}</span>
+          )}
         </div>
-
-        {/* ═══ FORM HEADER ═══ */}
-        <div className="border-b border-gray-200 bg-gray-50/50 px-4 py-3 space-y-3 flex-shrink-0">
-          {/* Row 1: customer + contact + date + status */}
-          <div className="grid grid-cols-4 gap-3">
-            <div>
-              <label className={lbl}>לקוח</label>
-              <div className="flex">
-                <button type="button" onClick={() => setPickerOpen(true)} className="flex items-center justify-center h-8 w-8 rounded-r border border-l-0 border-gray-300 bg-gray-100 hover:bg-gray-200 flex-shrink-0">
-                  <SearchIcon size={14} className="text-gray-500" />
-                </button>
-                <input className={inp + ' rounded-r-none'} value={customer} onChange={(e) => setCustomer(e.target.value)} readOnly={!!prefillCustomer} />
-              </div>
-            </div>
-            <div>
-              <label className={lbl}>איש קשר</label>
-              <div className="flex">
-                <button type="button" onClick={() => openQuoteLookup('contact')} className="flex items-center justify-center h-8 w-8 rounded-r border border-l-0 border-gray-300 bg-gray-100 hover:bg-gray-200 flex-shrink-0">
-                  <SearchIcon size={14} className="text-gray-500" />
-                </button>
-                <input readOnly className={inp + ' rounded-r-none cursor-default'} value={contact} placeholder="בחר איש קשר" />
-              </div>
-            </div>
-            <div>
-              <label className={lbl}>תאריך</label>
-              <input type="date" className={inp} value={date} onChange={(e) => setDate(e.target.value)} />
-            </div>
-            <div>
-              <label className={lbl}>סטטוס</label>
-              <input className={inp} value={status} onChange={(e) => setStatus(e.target.value)} />
-            </div>
-          </div>
-
-          {/* Row 2: reference, sales rep, performer, phone, companyNo, follow */}
-          <div className="grid grid-cols-6 gap-3">
-            <div>
-              <label className={lbl}>סימוכין</label>
-              <input className={inp} value={reference} onChange={(e) => setReference(e.target.value)} />
-            </div>
-            <div>
-              <label className={lbl}>נציג מכירה</label>
-              <div className="flex">
-                <button type="button" onClick={() => openQuoteLookup('salesRep')} className="flex items-center justify-center h-8 w-8 rounded-r border border-l-0 border-gray-300 bg-gray-100 hover:bg-gray-200 flex-shrink-0">
-                  <SearchIcon size={14} className="text-gray-500" />
-                </button>
-                <input readOnly className={inp + ' rounded-r-none cursor-default'} value={salesRepDisplayText} placeholder="בחר נציג" />
-              </div>
-            </div>
-            <div>
-              <label className={lbl}>מבצע</label>
-              <div className="flex">
-                <button type="button" onClick={() => openQuoteLookup('performer')} className="flex items-center justify-center h-8 w-8 rounded-r border border-l-0 border-gray-300 bg-gray-100 hover:bg-gray-200 flex-shrink-0">
-                  <SearchIcon size={14} className="text-gray-500" />
-                </button>
-                <input readOnly className={inp + ' rounded-r-none cursor-default'} value={performerDisplayText} placeholder="בחר מבצע" />
-              </div>
-            </div>
-            <div>
-              <label className={lbl}>טלפון</label>
-              <input className={inp} value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
-            <div>
-              <label className={lbl}>ח.פ / ע.מ</label>
-              <input className={inp} value={companyNo} onChange={(e) => setCompanyNo(e.target.value)} />
-            </div>
-            <div>
-              <label className={lbl}>למעקב</label>
-              <input type="date" className={inp} value={follow} onChange={(e) => setFollow(e.target.value)} />
-            </div>
-          </div>
-        </div>
-
-        {/* ═══ LINE ITEMS TABLE ═══ */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-white flex-shrink-0">
-            <span className="text-sm font-semibold text-gray-700">פריטים ({lineItems.length})</span>
-            <button
-              type="button"
-              onClick={() => {
-                const next = newLineItem();
-                setLineItems((prev) => [...prev, next]);
-                setSelectedLineIdx(lineItems.length);
-              }}
-              className="flex items-center gap-1 rounded bg-blue-50 border border-blue-200 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-            >
-              <Plus size={13} /> הוסף פריט
+        <div className="flex items-center gap-3">
+          {/* שמור — rightmost (first in RTL) */}
+          <div className="relative">
+            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave()}>
+              <span className="h-10 w-10 rounded-full border border-emerald-300 bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700"><Save size={18} /></span>
+              <span className="text-[10px] text-emerald-600 font-medium">שמור</span>
             </button>
+            {savedIndicator && <span className="absolute top-1/2 -translate-y-1/2 left-full ml-1 text-xs font-semibold text-emerald-600 whitespace-nowrap">נשמר</span>}
           </div>
-          <div className="overflow-auto flex-1" style={{ maxHeight: 260 }}>
-            <table className="w-full border-collapse text-sm" dir="rtl" style={{ tableLayout: 'fixed' }}>
-              <colgroup>
-                <col style={{ width: 60 }} />
-                <col style={{ width: 72 }} />
-                <col />
-                <col style={{ width: 80 }} />
-                <col style={{ width: 56 }} />
-                <col style={{ width: 80 }} />
-                <col style={{ width: 64 }} />
-                <col style={{ width: 80 }} />
-                <col style={{ width: 40 }} />
-              </colgroup>
-              <thead>
-                <tr className="bg-blue-700 text-white text-xs">
-                  {['קוד', 'מק"ט', 'תיאור', 'ערוץ הפצה', 'כמות', 'מחיר', '% הנחה', 'סה"כ', ''].map((h) => (
-                    <th key={h} className="px-2 py-1.5 text-right font-medium border-l border-blue-600 last:border-l-0">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {lineItems.length === 0 ? (
-                  <tr><td colSpan={9} className="text-center text-gray-400 py-6 text-xs">לחץ "הוסף פריט" להוספת שורה</td></tr>
-                ) : lineItems.map((item, idx) => {
-                  const total = calcTotal(item);
-                  const sel = idx === selectedLineIdx;
-                  const rowBg = sel ? 'bg-blue-50' : idx % 2 === 1 ? 'bg-gray-50' : 'bg-white';
-                  const cellCls = 'border border-gray-200 p-0';
-                  const rowInp = (field: keyof LineItem, align: 'left' | 'right' = 'right') => (
-                    <input
-                      value={item[field]}
-                      list={field === 'description' ? 'quote-catalog-list' : undefined}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (field === 'description') {
-                          const match = CATALOG_ITEMS.find((c) => c.description === val);
-                          if (match) {
-                            setLineItems((prev) => prev.map((r, i) =>
-                              i === idx ? { ...r, description: match.description, code: match.code, sku: match.sku, price: match.price } : r
-                            ));
-                          } else {
-                            setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: val } : r));
-                          }
-                        } else {
-                          setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, [field]: val } : r));
-                        }
-                      }}
-                      onClick={() => setSelectedLineIdx(idx)}
-                      className="w-full h-7 border-none bg-transparent text-sm px-1.5 focus:outline-none"
-                      style={{ textAlign: align }}
-                    />
-                  );
-                  return (
-                    <tr key={item.id} className={rowBg} onClick={() => setSelectedLineIdx(idx)}>
-                      <td className={cellCls}>{rowInp('code')}</td>
-                      <td className={cellCls}>{rowInp('sku')}</td>
-                      <td className={cellCls}>{rowInp('description', 'right')}</td>
-                      <td className={cellCls}>{rowInp('channel')}</td>
-                      <td className={cellCls}>{rowInp('qty', 'left')}</td>
-                      <td className={cellCls}>{rowInp('price', 'left')}</td>
-                      <td className={cellCls}>{rowInp('discountPct', 'left')}</td>
-                      <td className={cellCls + ' text-right px-1.5 text-sm font-medium'}>{total}</td>
-                      <td className={cellCls + ' text-center'}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setLineItems((prev) => prev.filter((_, i) => i !== idx)); setSelectedLineIdx(null); }} className="text-red-400 hover:text-red-600 p-0.5">
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <datalist id="quote-catalog-list">
-              {CATALOG_ITEMS.map((c) => <option key={c.code} value={c.description} />)}
-            </datalist>
-          </div>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => handleMergeClick()}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><FileText size={18} /></span>
+            <span className="text-[10px] text-gray-500">מיזוג</span>
+          </button>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => {
+            const id = await doSave();
+            if (!id) return;
+            if (!customerEmail?.trim()) { setStatusMsg('אין כתובת מייל לאיש הקשר'); return; }
+            try {
+              setStatusMsg('שולח מייל…');
+              const user = getSessionUser();
+              const r = await apiFetch(apiUrl(`/quotes/${id}/send-email`), {
+                method: 'POST',
+                body: JSON.stringify({ email: customerEmail.trim() }),
+                authUser: user,
+              });
+              if (!r.ok) {
+                const err = await r.json().catch(() => null);
+                setStatusMsg(err?.message || 'שגיאה בשליחת מייל');
+                return;
+              }
+              setStatusMsg(`מייל נשלח ל-${customerEmail.trim()}`);
+              if (onQuoteSent && id) onQuoteSent(id);
+              setTimeout(() => setStatusMsg(''), 3000);
+            } catch (_e) {
+              setStatusMsg('שגיאה בשליחת מייל');
+            }
+          }}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Mail size={18} /></span>
+            <span className="text-[10px] text-gray-500">שלח במייל</span>
+          </button>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => { const phoneNum = (phone || '').replace(/\D/g, ''); const msg = encodeURIComponent(`הצעת מחיר ${quoteNo || ''} - ${customer || ''}`); window.open(`https://wa.me/${phoneNum}?text=${msg}`, '_blank'); }}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><MessageCircle size={18} /></span>
+            <span className="text-[10px] text-gray-500">וואטסאפ</span>
+          </button>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => handlePrint()}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Printer size={18} /></span>
+            <span className="text-[10px] text-gray-500">הדפס</span>
+          </button>
+          {onExit && (
+            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={onExit}>
+              <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></span>
+              <span className="text-[10px] text-gray-500">סגור</span>
+            </button>
+          )}
+        </div>
+      </header>
 
-          {/* ═══ TOTALS ROW ═══ */}
-          <div className="flex items-start justify-between border-t border-gray-200 bg-gray-50 px-4 py-3 gap-6 flex-shrink-0">
-            {/* Left: discount + VAT + totals */}
-            <div className="grid grid-cols-3 gap-3 items-center text-sm" style={{ minWidth: 420 }}>
-              <div className="flex items-center gap-2">
-                <label className={lbl}>% הנחה</label>
-                <input className={inp + ' w-20'} value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} style={{ textAlign: 'left' }} />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className={lbl}>% מע"מ</label>
-                <input className={inp + ' w-20'} value={vatPercent} onChange={(e) => setVatPercent(e.target.value)} style={{ textAlign: 'left' }} />
-              </div>
-              <div />
-              <div className="flex items-center gap-2">
-                <label className={lbl}>סכום ביניים</label>
-                <span className="text-sm font-medium text-gray-800">{subtotal ? `₪ ${subtotal}` : '—'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className={lbl}>לאחר הנחה</label>
-                <span className="text-sm font-medium text-gray-800">{afterDiscount ? `₪ ${afterDiscount}` : '—'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-blue-700 whitespace-nowrap">סה"כ לתשלום</label>
-                <span className="text-sm font-bold text-blue-700">{cashTotal ? `₪ ${cashTotal}` : '—'}</span>
-              </div>
-            </div>
+      {/* ── Scrollable Content — 2-column landscape layout on desktop ── */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-3 pb-4">
+        <div className="flex flex-col xl:flex-row gap-3 w-full">
 
-            {/* Right: payment terms compact */}
-            <div className="flex items-center gap-3 flex-wrap text-sm">
-              <div className="flex items-center gap-1.5">
-                <label className={lbl}>תוקף</label>
-                <input className={inp + ' w-14'} value={validityDays} onChange={(e) => {
-                  const v = e.target.value;
-                  setValidityDays(v);
-                  const n = parseInt(v, 10);
-                  if (v.trim() === '' || Number.isNaN(n) || n < 0) { setPaymentDueDate(''); return; }
-                  setPaymentDueDate(dueDateAfterDaysFromQuote(date, n));
-                }} style={{ textAlign: 'left' }} />
-                <span className="text-xs text-gray-500">ימים</span>
+          {/* ══════ RIGHT / MAIN COLUMN (desktop ~62%) ══════ */}
+          <div className="flex-1 min-w-0 space-y-3">
+
+            {/* ── Customer Details ── */}
+            <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
+              <h3 className="text-base font-bold text-gray-700 mb-2 flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><SearchIcon size={12} /></span>
+                פרטי לקוח
+              </h3>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <div className={lbl}>לקוח / חברה</div>
+                  <div className="flex gap-2">
+                    <input className={`${inp} flex-1 ${prefillCustomer ? 'bg-gray-50 text-gray-600' : ''}`} readOnly={!!prefillCustomer} value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="שם הלקוח" />
+                    {!prefillCustomer && (
+                      <button type="button" className="h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white text-gray-400 hover:bg-gray-50 hover:text-gray-600 flex items-center justify-center transition-colors" onClick={() => setPickerOpen(true)}>
+                        <SearchIcon size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div className={lbl}>איש קשר</div>
+                  {quoteContactRows.length > 0 ? (
+                    <select className={inp} value={customerContactId} onChange={(e) => setCustomerContactId(e.target.value)}>
+                      <option value="">— בחר איש קשר —</option>
+                      {quoteContactRows.map((c) => <option key={c.id} value={c.id}>{c.fullName}{c.isPrimary ? ' (ראשי)' : ''}</option>)}
+                    </select>
+                  ) : (
+                    <input className={`${inp} bg-gray-50`} readOnly value={contact} placeholder="אין אנשי קשר" />
+                  )}
+                </div>
+                <div>
+                  <div className={lbl}>טלפון</div>
+                  <input className={inp} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="טלפון" />
+                </div>
+                <div>
+                  <div className={lbl}>אימייל איש קשר</div>
+                  <input className={inp} value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="אימייל" />
+                </div>
               </div>
-              <div className="flex items-center gap-1.5">
-                <label className={lbl}>תנאי תשלום</label>
-                <select
-                  value={paymentTerms}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === ADD_PAYMENT_TERM) { setNewPaymentTermLabel(''); setAddPaymentTermOpen(true); return; }
-                    setPaymentTerms(v);
-                  }}
-                  className={inp + ' w-36'}
-                >
-                  <option value="">—</option>
-                  {paymentTerms && !paymentTermRows.some((r) => r.label === paymentTerms) ? (
-                    <option value={paymentTerms}>{paymentTerms}</option>
-                  ) : null}
-                  {paymentTermRows.map((r) => (
-                    <option key={r.id} value={r.label}>{r.label}</option>
-                  ))}
-                  <option value={ADD_PAYMENT_TERM}>הוסף תנאי תשלום…</option>
-                </select>
+            </section>
+
+            {/* ── Line Items ── */}
+            <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500"><Plus size={12} /></span>
+                  פירוט פריטים
+                  <span className="text-xs font-normal text-gray-400 mr-1">({lineItems.length})</span>
+                </h3>
+                <button type="button" className="flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-2.5 text-base font-bold text-white hover:bg-emerald-600 shadow-md transition-colors" onClick={() => { const next = newLineItem(); setLineItems((prev) => [...prev, next]); setSelectedLineIdx(lineItems.length); }}>
+                  <Plus size={20} />הוסף פריט
+                </button>
               </div>
-              <div className="flex items-center gap-1.5">
-                <label className={lbl}>תשלומים</label>
-                <input className={inp + ' w-14'} value={paymentsCount} onChange={(e) => setPaymentsCount(e.target.value)} style={{ textAlign: 'left' }} />
-              </div>
-              {installmentsCountParsed > 0 && (
-                <span className="text-xs text-gray-500">
-                  {paymentEqDisplay && `₪${paymentEqDisplay}`} = {paymentXDisplay && `₪${paymentXDisplay}`} × {paymentsCount}
-                </span>
+              {lineItems.length === 0 ? (
+                <div className="py-6 text-center text-gray-400 text-base rounded-xl border-2 border-dashed border-gray-200">אין פריטים — לחץ &quot;הוסף פריט&quot; להתחלה</div>
+              ) : (
+                <div className="space-y-2">
+                  {lineItems.map((item, idx) => {
+                    const total = calcTotal(item);
+                    const sel = idx === selectedLineIdx;
+                    return (
+                      <div key={item.id} className={`rounded-xl border-2 ${sel ? 'border-blue-200 bg-blue-50/40 shadow-sm' : 'border-gray-100 bg-gray-50/30'} p-3 transition-all cursor-pointer hover:border-blue-100`} onClick={() => setSelectedLineIdx(idx)}>
+                        <div className="grid gap-2 items-end sm:grid-cols-2 lg:grid-cols-12">
+                          <div className="lg:col-span-1">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">קוד</div>
+                            <input value={item.code} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, code: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400" />
+                          </div>
+                          <div className="lg:col-span-1">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">מק&quot;ט</div>
+                            <input value={item.sku} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, sku: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400" />
+                          </div>
+                          <div className="sm:col-span-2 lg:col-span-4">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">תיאור השירות / מוצר</div>
+                            <input value={item.description} list="quote-catalog-list" onChange={(e) => { const val = e.target.value; const match = CATALOG_ITEMS.find((c) => c.description === val); if (match) { setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: match.description, code: match.code, sku: match.sku, price: match.price } : r)); } else { setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: val } : r)); } }} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-400" placeholder="שם הפריט" />
+                          </div>
+                          <div className="lg:col-span-2">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">מחיר ליחידה</div>
+                            <div className="relative">
+                              <input value={item.price} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white pl-7 pr-3 text-base outline-none focus:border-blue-400 text-left" placeholder="0" />
+                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₪</span>
+                            </div>
+                          </div>
+                          <div className="lg:col-span-1">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">כמות</div>
+                            <input value={item.qty} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, qty: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400 text-center" placeholder="1" />
+                          </div>
+                          <div className="lg:col-span-1">
+                            <div className="text-sm font-medium text-gray-400 mb-0.5">הנחה %</div>
+                            <input value={item.discountPct} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, discountPct: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400 text-center" placeholder="0" />
+                          </div>
+                          <div className="lg:col-span-2 flex items-end gap-2">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-400 mb-0.5">סה&quot;כ</div>
+                              <div className="h-11 flex items-center text-base font-bold text-gray-800 whitespace-nowrap">{total} ₪</div>
+                            </div>
+                            <button type="button" className="mb-0.5 h-8 w-8 shrink-0 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors" onClick={(e) => { e.stopPropagation(); setLineItems((prev) => prev.filter((_, i) => i !== idx)); setSelectedLineIdx(null); }}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-            </div>
+              <datalist id="quote-catalog-list">
+                {CATALOG_ITEMS.map((c) => <option key={c.code} value={c.description} />)}
+              </datalist>
+            </section>
+
+            {/* ── Notes ── */}
+            <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className={lbl}>הערות</div>
+                  <textarea className="mt-1 h-16 w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-base outline-none focus:border-blue-400 transition-colors" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות להצעה..." />
+                </div>
+                <div>
+                  <div className={lbl}>הערה פנימית</div>
+                  <textarea className="mt-1 h-16 w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-base outline-none focus:border-blue-400 transition-colors" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} placeholder="הערה פנימית (לא תופיע במסמך)..." />
+                </div>
+              </div>
+            </section>
           </div>
 
-          {/* ═══ TABS SECTION ═══ */}
-          <div className="border-t border-gray-200 flex-shrink-0">
-            <div className="flex border-b border-gray-200 bg-gray-50 px-2">
-              {(['הערות', 'מלל', 'פרטי תשלום', 'תחזית', 'שונות'] as const).map((x) => (
-                <button
-                  key={x}
-                  onClick={() => setTab(x as typeof tab)}
-                  className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
-                    tab === x ? 'border-blue-600 text-blue-700 bg-white' : 'border-transparent text-gray-500 hover:text-gray-700'
-                  }`}
-                >{x}</button>
-              ))}
-            </div>
-            <div className="p-4" style={{ minHeight: 120 }}>
+          {/* ══════ LEFT / SIDEBAR COLUMN (desktop ~38%) ══════ */}
+          <div className="w-full xl:w-[340px] shrink-0 space-y-3">
 
-              {tab === 'הערות' ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={lbl + ' mb-1 block'}>הערות</label>
-                    <textarea className="w-full h-20 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm resize-none focus:border-blue-400 focus:outline-none" value={notes} onChange={(e) => setNotes(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl + ' mb-1 block'}>הערה פנימית</label>
-                    <textarea className="w-full h-20 rounded border border-gray-300 bg-white px-2 py-1.5 text-sm resize-none focus:border-blue-400 focus:outline-none" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} />
-                  </div>
+            {/* ── Terms, Tracking & Sales Rep ── */}
+            <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
+              <h3 className="text-base font-bold text-gray-700 mb-2 flex items-center gap-2">
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-purple-50 text-purple-500"><FileText size={12} /></span>
+                תנאים ומעקב
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <div className={lbl}>תנאי תשלום</div>
+                  <select className={inp} value={paymentTerms} onChange={(e) => { const v = e.target.value; if (v === ADD_PAYMENT_TERM) { setNewPaymentTermLabel(''); setAddPaymentTermOpen(true); return; } setPaymentTerms(v); }}>
+                    <option value="">—</option>
+                    {paymentTerms && !paymentTermRows.some((r) => r.label === paymentTerms) ? <option value={paymentTerms}>{paymentTerms}</option> : null}
+                    {paymentTermRows.map((r) => <option key={r.id} value={r.label}>{r.label}</option>)}
+                    <option value={ADD_PAYMENT_TERM}>+ הוסף תנאי תשלום</option>
+                  </select>
                 </div>
-
-              ) : tab === 'מלל' ? (
-                <div className="rounded border border-gray-200 bg-white p-3 min-h-[80px] max-h-48 overflow-y-auto" dir="rtl">
-                  {mergedHtml
-                    ? <div dangerouslySetInnerHTML={{ __html: mergedHtml }} />
-                    : <div className="text-gray-400 text-sm text-center py-6">לחץ "מיזוג" לבחירת תבנית ויצירת מסמך</div>
-                  }
-                </div>
-
-              ) : tab === 'פרטי תשלום' ? (
-                <div className="grid grid-cols-4 gap-3 text-sm">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={lbl}>תוקף ההצעה (ימים)</label>
-                    <input className={inp} value={validityDays} onChange={(e) => {
-                      const v = e.target.value;
-                      setValidityDays(v);
-                      const n = parseInt(v, 10);
-                      if (v.trim() === '' || Number.isNaN(n) || n < 0) { setPaymentDueDate(''); return; }
-                      setPaymentDueDate(dueDateAfterDaysFromQuote(date, n));
-                    }} style={{ textAlign: 'left' }} />
+                    <div className={lbl}>תוקף (ימים)</div>
+                    <input className={inp} value={validityDays} onChange={(e) => { const v = e.target.value; setValidityDays(v); const n = parseInt(v, 10); if (v.trim() === '' || Number.isNaN(n) || n < 0) { setPaymentDueDate(''); return; } setPaymentDueDate(dueDateAfterDaysFromQuote(date, n)); }} placeholder="30" />
                   </div>
                   <div>
-                    <label className={lbl}>תאריך תוקף</label>
-                    <input type="date" className={inp} value={paymentValidityDate} onChange={(e) => setPaymentValidityDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>תאריך פירעון</label>
+                    <div className={lbl}>תאריך תוקף</div>
                     <input type="date" className={inp} value={paymentDueDate} onChange={(e) => setPaymentDueDate(e.target.value)} />
                   </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className={lbl}>מספר תשלומים</label>
-                    <input className={inp} value={paymentsCount} onChange={(e) => setPaymentsCount(e.target.value)} style={{ textAlign: 'left' }} />
+                    <div className={lbl}>מספר תשלומים</div>
+                    <input className={inp} value={paymentsCount} onChange={(e) => setPaymentsCount(e.target.value)} placeholder="1" />
                   </div>
-                  <div className="col-span-2">
-                    <label className={lbl}>תנאי תשלום</label>
-                    <div className="flex gap-1">
-                      <input className={inp + ' w-16'} value={paymentTermsCode} onChange={(e) => setPaymentTermsCode(e.target.value)} style={{ textAlign: 'left' }} />
-                      <select
-                        value={paymentTerms}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === ADD_PAYMENT_TERM) { setNewPaymentTermLabel(''); setAddPaymentTermOpen(true); return; }
-                          setPaymentTerms(v);
-                        }}
-                        className={inp}
-                      >
-                        <option value="">—</option>
-                        {paymentTerms && !paymentTermRows.some((r) => r.label === paymentTerms) ? (
-                          <option value={paymentTerms}>{paymentTerms}</option>
-                        ) : null}
-                        {paymentTermRows.map((r) => (
-                          <option key={r.id} value={r.label}>{r.label}</option>
-                        ))}
-                        <option value={ADD_PAYMENT_TERM}>הוסף תנאי תשלום…</option>
-                      </select>
-                      <button type="button" onClick={() => { setNewPaymentTermLabel(''); setAddPaymentTermOpen(true); }} className="flex items-center justify-center h-8 w-8 rounded border border-gray-300 bg-gray-100 hover:bg-gray-200 flex-shrink-0" title="הוסף תנאי תשלום">
-                        <Plus size={14} className="text-gray-500" />
+                  <div>
+                    <div className={lbl}>% הנחה כללית</div>
+                    <input className={inp} value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} placeholder="0" />
+                  </div>
+                </div>
+                {(() => { const n = parseInt(paymentsCount) || 0; const total = parseFloat(cashTotal) || 0; if (n > 1 && total > 0) { return <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 text-center">{n} תשלומים של {(total / n).toFixed(2)} ₪ לתשלום (כולל מע&quot;מ)</div>; } return null; })()}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className={lbl}>נציג מכירה</div>
+                    <div className="flex gap-2">
+                      <input className={`${inp} flex-1 bg-gray-50`} readOnly value={salesRepDisplayText} placeholder="לחץ לבחירה" />
+                      <button type="button" className="h-9 w-9 shrink-0 rounded-lg border border-gray-200 bg-white text-gray-400 hover:bg-gray-50 hover:text-gray-600 flex items-center justify-center transition-colors" onClick={() => openQuoteLookup('salesRep')}>
+                        <SearchIcon size={16} />
                       </button>
                     </div>
                   </div>
-                  {installmentsCountParsed > 0 && (
-                    <div className="col-span-2 flex items-center gap-3 text-sm text-gray-600 pt-1">
-                      <span>סה"כ: ₪{paymentEqDisplay}</span>
-                      <span>=</span>
-                      <span>₪{paymentXDisplay} × {paymentsCount} תשלומים</span>
+                  <div>
+                    <div className={lbl}>למעקב</div>
+                    <input type="date" className={inp} value={follow} onChange={(e) => setFollow(e.target.value)} />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* ── Dark Financial Summary ── */}
+            <section className="rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 text-white p-4 shadow-lg">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-300">סה&quot;כ פריטים</span>
+                  <span className="font-bold text-emerald-400 text-lg">{subtotal || '0.00'} ₪</span>
+                </div>
+                {parseFloat(discountPercent) > 0 && (
+                  <>
+                    <div className="flex items-center justify-between text-base">
+                      <span className="text-slate-400">הנחה {discountPercent}%</span>
+                      <span className="text-slate-300">-{((parseFloat(subtotal) || 0) - (parseFloat(afterDiscount) || parseFloat(subtotal) || 0)).toFixed(2)} ₪</span>
                     </div>
-                  )}
+                    <div className="flex items-center justify-between text-base">
+                      <span className="text-slate-400">לאחר הנחה</span>
+                      <span className="text-slate-300">{afterDiscount || subtotal || '0.00'} ₪</span>
+                    </div>
+                  </>
+                )}
+                <div className="flex items-center justify-between text-base">
+                  <span className="text-slate-300">מע&quot;מ ({vatPercent}%)</span>
+                  <span className="text-slate-300">{((parseFloat(cashTotal) || 0) - (parseFloat(afterDiscount) || parseFloat(subtotal) || 0)).toFixed(2)} ₪</span>
                 </div>
-
-              ) : tab === 'תחזית' ? (
-                <div className="grid grid-cols-3 gap-3 text-sm">
-                  <div>
-                    <label className={lbl}>אחוז סגירה</label>
-                    <input type="number" step="0.01" className={inp} value={fClosePercent} onChange={(e) => setFClosePercent(e.target.value)} style={{ textAlign: 'left' }} />
-                  </div>
-                  <div>
-                    <label className={lbl}>פונקציונאלי</label>
-                    <input className={inp} value={fFunctional} onChange={(e) => setFFunctional(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>צבע סגירה</label>
-                    <input type="date" className={inp} value={fCloseColor} onChange={(e) => setFCloseColor(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>ת. עדכון אחרון</label>
-                    <input type="date" className={inp} value={fLastDate} onChange={(e) => setFLastDate(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>משתמש אחרון</label>
-                    <input className={inp} value={fLastUser} onChange={(e) => setFLastUser(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>שעה</label>
-                    <input className={inp} value={fLastTime} onChange={(e) => setFLastTime(e.target.value)} />
+                <div className="border-t border-slate-600 pt-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-bold">סה&quot;כ לתשלום</span>
+                    <span className="text-2xl font-extrabold text-emerald-400">{cashTotal || '0.00'} ₪</span>
                   </div>
                 </div>
+              </div>
+            </section>
 
-              ) : tab === 'שונות' ? (
-                <div className="flex items-center gap-3 text-sm">
-                  <div>
-                    <label className={lbl}>מקור הזמנה</label>
-                    <input className={inp + ' w-40'} value={orderSource} onChange={(e) => setOrderSource(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>פקס</label>
-                    <input className={inp + ' w-32'} value={fax} onChange={(e) => setFax(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>מגבלות</label>
-                    <input className={inp + ' w-40'} value={limitations} onChange={(e) => setLimitations(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className={lbl}>מספר בהנה"ח</label>
-                    <input className={inp + ' w-28'} value={accountingNo} onChange={(e) => setAccountingNo(e.target.value)} />
-                  </div>
-                </div>
-
-              ) : null}
-            </div>
+            {/* ── Footer Note ── */}
+            <p className="text-sm text-gray-400 text-right px-1">שים לב: וודא שכל פרטי הלקוח מעודכנים לפני הפקת ה-PDF.</p>
           </div>
+
         </div>
       </div>
 
-      {/* ═══ MODALS ═══ */}
+      {/* ── Sticky Bottom Actions ── */}
+      {/* Bottom action bar removed — actions moved to header icon row */}
+
+      {/* ── Modals (logic unchanged) ── */}
       {pickerOpen && (
         <CustomerPickerModal
           open={pickerOpen}
@@ -1712,6 +1942,10 @@ export function QuoteNewScreen({
             setCustomer(c.name);
             setCustomerId(c.id);
             if (c.phone) setPhone(c.phone);
+            if (c.address) setCustomerAddress(c.address);
+            if (c.city) setCustomerCity(c.city);
+            if (c.email) setCustomerEmail(c.email);
+            if (c.contactName) setContact(c.contactName);
             setPickerOpen(false);
           }}
         />
@@ -1743,24 +1977,24 @@ export function QuoteNewScreen({
         />
       )}
       {addPaymentTermOpen && (
-        <div className="fixed inset-0 bg-black/40 z-[9000] flex items-center justify-center">
-          <div className="bg-white w-80 rounded-lg border border-gray-300 shadow-xl p-4" dir="rtl">
-            <div className="font-semibold text-sm mb-3">הוסף תנאי תשלום</div>
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/40">
+          <div className="w-96 rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl" dir="rtl">
+            <div className="mb-4 text-base font-bold text-gray-800">הוסף תנאי תשלום</div>
             <input
               autoFocus
-              className={inp + ' mb-3'}
+              className="mb-4 h-11 w-full rounded-xl border border-gray-200 px-4 text-base outline-none focus:border-blue-400"
               placeholder="תנאי תשלום חדש..."
               value={newPaymentTermLabel}
               onChange={(e) => setNewPaymentTermLabel(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') submitNewPaymentTerm(); if (e.key === 'Escape') setAddPaymentTermOpen(false); }}
             />
-            <div className="flex gap-2 justify-end">
-              <button type="button" className="px-3 py-1.5 text-xs rounded border border-gray-300 bg-gray-100 hover:bg-gray-200" onClick={() => setAddPaymentTermOpen(false)}>ביטול</button>
-              <button type="button" className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700" onClick={submitNewPaymentTerm}>שמור</button>
+            <div className="flex justify-end gap-3">
+              <button type="button" className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors" onClick={() => setAddPaymentTermOpen(false)}>ביטול</button>
+              <button type="button" className="rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 transition-colors" onClick={submitNewPaymentTerm}>שמור</button>
             </div>
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "mailDisplayName" TEXT;
+ALTER TABLE "User" ADD COLUMN "smtpHost" TEXT;
+ALTER TABLE "User" ADD COLUMN "smtpPort" INTEGER;
+ALTER TABLE "User" ADD COLUMN "smtpUser" TEXT;
+ALTER TABLE "User" ADD COLUMN "smtpPassword" TEXT;
+ALTER TABLE "User" ADD COLUMN "smtpFrom" TEXT;
+ALTER TABLE "User" ADD COLUMN "smtpSecure" BOOLEAN NOT NULL DEFAULT false;

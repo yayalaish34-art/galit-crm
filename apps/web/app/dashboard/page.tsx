@@ -12,9 +12,9 @@ import {
   mergeQuoteTemplateFull,
   mergedHtmlToPlainDescription,
   QUOTE_SERVICE_TYPE_OPTIONS,
-  QUOTE_TEMPLATE_VARIABLES_HELP,
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
+import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
 import {
   Users,
   FileText,
@@ -43,6 +43,53 @@ import {
   CheckSquare,
   BarChart3,
   Loader2,
+  Pencil,
+  MessageCircle,
+  UserPlus,
+  Flame,
+  Calendar,
+  Trash2,
+  Eye,
+  TrendingUp,
+  Target,
+  Zap,
+  PhoneCall,
+  MailOpen,
+  Star,
+  ArrowUpRight,
+  Timer,
+  Filter,
+  CircleDot,
+  AlertCircle,
+  ChevronUp,
+  FileCheck,
+  Hash,
+  RotateCcw,
+  PlayCircle,
+  Copy,
+  Lightbulb,
+  Sparkles,
+  MessagesSquare,
+  Upload,
+  MoreHorizontal,
+  Wind,
+  Volume2,
+  Radio,
+  Waves,
+  Shield,
+  CalendarCheck,
+  Home,
+  Bug,
+  Image,
+  ArrowLeft,
+  ArrowRight,
+  Info,
+  Lock,
+  Droplets,
+  Leaf,
+  Sniff,
+  Mic,
+  HelpCircle,
 } from 'lucide-react';
 
 import { DataImportWizard } from '../data-import-wizard';
@@ -503,11 +550,17 @@ type Task = {
   projectName?: string;
   customerId?: string | null;
   customerName?: string;
+  leadId?: string | null;
+  leadName?: string;
+  leadPhone?: string;
+  leadEmail?: string;
+  leadCompany?: string;
   dueDate?: string | null;
   due: string;
   priority: string;
   status?: string;
   type?: string;
+  createdAt?: string;
 };
 
 type Customer = {
@@ -1235,11 +1288,13 @@ function CustomerSearchModal({
   customers,
   onClose,
   onSelect,
+  onNewCustomer,
 }: {
   open: boolean;
   customers: Customer[];
   onClose: () => void;
   onSelect: (customer: Customer) => void;
+  onNewCustomer?: (prefillName: string) => void;
 }) {
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1316,8 +1371,20 @@ function CustomerSearchModal({
         {/* Results table */}
         <div className="max-h-[55vh] overflow-y-auto">
           {results.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-slate-400">
-              {q ? 'לא נמצאו לקוחות תואמים' : 'אין לקוחות'}
+            <div className="px-5 py-10 text-center">
+              <div className="text-sm text-slate-400">
+                {q ? 'לא נמצאו לקוחות תואמים' : 'אין לקוחות'}
+              </div>
+              {q && onNewCustomer && (
+                <button
+                  type="button"
+                  onClick={() => onNewCustomer(query.trim())}
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-emerald-700 transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  צור לקוח חדש — &ldquo;{query.trim()}&rdquo;
+                </button>
+              )}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -4549,380 +4616,677 @@ function LeadsPage({
     }
   };
 
+  // ── KPI computations ──
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = today.toLocaleDateString('en-CA');
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const kpiNewToday = leads.filter((l) => { const d = l.createdAt ? new Date(l.createdAt) : null; return d && d >= today; }).length;
+  const kpiOpen = leads.filter((l) => !['WON','LOST','NOT_RELEVANT'].includes(l.leadStatus || l.status || '')).length;
+  const kpiFollowToday = leads.filter((l) => { const d = l.nextFollowUpDate ? new Date(l.nextFollowUpDate).toLocaleDateString('en-CA') : ''; return d === todayStr; }).length;
+  const kpiContacted = leads.filter((l) => { const s = l.leadStatus || l.status || ''; const d = l.updatedAt ? new Date(l.updatedAt) : null; return s !== 'NEW' && d && d >= today; }).length;
+  const kpiWaiting = Math.max(0, kpiNewToday - kpiContacted);
+  const kpiClosedMonth = leads.filter((l) => { const s = l.leadStatus || l.status || ''; const d = l.updatedAt ? new Date(l.updatedAt) : null; return s === 'WON' && d && d >= monthStart; }).length;
+  const kpiClosedMonthVal = kpiClosedMonth; // placeholder for ₪ value
+  const kpiTotalMonth = leads.filter((l) => { const d = l.createdAt ? new Date(l.createdAt) : null; return d && d >= monthStart; }).length;
+  const kpiCloseRate = kpiTotalMonth > 0 ? Math.round((kpiClosedMonth / kpiTotalMonth) * 100) : 0;
+  const kpiHot = leads.filter((l) => { const s = l.leadStatus || l.status || ''; return s === 'NEGOTIATION' || s === 'QUOTE_SENT'; }).length;
+
+  // ── Quick filters ──
+  const [quickFilter, setQuickFilter] = useState('');
+  const [onlyMine, setOnlyMine] = useState(false);
+
+  const quickFiltered = useMemo(() => {
+    let list = filtered;
+    if (onlyMine) list = list.filter((l) => l.assignedUserId === currentUser.id);
+    if (quickFilter === 'new') list = list.filter((l) => { const d = l.createdAt ? new Date(l.createdAt) : null; return d && d >= today; });
+    if (quickFilter === 'open') list = list.filter((l) => !['WON','LOST','NOT_RELEVANT'].includes(l.leadStatus || l.status || ''));
+    if (quickFilter === 'followup') list = list.filter((l) => { const d = l.nextFollowUpDate ? new Date(l.nextFollowUpDate).toLocaleDateString('en-CA') : ''; return d === todayStr; });
+    if (quickFilter === 'closed') list = list.filter((l) => ['WON','LOST','NOT_RELEVANT'].includes(l.leadStatus || l.status || ''));
+    if (quickFilter === 'untouched15') list = list.filter((l) => { const s = l.leadStatus || l.status || ''; if (s !== 'NEW') return false; const d = l.createdAt ? new Date(l.createdAt) : null; if (!d) return false; return (Date.now() - d.getTime()) > 15 * 60 * 1000; });
+    if (quickFilter === 'hot') list = list.filter((l) => { const s = l.leadStatus || l.status || ''; return s === 'NEGOTIATION' || s === 'QUOTE_SENT'; });
+    // Source-based quick filters
+    if (quickFilter === 'src_facebook') list = list.filter((l) => (l.source || '').includes('פייסבוק'));
+    if (quickFilter === 'src_google') list = list.filter((l) => (l.source || '').includes('גוגל'));
+    if (quickFilter === 'src_site') list = list.filter((l) => (l.source || '').includes('אתר'));
+    // Service-based quick filters
+    if (quickFilter === 'svc_radiation') list = list.filter((l) => (l.serviceType || l.service || '').includes('קרינה'));
+    if (quickFilter === 'svc_radon') list = list.filter((l) => (l.serviceType || l.service || '').includes('ראדון'));
+    return list;
+  }, [filtered, onlyMine, quickFilter, currentUser.id]);
+
+  // ── Row color by status ──
+  const rowBgByStatus = (s: string) => {
+    const map: Record<string, string> = {
+      NEW: 'bg-blue-50/70',
+      CONTACTED: 'bg-red-50/60',
+      FU_1: 'bg-yellow-50/70',
+      FU_2: 'bg-yellow-50/70',
+      QUOTE_SENT: 'bg-orange-50/70',
+      NEGOTIATION: 'bg-orange-100/60',
+      WON: 'bg-green-50/70',
+      LOST: 'bg-slate-100/60',
+      NOT_RELEVANT: 'bg-slate-100/50',
+    };
+    return map[s] || '';
+  };
+
+  // ── Status badge colors ──
+  const statusBadge = (s: string) => {
+    const map: Record<string, string> = {
+      NEW: 'bg-blue-500 text-white',
+      CONTACTED: 'bg-red-500 text-white',
+      FU_1: 'bg-yellow-500 text-white',
+      FU_2: 'bg-yellow-600 text-white',
+      QUOTE_SENT: 'bg-orange-500 text-white',
+      NEGOTIATION: 'bg-orange-600 text-white',
+      WON: 'bg-green-600 text-white',
+      LOST: 'bg-slate-400 text-white',
+      NOT_RELEVANT: 'bg-slate-400 text-white',
+    };
+    return map[s] || 'bg-slate-400 text-white';
+  };
+
+  // ── Expanded row ──
+  const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
+  const toggleExpandLead = (lead: Lead) => {
+    setExpandedLeadId((prev) => prev === lead.id ? null : lead.id);
+  };
+
+  // ── Time ago helper ──
+  const timeAgo = (dateStr?: string | null) => {
+    if (!dateStr) return '—';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'עכשיו';
+    if (mins < 60) return `לפני ${mins} דק'`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `לפני ${hrs} שע'`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return 'אתמול';
+    if (days < 7) return `לפני ${days} ימים`;
+    if (days < 30) return `לפני ${Math.floor(days / 7)} שבועות`;
+    return new Date(dateStr).toLocaleDateString('he-IL');
+  };
+
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-5" dir="rtl">
+      {/* ════════════════════════════════════════════════
+          HEADER — Big title
+         ════════════════════════════════════════════════ */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>לידים</h1>
-          <p className="mt-1 text-slate-500">ניהול פניות חדשות, פולואפ ושיוך אחראי</p>
+          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight" style={{ color: '#1e293b' }}>
+            גלית CRM - מרכז מכירות - לידים
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">ניהול פניות, לידים, הצעות ומעקב</p>
         </div>
-        <Button className="rounded-2xl" style={{ background: galit.primary }} onClick={() => setOpen(true)}>
-          <Plus className="ml-2 h-4 w-4" />
+        <button
+          className="flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+          style={{ background: 'linear-gradient(135deg, #4ba647, #3d8b3a)' }}
+          onClick={() => setOpen(true)}
+        >
+          <Plus className="h-5 w-5" />
           ליד חדש
-        </Button>
+        </button>
       </div>
 
-      {loadError && (
-        <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          {loadError}
+      {loadError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-sm text-red-700">{loadError}</div>}
+      {(error || success) && (
+        <div className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+          {error || success}
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="יצירת ליד חדש">
+      {/* ════════════════════════════════════════════════
+          KPI CARDS — Clean business style
+         ════════════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+
+        {/* Card 1: לידים חדשים היום */}
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-slate-500 mb-1">לידים חדשים היום</div>
+              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiNewToday}</div>
+              <div className="text-[11px] text-slate-400 mt-1.5">טופלו: {kpiContacted} &middot; ממתינים: {kpiWaiting}</div>
+            </div>
+            <div className="rounded-full bg-blue-100 p-3.5 shrink-0">
+              <Timer className="h-6 w-6 text-blue-600" />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: פתוחים */}
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-slate-500 mb-1">לידים פתוחים</div>
+              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiOpen}</div>
+              <div className="text-[11px] text-slate-400 mt-1.5">חמים: {kpiHot}</div>
+            </div>
+            <div className="rounded-full bg-amber-100 p-3.5 shrink-0">
+              <Flame className="h-6 w-6 text-amber-600" />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3: נסגרו החודש */}
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-slate-500 mb-1">נסגרו החודש</div>
+              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiClosedMonthVal}</div>
+              <div className="text-[11px] text-slate-400 mt-1.5">יחס סגירה: {kpiCloseRate}%</div>
+            </div>
+            <div className="rounded-full bg-green-100 p-3.5 shrink-0">
+              <TrendingUp className="h-6 w-6 text-green-600" />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: במעקב היום */}
+        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-5">
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-slate-500 mb-1">במעקב היום</div>
+              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiFollowToday}</div>
+              <div className="text-[11px] text-slate-400 mt-1.5">הצעות פתוחות: {leads.filter((l) => (l.leadStatus || l.status || '') === 'QUOTE_SENT').length}</div>
+            </div>
+            <div className="rounded-full bg-purple-100 p-3.5 shrink-0">
+              <Target className="h-6 w-6 text-purple-600" />
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ════════════════════════════════════════════════
+          FILTER BAR — Colorful chips + search
+         ════════════════════════════════════════════════ */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute right-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pr-9 pl-3 text-sm outline-none focus:border-blue-400 focus:bg-white focus:shadow-sm transition"
+              placeholder="חיפוש שם, חברה, שירות, עיר..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Quick filter chips */}
+          {[
+            { key: 'mine', label: 'רק שלי', color: 'bg-indigo-600', hoverBg: 'hover:bg-indigo-50', borderColor: 'border-indigo-200', textColor: 'text-indigo-700', isMine: true },
+            { key: 'new', label: 'חדשים Today', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
+            { key: 'untouched15', label: 'לא טופל 15 דק\'', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700' },
+            { key: 'src_facebook', label: 'פייסבוק', color: 'bg-blue-700', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-800' },
+            { key: 'src_google', label: 'גוגל', color: 'bg-sky-600', hoverBg: 'hover:bg-sky-50', borderColor: 'border-sky-200', textColor: 'text-sky-700' },
+            { key: 'src_site', label: 'אתר', color: 'bg-teal-600', hoverBg: 'hover:bg-teal-50', borderColor: 'border-teal-200', textColor: 'text-teal-700' },
+            { key: 'svc_radiation', label: 'קרינה', color: 'bg-amber-600', hoverBg: 'hover:bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700' },
+            { key: 'svc_radon', label: 'ראדון', color: 'bg-violet-600', hoverBg: 'hover:bg-violet-50', borderColor: 'border-violet-200', textColor: 'text-violet-700' },
+            { key: 'hot', label: 'חם', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700', icon: 'flame' },
+          ].map((chip) => {
+            const isActive = chip.isMine ? onlyMine : quickFilter === chip.key;
+            return (
+              <button
+                key={chip.key}
+                onClick={() => {
+                  if (chip.isMine) { setOnlyMine((v) => !v); }
+                  else { setQuickFilter((v) => v === chip.key ? '' : chip.key); }
+                }}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-bold transition-all ${
+                  isActive
+                    ? `${chip.color} text-white border-transparent shadow-sm`
+                    : `bg-white ${chip.textColor} ${chip.borderColor} ${chip.hoverBg}`
+                }`}
+              >
+                {chip.icon === 'flame' && <span className="inline-block mr-0.5">&#128293;</span>}
+                {chip.label}
+              </button>
+            );
+          })}
+
+          {/* Dropdown filters */}
+          <select className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-400" value={filterSource} onChange={(e) => setFilterSource(e.target.value)}>
+            <option value="">מקור: הכל</option>
+            {sources.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-400" value={filterLeadStatus} onChange={(e) => setFilterLeadStatus(e.target.value)}>
+            <option value="">סטטוס: הכל</option>
+            <option value="NEW">חדש</option>
+            <option value="CONTACTED">נוצר קשר</option>
+            <option value="FU_1">פולואפ 1</option>
+            <option value="FU_2">פולואפ 2</option>
+            <option value="QUOTE_SENT">הצעה נשלחה</option>
+            <option value="NEGOTIATION">משא ומתן</option>
+            <option value="WON">זכייה</option>
+            <option value="LOST">אבוד</option>
+            <option value="NOT_RELEVANT">לא רלוונטי</option>
+          </select>
+          <select className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-400" value={filterAssignedUser} onChange={(e) => setFilterAssignedUser(e.target.value)}>
+            <option value="">נציג: הכל</option>
+            {users.map((u) => <option key={u.id} value={u.name}>{u.name}</option>)}
+          </select>
+          <select className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium outline-none focus:border-blue-400" value={filterServiceType} onChange={(e) => setFilterServiceType(e.target.value)}>
+            <option value="">שירות: הכל</option>
+            {serviceTypes.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* ════════════════════════════════════════════════
+          LEADS TABLE — Full width with expandable rows
+         ════════════════════════════════════════════════ */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-md overflow-hidden">
+        {/* Table title */}
+        <div className="bg-gradient-to-l from-slate-50 to-white border-b border-slate-100 px-5 py-3 flex items-center justify-between">
+          <span className="font-extrabold text-base text-slate-800">טבלת לידים</span>
+          <span className="text-xs text-slate-400">{quickFiltered.length} מתוך {leads.length}</span>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse" dir="rtl">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-100 border-b-2 border-slate-200">
+                <th className="px-2 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap" style={{ width: '30px' }}>&#128293;</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שם</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">טלפון</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שירות</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">מקור</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">סטטוס</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">נציג</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">קשר אחרון</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">משימה הבאה</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">&#8362;</th>
+                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">פעולות</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quickFiltered.length === 0 && (
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-slate-400">
+                  <div className="text-lg mb-1">&#128269;</div>
+                  <div>לא נמצאו לידים</div>
+                </td></tr>
+              )}
+              {quickFiltered.map((lead) => {
+                const s = (lead.leadStatus || lead.status || 'NEW').toString();
+                const isExpanded = expandedLeadId === lead.id;
+                const isHot = s === 'NEGOTIATION' || s === 'QUOTE_SENT' || s === 'CONTACTED';
+                return (
+                  <React.Fragment key={lead.id}>
+                    {/* ── Main row ── */}
+                    <tr
+                      className={`border-b border-slate-100/80 cursor-pointer transition-colors ${isExpanded ? 'ring-2 ring-inset ring-blue-400 border-b-0' : ''} ${rowBgByStatus(s)} hover:brightness-95`}
+                      onClick={() => toggleExpandLead(lead)}
+                    >
+                      <td className="px-2 py-2.5 text-center">
+                        {isHot && <span className="text-base" title="ליד חם">&#128293;</span>}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          <div>
+                            <div className="font-bold text-slate-900 text-[13px]">{lead.fullName || lead.name}</div>
+                            {lead.company && <div className="text-[10px] text-slate-500 mt-0.5">{lead.company}</div>}
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        {lead.phone ? (
+                          <span className="text-[13px] font-medium text-slate-700" dir="ltr">{phoneToDisplay(lead.phone)}</span>
+                        ) : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-[13px] text-slate-700 font-medium">{lead.serviceType || lead.service || '—'}</td>
+                      <td className="px-3 py-2.5 text-[13px] text-slate-600">{lead.source || '—'}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-extrabold shadow-sm ${statusBadge(s)}`}>
+                          {statusLabel(s)}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-[12px] text-slate-600 font-medium">{leadAssigneeLabel(lead)}</td>
+                      <td className="px-3 py-2.5 text-[12px] text-slate-500">{timeAgo(lead.updatedAt || lead.createdAt)}</td>
+                      <td className="px-3 py-2.5 text-[12px] text-slate-500">
+                        {lead.nextFollowUpDate
+                          ? new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-[12px] font-bold text-slate-700" dir="ltr">
+                        {(lead as any).estimatedValue ? `${(lead as any).estimatedValue.toLocaleString()}` : '—'}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                          {lead.phone && <a title="התקשר" href={phoneToTelHref(lead.phone) || undefined} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-100 transition"><Phone className="h-3.5 w-3.5" /></a>}
+                          {lead.phone && <a title="WhatsApp" href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-green-600 hover:bg-green-100 transition"><MessageCircle className="h-3.5 w-3.5" /></a>}
+                          {lead.email && <a title="מייל" href={`mailto:${lead.email}`} className="rounded-md p-1.5 text-orange-500 hover:bg-orange-100 transition"><Mail className="h-3.5 w-3.5" /></a>}
+                          <button title="צור הצעה" onClick={() => createQuoteFromLead(lead)} className="rounded-md p-1.5 text-purple-600 hover:bg-purple-100 transition"><FileText className="h-3.5 w-3.5" /></button>
+                          <button title="פולואפ" onClick={() => updateNextFollowUp(lead)} className="rounded-md p-1.5 text-cyan-600 hover:bg-cyan-100 transition"><Calendar className="h-3.5 w-3.5" /></button>
+                          <button title="מחק" onClick={() => deleteLead(lead)} className="rounded-md p-1.5 text-red-400 hover:bg-red-100 hover:text-red-600 transition"><X className="h-3.5 w-3.5" /></button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* ── Expanded detail card ── */}
+                    {isExpanded && (
+                      <tr>
+                        <td colSpan={11} className="p-0">
+                          <div className="border-t-2 border-blue-400" dir="rtl">
+                            <div className="flex flex-col lg:flex-row">
+
+                              {/* ═══════════ RIGHT SIDE — Lead info (light bg) ═══════════ */}
+                              <div className="flex-1 min-w-0 bg-white p-6">
+
+                                {/* ── Header: Name + Status ── */}
+                                <div className="flex items-start justify-between mb-5">
+                                  <div className="flex items-center gap-3">
+                                    <div className="rounded-full p-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #e0e7ff, #c7d2fe)' }}>
+                                      <UserCircle2 className="h-7 w-7 text-indigo-600" />
+                                    </div>
+                                    <div>
+                                      <div className="text-xl font-extrabold text-slate-900">{lead.fullName || lead.name}</div>
+                                      {lead.company && <div className="text-sm text-slate-500 mt-0.5">{lead.company}</div>}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <span className={`rounded-lg px-4 py-1.5 text-xs font-extrabold shadow-sm ${statusBadge(s)}`}>{statusLabel(s)}</span>
+                                    <button onClick={() => setExpandedLeadId(null)} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"><X className="h-4 w-4" /></button>
+                                  </div>
+                                </div>
+
+                                {/* ── Key info strip ── */}
+                                <div className="rounded-xl bg-slate-50 border border-slate-100 p-4 mb-4">
+                                  <div className="flex flex-wrap gap-x-8 gap-y-3 text-[13px]">
+                                    {lead.phone && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-blue-100 p-1.5"><Phone className="h-3 w-3 text-blue-600" /></div>
+                                        <span className="text-slate-400">טלפון:</span>
+                                        <span className="font-bold text-slate-800" dir="ltr">{phoneToDisplay(lead.phone)}</span>
+                                      </div>
+                                    )}
+                                    {lead.email && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-orange-100 p-1.5"><Mail className="h-3 w-3 text-orange-500" /></div>
+                                        <span className="text-slate-400">מייל:</span>
+                                        <span className="font-bold text-blue-600 text-xs" dir="ltr">{lead.email}</span>
+                                      </div>
+                                    )}
+                                    {lead.source && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-purple-100 p-1.5"><Zap className="h-3 w-3 text-purple-600" /></div>
+                                        <span className="text-slate-400">מקור:</span>
+                                        <span className="font-bold text-slate-800">{lead.source}</span>
+                                      </div>
+                                    )}
+                                    {(lead.serviceType || lead.service) && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-amber-100 p-1.5"><Star className="h-3 w-3 text-amber-600" /></div>
+                                        <span className="text-slate-400">שירות:</span>
+                                        <span className="font-bold text-slate-800">{lead.serviceType || lead.service}</span>
+                                      </div>
+                                    )}
+                                    <div className="flex items-center gap-2">
+                                      <div className="rounded-full bg-emerald-100 p-1.5"><Users className="h-3 w-3 text-emerald-600" /></div>
+                                      <span className="text-slate-400">נציג:</span>
+                                      <span className="font-bold text-slate-800">{leadAssigneeLabel(lead)}</span>
+                                    </div>
+                                    {lead.createdAt && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-slate-200 p-1.5"><Calendar className="h-3 w-3 text-slate-600" /></div>
+                                        <span className="text-slate-400">כניסה:</span>
+                                        <span className="font-bold text-slate-800">{new Date(lead.createdAt).toLocaleDateString('he-IL')}</span>
+                                      </div>
+                                    )}
+                                    {(lead.updatedAt || lead.createdAt) && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-cyan-100 p-1.5"><Clock3 className="h-3 w-3 text-cyan-600" /></div>
+                                        <span className="text-slate-400">קשר אחרון:</span>
+                                        <span className="font-bold text-slate-800">{timeAgo(lead.updatedAt || lead.createdAt)}</span>
+                                      </div>
+                                    )}
+                                    {(lead.address || lead.city) && (
+                                      <div className="flex items-center gap-2">
+                                        <div className="rounded-full bg-rose-100 p-1.5"><MapPin className="h-3 w-3 text-rose-500" /></div>
+                                        <span className="text-slate-400">כתובת:</span>
+                                        <span className="font-bold text-slate-800">{[lead.address, lead.city].filter(Boolean).join(', ')}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* ── Followup section (prominent) ── */}
+                                <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 mb-4">
+                                  <div className="flex items-center justify-between flex-wrap gap-3">
+                                    <div className="flex items-center gap-2">
+                                      <CalendarDays className="h-5 w-5 text-cyan-600" />
+                                      <span className="text-sm font-bold text-cyan-800">פולואפ הבא:</span>
+                                      {lead.nextFollowUpDate ? (
+                                        <span className="text-lg font-extrabold text-cyan-900">{new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')}</span>
+                                      ) : (
+                                        <span className="text-sm text-slate-400">לא נקבע</span>
+                                      )}
+                                    </div>
+                                    <div className="flex gap-2 flex-wrap">
+                                      <button onClick={() => setFollowUp(lead, 1)} className="rounded-lg bg-cyan-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-cyan-700 transition shadow-sm">+2 ימים</button>
+                                      <button onClick={() => setFollowUp(lead, 2)} className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-sky-700 transition shadow-sm">+7 ימים</button>
+                                      <button onClick={() => updateNextFollowUp(lead)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition">תאריך מותאם</button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* ── Notes ── */}
+                                <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <ClipboardList className="h-4 w-4 text-slate-400" />
+                                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">הערות / תקציר</span>
+                                  </div>
+                                  {lead.notes ? (
+                                    <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{lead.notes}</div>
+                                  ) : (
+                                    <div className="text-xs text-slate-300">אין הערות</div>
+                                  )}
+                                </div>
+
+                                {/* ── AI Placeholder ── */}
+                                <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white p-3 flex items-center gap-3">
+                                  <div className="rounded-full bg-amber-100 p-2"><Zap className="h-4 w-4 text-amber-500" /></div>
+                                  <div>
+                                    <div className="text-xs font-bold text-slate-500">פולואפ AI</div>
+                                    <div className="text-[11px] text-slate-300">תסריט שיחה, המלצת פעולה, ניתוח התנגדויות — בקרוב</div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* ═══════════ LEFT SIDE — Actions (dark bg) ═══════════ */}
+                              <div className="w-full lg:w-[280px] shrink-0 p-5 flex flex-col gap-3" style={{ background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)' }}>
+                                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">פעולות</div>
+
+                                {/* WhatsApp — big green */}
+                                {lead.phone && (
+                                  <a href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer"
+                                    className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110"
+                                    style={{ background: 'linear-gradient(135deg, #25D366, #128C7E)' }}>
+                                    <MessageCircle className="h-5 w-5" />
+                                    <span>פתח WhatsApp</span>
+                                  </a>
+                                )}
+
+                                {/* Create quote — orange */}
+                                <button onClick={() => createQuoteFromLead(lead)}
+                                  className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110"
+                                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}>
+                                  <FileText className="h-5 w-5" />
+                                  <span>צור הצעת מחיר</span>
+                                </button>
+
+                                {/* Close won — green */}
+                                <button onClick={() => patchLead(lead.id, { leadStatus: 'WON' })}
+                                  className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110"
+                                  style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}>
+                                  <CheckCircle2 className="h-5 w-5" />
+                                  <span>סגור הצלחה</span>
+                                </button>
+
+                                {/* Close lost — red */}
+                                <button onClick={() => patchLead(lead.id, { leadStatus: 'LOST' })}
+                                  className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110"
+                                  style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}>
+                                  <X className="h-5 w-5" />
+                                  <span>סגור אבוד</span>
+                                </button>
+
+                                {/* Divider */}
+                                <div className="border-t border-white/10 my-1" />
+
+                                {/* Secondary actions — smaller */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  {lead.phone && (
+                                    <a href={phoneToTelHref(lead.phone) || undefined}
+                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                      <Phone className="h-3.5 w-3.5" />התקשר
+                                    </a>
+                                  )}
+                                  {lead.email && (
+                                    <a href={`mailto:${lead.email}`}
+                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                      <Mail className="h-3.5 w-3.5" />מייל
+                                    </a>
+                                  )}
+                                  <button onClick={() => startEditLead(lead)}
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    <Pencil className="h-3.5 w-3.5" />ערוך
+                                  </button>
+                                  <button onClick={() => patchLead(lead.id, { leadStatus: 'CONTACTED' })}
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />טופל
+                                  </button>
+                                  <button onClick={() => convertToCustomer(lead)}
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    <UserPlus className="h-3.5 w-3.5" />לקוח
+                                  </button>
+                                  <button onClick={() => openProjectFromLead(lead)}
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    <FolderKanban className="h-3.5 w-3.5" />פרויקט
+                                  </button>
+                                </div>
+                              </div>
+
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ════════════════════════════════════════════════
+          MOBILE CARDS
+         ════════════════════════════════════════════════ */}
+      <div className="space-y-3 lg:hidden">
+        {quickFiltered.map((lead) => {
+          const s = (lead.leadStatus || lead.status || 'NEW').toString();
+          const isHot = s === 'NEGOTIATION' || s === 'QUOTE_SENT' || s === 'CONTACTED';
+          return (
+            <div key={lead.id} onClick={() => onOpenLead(lead)} className={`rounded-2xl border border-slate-200 bg-white p-4 cursor-pointer active:bg-slate-50 shadow-sm ${rowBgByStatus(s)}`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  {isHot && <span>&#128293;</span>}
+                  <div className="font-extrabold text-sm text-slate-900">{lead.fullName || lead.name}</div>
+                </div>
+                <span className={`rounded-md px-2.5 py-1 text-[10px] font-extrabold shadow-sm ${statusBadge(s)}`}>{statusLabel(s)}</span>
+              </div>
+              {lead.company && <div className="text-xs text-slate-500 mb-2">{lead.company}</div>}
+              <div className="grid grid-cols-2 gap-1.5 text-xs text-slate-600">
+                {lead.phone && <div className="flex items-center gap-1"><Phone className="h-3 w-3 text-slate-400" />{phoneToDisplay(lead.phone)}</div>}
+                {lead.source && <div className="flex items-center gap-1"><Zap className="h-3 w-3 text-slate-400" />{lead.source}</div>}
+                {(lead.serviceType || lead.service) && <div className="flex items-center gap-1"><Star className="h-3 w-3 text-slate-400" />{lead.serviceType || lead.service}</div>}
+                <div className="flex items-center gap-1"><Users className="h-3 w-3 text-slate-400" />{leadAssigneeLabel(lead)}</div>
+              </div>
+              <div className="mt-3 flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                {lead.phone && <a href={phoneToTelHref(lead.phone) || undefined} className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-600"><Phone className="h-3.5 w-3.5" /></a>}
+                {lead.phone && <a href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer" className="rounded-lg border border-green-200 bg-green-50 p-2 text-green-600"><MessageCircle className="h-3.5 w-3.5" /></a>}
+                {lead.email && <a href={`mailto:${lead.email}`} className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-orange-500"><Mail className="h-3.5 w-3.5" /></a>}
+                <button onClick={() => createQuoteFromLead(lead)} className="rounded-lg border border-purple-200 bg-purple-50 p-2 text-purple-600"><FileText className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ════════════════════════════════════════════════
+          MODALS — Create / Edit
+         ════════════════════════════════════════════════ */}
+      <Modal open={open} onClose={() => setOpen(false)} title="ליד חדש">
         <div className="space-y-3">
-          <FormField label="שם מלא">
-            <Input placeholder="שם מלא" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
-          </FormField>
-          <FormField label="חברה / לקוח">
-            <Input placeholder="חברה / לקוח" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
-          </FormField>
-          <FormField label="טלפון">
-            <PhoneInput placeholder="טלפון" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
-          </FormField>
-          <FormField label="כתובת אתר">
-            <Input placeholder="כתובת אתר" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} />
-          </FormField>
-          <FormField label="סוג שירות">
-            <Select value={form.serviceType} onChange={(v) => setForm({ ...form, serviceType: v })} options={['קרינה', 'אקוסטיקה / רעש', 'אסבסט', 'איכות אוויר', 'ראדון', 'ריח', 'קרקע', 'אחר']} />
-          </FormField>
-          <FormField label="מקור ליד">
-            <Select value={form.source} onChange={(v) => setForm({ ...form, source: v })} options={['טלפון', 'אתר', 'וואטסאפ', 'פייסבוק', 'גוגל', 'לקוח חוזר', 'הפניה', 'אחר']} />
-          </FormField>
-          {error && <div className="rounded-2xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
-          <Button className="w-full" style={{ background: galit.primary }} onClick={addLead}>
-            {loading ? 'שומר...' : 'שמור ליד'}
-          </Button>
+          <FormField label="שם מלא"><Input placeholder="שם מלא" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></FormField>
+          <FormField label="חברה / לקוח"><Input placeholder="חברה / לקוח" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></FormField>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="טלפון"><PhoneInput placeholder="טלפון" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} /></FormField>
+            <FormField label="אימייל"><Input placeholder="אימייל" type="email" dir="ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FormField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="עיר"><Input placeholder="עיר" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></FormField>
+            <FormField label="כתובת אתר"><Input placeholder="כתובת אתר" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} /></FormField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="סוג שירות"><Select value={form.serviceType} onChange={(v) => setForm({ ...form, serviceType: v })} options={['קרינה', 'אקוסטיקה / רעש', 'אסבסט', 'איכות אוויר', 'ראדון', 'ריח', 'קרקע', 'אחר']} /></FormField>
+            <FormField label="מקור"><Select value={form.source} onChange={(v) => setForm({ ...form, source: v })} options={['טלפון', 'אתר', 'וואטסאפ', 'פייסבוק', 'גוגל', 'לקוח חוזר', 'הפניה', 'אחר']} /></FormField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="נציג">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400" value={form.assignedUserId} onChange={(e) => setForm({ ...form, assignedUserId: e.target.value })}>
+                <option value="">ללא שיוך</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </FormField>
+            <FormField label="סטטוס">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400" value={form.leadStatus} onChange={(e) => setForm({ ...form, leadStatus: e.target.value })}>
+                <option value="NEW">חדש</option><option value="CONTACTED">נוצר קשר</option><option value="FU_1">פולואפ 1</option><option value="FU_2">פולואפ 2</option><option value="QUOTE_SENT">הצעה נשלחה</option><option value="WON">זכייה</option><option value="LOST">אבוד</option><option value="NOT_RELEVANT">לא רלוונטי</option>
+              </select>
+            </FormField>
+          </div>
+          <FormField label="הערות"><textarea className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 min-h-[60px] resize-y" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="הערות..." /></FormField>
+          {error && <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{error}</div>}
+          <Button className="w-full rounded-xl" style={{ background: galit.primary }} onClick={addLead}>{loading ? 'שומר...' : 'שמור ליד'}</Button>
         </div>
       </Modal>
 
       <Modal open={editOpen} onClose={() => setEditOpen(false)} title="עריכת ליד">
         <div className="space-y-3">
-          <FormField label="שם מלא">
-            <Input placeholder="שם מלא" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
-          </FormField>
-          <FormField label="חברה / לקוח">
-            <Input placeholder="חברה / לקוח" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
-          </FormField>
-          <FormField label="טלפון">
-            <PhoneInput placeholder="טלפון" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
-          </FormField>
-          <FormField label="כתובת אתר">
-            <Input placeholder="כתובת אתר" value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value })} />
-          </FormField>
-          <FormField label="סוג שירות">
-            <Select value={form.serviceType} onChange={(v) => setForm({ ...form, serviceType: v })} options={['קרינה', 'אקוסטיקה / רעש', 'אסבסט', 'איכות אוויר', 'ראדון', 'ריח', 'קרקע', 'אחר']} />
-          </FormField>
-          <FormField label="מקור ליד">
-            <Select value={form.source} onChange={(v) => setForm({ ...form, source: v })} options={['טלפון', 'אתר', 'וואטסאפ', 'פייסבוק', 'גוגל', 'לקוח חוזר', 'הפניה', 'אחר']} />
-          </FormField>
-          {error && <div className="rounded-2xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
-          <Button className="w-full" style={{ background: galit.primary }} onClick={saveEditedLead}>
-            {loading ? 'שומר...' : 'שמור שינויים'}
-          </Button>
-        </div>
-      </Modal>
-
-      <Card>
-        <CardContent className="p-3 sm:p-4">
-          {(error || success) && (
-            <div
-              className={`mb-4 rounded-2xl px-4 py-3 text-sm ${
-                error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'
-              }`}
-            >
-              {error || success}
-            </div>
-          )}
-
-          <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5">
-            <FormField label="מקור ליד">
-              <Select
-                value={filterSource || 'הכל'}
-                onChange={(v) => setFilterSource(v === 'הכל' ? '' : v)}
-                options={['הכל', ...sources]}
-              />
-            </FormField>
-            <FormField label="סוג שירות">
-              <Select
-                value={filterServiceType || 'הכל'}
-                onChange={(v) => setFilterServiceType(v === 'הכל' ? '' : v)}
-                options={['הכל', ...serviceTypes]}
-              />
-            </FormField>
-            <FormField label="אחראי">
-              <Select
-                value={filterAssignedUser || 'הכל'}
-                onChange={(v) => setFilterAssignedUser(v === 'הכל' ? '' : v)}
-                options={['הכל', ...users.map((u) => u.name)]}
-              />
-            </FormField>
-            <FormField label="סטטוס ליד">
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
-                value={filterLeadStatus || ''}
-                onChange={(e) => setFilterLeadStatus(e.target.value)}
-              >
-                <option value="">הכל</option>
-                <option value="NEW">חדש</option>
-                <option value="FU_1">פולואפ 1</option>
-                <option value="FU_2">פולואפ 2</option>
-                <option value="QUOTE_SENT">הצעה נשלחה</option>
-                <option value="WON">זכייה</option>
-                <option value="LOST">אבוד</option>
-                <option value="NOT_RELEVANT">לא רלוונטי</option>
+          <FormField label="שם מלא"><Input placeholder="שם מלא" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} /></FormField>
+          <FormField label="חברה / לקוח"><Input placeholder="חברה / לקוח" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></FormField>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="טלפון"><PhoneInput placeholder="טלפון" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} /></FormField>
+            <FormField label="אימייל"><Input placeholder="אימייל" type="email" dir="ltr" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></FormField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="סוג שירות"><Select value={form.serviceType} onChange={(v) => setForm({ ...form, serviceType: v })} options={['קרינה', 'אקוסטיקה / רעש', 'אסבסט', 'איכות אוויר', 'ראדון', 'ריח', 'קרקע', 'אחר']} /></FormField>
+            <FormField label="מקור"><Select value={form.source} onChange={(v) => setForm({ ...form, source: v })} options={['טלפון', 'אתר', 'וואטסאפ', 'פייסבוק', 'גוגל', 'לקוח חוזר', 'הפניה', 'אחר']} /></FormField>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <FormField label="נציג">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400" value={form.assignedUserId} onChange={(e) => setForm({ ...form, assignedUserId: e.target.value })}>
+                <option value="">ללא שיוך</option>
+                {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </FormField>
-            <FormField label="תאריך יצירה">
-              <Input type="date" value={filterCreatedAt} onChange={(e) => setFilterCreatedAt(e.target.value)} placeholder="תאריך יצירה" />
+            <FormField label="סטטוס">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400" value={form.leadStatus} onChange={(e) => setForm({ ...form, leadStatus: e.target.value })}>
+                <option value="NEW">חדש</option><option value="CONTACTED">נוצר קשר</option><option value="FU_1">פולואפ 1</option><option value="FU_2">פולואפ 2</option><option value="QUOTE_SENT">הצעה נשלחה</option><option value="NEGOTIATION">משא ומתן</option><option value="WON">זכייה</option><option value="LOST">אבוד</option><option value="NOT_RELEVANT">לא רלוונטי</option>
+              </select>
             </FormField>
           </div>
-
-          <FormField label="חיפוש">
-            <div className="relative mb-4">
-              <Search className="absolute right-3 top-3 h-4 w-4 text-slate-400" />
-              <Input className="pr-9" placeholder="חיפוש לפי שם, חברה, שירות או עיר" value={search} onChange={(e) => setSearch(e.target.value)} />
-            </div>
-          </FormField>
-          <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>שם</TableHead>
-                  <TableHead>טלפון</TableHead>
-                  <TableHead>עיר</TableHead>
-                  <TableHead>מקור</TableHead>
-                  <TableHead>סוג שירות</TableHead>
-                  <TableHead>משויך ל</TableHead>
-                  <TableHead>סטטוס</TableHead>
-                  <TableHead>פולואפ הבא</TableHead>
-                  <TableHead>נוצר</TableHead>
-                  <TableHead>פעולות</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((lead) => (
-                  <TableRow
-                    key={lead.id}
-                    className="cursor-pointer hover:bg-slate-50"
-                    onClick={() => onOpenLead(lead)}
-                  >
-                    <TableCell className="font-medium">{lead.fullName || lead.name}</TableCell>
-                    <TableCell>
-                      {lead.phone ? (
-                        <div className="space-y-1">
-                          <a
-                            href={phoneToTelHref(lead.phone) || undefined}
-                            className="hover:underline"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {phoneToDisplay(lead.phone)}
-                          </a>
-                          <div className="text-xs">
-                            <a
-                              href={phoneToWhatsAppHref(lead.phone) || undefined}
-                              className="text-sky-700 hover:underline"
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              וואטסאפ
-                            </a>
-                          </div>
-                        </div>
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>{lead.city || '-'}</TableCell>
-                    <TableCell>{lead.source || '-'}</TableCell>
-                    <TableCell>{lead.serviceType || lead.service || '-'}</TableCell>
-                    <TableCell>
-                      {leadAssigneeLabel(lead)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className="bg-slate-100 text-slate-700">
-                        {statusLabel(String(lead.leadStatus || lead.status || '-'))}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString('en-CA') : '-'}
-                    </TableCell>
-                    <TableCell>{lead.createdAt ? new Date(lead.createdAt).toLocaleDateString('en-CA') : '-'}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="rounded-xl border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                          onClick={() => onOpenLead(lead)}
-                        >
-                          פתח ליד
-                        </button>
-                        <button
-                          className="rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800 hover:bg-cyan-100"
-                          onClick={() => setFollowUp(lead, 1)}
-                        >
-                          קבע פולואפ 1
-                        </button>
-                        <button
-                          className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100"
-                          onClick={() => setFollowUp(lead, 2)}
-                        >
-                          קבע פולואפ 2
-                        </button>
-                        <button
-                          className="rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
-                          onClick={() => updateNextFollowUp(lead)}
-                        >
-                          עדכן פולואפ הבא
-                        </button>
-                        <button
-                          className="rounded-xl px-3 py-1 text-xs font-semibold text-white"
-                          style={{ background: galit.primary }}
-                          onClick={() => createQuoteFromLead(lead)}
-                        >
-                          צור הצעת מחיר
-                        </button>
-                        <button
-                          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
-                          onClick={() => convertToCustomer(lead)}
-                        >
-                          הפוך ללקוח
-                        </button>
-                        <button
-                          className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100"
-                          onClick={() => openProjectFromLead(lead)}
-                        >
-                          פתח פרויקט
-                        </button>
-                        <button
-                          className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-800 hover:bg-rose-100"
-                          onClick={() => patchLead(lead.id, { leadStatus: 'LOST' })}
-                        >
-                          סמן כאבוד
-                        </button>
-                        <button
-                          className="rounded-xl border border-orange-300 bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-800 hover:bg-orange-100"
-                          onClick={() => patchLead(lead.id, { leadStatus: 'NOT_RELEVANT' })}
-                        >
-                          סמן כלא רלוונטי
-                        </button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-
-          <div className="space-y-3 md:hidden">
-            {filtered.map((lead) => {
-              const linkedCustomer = findCustomerByLead(lead, customers);
-              const s = (lead.leadStatus || lead.status || '').toString();
-              return (
-                <button
-                  key={lead.id}
-                  onClick={() => onOpenLead(lead)}
-                  className="w-full rounded-2xl border p-4 text-right transition hover:bg-slate-50"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold">{lead.fullName || lead.name}</div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {lead.phone ? (
-                          <div className="space-y-1">
-                            <a
-                              href={phoneToTelHref(lead.phone) || undefined}
-                              className="hover:underline"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {phoneToDisplay(lead.phone)}
-                            </a>
-                            <div className="text-xs">
-                              <a
-                                href={phoneToWhatsAppHref(lead.phone) || undefined}
-                                className="text-sky-700 hover:underline"
-                                target="_blank"
-                                rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                וואטסאפ
-                              </a>
-                            </div>
-                          </div>
-                        ) : (
-                          '-'
-                        )}
-                      </div>
-                    </div>
-                      <Badge className="bg-slate-100 text-slate-700">{statusLabel(s || '-')}</Badge>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <div className="text-slate-400">חברה</div>
-                      <div className="font-medium">{lead.company || '-'}</div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400">שירות</div>
-                      <div className="font-medium">{lead.serviceType || lead.service || '-'}</div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400">מקור</div>
-                      <div className="font-medium">{lead.source || '-'}</div>
-                    </div>
-                    <div>
-                      <div className="text-slate-400">אחראי</div>
-                      <div className="font-medium">{leadAssigneeLabel(lead)}</div>
-                    </div>
-                    <div className="col-span-2">
-                      <div className="text-slate-400">אתר</div>
-                      <div className="font-medium">{lead.site || '-'}</div>
-                    </div>
-                    {linkedCustomer && (
-                      <div className="col-span-2 rounded-xl bg-slate-50 p-3">
-                        <div className="text-slate-400">לקוח משויך</div>
-                        <div className="font-medium">{linkedCustomer.name}</div>
-                      </div>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-6">
-            <h2 className="mb-3 text-lg font-semibold" style={{ color: galit.text }}>צינור לידים</h2>
-            <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
-              {stages.map((stage) => (
-                <div key={stage} className="rounded-2xl border bg-white p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-semibold">{statusLabel(stage)}</span>
-                    <span className="text-xs text-slate-400">{(leadsByStage[stage] || []).length}</span>
-                  </div>
-                  <div className="space-y-2">
-                    {(leadsByStage[stage] || []).map((lead) => (
-                      <div key={lead.id} className="rounded-xl border bg-slate-50 p-2 text-xs">
-                        <div className="font-semibold">{lead.name}</div>
-                        <div className="text-slate-500">{lead.service} · {lead.site}</div>
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {stages
-                            .filter((s) => s !== stage)
-                            .map((target) => (
-                              <button
-                                key={target}
-                                onClick={() => moveLeadStage(lead, target)}
-                                className="rounded-full bg-white px-2 py-0.5 text-[10px] text-slate-500 hover:bg-slate-100"
-                              >
-                                {statusLabel(target)}
-                              </button>
-                            ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          <FormField label="הערות"><textarea className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 min-h-[60px] resize-y" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="הערות..." /></FormField>
+          {error && <div className="rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">{error}</div>}
+          <Button className="w-full rounded-xl" style={{ background: galit.primary }} onClick={saveEditedLead}>{loading ? 'שומר...' : 'שמור שינויים'}</Button>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -5369,6 +5733,29 @@ function CustomersPage({
 
   const serverTypeFilter = typeFilter === 'הכל' ? undefined : typeFilterToEnum(typeFilter);
 
+  const buildLocalCustomerPage = useCallback(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    const type = (serverTypeFilter || '').trim().toUpperCase();
+    const filtered = customers.filter((c) => {
+      if (type && (c.type || '').toString().toUpperCase() !== type) return false;
+      if (!q) return true;
+      return (
+        String(c.name || '').toLowerCase().includes(q) ||
+        String(c.phone || '').toLowerCase().includes(q) ||
+        String(c.email || '').toLowerCase().includes(q) ||
+        String(c.city || '').toLowerCase().includes(q) ||
+        String(c.companyRegNumber || '').toLowerCase().includes(q) ||
+        String(c.contactName || '').toLowerCase().includes(q)
+      );
+    });
+    const sorted = [...filtered].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'));
+    const total = sorted.length;
+    const start = Math.max(0, (listPage - 1) * CUSTOMER_PAGE_SIZE);
+    const pageItems = sorted.slice(start, start + CUSTOMER_PAGE_SIZE);
+    setPagedRows(pageItems);
+    setPagedTotal(total);
+  }, [customers, debouncedSearch, serverTypeFilter, listPage]);
+
   const loadCustomerPage = useCallback(async () => {
     setListLoading(true);
     try {
@@ -5381,15 +5768,20 @@ function CustomersPage({
       const res = await apiFetch(apiUrl(`/customers/paged?${params.toString()}`), { authUser: currentUser });
       if (!res.ok) throw new Error('paged');
       const data = (await res.json()) as { items?: Customer[]; total?: number };
-      setPagedRows(Array.isArray(data.items) ? data.items : []);
-      setPagedTotal(typeof data.total === 'number' ? data.total : 0);
+      const items = Array.isArray(data.items) ? data.items : [];
+      const total = typeof data.total === 'number' ? data.total : 0;
+      if (total === 0 && customers.length > 0 && !debouncedSearch && !serverTypeFilter) {
+        buildLocalCustomerPage();
+      } else {
+        setPagedRows(items);
+        setPagedTotal(total);
+      }
     } catch {
-      setPagedRows([]);
-      setPagedTotal(0);
+      buildLocalCustomerPage();
     } finally {
       setListLoading(false);
     }
-  }, [currentUser, listPage, debouncedSearch, serverTypeFilter]);
+  }, [currentUser, listPage, debouncedSearch, serverTypeFilter, customers.length, buildLocalCustomerPage]);
 
   useEffect(() => {
     void loadCustomerPage();
@@ -6034,6 +6426,7 @@ function QuotesPage({
   const [templateLineItems, setTemplateLineItems] = useState<QuoteTemplateLineItem[]>([]);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [docxMergeBusy, setDocxMergeBusy] = useState(false);
   const lastAutoTemplateKeyRef = useRef('');
 
   const [form, setForm] = useState({
@@ -6116,6 +6509,97 @@ function QuotesPage({
     return Math.max(0, withVat);
   }, [form.amountBeforeVat, form.discountType, form.discountValue, form.vatPercent]);
 
+  const downloadMergedDocx = async () => {
+    const tpl =
+      quoteTemplatesList.length === 1
+        ? quoteTemplatesList[0]
+        : quoteTemplatesList.find((t: { id: string }) => t.id === selectedTemplateId);
+    if (!tpl?.docxTemplatePath) {
+      setError('לתבנית הנבחרת אין קובץ Word מוגדר.');
+      return;
+    }
+    const customer = customers.find((c) => c.id === form.customerId);
+    if (!customer) {
+      setError('יש לבחור לקוח לפני הורדת Word.');
+      return;
+    }
+    setDocxMergeBusy(true);
+    setError('');
+    try {
+      const fmtMoney = (n: number) =>
+        n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const base = parseCurrencyInput(form.amountBeforeVat) ?? 0;
+      const vat = Number(form.vatPercent) || 0;
+      const withVat = base * (1 + vat / 100);
+      const discVal = parseCurrencyInput(form.discountValue) ?? 0;
+      let totalAmount = withVat;
+      if (form.discountType === 'CURRENCY') totalAmount = Math.max(0, withVat - discVal);
+      else if (form.discountType === 'PERCENT') totalAmount = Math.max(0, withVat * (1 - discVal / 100));
+      const globalDiscPct = form.discountType === 'PERCENT' ? discVal : 0;
+
+      const mergeData = buildQuoteDocxMergeBody({
+        quoteNumber: form.quoteNumber || '—',
+        contractSurveyNumber: form.quoteNumber || '',
+        quoteDateYmd: form.validityDate,
+        validUntilYmd: form.validityDate,
+        customerName: customer.name,
+        contactName: customer.contactName || '',
+        customerPhone: customer.phone || '',
+        customerEmail: customer.email || '',
+        customerAddress: customer.address || '',
+        customerCity: customer.city || '',
+        contactPhone: (customer.phone || '').trim(),
+        contactEmail: (customer.email || '').trim(),
+        salesRepName: '',
+        paymentTerms: form.paymentTerms || '',
+        notes: form.notes || '',
+        approverName: customer.contactName || '',
+        globalDiscountPercent: globalDiscPct,
+        vatPercent: vat,
+        lineItems: templateLineItems.map((li) => ({
+          code: (li as { code?: string }).code,
+          sku: (li as { sku?: string }).sku,
+          description: li.name,
+          qty: li.quantity,
+          unitPrice: li.unitPrice,
+          discountPct: 0,
+        })),
+        formatMoney: fmtMoney,
+        summaryOverride: {
+          subtotal: base,
+          afterDiscount: base,
+          vatAmount: base * (vat / 100),
+          totalAmount,
+        },
+      });
+
+      const res = await apiFetch(apiUrl(`/quote-templates/${tpl.id}/merge-docx`), {
+        authUser: currentUser,
+        method: 'POST',
+        body: JSON.stringify(mergeData),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({ message: res.statusText }));
+        setError(typeof errBody?.message === 'string' ? errBody.message : 'הורדת Word נכשלה');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeName = (customer.name || 'quote').replace(/[^\u0590-\u05FFa-zA-Z0-9 _-]/g, '').trim() || 'quote';
+      a.href = url;
+      a.download = `הצעת_מחיר_${safeName}_${form.quoteNumber || 'טיוטה'}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      setError('הורדת Word נכשלה');
+    } finally {
+      setDocxMergeBusy(false);
+    }
+  };
+
   const serviceOptionsForQuote = useMemo(() => {
     const s = new Set<string>([...QUOTE_SERVICE_TYPE_OPTIONS]);
     if (form.service?.trim()) s.add(form.service.trim());
@@ -6139,6 +6623,18 @@ function QuotesPage({
     }));
     setTemplateLineItems(lineItems);
     const subtotal = Math.round(lineItems.reduce((a, li) => a + li.quantity * li.unitPrice, 0) * 100) / 100;
+
+    /** תבנית Word בלבד — ללא מיזוג HTML (המסלול הישן נשמר לתבניות ללא DOCX) */
+    if (tpl.docxTemplatePath) {
+      setContentHtml('');
+      setForm((p) => ({
+        ...p,
+        amountBeforeVat: String(subtotal),
+        description: mergedHtmlToPlainDescription(`תבנית Word (DOCX) — ${tpl.name || ''}`),
+      }));
+      return;
+    }
+
     const disc = parseCurrencyInput(form.discountValue) ?? 0;
     const ctx = buildQuoteTemplateContext(
       {
@@ -6803,6 +7299,17 @@ function QuotesPage({
 
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4" dir="rtl">
               <div className="text-sm font-semibold text-slate-800">תבנית הצעת מחיר</div>
+              {(() => {
+                const tplSel =
+                  quoteTemplatesList.length === 1
+                    ? quoteTemplatesList[0]
+                    : quoteTemplatesList.find((t: { id: string }) => t.id === selectedTemplateId);
+                return tplSel?.docxTemplatePath ? (
+                  <p className="mt-1 text-xs text-emerald-800">
+                    נבחרה תבנית Word (DOCX) — המסמך נבנה מקובץ המקור; אין מיזוג HTML.
+                  </p>
+                ) : null;
+              })()}
               <p className="mt-1 text-xs text-slate-600">
                 {templatesLoading ? 'טוען תבניות...' : quoteTemplatesList.length === 0 ? 'אין תבנית פעילה לשירות זה — הוסף בהגדרות › תבניות הצעות מחיר.' : null}
               </p>
@@ -6841,6 +7348,27 @@ function QuotesPage({
                   <Button type="button" variant="outline" disabled={!contentHtml.trim()} onClick={() => setPreviewOpen(true)}>
                     תצוגה מקדימה
                   </Button>
+                  {(() => {
+                    const tplSel =
+                      quoteTemplatesList.length === 1
+                        ? quoteTemplatesList[0]
+                        : quoteTemplatesList.find((t: { id: string }) => t.id === selectedTemplateId);
+                    if (!tplSel?.docxTemplatePath) return null;
+                    return (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={
+                          !form.customerId ||
+                          (!selectedTemplateId && quoteTemplatesList.length > 1) ||
+                          docxMergeBusy
+                        }
+                        onClick={() => void downloadMergedDocx()}
+                      >
+                        {docxMergeBusy ? 'מייצר…' : 'הורד Word (DOCX)'}
+                      </Button>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -9556,7 +10084,7 @@ function SettingsPage({
     { key: 'statuses', label: 'סטטוסים', enabled: true },
     { key: 'targets', label: 'יעדים', enabled: true },
     { key: 'catalog', label: 'פריטים / מחירון', enabled: true },
-    { key: 'templates', label: 'תבניות הצעות מחיר', enabled: true },
+    { key: 'templates', label: 'תבניות Word להצעות מחיר', enabled: true },
     { key: 'system', label: 'מערכת', enabled: true },
   ];
 
@@ -9602,7 +10130,17 @@ function SettingsPage({
     canManageUsers: false,
     canManagePermissions: false,
     canViewAllRecords: false,
+    // SMTP settings
+    mailDisplayName: '',
+    smtpHost: '',
+    smtpPort: '587',
+    smtpUser: '',
+    smtpPassword: '',
+    smtpFrom: '',
+    smtpSecure: false,
   });
+  const [smtpTestMsg, setSmtpTestMsg] = useState('');
+  const [smtpTestBusy, setSmtpTestBusy] = useState(false);
 
   const [transferFromId, setTransferFromId] = useState('');
   const [transferToId, setTransferToId] = useState('');
@@ -9624,19 +10162,19 @@ function SettingsPage({
   const [qtList, setQtList] = useState<any[]>([]);
   const [qtLoading, setQtLoading] = useState(false);
   const [qtError, setQtError] = useState('');
-  const [qtModalOpen, setQtModalOpen] = useState(false);
-  const [qtEditing, setQtEditing] = useState<any | null>(null);
-  const [qtForm, setQtForm] = useState({
-    name: '',
-    serviceType: 'קרינה',
-    isActive: true,
-    introHtml: '',
-    bodyHtml: '',
-    closingHtml: '',
-    termsHtml: '',
-    variablesHelp: QUOTE_TEMPLATE_VARIABLES_HELP,
-    defaultLineItemsJson: '[{"name":"שירות לדוגמה","quantity":1,"unitPrice":1000}]',
-  });
+  const [qtCreate, setQtCreate] = useState({ name: '', serviceType: 'קרינה', isActive: true });
+  const qtCreateDocxRef = useRef<HTMLInputElement | null>(null);
+  const [qtEditOpen, setQtEditOpen] = useState(false);
+  const [qtEdit, setQtEdit] = useState<{
+    id: string;
+    name: string;
+    serviceType: string;
+    isActive: boolean;
+    docxTemplatePath: string;
+  } | null>(null);
+  const qtEditDocxRef = useRef<HTMLInputElement | null>(null);
+  const [qtSaving, setQtSaving] = useState(false);
+  const [qtSampleLoadingId, setQtSampleLoadingId] = useState<string | null>(null);
 
   const loadQuoteTemplates = async () => {
     setQtLoading(true);
@@ -9658,6 +10196,174 @@ function SettingsPage({
     void loadQuoteTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, currentUser.id]);
+
+  const qtWordPayloadBase = () => ({
+    introHtml: null,
+    bodyHtml: null,
+    closingHtml: null,
+    termsHtml: null,
+    variablesHelp: null,
+    defaultLineItems: [],
+  });
+
+  const handleQtCreateSave = async () => {
+    if (!qtCreate.name.trim()) {
+      setQtError('שם תבנית חובה');
+      return;
+    }
+    setQtSaving(true);
+    setQtError('');
+    try {
+      const res = await apiFetch(apiUrl('/quote-templates'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          name: qtCreate.name.trim(),
+          serviceType: qtCreate.serviceType,
+          isActive: qtCreate.isActive,
+          ...qtWordPayloadBase(),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { id?: string };
+      const file = qtCreateDocxRef.current?.files?.[0];
+      if (file && data?.id) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await apiFetch(apiUrl(`/quote-templates/${data.id}/upload-docx`), {
+          method: 'POST',
+          authUser: currentUser,
+          body: fd,
+        });
+        if (!up.ok) throw new Error();
+      }
+      setQtCreate({ name: '', serviceType: 'קרינה', isActive: true });
+      if (qtCreateDocxRef.current) qtCreateDocxRef.current.value = '';
+      await loadQuoteTemplates();
+      setSettingsMsg('התבנית נשמרה');
+      window.setTimeout(() => setSettingsMsg(''), 2500);
+    } catch {
+      setQtError('שמירת תבנית נכשלה');
+    } finally {
+      setQtSaving(false);
+    }
+  };
+
+  const handleQtEditSave = async () => {
+    if (!qtEdit?.id || !qtEdit.name.trim()) {
+      setQtError('שם תבנית חובה');
+      return;
+    }
+    setQtSaving(true);
+    setQtError('');
+    try {
+      const res = await apiFetch(apiUrl(`/quote-templates/${qtEdit.id}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({
+          name: qtEdit.name.trim(),
+          serviceType: qtEdit.serviceType,
+          isActive: qtEdit.isActive,
+          ...qtWordPayloadBase(),
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const file = qtEditDocxRef.current?.files?.[0];
+      if (file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const up = await apiFetch(apiUrl(`/quote-templates/${qtEdit.id}/upload-docx`), {
+          method: 'POST',
+          authUser: currentUser,
+          body: fd,
+        });
+        if (!up.ok) throw new Error();
+        const u = (await up.json()) as { docxTemplatePath?: string };
+        setQtEdit((p) => (p ? { ...p, docxTemplatePath: u.docxTemplatePath || p.docxTemplatePath } : p));
+        if (qtEditDocxRef.current) qtEditDocxRef.current.value = '';
+      }
+      setQtEditOpen(false);
+      setQtEdit(null);
+      await loadQuoteTemplates();
+      setSettingsMsg('התבנית עודכנה');
+      window.setTimeout(() => setSettingsMsg(''), 2500);
+    } catch {
+      setQtError('שמירת תבנית נכשלה');
+    } finally {
+      setQtSaving(false);
+    }
+  };
+
+  const handleQtSampleDocx = async (t: { id: string; docxTemplatePath?: string | null }) => {
+    if (!t.docxTemplatePath) {
+      setQtError('אין קובץ Word לתבנית — העלה קובץ DOCX לפני הפקת דוגמה');
+      return;
+    }
+    setQtSampleLoadingId(t.id);
+    setQtError('');
+    try {
+      const fmtMoney = (n: number) =>
+        n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const mergeData = buildQuoteDocxMergeBody({
+        quoteNumber: 'דוגמה-001',
+        contractSurveyNumber: 'דוגמה-סקר',
+        quoteDateYmd: new Date().toISOString().slice(0, 10),
+        validUntilYmd: new Date().toISOString().slice(0, 10),
+        customerName: 'קוקה קולה',
+        contactName: 'גלית לוי',
+        customerPhone: '050-0000000',
+        customerEmail: 'demo@example.com',
+        customerAddress: 'רחוב לדוגמה 1',
+        customerCity: 'חיפה',
+        contactPhone: '052-5556664',
+        contactEmail: 'Wert@gmail.com',
+        salesRepName: 'נציג מכירה',
+        paymentTerms: 'שוטף 30',
+        notes: 'הערות לדוגמה',
+        approverName: 'מאשר לדוגמה',
+        globalDiscountPercent: 0,
+        vatPercent: 18,
+        lineItems: [
+          {
+            description: 'פריט לדוגמה',
+            qty: 1,
+            unitPrice: 1000,
+            discountPct: 0,
+            code: 'CODE-1',
+            sku: 'SKU-1',
+          },
+        ],
+        formatMoney: fmtMoney,
+      });
+      const res = await apiFetch(apiUrl(`/quote-templates/${t.id}/merge-docx`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify(mergeData),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        setQtError(
+          typeof (errBody as { message?: string }).message === 'string'
+            ? (errBody as { message: string }).message
+            : 'הפקת דוגמה נכשלה',
+        );
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `תבנית_דוגמה_${t.id.slice(0, 8)}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch {
+      setQtError('הפקת דוגמה נכשלה');
+    } finally {
+      setQtSampleLoadingId(null);
+    }
+  };
 
   const employeesActiveOnly = useMemo(
     () => (employees as any[]).filter((e) => (e.status || '').toString().toUpperCase() === 'ACTIVE'),
@@ -9741,6 +10447,7 @@ function SettingsPage({
   const openCreateEmp = () => {
     if (!canManageUsersEffective) return;
     setEmpEditing(null);
+    setSmtpTestMsg('');
     setEmpForm({
       name: '',
       email: '',
@@ -9756,12 +10463,20 @@ function SettingsPage({
       canManageUsers: false,
       canManagePermissions: false,
       canViewAllRecords: false,
+      mailDisplayName: '',
+      smtpHost: '',
+      smtpPort: '587',
+      smtpUser: '',
+      smtpPassword: '',
+      smtpFrom: '',
+      smtpSecure: false,
     });
     setEmpModalOpen(true);
   };
   const openEditEmp = (u: any) => {
     if (!canManageUsersEffective) return;
     setEmpEditing(u);
+    setSmtpTestMsg('');
     setEmpForm({
       name: u.name || '',
       email: u.email || '',
@@ -9777,6 +10492,13 @@ function SettingsPage({
       canManageUsers: !!u.canManageUsers,
       canManagePermissions: !!u.canManagePermissions,
       canViewAllRecords: !!u.canViewAllRecords,
+      mailDisplayName: u.mailDisplayName || '',
+      smtpHost: u.smtpHost || '',
+      smtpPort: u.smtpPort ? String(u.smtpPort) : '587',
+      smtpUser: u.smtpUser || '',
+      smtpPassword: '', // never returned from server
+      smtpFrom: u.smtpFrom || '',
+      smtpSecure: !!u.smtpSecure,
     });
     setEmpModalOpen(true);
   };
@@ -9819,7 +10541,18 @@ function SettingsPage({
         canManageUsers: !!empForm.canManageUsers,
         canManagePermissions: !!empForm.canManagePermissions,
         canViewAllRecords: !!empForm.canViewAllRecords,
+        // SMTP settings
+        mailDisplayName: empForm.mailDisplayName.trim() || null,
+        smtpHost: empForm.smtpHost.trim() || null,
+        smtpPort: parseInt(empForm.smtpPort) || 587,
+        smtpUser: empForm.smtpUser.trim() || null,
+        smtpFrom: empForm.smtpFrom.trim() || null,
+        smtpSecure: !!empForm.smtpSecure,
       };
+      // Only send smtpPassword if user typed a new one
+      if (empForm.smtpPassword.trim()) {
+        payload.smtpPassword = empForm.smtpPassword.trim();
+      }
       if (!empEditing) payload.password = empForm.password || '1234';
       const url = empEditing ? `${getApiBaseUrl()}/users/${empEditing.id}` : apiUrl('/users');
       const res = await apiFetch(url, {
@@ -10863,80 +11596,164 @@ function SettingsPage({
       )}
 
       {tab === 'templates' && (
-        <div className="space-y-4" dir="rtl">
-          <Card>
-            <CardHeader className="flex flex-wrap items-center justify-between gap-2">
-              <CardTitle>תבניות הצעות מחיר</CardTitle>
-              {canManageQuoteTemplates && (
+        <div className="space-y-6" dir="rtl">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
+            <p className="mt-1 text-sm text-slate-600">העלה קובץ Word מקורי שישמש כתבנית למיזוג הצעות מחיר</p>
+          </div>
+
+          {qtError && <div className="rounded-2xl bg-red-50 px-4 py-2 text-sm text-red-700">{qtError}</div>}
+
+          {canManageQuoteTemplates && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">יצירת תבנית חדשה</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <FormField label="שם התבנית">
+                  <Input
+                    value={qtCreate.name}
+                    onChange={(e) => setQtCreate((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="למשל: הצעת מחיר אקוסטיקה"
+                  />
+                </FormField>
+                <FormField label="סוג שירות / קטגוריה">
+                  <select
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    value={qtCreate.serviceType}
+                    onChange={(e) => setQtCreate((p) => ({ ...p, serviceType: e.target.value }))}
+                  >
+                    {QUOTE_SERVICE_TYPE_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <FormField label="קובץ Word (DOCX)">
+                  <input
+                    ref={qtCreateDocxRef}
+                    type="file"
+                    accept=".docx,.DOCX"
+                    className="block w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm"
+                  />
+                </FormField>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="qt-create-active"
+                    type="checkbox"
+                    checked={qtCreate.isActive}
+                    onChange={(e) => setQtCreate((p) => ({ ...p, isActive: e.target.checked }))}
+                  />
+                  <label htmlFor="qt-create-active" className="text-sm text-slate-700">
+                    פעיל
+                  </label>
+                </div>
                 <Button
                   style={{ background: galit.primary }}
-                  disabled={qtLoading}
-                  onClick={() => {
-                    setQtEditing(null);
-                    setQtForm({
-                      name: '',
-                      serviceType: 'קרינה',
-                      isActive: true,
-                      introHtml: '<p>לכבוד {{customerName}},</p>',
-                      bodyHtml: '<p>הצעת מחיר עבור {{serviceName}}.</p><p>{{itemsTable}}</p><p>סה״כ לפני מע״מ: {{subtotal}} · מע״מ: {{vat}} · סה״כ: {{total}}</p>',
-                      closingHtml: '<p>בברכה,<br/>גלית</p>',
-                      termsHtml: '<p><strong>תנאים:</strong> תשלום לפי תנאי ההצעה · {{notes}}</p>',
-                      variablesHelp: QUOTE_TEMPLATE_VARIABLES_HELP,
-                      defaultLineItemsJson: '[{"name":"ביקור שטח","quantity":1,"unitPrice":2000}]',
-                    });
-                    setQtModalOpen(true);
-                  }}
+                  disabled={qtSaving || qtLoading}
+                  type="button"
+                  onClick={() => void handleQtCreateSave()}
                 >
-                  תבנית חדשה
+                  {qtSaving ? 'שומר…' : 'שמור תבנית'}
                 </Button>
-              )}
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">שדות מיזוג נתמכים</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {qtError && <div className="rounded-2xl bg-red-50 px-4 py-2 text-sm text-red-700">{qtError}</div>}
-              <p className="text-sm text-slate-600">
-                תבניות HTML עם משתנים <code className="rounded bg-slate-100 px-1">{'{{שם}}'}</code>. התאמת שירות לפי שדה «סוג שירות» — זהה לערך שנבחר במסך הצעות מחיר.
-              </p>
-              <div className="rounded-2xl border bg-slate-50 p-3 text-xs text-slate-600 whitespace-pre-wrap">{QUOTE_TEMPLATE_VARIABLES_HELP}</div>
+            <CardContent className="space-y-3 text-sm text-slate-700">
+              <ul className="list-disc list-inside space-y-1 pr-1">
+                <li>quoteNumber</li>
+                <li>contractSurveyNumber</li>
+                <li>quoteDate</li>
+                <li>validUntil</li>
+                <li>customerName</li>
+                <li>contactName</li>
+                <li>customerPhone</li>
+                <li>customerEmail</li>
+                <li>customerAddress</li>
+                <li>salesRepName</li>
+                <li>paymentTerms</li>
+                <li>subtotal</li>
+                <li>discountPercent</li>
+                <li>subtotalAfterDiscount</li>
+                <li>vatAmount</li>
+                <li>totalAmount</li>
+                <li>approverName</li>
+                <li>items[]</li>
+              </ul>
+              <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2">
+                <div className="mb-1 font-medium text-slate-800">items[]</div>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                  <li>lineNumber</li>
+                  <li>sku</li>
+                  <li>itemCode</li>
+                  <li>description</li>
+                  <li>quantity</li>
+                  <li>unitPrice</li>
+                  <li>lineDiscountPercent</li>
+                  <li>lineTotal</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">תבניות קיימות</CardTitle>
+            </CardHeader>
+            <CardContent>
               {qtLoading ? (
                 <div className="text-sm text-slate-500">טוען...</div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>שם</TableHead>
+                      <TableHead>שם התבנית</TableHead>
                       <TableHead>סוג שירות</TableHead>
+                      <TableHead>שם הקובץ</TableHead>
                       <TableHead>פעיל</TableHead>
+                      <TableHead>תאריך יצירה</TableHead>
                       <TableHead>פעולות</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {qtList.map((t) => (
+                    {qtList.map((t: any) => (
                       <TableRow key={t.id}>
                         <TableCell className="font-medium">{t.name}</TableCell>
                         <TableCell>{t.serviceType}</TableCell>
+                        <TableCell className="max-w-[200px] truncate font-mono text-xs" title={t.docxTemplatePath || ''}>
+                          {t.docxTemplatePath || '—'}
+                        </TableCell>
                         <TableCell>{t.isActive ? 'כן' : 'לא'}</TableCell>
+                        <TableCell className="whitespace-nowrap text-slate-600">
+                          {t.createdAt
+                            ? new Date(t.createdAt).toLocaleDateString('he-IL', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                              })
+                            : '—'}
+                        </TableCell>
                         <TableCell>
-                          {canManageQuoteTemplates && (
+                          {canManageQuoteTemplates ? (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
                                 className="rounded-xl border px-3 py-1 text-xs hover:bg-slate-50"
                                 onClick={() => {
-                                  setQtEditing(t);
-                                  setQtForm({
+                                  setQtEdit({
+                                    id: t.id,
                                     name: t.name || '',
                                     serviceType: t.serviceType || 'קרינה',
                                     isActive: t.isActive !== false,
-                                    introHtml: t.introHtml || '',
-                                    bodyHtml: t.bodyHtml || '',
-                                    closingHtml: t.closingHtml || '',
-                                    termsHtml: t.termsHtml || '',
-                                    variablesHelp: t.variablesHelp || QUOTE_TEMPLATE_VARIABLES_HELP,
-                                    defaultLineItemsJson: t.defaultLineItems
-                                      ? JSON.stringify(t.defaultLineItems, null, 2)
-                                      : '[]',
+                                    docxTemplatePath: t.docxTemplatePath || '',
                                   });
-                                  setQtModalOpen(true);
+                                  setQtEditOpen(true);
                                 }}
                               >
                                 עריכה
@@ -10960,7 +11777,17 @@ function SettingsPage({
                               >
                                 מחק
                               </button>
+                              <button
+                                type="button"
+                                className="rounded-xl border px-3 py-1 text-xs hover:bg-slate-50 disabled:opacity-50"
+                                disabled={qtSampleLoadingId === t.id}
+                                onClick={() => void handleQtSampleDocx(t)}
+                              >
+                                {qtSampleLoadingId === t.id ? 'מפיק…' : 'בדיקה / דוגמה'}
+                              </button>
                             </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
                           )}
                         </TableCell>
                       </TableRow>
@@ -10969,115 +11796,92 @@ function SettingsPage({
                 </Table>
               )}
               {!canManageQuoteTemplates && (
-                <p className="text-xs text-slate-500">עריכה ומחיקה: מנהל מערכת או מנהל בלבד.</p>
+                <p className="mt-3 text-xs text-slate-500">עריכה, מחיקה והפקת דוגמה: מנהל מערכת או מנהל בלבד.</p>
               )}
             </CardContent>
           </Card>
 
           <Modal
-            open={qtModalOpen}
-            onClose={() => setQtModalOpen(false)}
-            title={qtEditing ? 'עריכת תבנית' : 'תבנית חדשה'}
-            maxWidth="max-w-3xl"
+            open={qtEditOpen}
+            onClose={() => {
+              setQtEditOpen(false);
+              setQtEdit(null);
+            }}
+            title="עריכת תבנית Word"
+            maxWidth="max-w-lg"
           >
-            <div className="space-y-3" dir="rtl">
-              <FormField label="שם תבנית">
-                <Input value={qtForm.name} onChange={(e) => setQtForm((p) => ({ ...p, name: e.target.value }))} placeholder="שם" />
-              </FormField>
-              <FormField label="סוג שירות (מחרוזת זהה לבחירת שירות בהצעה)">
-                <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                  value={qtForm.serviceType}
-                  onChange={(e) => setQtForm((p) => ({ ...p, serviceType: e.target.value }))}
-                >
-                  {QUOTE_SERVICE_TYPE_OPTIONS.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </FormField>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={qtForm.isActive}
-                  onChange={(e) => setQtForm((p) => ({ ...p, isActive: e.target.checked }))}
-                />
-                <span className="text-sm">פעיל</span>
+            {qtEdit && (
+              <div className="space-y-4" dir="rtl">
+                <FormField label="שם התבנית">
+                  <Input
+                    value={qtEdit.name}
+                    onChange={(e) => setQtEdit((p) => (p ? { ...p, name: e.target.value } : p))}
+                    placeholder="שם"
+                  />
+                </FormField>
+                <FormField label="סוג שירות / קטגוריה">
+                  <select
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    value={qtEdit.serviceType}
+                    onChange={(e) => setQtEdit((p) => (p ? { ...p, serviceType: e.target.value } : p))}
+                  >
+                    {QUOTE_SERVICE_TYPE_OPTIONS.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="qt-edit-active"
+                    type="checkbox"
+                    checked={qtEdit.isActive}
+                    onChange={(e) => setQtEdit((p) => (p ? { ...p, isActive: e.target.checked } : p))}
+                  />
+                  <label htmlFor="qt-edit-active" className="text-sm text-slate-700">
+                    פעיל
+                  </label>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <div className="text-sm font-medium">החלפת קובץ Word (DOCX)</div>
+                  <p className="text-xs text-slate-600 break-all">
+                    קובץ נוכחי:{' '}
+                    {qtEdit.docxTemplatePath ? (
+                      <code className="rounded bg-white px-1">{qtEdit.docxTemplatePath}</code>
+                    ) : (
+                      'לא הוגדר'
+                    )}
+                  </p>
+                  <input
+                    ref={qtEditDocxRef}
+                    type="file"
+                    accept=".docx,.DOCX"
+                    className="block w-full max-w-md rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <Button
+                    style={{ background: galit.primary }}
+                    type="button"
+                    disabled={qtSaving}
+                    onClick={() => void handleQtEditSave()}
+                  >
+                    {qtSaving ? 'שומר…' : 'שמור'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={() => {
+                      setQtEditOpen(false);
+                      setQtEdit(null);
+                    }}
+                  >
+                    ביטול
+                  </Button>
+                </div>
               </div>
-              <FormField label="טקסט פתיחה (HTML)">
-                <Textarea className="min-h-[80px] font-mono text-xs" value={qtForm.introHtml} onChange={(e) => setQtForm((p) => ({ ...p, introHtml: e.target.value }))} />
-              </FormField>
-              <FormField label="תוכן תבנית (HTML)">
-                <Textarea className="min-h-[100px] font-mono text-xs" value={qtForm.bodyHtml} onChange={(e) => setQtForm((p) => ({ ...p, bodyHtml: e.target.value }))} />
-              </FormField>
-              <FormField label="טקסט סיום (HTML)">
-                <Textarea className="min-h-[80px] font-mono text-xs" value={qtForm.closingHtml} onChange={(e) => setQtForm((p) => ({ ...p, closingHtml: e.target.value }))} />
-              </FormField>
-              <FormField label="תנאים (HTML)">
-                <Textarea className="min-h-[80px] font-mono text-xs" value={qtForm.termsHtml} onChange={(e) => setQtForm((p) => ({ ...p, termsHtml: e.target.value }))} />
-              </FormField>
-              <FormField label="משתנים נתמכים (טקסט עזר)">
-                <Textarea className="min-h-[100px] font-mono text-xs" value={qtForm.variablesHelp} onChange={(e) => setQtForm((p) => ({ ...p, variablesHelp: e.target.value }))} />
-              </FormField>
-              <FormField label="פריטים ברירת מחדל (JSON)">
-                <Textarea
-                  className="min-h-[100px] font-mono text-xs"
-                  value={qtForm.defaultLineItemsJson}
-                  onChange={(e) => setQtForm((p) => ({ ...p, defaultLineItemsJson: e.target.value }))}
-                />
-              </FormField>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  style={{ background: galit.primary }}
-                  onClick={async () => {
-                    if (!qtForm.name.trim()) {
-                      setQtError('שם תבנית חובה');
-                      return;
-                    }
-                    let parsed;
-                    try {
-                      parsed = JSON.parse(qtForm.defaultLineItemsJson || '[]');
-                    } catch {
-                      setQtError('JSON פריטים לא תקין');
-                      return;
-                    }
-                    setQtError('');
-                    try {
-                      const payload: any = {
-                        name: qtForm.name.trim(),
-                        serviceType: qtForm.serviceType,
-                        isActive: qtForm.isActive,
-                        introHtml: qtForm.introHtml || null,
-                        bodyHtml: qtForm.bodyHtml || null,
-                        closingHtml: qtForm.closingHtml || null,
-                        termsHtml: qtForm.termsHtml || null,
-                        variablesHelp: qtForm.variablesHelp || null,
-                        defaultLineItems: parsed,
-                      };
-                      const url = qtEditing ? `${getApiBaseUrl()}/quote-templates/${qtEditing.id}` : apiUrl('/quote-templates');
-                      const res = await apiFetch(url, {
-                        method: qtEditing ? 'PATCH' : 'POST',
-                        authUser: currentUser,
-                        body: JSON.stringify(payload),
-                      });
-                      if (!res.ok) throw new Error();
-                      setQtModalOpen(false);
-                      await loadQuoteTemplates();
-                      setSettingsMsg('התבנית נשמרה');
-                      window.setTimeout(() => setSettingsMsg(''), 2500);
-                    } catch {
-                      setQtError('שמירת תבנית נכשלה');
-                    }
-                  }}
-                >
-                  שמור
-                </Button>
-                <Button variant="outline" type="button" onClick={() => setQtModalOpen(false)}>
-                  ביטול
-                </Button>
-              </div>
-            </div>
+            )}
           </Modal>
         </div>
       )}
@@ -11239,6 +12043,86 @@ function SettingsPage({
               })}
             </div>
             <div className="mt-3 text-xs text-slate-500">לידים יוכלו להתאים אוטומטית לפי שירות/מחלקה עתידית.</div>
+          </div>
+
+          <div className="rounded-2xl border bg-slate-50 p-4">
+            <div className="mb-2 text-sm font-semibold">הגדרות מייל (SMTP)</div>
+            <div className="mb-3 text-xs text-slate-500">הגדרות אישיות לשליחת הצעות מחיר במייל מהמערכת.</div>
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שם תצוגה</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" value={empForm.mailDisplayName} onChange={(e) => setEmpForm((p) => ({ ...p, mailDisplayName: e.target.value }))} placeholder="שם השולח" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">כתובת שולח (From)</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpFrom} onChange={(e) => setEmpForm((p) => ({ ...p, smtpFrom: e.target.value }))} placeholder="sender@example.com" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שרת SMTP</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpHost} onChange={(e) => setEmpForm((p) => ({ ...p, smtpHost: e.target.value }))} placeholder="smtp.gmail.com" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">פורט</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" type="number" value={empForm.smtpPort} onChange={(e) => setEmpForm((p) => ({ ...p, smtpPort: e.target.value }))} placeholder="587" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שם משתמש SMTP</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpUser} onChange={(e) => setEmpForm((p) => ({ ...p, smtpUser: e.target.value }))} placeholder="user@example.com" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-0.5">סיסמת SMTP</label>
+                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" type="password" value={empForm.smtpPassword} onChange={(e) => setEmpForm((p) => ({ ...p, smtpPassword: e.target.value }))} placeholder={empEditing ? '••••• (לא ישתנה אם ריק)' : 'סיסמה'} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="checkbox" checked={!!empForm.smtpSecure} onChange={(e) => setEmpForm((p) => ({ ...p, smtpSecure: e.target.checked }))} />
+                <span className="text-sm">SSL/TLS (סמן עבור פורט 465)</span>
+              </div>
+              {empEditing && (
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={smtpTestBusy}
+                    className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                    onClick={async () => {
+                      setSmtpTestMsg('בודק חיבור…');
+                      setSmtpTestBusy(true);
+                      try {
+                        const body: any = {};
+                        if (empForm.smtpHost.trim()) body.smtpHost = empForm.smtpHost.trim();
+                        if (empForm.smtpUser.trim()) body.smtpUser = empForm.smtpUser.trim();
+                        if (empForm.smtpPassword.trim()) body.smtpPassword = empForm.smtpPassword.trim();
+                        if (empForm.smtpPort) body.smtpPort = parseInt(empForm.smtpPort) || 587;
+                        body.smtpSecure = !!empForm.smtpSecure;
+                        const r = await apiFetch(apiUrl(`/users/${empEditing.id}/test-smtp`), {
+                          method: 'POST',
+                          body: JSON.stringify(body),
+                          authUser: currentUser,
+                        });
+                        if (!r.ok) {
+                          const err = await r.json().catch(() => null);
+                          setSmtpTestMsg(err?.message || 'בדיקה נכשלה');
+                        } else {
+                          setSmtpTestMsg('✓ חיבור SMTP תקין');
+                        }
+                      } catch {
+                        setSmtpTestMsg('שגיאה בבדיקת חיבור');
+                      } finally {
+                        setSmtpTestBusy(false);
+                      }
+                    }}
+                  >
+                    בדוק חיבור
+                  </button>
+                  {smtpTestMsg && <span className={`text-xs font-medium ${smtpTestMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{smtpTestMsg}</span>}
+                </div>
+              )}
+            </div>
           </div>
 
           <Button style={{ background: galit.primary }} onClick={saveEmp}>שמור</Button>
@@ -11592,7 +12476,17 @@ function TasksPage({
   currentUser,
   projects,
   customers,
+  leads,
   users,
+  onOpenLead,
+  onOpenCustomer,
+  onCreateQuote,
+  quotes: allQuotes,
+  parentExpandedTaskId: extExpandedTaskId,
+  setParentExpandedTaskId: extSetExpandedTaskId,
+  parentManualStepOverride: extManualStepOverride,
+  setParentManualStepOverride: extSetManualStepOverride,
+  onReloadLeads,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
@@ -11600,18 +12494,154 @@ function TasksPage({
   currentUser: AppUser;
   projects: Project[];
   customers: Customer[];
+  leads: Lead[];
   users: AppUser[];
+  onOpenLead?: (lead: Lead) => void;
+  onOpenCustomer?: (customer: Customer) => void;
+  onCreateQuote?: (customerId?: string | null, taskId?: string, leadPrefill?: { name: string; phone?: string; email?: string; company?: string; city?: string; address?: string; contactName?: string; service?: string; notes?: string; leadId?: string; customerType?: string } | null) => void;
+  quotes?: Quote[];
+  parentExpandedTaskId?: string | null;
+  setParentExpandedTaskId?: (id: string | null) => void;
+  parentManualStepOverride?: Record<string, number>;
+  setParentManualStepOverride?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  onReloadLeads?: () => void | Promise<void>;
 }) {
+  /* ── state ── */
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [searchQ, setSearchQ] = useState('');
+  const [quickFilter, setQuickFilter] = useState<string>('all');
+  const [onlyMine, setOnlyMine] = useState(false);
+  /* ── expandedTaskId: parent is the single source of truth ──
+   * Local state is ONLY used as fallback when parent props are not provided.
+   * When parent IS provided, we read/write directly to parent — no local copy. */
+  const [_localExpandedTaskId, _setLocalExpandedTaskId] = useState<string | null>(null);
+  const expandedRowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+
+  const expandedTaskId = extSetExpandedTaskId ? (extExpandedTaskId ?? null) : _localExpandedTaskId;
+  const setExpandedTaskId = useCallback((v: string | null) => {
+    if (extSetExpandedTaskId) {
+      extSetExpandedTaskId(v);
+    } else {
+      _setLocalExpandedTaskId(v);
+    }
+  }, [extSetExpandedTaskId]);
+
+  // expandedTab removed — workspace is now single-page
+  const [_localManualStep, _setLocalManualStep] = useState<Record<string, number>>({});
+
+  const manualStepOverride = extSetManualStepOverride ? (extManualStepOverride ?? {}) : _localManualStep;
+  const setManualStepOverride = useCallback((v: React.SetStateAction<Record<string, number>>) => {
+    if (extSetManualStepOverride) {
+      extSetManualStepOverride(v);
+    } else {
+      _setLocalManualStep(v);
+    }
+  }, [extSetManualStepOverride]);
+
+  /* Scroll to restored expanded row on mount (when coming back from another tab) */
+  useEffect(() => {
+    const restoredId = extExpandedTaskId ?? null;
+    if (restoredId) {
+      /* Retry scroll a few times — DOM may need time to render the expanded row */
+      let attempts = 0;
+      const tryScroll = () => {
+        const el = expandedRowRefs.current[restoredId];
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const headerOffset = 80;
+          const targetY = window.scrollY + rect.top - headerOffset;
+          window.scrollTo({ top: targetY, behavior: 'smooth' });
+        } else if (attempts < 5) {
+          attempts++;
+          setTimeout(tryScroll, 200);
+        }
+      };
+      setTimeout(tryScroll, 150);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /* ── Call intake form data per task ── */
+  const [callFormData, setCallFormData] = useState<Record<string, Record<string, string>>>({});
+  const getCallForm = (taskId: string, linkedLead: any, task: any) => {
+    if (callFormData[taskId]) return callFormData[taskId];
+    // Initialize from existing data
+    const rawName = task.leadName || task.customerName || linkedLead?.fullName || '';
+    const nameParts = rawName.split(' ');
+    return {
+      fullName: rawName,
+      firstName: linkedLead?.firstName || nameParts[0] || '',
+      lastName: linkedLead?.lastName || nameParts.slice(1).join(' ') || '',
+      company: task.leadCompany || linkedLead?.company || '',
+      phone: task.leadPhone || linkedLead?.phone || '',
+      email: task.leadEmail || linkedLead?.email || '',
+      city: linkedLead?.city || '',
+      address: linkedLead?.address || '',
+      role: '',
+      leadSource: linkedLead?.source || '',
+      companySize: '',
+      inquiryDate: new Date().toISOString().slice(0, 10),
+      customerType: linkedLead?.company ? 'עסקי' : 'פרטי',
+      serviceType: linkedLead?.serviceType || linkedLead?.service || '',
+      serviceSubType: linkedLead?.serviceSubType || '',
+      serviceSubTypeOther: '',
+      needDescription: '',
+      propertyType: '',
+      urgency: '',
+      budget: '',
+      hasDocuments: '',
+      callSummary: '',
+      callNotes: '',
+      solutionDescription: '',
+      nextAction: '',
+      nextActionDate: '',
+      nextActionTime: '',
+      needCategories: '',
+    };
+  };
+  const updateCallForm = (taskId: string, field: string, value: string) => {
+    setCallFormData((prev) => ({
+      ...prev,
+      [taskId]: { ...(prev[taskId] || {}), [field]: value },
+    }));
+  };
+  const initCallFormIfNeeded = (taskId: string, linkedLead: any, task: any) => {
+    if (!callFormData[taskId]) {
+      setCallFormData((prev) => ({
+        ...prev,
+        [taskId]: getCallForm(taskId, linkedLead, task),
+      }));
+    }
+  };
+
+  const [callModeTaskId, setCallModeTaskId] = useState<string | null>(null);
+  const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const [callElapsed, setCallElapsed] = useState(0);
+  const callTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startCallMode = (taskId: string) => {
+    setCallModeTaskId(taskId);
+    const now = Date.now();
+    setCallStartTime(now);
+    setCallElapsed(0);
+    if (callTimerRef.current) clearInterval(callTimerRef.current);
+    callTimerRef.current = setInterval(() => setCallElapsed(Math.floor((Date.now() - now) / 1000)), 1000);
+  };
+  const endCallMode = () => {
+    setCallModeTaskId(null);
+    setCallStartTime(null);
+    setCallElapsed(0);
+    if (callTimerRef.current) { clearInterval(callTimerRef.current); callTimerRef.current = null; }
+  };
+  const fmtCallTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   const [form, setForm] = useState({
     title: '',
     description: '',
     ownerId: currentUser.id,
     projectId: '',
     customerId: '',
+    leadId: '',
     dueDate: '',
+    dueTime: '',
     priority: 'MEDIUM',
     status: 'OPEN',
     type: 'GENERAL',
@@ -11621,52 +12651,399 @@ function TasksPage({
     setForm((p) => ({ ...p, ownerId: currentUser.id }));
   }, [currentUser.id]);
 
-  const priorityLabel = (priority: string) => {
-    const map: Record<string, string> = {
-      LOW: 'נמוכה',
-      MEDIUM: 'בינונית',
-      HIGH: 'גבוהה',
-      URGENT: 'דחופה',
+  /* ── demo data (shown when no real tasks exist) ── */
+  const demoTasks: Task[] = useMemo(() => {
+    if (tasks.length > 0) return []; // real data exists, skip demo
+
+    const now = new Date();
+    const d = (offsetDays: number, hh: number, mm: number) => {
+      const dt = new Date(now); dt.setDate(dt.getDate() + offsetDays); dt.setHours(hh, mm, 0, 0);
+      return dt.toISOString();
     };
+    const ownersPool = users.length > 0 ? users.map(u => ({ id: u.id, name: u.name })) : [
+      { id: 'demo-1', name: 'יורם' }, { id: 'demo-2', name: 'מירב' }, { id: 'demo-3', name: 'אלון' }, { id: 'demo-4', name: 'שרה' },
+    ];
+    const pick = (i: number) => ownersPool[i % ownersPool.length];
+
+    const raw: Omit<Task, 'id'>[] = [
+      // ── 10 NEW LEAD tasks (שלב: פנייה) ──
+      { title: 'ליד חדש מפייסבוק – בדיקת קרינה ברעננה', description: 'פנייה דרך פייסבוק. הלקוח מעוניין בבדיקת קרינה בבית מגורים חדש. השאיר טלפון.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,8,15), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'דני אברהם', leadPhone: '052-3119842', leadCompany: 'פרטי', projectName: 'בדיקת קרינה' },
+      { title: 'ליד מהאתר – בדיקת רעש שכנים בתל אביב', description: 'מילא טופס באתר. מתלונן על רעש ממזגנים של השכנים מעל. רוצה בדיקה ודוח.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,8,45), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'מיכל רוזנברג', leadPhone: '054-7712309', leadCompany: 'פרטי', projectName: 'בדיקת רעש' },
+      { title: 'ליד מגוגל – בדיקת ראדון בירושלים', description: 'חיפש בגוגל "בדיקת ראדון ירושלים". מתכנן רכישת דירה בקומת קרקע וחושש מראדון.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,9,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'אלעד כץ', leadPhone: '050-4418320', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'ליד מהמלצה – עובש בבית בכפר סבא', description: 'הופנה ע"י לקוח קיים (יואב כהן). מתלונן על עובש בחדרי שינה, רוצה בדיקת איכות אוויר.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,10,0), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'אורי גפן', leadPhone: '052-8905561', leadCompany: 'פרטי', projectName: 'בדיקת עובש ואיכות אוויר' },
+      { title: 'ליד מ-WhatsApp – איכות אוויר במשרד ברמת גן', description: 'שלח הודעה ב-WhatsApp. עובדים מתלוננים על כאבי ראש וריח חריג. רוצה בדיקת איכות אוויר דחופה.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,9,30), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'רוני שטרן', leadPhone: '053-2207715', leadCompany: 'שטרן טכנולוגיות', projectName: 'בדיקת איכות אוויר' },
+      { title: 'ליד מפייסבוק – אקוסטיקה דירה חדשה בנתניה', description: 'ראתה פוסט בפייסבוק. נכנסה לדירה חדשה ושומעת רעשים מהשכנים. רוצה ייעוץ אקוסטי.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,11,0), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'יעל דהן', leadPhone: '054-3306879', leadCompany: 'פרטי', projectName: 'ייעוץ אקוסטי' },
+      { title: 'ליד מגוגל – בדיקת מים בהוד השרון', description: 'חיפש "בדיקת מים הוד השרון". מתגורר בבית פרטי עם באר, רוצה לוודא שהמים בטוחים.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,12,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'אמיר נחום', leadPhone: '050-6623144', leadCompany: 'פרטי', projectName: 'בדיקת מים' },
+      { title: 'ליד מהאתר – ריח חריג בעסק בהרצליה', description: 'בעל מסעדה בהרצליה. מריח ריח חריג מכיוון המחסן. רוצה בדיקה מקצועית.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,10,30), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'משה ביטון', leadPhone: '052-2114578', leadCompany: 'מסעדת הגינה', projectName: 'בדיקת ריח וזיהום אוויר' },
+      { title: 'לקוח חוזר – בדיקת קרינה לבית ספר ביבנה', description: 'לקוח שעבדנו איתו בעבר. חוזר עם בקשה לבדיקת קרינה בבית ספר. דחוף – הורים לוחצים.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,8,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'שירה לוינסון', leadPhone: '054-9981203', leadCompany: 'עיריית יבנה', customerName: 'עיריית יבנה', projectName: 'בדיקת קרינה לבית ספר' },
+      { title: 'ליד שביקש שיחזרו – רעש מזגן בפתח תקווה', description: 'התקשר ולא ענינו. השאיר הודעה שרוצה בדיקת רעש ממזגן מרכזי בבניין. ביקש שיחזרו אליו היום.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,9,15), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'גיא פרידמן', leadPhone: '050-7749321', leadCompany: 'ועד בית הגפן 12', projectName: 'בדיקת רעש מזגן' },
+      // ── 30 NEW INQUIRY LEAD tasks (שלב: פנייה) ──
+      { title: 'ליד מפייסבוק – קרינה בדירה חדשה ברעננה', description: 'פנייה מפייסבוק. מעוניין בבדיקת קרינה בדירה חדשה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,8,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'נדב שלום', leadPhone: '052-4001234', leadCompany: 'פרטי', projectName: 'בדיקת קרינה' },
+      { title: 'ליד מגוגל – רעש שכנים בכפר סבא', description: 'חיפשה "בדיקת רעש כפר סבא". רעש ממזגן שכן.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,8,10), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'הדס אורן', leadPhone: '054-5012345', leadCompany: 'פרטי', projectName: 'בדיקת רעש' },
+      { title: 'ליד מהאתר – ראדון בדירת קרקע בהרצליה', description: 'מילא טופס. דירת קרקע, חושש מראדון.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,8,20), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'עידו רם', leadPhone: '050-6023456', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'ליד מ-WhatsApp – איכות אוויר במשרד בתל אביב', description: 'ריח מוזר ממיזוג. עובדים מתלוננים.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,8,30), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'ליאור כהן', leadPhone: '053-7034567', leadCompany: 'כהן אינסטלציה', projectName: 'בדיקת איכות אוויר' },
+      { title: 'ליד מהמלצה – עובש בדירה ברמת גן', description: 'הופנתה ע"י חברה. עובש בחדר רחצה וחדר שינה.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,8,40), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'מורן דוד', leadPhone: '054-8045678', leadCompany: 'פרטי', projectName: 'בדיקת עובש' },
+      { title: 'ליד מגוגל – דוח אקוסטי להיתר בנתניה', description: 'קבלן צריך דוח אקוסטי לוועדה המקומית.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,8,50), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'אסף ברוש', leadPhone: '052-9056789', leadCompany: 'ברוש הנדסה', projectName: 'דוח אקוסטי' },
+      { title: 'ליד מפייסבוק – בדיקת מים ביבנה', description: 'גרה עם באר פרטית, רוצה לבדוק איכות מים.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,9,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'שירלי גבע', leadPhone: '050-1067890', leadCompany: 'פרטי', projectName: 'בדיקת מים' },
+      { title: 'לקוח חוזר – מדידת קרינה בירושלים', description: 'לקוח חוזר, רוצה מדידה אחרי שינויי תשתית חשמל.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,9,10), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'גל עוז', leadPhone: '053-2078901', leadCompany: 'עוז טכנולוגיות', projectName: 'מדידת קרינה' },
+      { title: 'ליד מהאתר – רעש מזגן בפתח תקווה', description: 'רעש מזגן מרכזי מטריד בשעות הלילה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,9,20), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'יעל מזור', leadPhone: '054-3089012', leadCompany: 'פרטי', projectName: 'בדיקת רעש מזגן' },
+      { title: 'ליד משותף – אקוסטיקה בהוד השרון', description: 'קבלן שותף, צריך בדיקות ל-3 בניינים.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,9,30), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'דביר אלוני', leadPhone: '050-4090123', leadCompany: 'אלוני בנייה', projectName: 'בדיקות אקוסטיות' },
+      { title: 'ליד מפייסבוק – ראדון ברעננה', description: 'שמעה על סכנת ראדון, רוצה בדיקה לפני אכלוס.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,9,40), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'נועה פלד', leadPhone: '052-5101234', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'ליד מגוגל – ניטור אוויר במגדל בתל אביב', description: 'דורש ניטור שוטף ב-3 קומות במגדל משרדים.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,9,50), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'רועי חזן', leadPhone: '054-6112345', leadCompany: 'קבוצת חזן', projectName: 'ניטור איכות אוויר' },
+      { title: 'ליד מהמלצה – בדיקות לבי"ס בכפר סבא', description: 'הורים לוחצים. בדיקת קרינה ורעש בכיתות.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,10,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'טלי שגב', leadPhone: '050-7123456', leadCompany: 'בי"ס השרון', projectName: 'בדיקות סביבתיות' },
+      { title: 'ליד מ-WhatsApp – ריח חריג בהרצליה', description: 'ריח ביוב חזק בחדר שינה. מבקש בדיקה דחופה.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,10,10), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'אורי נווה', leadPhone: '053-8134567', leadCompany: 'פרטי', projectName: 'בדיקת ריח' },
+      { title: 'ליד מגוגל – דיגום עובש ברמת גן', description: 'כתמי עובש על הקירות. מבקשת דוח לביטוח.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,10,20), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'דנה אשכנזי', leadPhone: '054-9145678', leadCompany: 'פרטי', projectName: 'דיגום עובש' },
+      { title: 'ליד משותף – קרינה לפני בנייה בנתניה', description: 'יזם שצריך בדיקת קרינה לפני תחילת חפירות.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,10,30), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'עמית זהבי', leadPhone: '052-1156789', leadCompany: 'זהבי יזמות', projectName: 'בדיקת קרינה' },
+      { title: 'ליד מפייסבוק – מים עם טעם מוזר ביבנה', description: 'מים עם טעם מוזר מהברז. רוצה בדיקה מקיפה.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,10,40), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'קרן אביב', leadPhone: '050-2167890', leadCompany: 'פרטי', projectName: 'בדיקת מים' },
+      { title: 'ליד מהאתר – רעש תשתיות בירושלים', description: 'רעש רציף מצנרת או חימום מרכזי.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,10,50), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'תום רוזן', leadPhone: '053-3178901', leadCompany: 'פרטי', projectName: 'בדיקת רעש' },
+      { title: 'ליד מגוגל – ניטור פליטות למפעל בפתח תקווה', description: 'ממונה בטיחות דורש דוח תקופתי.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,11,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'מיכאל פרץ', leadPhone: '054-4189012', leadCompany: 'מפעלי פרץ', projectName: 'ניטור פליטות' },
+      { title: 'ליד מהמלצה – רעש בדירה חדשה בהוד השרון', description: 'נכנסה לדירה חדשה ושומעת רעש מלמעלה.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,11,10), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'שני לוי', leadPhone: '050-5190123', leadCompany: 'פרטי', projectName: 'בדיקת רעש' },
+      { title: 'ליד מ-WhatsApp – ריח במשרד בתל אביב', description: 'ריח חריג מאזור המטבחון. עובדים מתלוננים.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,11,20), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'יונתן בר', leadPhone: '052-6201234', leadCompany: 'בר משרדים', projectName: 'בדיקת ריח' },
+      { title: 'לקוחה חוזרת – קרינה ברעננה', description: 'רוצה בדיקה חוזרת אחרי הקמת אנטנה חדשה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,11,30), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'עדי סער', leadPhone: '054-7212345', leadCompany: 'פרטי', projectName: 'בדיקת קרינה' },
+      { title: 'ליד משותף – דוח אקוסטי דחוף בנתניה', description: 'קבלן צריך דוח אקוסטי דחוף להגשת היתר.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,11,40), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'איתי גולן', leadPhone: '050-8223456', leadCompany: 'גולן בנייה', projectName: 'דוח אקוסטי' },
+      { title: 'ליד מפייסבוק – ראדון בירושלים', description: 'קראה כתבה על ראדון, גרה בקומת קרקע.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,11,50), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'רותם ניר', leadPhone: '053-9234567', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'ליד מהמלצה – בדיקות לבי"ס נוסף בכפר סבא', description: 'מנהלת בית ספר. הורים דורשים בדיקות קרינה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,12,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'מעיין שפירא', leadPhone: '054-1245678', leadCompany: 'בי"ס שפירא', projectName: 'בדיקות קרינה' },
+      { title: 'ליד מגוגל – בדיקת מים תעשייתית בהרצליה', description: 'מפעל עם מערכת מיחזור מים, צריך בדיקה.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,12,10), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'אלעד טל', leadPhone: '050-2256789', leadCompany: 'טל מים', projectName: 'בדיקת מים' },
+      { title: 'ליד מהאתר – רעש מזגן מרכזי ברמת גן', description: 'מזגן מרכזי בבניין גורם לרעידות.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,12,20), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'ליהי קדם', leadPhone: '052-3267890', leadCompany: 'פרטי', projectName: 'בדיקת רעש מזגן' },
+      { title: 'ליד מ-WhatsApp – עובש בבניין בפתח תקווה', description: 'מנהל נכסים. עובש חוזר ב-3 דירות.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,12,30), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'ניר אדם', leadPhone: '054-4278901', leadCompany: 'אדם נכסים', projectName: 'בדיקת עובש' },
+      { title: 'ליד מפייסבוק – איכות אוויר בהוד השרון', description: 'ילד אסטמטי. רוצה לוודא אוויר תקין בבית.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,12,40), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'שיר ארזי', leadPhone: '050-5289012', leadCompany: 'פרטי', projectName: 'בדיקת איכות אוויר' },
+      { title: 'ליד מגוגל – אקוסטיקה למסחרי בתל אביב', description: 'צריך דוח אקוסטי לרישוי עסק במרכז מסחרי.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,12,50), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'אופיר יוסף', leadPhone: '053-6290123', leadCompany: 'יוסף הנדסה', projectName: 'דוח אקוסטי' },
+      // ── 20 additional INQUIRY LEAD tasks ──
+      { title: 'ליד מפייסבוק – קרינה סלולרית בחיפה', description: 'אנטנה סלולרית חדשה הוקמה על גג הבניין. מודאג.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,13,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'אורן דגן', leadPhone: '052-7301234', leadCompany: 'פרטי', projectName: 'בדיקת קרינה' },
+      { title: 'ליד מגוגל – חוות דעת רעש לתביעה בראשון לציון', description: 'עו"ד צריכה חוות דעת מומחה לרעש לבית משפט.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,13,10), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'ליאת מור', leadPhone: '054-8312345', leadCompany: 'מור עורכי דין', projectName: 'חוות דעת רעש' },
+      { title: 'ליד מהאתר – ראדון בבית חדש בבאר שבע', description: 'בנה בית בנגב, קומת קרקע, רוצה בדיקת ראדון.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,13,20), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'בועז קריף', leadPhone: '050-9323456', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'ליד מהמלצה – איכות אוויר במרפאה ברחובות', description: 'מטופלים מתלוננים על ריח. הרופאה רוצה בדיקה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,13,30), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'הילה עמר', leadPhone: '053-1334567', leadCompany: 'מרפאת עמר', projectName: 'בדיקת איכות אוויר' },
+      { title: 'ליד משותף – אקוסטיקה ל-80 יח"ד באשדוד', description: 'קבלן, פרויקט גדול, דחוף להיתר בנייה.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,13,40), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'תמיר חן', leadPhone: '052-2345678', leadCompany: 'חן בנייה', projectName: 'דוח אקוסטי' },
+      { title: 'ליד מ-WhatsApp – עובש חוזר בגבעתיים', description: 'עובש חזר אחרי שיפוץ. מבקשת בדיקה מקצועית.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,13,50), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'סיגל הראל', leadPhone: '054-3356789', leadCompany: 'פרטי', projectName: 'בדיקת עובש' },
+      { title: 'ליד מגוגל – ניטור פליטות מפעל בחולון', description: 'דרישה של המשרד להגנ"ס, ניטור תקופתי.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,14,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'אייל פישר', leadPhone: '050-4367890', leadCompany: 'פישר תעשיות', projectName: 'ניטור פליטות' },
+      { title: 'ליד מפייסבוק – קרינה בדירה במודיעין', description: 'בהריון וחוששת מקרינה ממתקן חשמל סמוך.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,14,10), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'נטע שמעון', leadPhone: '053-5378901', leadCompany: 'פרטי', projectName: 'בדיקת קרינה' },
+      { title: 'ליד משותף – ייעוץ אקוסטי לפרויקט שימור בתל אביב', description: 'אדריכל, פרויקט שימור, צריך ייעוץ אקוסטי מקצועי.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,14,20), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'דרור בן דוד', leadPhone: '052-6389012', leadCompany: 'בן דוד אדריכלים', projectName: 'ייעוץ אקוסטי' },
+      { title: 'ליד מהאתר – מים צהובים ברמת השרון', description: 'מים צהובים מהברז. חוששת לשתות.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,14,30), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'ענבר צור', leadPhone: '054-7390123', leadCompany: 'פרטי', projectName: 'בדיקת מים' },
+      { title: 'לקוח חוזר – בדיקות סביבתיות למלון באילת', description: 'לקוח חוזר, ביקורת שנתית, 200 חדרים.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,14,40), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'יגאל נוי', leadPhone: '050-8401234', leadCompany: 'נוי מלונאות', projectName: 'בדיקות סביבתיות' },
+      { title: 'ליד מגוגל – ריח דלק בהרצליה', description: 'מריחה ריח דלק ליד הבית. רוצה בדיקה מקצועית.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,14,50), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'רונית גלעד', leadPhone: '053-9412345', leadCompany: 'פרטי', projectName: 'בדיקת ריח' },
+      { title: 'ליד משותף – סקר קרינה ל-3 מגדלים בנתניה', description: 'יזם, 3 מגדלים ליד קו מתח עליון. צריך סקר.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,15,0), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'עמרי שלו', leadPhone: '052-1423456', leadCompany: 'שילו פיתוח', projectName: 'סקר קרינה' },
+      { title: 'ליד מהמלצה – קרינה לגן ילדים בכפר סבא', description: 'הורים מודאגים מאנטנה ליד הגן. מנהלת מבקשת בדיקה.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,15,10), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'אפרת רוזנפלד', leadPhone: '054-2434567', leadCompany: 'גן הילדים שקד', projectName: 'בדיקת קרינה' },
+      { title: 'ליד מ-WhatsApp – רעש לילי ממפעל בפתח תקווה', description: 'רעש לילי ממפעל סמוך לבית. לא יכול לישון.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,15,20), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'גיא אשר', leadPhone: '050-3445678', leadCompany: 'פרטי', projectName: 'בדיקת רעש' },
+      { title: 'ליד מגוגל – חשד SBS במשרד ברעננה', description: 'עובדים חולים בתדירות גבוהה. חשד לתסמונת בניין חולה.', status: 'OPEN', priority: 'URGENT', type: 'GENERAL', dueDate: d(0,15,30), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'מיטל אריאלי', leadPhone: '053-4456789', leadCompany: 'אריאלי משרדים', projectName: 'בדיקת SBS' },
+      { title: 'ליד מפייסבוק – ראדון בהרי ירושלים', description: 'בית בהרי ירושלים. קרא על סכנת ראדון באזור.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,15,40), due: '', owner: pick(2).name, ownerId: pick(2).id, leadName: 'נדב ברק', leadPhone: '052-5467890', leadCompany: 'פרטי', projectName: 'בדיקת ראדון' },
+      { title: 'לקוחה חוזרת – עובש ב-5 דירות ברמת גן', description: 'מנהלת נכסים חוזרת. בעיית עובש ב-5 דירות שמנהלת.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,15,50), due: '', owner: pick(3).name, ownerId: pick(3).id, leadName: 'שלומית ויס', leadPhone: '054-6478901', leadCompany: 'ויס נכסים', projectName: 'בדיקת עובש' },
+      { title: 'ליד משותף – אקוסטיקה תעשייתית בחיפה', description: 'מפעל ליד שכונת מגורים. צריך דוח לרשות הסביבה.', status: 'OPEN', priority: 'HIGH', type: 'GENERAL', dueDate: d(0,16,0), due: '', owner: pick(0).name, ownerId: pick(0).id, leadName: 'רז כרמל', leadPhone: '050-7489012', leadCompany: 'כרמל הנדסה', projectName: 'דוח אקוסטי' },
+      { title: 'ליד מהאתר – בדיקת מים באר פרטית באשקלון', description: 'באר פרטית. חששות בריאותיים לגבי איכות המים.', status: 'OPEN', priority: 'MEDIUM', type: 'GENERAL', dueDate: d(0,16,10), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'דקלה יפרח', leadPhone: '053-8490123', leadCompany: 'פרטי', projectName: 'בדיקת מים' },
+      // ── 5 tasks TODAY ──
+      { title: 'לחזור ללקוח לגבי הצעת מחיר לבדיקת קרינה בבית', description: 'הצעה נשלחה לפני 3 ימים, הלקוח ביקש לחשוב. לחזור ולבדוק אם יש שאלות.', status: 'OPEN', priority: 'HIGH', type: 'SALES_FOLLOWUP', dueDate: d(0,10,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'יואב כהן', leadName: 'תומר מזרחי', leadPhone: '052-7001181', leadEmail: 'tomer.mizrahi@gmail.com', leadCompany: 'לקוח פרטי', projectName: 'בדיקות קרינה לפני רכישת בית' },
+      { title: 'שיחה חוזרת אחרי פנייה מפייסבוק - בדיקת ראדון', description: 'ליד חם מפייסבוק, לא ענתה בשיחה ראשונה. לנסות שוב היום.', status: 'OPEN', priority: 'URGENT', type: 'SALES_FOLLOWUP', dueDate: d(0,11,30), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'ליאת שמש', leadPhone: '054-2203914', leadCompany: 'פרטי' },
+      { title: 'לתאם הגעה למדידת רעש - בניין משרדים רמת גן', description: 'לאשר שעת הגעה ולוודא שיש גישה לקומות 3-5.', status: 'IN_PROGRESS', priority: 'HIGH', type: 'COORDINATION', dueDate: d(0,9,0), due: '', owner: pick(2).name, ownerId: pick(2).id, customerName: 'אלון מערכות מיזוג', leadName: 'אילן דיין', leadPhone: '050-2016775', leadCompany: 'אורבן נויז', projectName: 'בדיקות רעש למערכות מיזוג' },
+      { title: 'שליחת מסמכים - דוח אקוסטי להיתר בנייה', description: 'להעביר דוח מסכם + נספחים לוועדה המקומית. הלקוח מחכה.', status: 'OPEN', priority: 'HIGH', type: 'REPORT_WRITING', dueDate: d(0,14,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'קבוצת שקד הנדסה', leadName: 'שירי עמית', leadPhone: '052-3098842', leadCompany: 'עמית יזמות', projectName: 'בדיקות אקוסטיות לבניין מגורים' },
+      { title: 'גבייה על בדיקת איכות אוויר - חשבונית 4870', description: 'חשבונית לא שולמה כבר 45 יום. לתזכר את הנה"ח של הלקוח.', status: 'OPEN', priority: 'MEDIUM', type: 'COLLECTION', dueDate: d(0,16,0), due: '', owner: pick(3).name, ownerId: pick(3).id, customerName: 'גרין אופיס', leadName: 'אביב גרין', leadPhone: '053-7719280', leadCompany: 'גרין אופיס' },
+      // ── 4 tasks OVERDUE ──
+      { title: 'שיחה חוזרת אחרי אין מענה - סקר אסבסט', description: 'ניסיתי 3 פעמים, לא ענה. לנסות שוב או לשלוח WhatsApp.', status: 'OPEN', priority: 'URGENT', type: 'SALES_FOLLOWUP', dueDate: d(-2,10,0), due: '', owner: pick(1).name, ownerId: pick(1).id, customerName: 'אורן בנייה ויזמות', leadName: 'עומר פרנק', leadPhone: '050-6221417', leadCompany: 'פרנק בנייה', projectName: 'סקר אסבסט לפני פירוק גג' },
+      { title: 'פולואפ אחרי שליחת הצעה לבית ספר', description: 'הצעה לבדיקות סביבתיות נשלחה לפני שבוע. לוודא שדנה קיבלה.', status: 'OPEN', priority: 'HIGH', type: 'QUOTE_PREPARATION', dueDate: d(-3,9,0), due: '', owner: pick(2).name, ownerId: pick(2).id, customerName: 'בית ספר אורנים', leadName: 'דניאלה שור', leadPhone: '052-9911134', leadCompany: 'עיריית הוד השרון' },
+      { title: 'לבדוק אם הלקוח קיבל דוח ראדון', description: 'דוח נשלח במייל, לא אושרה קבלה. לחזור ללקוח.', status: 'OPEN', priority: 'MEDIUM', type: 'REVIEW', dueDate: d(-1,11,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'לירון כהן', leadName: 'ענת ברק', leadPhone: '052-6175510', leadCompany: 'פרטי' },
+      { title: 'לעדכן לקוח לגבי זמינות צוות - מדידת קרינה', description: 'הלקוח מחכה לתאריך. צוות שטח עמוס, צריך לתת צפי.', status: 'OPEN', priority: 'HIGH', type: 'COORDINATION', dueDate: d(-4,13,0), due: '', owner: pick(3).name, ownerId: pick(3).id, customerName: 'אוסם הנדסה תשתיות', leadName: 'קובי זיו', leadPhone: '053-2884201', leadCompany: 'זיו אלקטרו' },
+      // ── 5 tasks THIS WEEK ──
+      { title: 'מעקב אחרי ליד חם - דוח אקוסטי להיתר', description: 'הצעה אושרה בעל-פה. לסגור חוזה ולפתוח פרויקט.', status: 'IN_PROGRESS', priority: 'HIGH', type: 'SALES_FOLLOWUP', dueDate: d(1,10,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'קבוצת שקד הנדסה', leadName: 'נעם קליין', leadPhone: '053-4776102', leadCompany: 'ARC Design' },
+      { title: 'תזכורת לשליחת הצעה לאקוסטיקה - אולם רב תכליתי', description: 'צריך להכין הצעת מחיר לבדיקות רעש לאולם פעילות בעמק חפר.', status: 'OPEN', priority: 'MEDIUM', type: 'QUOTE_PREPARATION', dueDate: d(2,12,0), due: '', owner: pick(1).name, ownerId: pick(1).id, leadName: 'מאיה דרור', leadPhone: '054-9093317', leadCompany: 'מרכז קהילתי' },
+      { title: 'מעקב אחרי לקוח קיים - ליווי סביבתי חודשי', description: 'לבדוק עם רוני הדר האם יש צורך בעדכון דוח חודשי.', status: 'OPEN', priority: 'LOW', type: 'SALES_FOLLOWUP', dueDate: d(3,15,0), due: '', owner: pick(2).name, ownerId: pick(2).id, customerName: 'הדר ניהול פרויקטים', leadName: 'איתן מור', leadPhone: '050-7740128', leadCompany: 'Buildline' },
+      { title: 'תיאום ביקור - בדיקת עובש בבניין מגורים חולון', description: 'דיגום עובש ואיכות אוויר. לתאם שעה עם ועד הבית.', status: 'OPEN', priority: 'MEDIUM', type: 'FIELD_WORK', dueDate: d(4,9,30), due: '', owner: pick(3).name, ownerId: pick(3).id, customerName: 'אחוזת כרמל ניהול', leadName: 'מיכל אביטל', leadPhone: '054-1189030', leadCompany: 'לקוחה פרטית' },
+      { title: 'בדיקת מסמכי ביטוח לפני כניסה לשטח - עירייה', description: 'בדיקות סביבתיות בנס ציונה. צריך אישורי בטיחות וביטוח.', status: 'OPEN', priority: 'HIGH', type: 'COORDINATION', dueDate: d(5,10,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'עיריית נס ציונה' },
+      // ── 3 tasks DONE ──
+      { title: 'שיחת מכירה ראשונה - בדיקת קרינה לפני רכישה', description: 'שיחה מוצלחת, הלקוח מעוניין. נשלחה הצעה.', status: 'DONE', priority: 'HIGH', type: 'SALES_FOLLOWUP', dueDate: d(-1,10,0), due: '', owner: pick(1).name, ownerId: pick(1).id, customerName: 'יואב כהן', leadName: 'שרון ממן', leadPhone: '050-8114722', leadCompany: 'פרטי' },
+      { title: 'לחזור לגבי בדיקת ראדון - מודיעין', description: 'אושר מועד בדיקה. פרויקט נפתח.', status: 'DONE', priority: 'MEDIUM', type: 'COORDINATION', dueDate: d(-2,14,0), due: '', owner: pick(2).name, ownerId: pick(2).id, customerName: 'לירון כהן', leadName: 'ענת ברק', leadPhone: '052-6175510', leadCompany: 'פרטי' },
+      { title: 'פתיחת פרויקט לאחר אישור - בדיקות רעש', description: 'פרויקט נפתח, טכנאי הוקצה, דד-ליין נקבע.', status: 'DONE', priority: 'HIGH', type: 'GENERAL', dueDate: d(-3,9,0), due: '', owner: pick(3).name, ownerId: pick(3).id, customerName: 'ענבל לוי', leadName: 'אתי גרוס', leadPhone: '052-9430081', leadCompany: 'פרטי' },
+      // ── 3 QUOTE FOLLOWUP ──
+      { title: 'פולואפ הצעה - מיגון קרינה לחדר שנאים', description: 'הצעה ב-11,800 ₪ נשלחה. הלקוח ביקש אישור מהמזמין.', status: 'IN_PROGRESS', priority: 'HIGH', type: 'QUOTE_PREPARATION', dueDate: d(1,11,0), due: '', owner: pick(0).name, ownerId: pick(0).id, customerName: 'אוסם הנדסה תשתיות', leadName: 'אלון ברנע', leadPhone: '053-2248801', leadCompany: 'ברנע הנדסה' },
+      { title: 'פולואפ הצעה - ניטור איכות אוויר במפעל', description: 'הצעה נדחתה, הלקוח ביקש הצעה מעודכנת עם הנחה. להכין גרסה 2.', status: 'OPEN', priority: 'MEDIUM', type: 'QUOTE_PREPARATION', dueDate: d(3,14,0), due: '', owner: pick(1).name, ownerId: pick(1).id, customerName: 'טכנו-מד תעשיות', leadName: 'רון יעקובי', leadPhone: '054-8440923', leadCompany: 'יעקובי תעשיות' },
+      { title: 'תזכורת פנימית - לסגור הצעה ללקוח סקר אסבסט', description: 'הצעה טרם נשלחה. צריך לסיים מפרט ולשלוח השבוע.', status: 'OPEN', priority: 'URGENT', type: 'QUOTE_PREPARATION', dueDate: d(2,9,0), due: '', owner: pick(2).name, ownerId: pick(2).id, customerName: 'אורן בנייה ויזמות', leadName: 'עומר פרנק', leadPhone: '050-6221417', leadCompany: 'פרנק בנייה' },
+    ];
+
+    return raw.map((t, i) => ({
+      ...t,
+      id: `demo-task-${i + 1}`,
+      due: t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL') : '',
+    }));
+  }, [tasks.length, users]);
+
+  const effectiveTasks = tasks.length > 0 ? tasks : demoTasks;
+
+  /* ── helpers ── */
+  const priorityLabel = (priority: string) => {
+    const map: Record<string, string> = { LOW: 'נמוכה', MEDIUM: 'בינונית', HIGH: 'גבוהה', URGENT: 'דחופה' };
     return map[(priority || '').toUpperCase()] || priority || '-';
   };
-
-  const statusLabel = (status: string) => {
-    const map: Record<string, string> = {
-      OPEN: 'פתוחה',
-      IN_PROGRESS: 'בביצוע',
-      DONE: 'הושלמה',
-      CANCELLED: 'בוטלה',
-    };
+  const priorityColor = (p: string) => {
+    const map: Record<string, string> = { LOW: 'bg-slate-200 text-slate-700', MEDIUM: 'bg-blue-100 text-blue-700', HIGH: 'bg-orange-100 text-orange-700', URGENT: 'bg-red-100 text-red-700' };
+    return map[(p || '').toUpperCase()] || 'bg-slate-100 text-slate-600';
+  };
+  const priorityDot = (p: string) => {
+    const map: Record<string, string> = { LOW: 'bg-slate-400', MEDIUM: 'bg-blue-500', HIGH: 'bg-orange-500', URGENT: 'bg-red-500' };
+    return map[(p || '').toUpperCase()] || 'bg-slate-400';
+  };
+  const taskStatusLabel = (status: string) => {
+    const map: Record<string, string> = { OPEN: 'פתוחה', IN_PROGRESS: 'בביצוע', DONE: 'הושלמה', CANCELLED: 'בוטלה' };
     return map[(status || '').toUpperCase()] || status || '-';
   };
-
+  const taskStatusBadge = (s: string) => {
+    const map: Record<string, string> = { OPEN: 'bg-blue-500 text-white', IN_PROGRESS: 'bg-amber-500 text-white', DONE: 'bg-green-600 text-white', CANCELLED: 'bg-slate-400 text-white' };
+    return map[(s || '').toUpperCase()] || 'bg-slate-400 text-white';
+  };
   const taskTypeLabel = (type: string) => {
-    const map: Record<string, string> = {
-      SALES_FOLLOWUP: 'מעקב מכירות',
-      QUOTE_PREPARATION: 'הכנת הצעת מחיר',
-      COORDINATION: 'תיאום',
-      FIELD_WORK: 'עבודת שטח',
-      REPORT_WRITING: 'כתיבת דוח',
-      REVIEW: 'בקרה',
-      COLLECTION: 'גבייה',
-      GENERAL: 'כללי',
-    };
+    const map: Record<string, string> = { SALES_FOLLOWUP: 'מעקב מכירות', QUOTE_PREPARATION: 'הכנת הצעת מחיר', COORDINATION: 'תיאום', FIELD_WORK: 'עבודת שטח', REPORT_WRITING: 'כתיבת דוח', REVIEW: 'בקרה', COLLECTION: 'גבייה', GENERAL: 'כללי' };
     return map[(type || '').toUpperCase()] || type || '-';
   };
+
+  /* ── KPI computations ── */
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = today.toLocaleDateString('en-CA');
+  const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
+  const weekEndStr = weekEnd.toLocaleDateString('en-CA');
+
+  const kpiToday = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiOverdue = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiWeek = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiDoneToday = effectiveTasks.filter((t) => { return t.status === 'DONE'; }).length;
+  const kpiQuoteFollowup = effectiveTasks.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION' && t.status !== 'DONE' && t.status !== 'CANCELLED').length;
+
+  /* ── filtering ── */
+  const filtered = useMemo(() => {
+    let list = [...effectiveTasks];
+    // search
+    if (searchQ.trim()) {
+      const q = searchQ.trim().toLowerCase();
+      list = list.filter((t) =>
+        (t.title || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.customerName || '').toLowerCase().includes(q) ||
+        (t.leadName || '').toLowerCase().includes(q) ||
+        (t.projectName || '').toLowerCase().includes(q) ||
+        (t.owner || '').toLowerCase().includes(q)
+      );
+    }
+    // only mine
+    if (onlyMine) list = list.filter((t) => t.ownerId === currentUser.id);
+    // quick filters
+    if (quickFilter === 'today') {
+      list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr; });
+    } else if (quickFilter === 'overdue') {
+      list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; });
+    } else if (quickFilter === 'week') {
+      list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr; });
+    } else if (quickFilter === 'open') {
+      list = list.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS');
+    } else if (quickFilter === 'done') {
+      list = list.filter((t) => t.status === 'DONE');
+    } else if (quickFilter === 'leads') {
+      list = list.filter((t) => t.leadId || t.leadName);
+    } else if (quickFilter === 'customers') {
+      list = list.filter((t) => t.customerId || t.customerName);
+    } else if (quickFilter === 'quotes') {
+      list = list.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION');
+    }
+    return list;
+  }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr]);
+
+  /* ── actions ── */
+  const updateTaskField = async (taskId: string, data: Record<string, unknown>) => {
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error();
+      await onReloadTasks?.();
+    } catch { /* silent */ }
+  };
+
+  const markDone = (taskId: string) => updateTaskField(taskId, { status: 'DONE' });
+  const postponeDay = (taskId: string, currentDue: string | null | undefined) => {
+    const base = currentDue ? new Date(currentDue) : new Date();
+    base.setDate(base.getDate() + 1);
+    updateTaskField(taskId, { dueDate: base.toISOString() });
+  };
+  const postponeWeek = (taskId: string, currentDue: string | null | undefined) => {
+    const base = currentDue ? new Date(currentDue) : new Date();
+    base.setDate(base.getDate() + 7);
+    updateTaskField(taskId, { dueDate: base.toISOString() });
+  };
+
+  const postponeByDays = (taskId: string, currentDue: string | null | undefined, days: number) => {
+    const base = currentDue ? new Date(currentDue) : new Date();
+    base.setDate(base.getDate() + days);
+    updateTaskField(taskId, { dueDate: base.toISOString() });
+  };
+
+  /* ── reassign task to a different agent ── */
+  const reassignTask = async (taskId: string, newOwnerId: string) => {
+    const newOwner = users.find((u) => u.id === newOwnerId);
+    if (!newOwner) return;
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ ownerId: newOwnerId }),
+      });
+      if (!res.ok) throw new Error();
+      /* update local state immediately */
+      setTasks((prev) => prev.map((tk) =>
+        tk.id === taskId ? { ...tk, ownerId: newOwnerId, owner: newOwner.name } : tk
+      ));
+      /* If this task is currently expanded, move to the next task in the filtered list */
+      if (expandedTaskId === taskId) {
+        /* We need to find the next task AFTER the reassignment.
+         * The current task may be filtered out (if "only mine" is on and it's no longer mine).
+         * Get the filtered list without the reassigned task to find the next one. */
+        const remaining = filtered.filter((ft) => ft.id !== taskId);
+        const currentIndex = filtered.findIndex((ft) => ft.id === taskId);
+        /* Pick the task that was right after, or the one before, or null */
+        const nextTask = remaining[currentIndex] || remaining[currentIndex - 1] || null;
+        setExpandedTaskId(nextTask ? nextTask.id : null);
+      }
+      /* reload to get fresh data from server */
+      await onReloadTasks?.();
+    } catch { /* silent */ }
+  };
+
+  const [postponeDropdownId, setPostponeDropdownId] = useState<string | null>(null);
+
+  /* ── snooze task: set future dueDate & advance to next task ── */
+  const [snoozeCustomTaskId, setSnoozeCustomTaskId] = useState<string | null>(null);
+  const [snoozeCustomDate, setSnoozeCustomDate] = useState('');
+  const [snoozeCustomHour, setSnoozeCustomHour] = useState('09');
+  const [snoozeCustomMinute, setSnoozeCustomMinute] = useState('00');
+
+  const snoozeTask = async (taskId: string, futureDate: Date) => {
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ dueDate: futureDate.toISOString() }),
+      });
+      if (!res.ok) throw new Error();
+      /* advance to next task */
+      if (expandedTaskId === taskId) {
+        const remaining = filtered.filter((ft) => ft.id !== taskId);
+        const currentIndex = filtered.findIndex((ft) => ft.id === taskId);
+        const nextTask = remaining[currentIndex] || remaining[currentIndex - 1] || null;
+        setExpandedTaskId(nextTask ? nextTask.id : null);
+      }
+      await onReloadTasks?.();
+    } catch { /* silent */ }
+    setPostponeDropdownId(null);
+    setSnoozeCustomTaskId(null);
+  };
+
+  const snoozeByMinutes = (taskId: string, minutes: number) => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + minutes);
+    snoozeTask(taskId, d);
+  };
+
+  const snoozeToTonightOrMorning = (taskId: string, type: 'tonight' | 'tomorrow') => {
+    const d = new Date();
+    if (type === 'tonight') {
+      d.setHours(19, 0, 0, 0);
+      if (d <= new Date()) d.setDate(d.getDate() + 1); // if already past 19:00
+    } else {
+      d.setDate(d.getDate() + 1);
+      d.setHours(9, 0, 0, 0);
+    }
+    snoozeTask(taskId, d);
+  };
+
+  const snoozeCustomSubmit = (taskId: string) => {
+    if (!snoozeCustomDate) return;
+    const d = new Date(`${snoozeCustomDate}T${snoozeCustomHour.padStart(2, '0')}:${snoozeCustomMinute.padStart(2, '0')}:00`);
+    if (isNaN(d.getTime())) return;
+    snoozeTask(taskId, d);
+  };
+
+  /* render snooze popup content (reusable across all 3 locations) */
+  const renderSnoozePopup = (taskId: string, positionClass: string) => (
+    <div className={`absolute ${positionClass} z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl py-2 min-w-[260px]`} style={{ direction: 'rtl' }}>
+      {/* Quick */}
+      <div className="px-3 pt-1 pb-1.5">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">מהיר</span>
+      </div>
+      {[
+        { label: 'תוך 15 דקות', min: 15 },
+        { label: 'תוך 30 דקות', min: 30 },
+        { label: 'תוך שעה', min: 60 },
+        { label: 'תוך שעתיים', min: 120 },
+      ].map((opt) => (
+        <button key={opt.min} className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeByMinutes(taskId, opt.min)}>
+          <Timer className="h-3.5 w-3.5 text-slate-400" />
+          {opt.label}
+        </button>
+      ))}
+      <div className="border-t border-slate-100 mx-3 my-1.5" />
+      {/* Day */}
+      <div className="px-3 pt-1 pb-1.5">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">יום</span>
+      </div>
+      <button className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeToTonightOrMorning(taskId, 'tonight')}>
+        <Clock3 className="h-3.5 w-3.5 text-slate-400" />
+        היום בערב
+      </button>
+      <button className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeToTonightOrMorning(taskId, 'tomorrow')}>
+        <Clock3 className="h-3.5 w-3.5 text-slate-400" />
+        מחר בבוקר
+      </button>
+      <button className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeByMinutes(taskId, 1440)}>
+        <Clock3 className="h-3.5 w-3.5 text-slate-400" />
+        בעוד 24 שעות
+      </button>
+      <div className="border-t border-slate-100 mx-3 my-1.5" />
+      {/* Advanced */}
+      <div className="px-3 pt-1 pb-1.5">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">מתקדם</span>
+      </div>
+      <button className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeByMinutes(taskId, 2880)}>
+        <Calendar className="h-3.5 w-3.5 text-slate-400" />
+        בעוד יומיים
+      </button>
+      <button className="w-full text-right px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50 hover:text-blue-700 transition-colors flex items-center gap-2" onClick={() => snoozeByMinutes(taskId, 10080)}>
+        <Calendar className="h-3.5 w-3.5 text-slate-400" />
+        בעוד שבוע
+      </button>
+      <div className="border-t border-slate-100 mx-3 my-1.5" />
+      {/* Custom */}
+      <div className="px-3 pt-1 pb-1.5">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">מותאם אישית</span>
+      </div>
+      <div className="px-3 pb-2 space-y-2">
+        <input type="date" className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm" value={snoozeCustomTaskId === taskId ? snoozeCustomDate : ''} onChange={(e) => { setSnoozeCustomTaskId(taskId); setSnoozeCustomDate(e.target.value); }} />
+        <div className="flex gap-2 items-center">
+          <select className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={snoozeCustomTaskId === taskId ? snoozeCustomHour : '09'} onChange={(e) => { setSnoozeCustomTaskId(taskId); setSnoozeCustomHour(e.target.value); }}>
+            {Array.from({ length: 24 }, (_, i) => <option key={i} value={String(i).padStart(2, '0')}>{String(i).padStart(2, '0')}</option>)}
+          </select>
+          <span className="text-sm font-bold text-slate-500">:</span>
+          <select className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm" value={snoozeCustomTaskId === taskId ? snoozeCustomMinute : '00'} onChange={(e) => { setSnoozeCustomTaskId(taskId); setSnoozeCustomMinute(e.target.value); }}>
+            {Array.from({ length: 12 }, (_, i) => <option key={i * 5} value={String(i * 5).padStart(2, '0')}>{String(i * 5).padStart(2, '0')}</option>)}
+          </select>
+        </div>
+        <button disabled={!(snoozeCustomTaskId === taskId && snoozeCustomDate)} className="w-full rounded-lg px-3 py-2 text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: snoozeCustomTaskId === taskId && snoozeCustomDate ? '#3b82f6' : '#94a3b8' }} onClick={() => snoozeCustomSubmit(taskId)}>
+          אישור
+        </button>
+      </div>
+    </div>
+  );
 
   const createTask = async () => {
     if (!form.title.trim()) return;
     setSaving(true);
     setError('');
     try {
+      const dueISO = form.dueDate
+        ? new Date(`${form.dueDate}T${form.dueTime || '09:00'}`).toISOString()
+        : null;
       const payload: any = {
         title: form.title.trim(),
         description: form.description || null,
         ownerId: form.ownerId,
         projectId: form.projectId || null,
         customerId: form.customerId || null,
-        dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+        leadId: form.leadId || null,
+        dueDate: dueISO,
         priority: form.priority,
         status: form.status,
         type: form.type,
@@ -11680,17 +13057,7 @@ function TasksPage({
       await res.json();
       await onReloadTasks?.();
       setOpen(false);
-      setForm({
-        title: '',
-        description: '',
-        ownerId: currentUser.id,
-        projectId: '',
-        customerId: '',
-        dueDate: '',
-        priority: 'MEDIUM',
-        status: 'OPEN',
-        type: 'GENERAL',
-      });
+      setForm({ title: '', description: '', ownerId: currentUser.id, projectId: '', customerId: '', leadId: '', dueDate: '', dueTime: '', priority: 'MEDIUM', status: 'OPEN', type: 'GENERAL' });
     } catch {
       setError('יצירת משימה נכשלה. נסה שוב מאוחר יותר.');
     } finally {
@@ -11698,186 +13065,1253 @@ function TasksPage({
     }
   };
 
+  const toggleExpand = (id: string) => {
+    if (expandedTaskId === id) {
+      setExpandedTaskId(null);
+      return;
+    }
+    setExpandedTaskId(id);
+    /* scroll to expanded row after render, accounting for sticky header */
+    setTimeout(() => {
+      const el = expandedRowRefs.current[id];
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const headerOffset = 80; /* sticky header + padding */
+        const targetY = window.scrollY + rect.top - headerOffset;
+        window.scrollTo({ top: targetY, behavior: 'smooth' });
+      }
+    }, 120);
+  };
+
+  /* ── quick filter config ── */
+  const filterBtns: { key: string; label: string; icon: React.ElementType; count?: number }[] = [
+    { key: 'all', label: 'הכל', icon: ClipboardList },
+    { key: 'today', label: 'היום', icon: Calendar, count: kpiToday },
+    { key: 'overdue', label: 'באיחור', icon: AlertCircle, count: kpiOverdue },
+    { key: 'week', label: 'השבוע', icon: CalendarDays, count: kpiWeek },
+    { key: 'open', label: 'פתוחות', icon: CircleDot },
+    { key: 'done', label: 'הושלמו', icon: CheckCircle2 },
+    { key: 'leads', label: 'לידים', icon: Flame },
+    { key: 'customers', label: 'לקוחות', icon: Users },
+    { key: 'quotes', label: 'הצעות מחיר', icon: FileText },
+  ];
+
+  /* ── progress steps for arrow ── */
+  /* ── Business workflow stages (arrows) ── */
+  const progressSteps = [
+    { key: 'inquiry',      label: 'פנייה',   color: '#3b82f6' },
+    { key: 'call',         label: 'שיחה',   color: '#6366f1' },
+    { key: 'quote',        label: 'הצעה',   color: '#f59e0b' },
+    { key: 'followup',     label: 'פולואפ', color: '#f97316' },
+    { key: 'coordination', label: 'תיאום',  color: '#8b5cf6' },
+    { key: 'execution',    label: 'ביצוע',  color: '#06b6d4' },
+    { key: 'report',       label: 'דוח',    color: '#0ea5e9' },
+    { key: 'collection',   label: 'גבייה',  color: '#ec4899' },
+    { key: 'feedback',     label: 'משוב',   color: '#14b8a6' },
+    { key: 'closed',       label: 'נסגר',   color: '#22c55e' },
+  ];
+  /** Map task type + status → workflow stage index */
+  const detectStep = (task: Task): number => {
+    const s = (task.status || 'OPEN').toUpperCase();
+    const tp = (task.type || 'GENERAL').toUpperCase();
+    if (s === 'DONE' || s === 'CANCELLED') return 9;       // נסגר
+    if (tp === 'REVIEW')                   return 8;       // משוב
+    if (tp === 'COLLECTION')               return 7;       // גבייה
+    if (tp === 'REPORT_WRITING')           return 6;       // דוח
+    if (tp === 'FIELD_WORK')               return 5;       // ביצוע
+    if (tp === 'COORDINATION')             return 4;       // תיאום
+    if (tp === 'SALES_FOLLOWUP')           return 3;       // פולואפ
+    if (tp === 'QUOTE_PREPARATION')        return 2;       // הצעה
+    if (s === 'IN_PROGRESS')               return 1;       // שיחה
+    return 0;                                              // פנייה
+  };
+
+  /* ── phone helpers (reuse from leads if exist) ── */
+  const phoneClean = (p: string) => (p || '').replace(/[^\d+]/g, '');
+  const waLink = (p: string) => `https://wa.me/${phoneClean(p).replace(/^0/, '972')}`;
+
+  /* ── render ── */
   return (
     <div className="space-y-5">
+      {/* ═══ HEADER ═══ */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>משימות</h1>
-          <p className="mt-1 text-slate-500">משימות מחוברות לפרויקטים ולקוחות</p>
+          <h1 className="text-3xl font-extrabold" style={{ color: galit.text }}>משימות</h1>
+          <p className="mt-1 text-sm text-slate-500">ניהול משימות, פולואפים ומעקב יומי</p>
         </div>
-        <Button className="rounded-2xl" style={{ background: galit.primary }} onClick={() => setOpen(true)}>
-          <Plus className="ml-2 h-4 w-4" />
+        <button
+          className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
+          style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
+          onClick={() => setOpen(true)}
+        >
+          <Plus className="h-4 w-4" />
           משימה חדשה
-        </Button>
+        </button>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>כותרת</TableHead>
-                <TableHead>פרויקט</TableHead>
-                <TableHead>לקוח</TableHead>
-                <TableHead>אחראי</TableHead>
-                <TableHead>תאריך יעד</TableHead>
-                <TableHead>עדיפות</TableHead>
-                <TableHead>סטטוס</TableHead>
-                <TableHead>סוג</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tasks.map((t) => (
-                <TableRow key={t.id} className="hover:bg-slate-50">
-                  <TableCell>
-                    <div className="font-medium">{t.title}</div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      {t.description ? `תיאור/הערות: ${t.description}` : 'אין תיאור/הערות'}
-                    </div>
-                  </TableCell>
-                  <TableCell>{t.projectName || '-'}</TableCell>
-                  <TableCell>{t.customerName || '-'}</TableCell>
-                  <TableCell>{t.owner || '-'}</TableCell>
-                  <TableCell>{t.due || '-'}</TableCell>
-                  <TableCell>{priorityLabel(t.priority)}</TableCell>
-                  <TableCell>{statusLabel(t.status || 'OPEN')}</TableCell>
-                  <TableCell>{taskTypeLabel(t.type || 'GENERAL')}</TableCell>
-                </TableRow>
-              ))}
-              {tasks.length === 0 && (
-                <TableRow>
-                  <TableCell className="py-10 text-center text-slate-500" colSpan={8}>
-                    אין משימות להצגה
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {/* ═══ KPI CARDS ═══ */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        {[
+          { title: 'להיום', value: kpiToday, icon: Calendar, color: '#3b82f6', sub: `${todayStr.split('-').reverse().join('/')}` },
+          { title: 'באיחור', value: kpiOverdue, icon: AlertCircle, color: '#ef4444', sub: 'דורשות טיפול' },
+          { title: 'השבוע', value: kpiWeek, icon: CalendarDays, color: '#8b5cf6', sub: '7 ימים קרובים' },
+          { title: 'הושלמו', value: kpiDoneToday, icon: CheckCircle2, color: '#22c55e', sub: 'סה"כ שהושלמו' },
+          { title: 'פולואפ הצעות', value: kpiQuoteFollowup, icon: FileText, color: '#f59e0b', sub: 'ממתינות למעקב' },
+        ].map((kpi) => {
+          const KIcon = kpi.icon;
+          return (
+            <div key={kpi.title} className="rounded-2xl bg-white p-4 shadow-sm border border-slate-100 transition-all duration-150 hover:shadow-md">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="text-xs font-medium text-slate-500" style={{ fontSize: 13 }}>{kpi.title}</div>
+                  <div className="mt-1 text-3xl font-extrabold" style={{ color: galit.text }}>{kpi.value}</div>
+                  <div className="mt-0.5 text-slate-400" style={{ fontSize: 11 }}>{kpi.sub}</div>
+                </div>
+                <div className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: `${kpi.color}18` }}>
+                  <KIcon className="h-5 w-5" style={{ color: kpi.color }} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
+      {/* ═══ FILTERS BAR ═══ */}
+      <div className="rounded-2xl bg-white p-3 shadow-sm border border-slate-100">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* search */}
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pr-9 pl-3 text-sm outline-none focus:border-green-400 focus:ring-1 focus:ring-green-200"
+              placeholder="חיפוש משימה..."
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+            />
+          </div>
+          {/* only mine */}
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${onlyMine ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+            style={onlyMine ? { background: galit.primary } : {}}
+            onClick={() => setOnlyMine(!onlyMine)}
+          >
+            רק שלי
+          </button>
+          <div className="h-5 w-px bg-slate-200" />
+          {/* quick filter pills */}
+          {filterBtns.map((fb) => {
+            const FIcon = fb.icon;
+            const active = quickFilter === fb.key;
+            return (
+              <button
+                key={fb.key}
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${active ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+                style={active ? { background: galit.primary } : {}}
+                onClick={() => setQuickFilter(fb.key === quickFilter ? 'all' : fb.key)}
+              >
+                <FIcon className="h-3.5 w-3.5" />
+                {fb.label}
+                {fb.count !== undefined && fb.count > 0 && (
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${active ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-600'}`}>{fb.count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ═══ TASKS TABLE ═══ */}
+      <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
+        <table className="w-full text-sm" dir="rtl">
+          <thead>
+            <tr className="border-b border-slate-100 text-right" style={{ background: '#f8fafb' }}>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 40 }}>
+                <Hash className="h-3.5 w-3.5 mx-auto text-slate-400" />
+              </th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 50 }}>עדיפות</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">משימה</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">קשור ל</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">לקוח / ליד</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">טלפון</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">תאריך יעד</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">סטטוס</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">אחראי</th>
+              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 90 }}>פעולות</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 && (
+              <tr><td colSpan={10} className="py-16 text-center text-slate-400">
+                <div className="flex flex-col items-center gap-2">
+                  <ClipboardList className="h-10 w-10 text-slate-300" />
+                  <span>אין משימות להצגה</span>
+                </div>
+              </td></tr>
+            )}
+            {filtered.map((t, idx) => {
+              const isExpanded = expandedTaskId === t.id;
+              const s = (t.status || 'OPEN').toUpperCase();
+              const p = (t.priority || 'MEDIUM').toUpperCase();
+              const isDone = s === 'DONE' || s === 'CANCELLED';
+              const isOverdue = t.dueDate && new Date(t.dueDate) < today && !isDone;
+              const contactName = t.leadName || t.customerName || '';
+              const contactPhone = t.leadPhone || '';
+              const relatedTo = t.projectName || taskTypeLabel(t.type || 'GENERAL');
+              const dueDisplay = t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '-';
+              const dueTime = t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
+
+              return (
+                <React.Fragment key={t.id}>
+                  <tr
+                    className={`border-b border-slate-50 cursor-pointer transition-all duration-100 ${isDone ? 'opacity-60' : ''} ${isOverdue ? 'bg-red-50/40' : 'hover:bg-slate-50/80'} ${isExpanded ? 'bg-slate-50' : ''}`}
+                    onClick={() => toggleExpand(t.id)}
+                  >
+                    {/* # */}
+                    <td className="px-3 py-3 text-center text-xs text-slate-400">{idx + 1}</td>
+                    {/* priority */}
+                    <td className="px-3 py-3 text-center">
+                      <div className={`mx-auto h-2.5 w-2.5 rounded-full ${priorityDot(p)}`} title={priorityLabel(p)} />
+                    </td>
+                    {/* title + type */}
+                    <td className="px-3 py-3">
+                      <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>{t.title}</div>
+                      <div className="mt-0.5 text-[11px] text-slate-400">{taskTypeLabel(t.type || 'GENERAL')}</div>
+                    </td>
+                    {/* related to */}
+                    <td className="px-3 py-3 hidden md:table-cell">
+                      <span className="text-xs text-slate-600">{relatedTo}</span>
+                    </td>
+                    {/* customer / lead */}
+                    <td className="px-3 py-3 hidden md:table-cell">
+                      <span className="text-xs font-medium text-slate-700">{contactName || '-'}</span>
+                      {t.leadCompany && <div className="text-[10px] text-slate-400">{t.leadCompany}</div>}
+                    </td>
+                    {/* phone */}
+                    <td className="px-3 py-3 hidden lg:table-cell">
+                      {contactPhone ? (
+                        <a href={`tel:${phoneClean(contactPhone)}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{contactPhone}</a>
+                      ) : <span className="text-xs text-slate-400">-</span>}
+                    </td>
+                    {/* due date */}
+                    <td className="px-3 py-3">
+                      <div className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>{dueDisplay}</div>
+                      {dueTime && dueTime !== '00:00' && <div className="text-[10px] text-slate-400">{dueTime}</div>}
+                    </td>
+                    {/* status */}
+                    <td className="px-3 py-3 hidden md:table-cell">
+                      <span className={`inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
+                    </td>
+                    {/* owner */}
+                    <td className="px-3 py-3 hidden lg:table-cell">
+                      <span className="text-xs text-slate-600">{t.owner || '-'}</span>
+                    </td>
+                    {/* actions */}
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1">
+                        {!isDone && (
+                          <button className="rounded-lg p-1.5 text-green-600 hover:bg-green-50 transition-colors" title="סמן הושלם" onClick={(e) => { e.stopPropagation(); markDone(t.id); }}>
+                            <CheckCircle2 className="h-4 w-4" />
+                          </button>
+                        )}
+                        {contactPhone && (
+                          <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="rounded-lg p-1.5 text-green-600 hover:bg-green-50 transition-colors" title="WhatsApp" onClick={(e) => e.stopPropagation()}>
+                            <MessageCircle className="h-4 w-4" />
+                          </a>
+                        )}
+                        <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors" title={isExpanded ? 'סגור' : 'פתח'} onClick={(e) => { e.stopPropagation(); toggleExpand(t.id); }}>
+                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                  {/* ═══ EXPANDED ROW — TASK WORKSPACE ═══ */}
+                  {isExpanded && (() => {
+                    const currentStep = manualStepOverride[t.id] ?? detectStep(t);
+                    const totalSteps = progressSteps.length;
+                    const stepsReversed = [...progressSteps].reverse();
+                    const isPostponeOpen = postponeDropdownId === t.id;
+                    /* info fields — only show if value exists */
+                    const infoFields = [
+                      { icon: Phone, color: '#06b6d4', bg: '#ecfeff', label: 'טלפון', value: contactPhone },
+                      { icon: Mail, color: '#a855f7', bg: '#faf5ff', label: 'אימייל', value: t.leadEmail },
+                      { icon: Building2, color: '#f59e0b', bg: '#fffbeb', label: 'לקוח', value: t.customerName },
+                      { icon: Flame, color: '#ef4444', bg: '#fef2f2', label: 'איש קשר / ליד', value: t.leadName },
+                      { icon: FolderKanban, color: '#22c55e', bg: '#f0fdf4', label: 'פרויקט', value: t.projectName },
+                      { icon: ClipboardList, color: '#64748b', bg: '#f8fafc', label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
+                      { icon: UserCircle2, color: '#8b5cf6', bg: '#faf5ff', label: 'נציג מטפל', value: t.owner },
+                      { icon: AlertTriangle, color: '#f97316', bg: '#fff7ed', label: 'עדיפות', value: priorityLabel(p) },
+                      { icon: Calendar, color: '#3b82f6', bg: '#eff6ff', label: 'תאריך יעד', value: t.due },
+                      { icon: Clock3, color: '#06b6d4', bg: '#ecfeff', label: 'שעה', value: t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : null },
+                      { icon: BarChart3, color: '#10b981', bg: '#ecfdf5', label: 'סטטוס', value: taskStatusLabel(s) },
+                      { icon: Hash, color: '#6366f1', bg: '#eef2ff', label: 'סוג לקוח / חברה', value: t.leadCompany },
+                    ].filter((f) => f.value && f.value !== '-');
+                    return (
+                    <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
+                      <td colSpan={10} className="p-0">
+                        <div className="my-3 rounded-3xl bg-slate-50/80 shadow-xl border border-slate-200/60" style={{ minHeight: '55vh' }}>
+
+                          {/* ═══ 1. PROGRESS ARROWS — פס חצים RTL ═══ */}
+                          <div className="px-8 pt-6 pb-2">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-base font-bold text-slate-800">ניהול משימה</span>
+                                <span className="text-xs text-slate-400 font-medium">גלית CRM · מעקב ליד</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${priorityColor(p)}`}>{priorityLabel(p)}</span>
+                                <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
+                                <button className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors" onClick={() => setExpandedTaskId(null)}>
+                                  <X className="h-5 w-5" />
+                                </button>
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm px-5 py-5">
+                              <div className="flex" style={{ direction: 'ltr', gap: 0 }}>
+                                {stepsReversed.map((step, vi) => {
+                                  const origIdx = totalSteps - 1 - vi;
+                                  const isActive = origIdx <= currentStep;
+                                  const isCurrent = origIdx === currentStep;
+                                  const isLeftmost = vi === 0;
+                                  const isRightmost = vi === totalSteps - 1;
+                                  /* last step (נסגר, leftmost visually) always green when active */
+                                  const stepColor = isLeftmost && isActive ? '#22c55e' : step.color;
+                                  const bg = isActive ? stepColor : '#e2e8f0';
+                                  const textColor = isActive ? '#fff' : '#64748b';
+                                  const h = 64;
+                                  const tip = 28;
+                                  let points: string;
+                                  if (isRightmost) { points = `200,0 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
+                                  else if (isLeftmost) { points = `200,0 ${200-tip},${h/2} 200,${h} 0,${h} 0,0`; }
+                                  else { points = `200,0 ${200-tip},${h/2} 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
+                                  return (
+                                    <div key={step.key} className="flex-1 min-w-0" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }))}>
+                                      <svg viewBox={`0 0 200 ${h}`} preserveAspectRatio="none" className="w-full" style={{ height: h, display: 'block' }}>
+                                        <polygon points={points} fill={bg} style={{ transition: 'fill 0.2s ease' }} />
+                                        {isCurrent && isActive && <polygon points={points} fill="none" stroke="#fff" strokeWidth="3" strokeOpacity="0.4" />}
+                                      </svg>
+                                      <div className="absolute inset-0 flex items-center justify-center" style={{ pointerEvents: 'none' }}>
+                                        {isCurrent && isActive && <CheckCircle2 className="h-5 w-5 ml-1.5" style={{ color: textColor }} />}
+                                        <span style={{ color: textColor, fontWeight: isCurrent ? 700 : 600, fontSize: isCurrent ? 17 : 15, letterSpacing: '0.01em', fontFamily: 'var(--font-sans)' }}>{step.label}</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* ═══ 2. SMART HEADER CARD — dynamic sentence + CTA per stage ═══ */}
+                          <div className="px-8 pb-4 pt-2">
+                            {(() => {
+                              const stageColor = progressSteps[currentStep]?.color || '#3b82f6';
+                              const stageKey = progressSteps[currentStep]?.key || 'inquiry';
+                              /* ── build human-readable action sentence ── */
+                              const agentName = t.owner || currentUser.name || 'הנציג';
+                              const contactDisplay = t.leadName || t.customerName || 'הלקוח';
+                              const companyDisplay = t.leadCompany || t.customerName || '';
+                              /* Priority: projectName → taskTypeLabel (fallback) */
+                              const projectDisplay = t.projectName || '';
+                              const serviceTypeFallback = taskTypeLabel(t.type || 'GENERAL');
+                              const topicDisplay = projectDisplay || serviceTypeFallback;
+                              /* Preposition: "עבור פרויקט X" when project, "ל-X" when service type */
+                              const topicPrefix = projectDisplay ? 'עבור ' : 'ל';
+                              const isPrivate = /^(פרטי|לקוח פרטי|לקוחה פרטית)$/i.test(companyDisplay);
+                              const fromCompany = companyDisplay && companyDisplay !== contactDisplay && !isPrivate ? ` מ${companyDisplay}` : '';
+                              /* Extract service hint from title for new leads (e.g. "בדיקת קרינה", "בדיקת רעש") */
+                              const serviceHintMatch = t.title.match(/–\s*(.+?)(?:\s+ב[א-ת]+)?$/);
+                              const serviceHint = serviceHintMatch ? serviceHintMatch[1].trim() : '';
+                              const inquirySuffix = projectDisplay ? ` עבור ${projectDisplay}` : (serviceHint ? ` לגבי ${serviceHint}` : '');
+                              /* ── Smart action suffix for call stage ── */
+                              const callMissing: string[] = [];
+                              const linkedLeadForHeader = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
+                              if (!t.leadPhone && !linkedLeadForHeader?.phone) callMissing.push('לעדכן מספר טלפון');
+                              if (!contactDisplay || contactDisplay === 'הלקוח') callMissing.push('לאשר איש קשר');
+                              if (!companyDisplay && !isPrivate) callMissing.push('לעדכן שם חברה');
+                              if (!linkedLeadForHeader?.serviceType && !linkedLeadForHeader?.service && !t.projectName) callMissing.push('להבין צורך מדויק');
+                              const callAction = callMissing.length > 0
+                                ? callMissing.join(', ') + ' ולהכין מעבר להצעה'
+                                : 'לבצע אימות נתונים לפני מעבר להצעה';
+                              const actionSentences: Record<string, string> = {
+                                inquiry:      `${agentName} צריך לחזור ל${contactDisplay}${fromCompany}${inquirySuffix}`,
+                                call:         `${agentName} צריך לחזור ל${contactDisplay}${fromCompany} ${topicPrefix}${topicDisplay}`,
+                                quote:        `${agentName} צריך להוציא ל${contactDisplay}${fromCompany} הצעת מחיר ${topicPrefix}${topicDisplay}`,
+                                followup:     `${agentName} צריך לחזור ל${contactDisplay}${fromCompany} ולוודא שהבין את ההצעה ${topicPrefix}${topicDisplay}`,
+                                coordination: `${agentName} צריך לתאם עם ${contactDisplay}${fromCompany} הגעה ${topicPrefix}${topicDisplay}`,
+                                execution:    `${agentName} צריך לבצע ${topicDisplay} עבור ${contactDisplay}${fromCompany}`,
+                                report:       `${agentName} צריך לשלוח ל${contactDisplay}${fromCompany} את הדוח ${topicPrefix}${topicDisplay}`,
+                                collection:   `${agentName} צריך לגבות תשלום מ${contactDisplay}${fromCompany} עבור ${topicDisplay}`,
+                                feedback:     `${agentName} צריך לקבל משוב מ${contactDisplay}${fromCompany} על ${topicDisplay}`,
+                                closed:       `הטיפול ב${contactDisplay}${fromCompany} הושלם בהצלחה`,
+                              };
+                              const smartSentenceBase = actionSentences[stageKey] || t.title;
+                              /* For call stage: merge action into one unified headline */
+                              const smartSentence = stageKey === 'call'
+                                ? `${smartSentenceBase} — ${callAction}`
+                                : smartSentenceBase;
+                              /* ── CTA button config per stage ── */
+                              const stageCTA: Record<string, { label: string; icon: React.ElementType; action: () => void }> = {
+                                inquiry:      { label: 'התקשר עכשיו', icon: PhoneCall, action: () => { if (contactPhone) window.open(`tel:${phoneClean(contactPhone)}`); } },
+                                call:         { label: 'התקשר עכשיו', icon: PhoneCall, action: () => { if (contactPhone) window.open(`tel:${phoneClean(contactPhone)}`); } },
+                                quote:        { label: 'צור הצעה', icon: FileText, action: () => { if (onCreateQuote) onCreateQuote(t.customerId, t.id); } },
+                                followup:     { label: 'התקשר עכשיו', icon: PhoneCall, action: () => { if (contactPhone) window.open(`tel:${phoneClean(contactPhone)}`); } },
+                                coordination: { label: 'קבע תיאום', icon: Calendar, action: () => { if (contactPhone) window.open(`tel:${phoneClean(contactPhone)}`); } },
+                                execution:    { label: 'דווח התקדמות', icon: ClipboardList, action: () => { updateTaskField(t.id, { status: 'IN_PROGRESS' }); } },
+                                report:       { label: 'שלח דוח', icon: FileText, action: () => { alert('שליחת דוח'); } },
+                                collection:   { label: 'דווח תשלום', icon: CheckCircle2, action: () => { updateTaskField(t.id, { status: 'DONE' }); } },
+                                feedback:     { label: 'סמן הושלם', icon: CheckCircle2, action: () => { updateTaskField(t.id, { status: 'DONE' }); } },
+                                closed:       { label: 'הושלם', icon: CheckCircle2, action: () => {} },
+                              };
+                              const cta = stageCTA[stageKey] || stageCTA.inquiry;
+                              const CTAIcon = cta.icon;
+                              return (
+                            <div className="rounded-2xl flex items-center" style={{ background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}dd 100%)`, minHeight: 130, padding: '24px 32px', direction: 'rtl', gap: 24 }}>
+                              {/* RIGHT SIDE — headline + meta underneath aligned right */}
+                              <div className="flex-1 min-w-0">
+                                <div className="font-bold text-white" style={{ fontSize: 36, lineHeight: 1.3, letterSpacing: '-0.01em', marginBottom: 10, fontFamily: 'var(--font-sans)' }}>{smartSentence}</div>
+                                <div className="flex items-center gap-3 flex-wrap" style={{ direction: 'rtl' }}>
+                                  <span className="inline-flex items-center rounded-full px-4 py-1 text-xs font-bold" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
+                                  <span className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.8)' }}>{t.due || ''}</span>
+                                  {t.owner && <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>{t.owner}</span>}
+                                </div>
+                              </div>
+                              {/* LEFT SIDE — avatar + CTA button together */}
+                              <div className="flex items-center gap-4 flex-shrink-0">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }}>
+                                  <UserCircle2 className="h-8 w-8 text-white" />
+                                </div>
+                                {stageKey !== 'closed' && (
+                                  <button onClick={cta.action} className="flex items-center gap-2.5 rounded-2xl px-7 py-4 font-bold text-base transition-all duration-200 hover:scale-105 hover:shadow-xl" style={{ background: '#fff', color: stageColor, border: `3px solid rgba(255,255,255,0.5)`, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', fontFamily: 'var(--font-sans)' }}>
+                                    <CTAIcon className="h-6 w-6" />
+                                    {cta.label}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                              );
+                            })()}
+                          </div>
+
+                          {/* ═══ STAGE-SPECIFIC CONTENT ═══ */}
+                          {currentStep === 0 ? (() => {
+                            /* ── פנייה stage — custom inquiry view ── */
+                            const linkedLead = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
+                            const sourceRaw = linkedLead?.source || '';
+                            const sourceMap: Record<string, string> = { facebook: 'פייסבוק', google: 'גוגל', website: 'אתר', whatsapp: 'WhatsApp', phone: 'טלפון נכנס', referral: 'המלצה', returning: 'לקוח חוזר', partner: 'שותף / קבלן' };
+                            const sourceDisplay = sourceMap[sourceRaw.toLowerCase()] || sourceRaw || 'לא צוין';
+                            const serviceRaw = linkedLead?.service || linkedLead?.serviceType || t.projectName || taskTypeLabel(t.type || 'GENERAL');
+                            const cityDisplay = linkedLead?.city || '';
+                            const createdDate = t.createdAt || t.dueDate;
+                            const createdDisplay = createdDate ? new Date(createdDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+                            const createdTime = createdDate ? new Date(createdDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
+                            /* time ago */
+                            const timeAgo = (() => {
+                              if (!createdDate) return '';
+                              const diff = Date.now() - new Date(createdDate).getTime();
+                              const mins = Math.floor(diff / 60000);
+                              if (mins < 60) return `לפני ${mins} דקות`;
+                              const hrs = Math.floor(mins / 60);
+                              if (hrs < 24) return `לפני ${hrs} שעות`;
+                              const days = Math.floor(hrs / 24);
+                              return `לפני ${days} ימים`;
+                            })();
+                            /* urgency */
+                            const urgencyBadge = (() => {
+                              if (!createdDate) return { label: 'חדש', color: '#3b82f6', bg: '#eff6ff' };
+                              const hrs = (Date.now() - new Date(createdDate).getTime()) / 3600000;
+                              if (hrs < 1) return { label: 'ליד חם 🔥', color: '#ef4444', bg: '#fef2f2' };
+                              if (hrs < 4) return { label: 'דחוף', color: '#f97316', bg: '#fff7ed' };
+                              if (hrs < 24) return { label: 'חדש', color: '#3b82f6', bg: '#eff6ff' };
+                              return { label: 'ממתין לטיפול', color: '#64748b', bg: '#f8fafc' };
+                            })();
+                            const customerType = linkedLead?.company ? 'עסקי' : 'פרטי';
+                            return (
+                            <>
+                              {/* ═══ BLOCK 1: החלטת טיפול ═══ */}
+                              <div className="px-8 pb-4">
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5" style={{ direction: 'rtl' }}>
+                                  <div className="flex items-center gap-2 mb-4">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#fef3c7' }}>
+                                      <Target className="h-4 w-4 text-amber-600" />
+                                    </div>
+                                    <span className="text-sm font-bold text-slate-700" style={{ fontFamily: 'var(--font-sans)' }}>החלטת טיפול</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {/* נציג מטפל */}
+                                    <div>
+                                      <label className="block text-[11px] font-medium text-slate-500 mb-1">נציג מטפל</label>
+                                      <select
+                                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                                        value={t.ownerId || ''}
+                                        onChange={(e) => { if (e.target.value && e.target.value !== t.ownerId) reassignTask(t.id, e.target.value); }}
+                                      >
+                                        <option value="">בחר נציג</option>
+                                        {users.map((u: any) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                      </select>
+                                    </div>
+                                    {/* דחיפות */}
+                                    <div>
+                                      <label className="block text-[11px] font-medium text-slate-500 mb-1">דחיפות</label>
+                                      <select
+                                        className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
+                                        value={(t.priority || 'MEDIUM').toUpperCase()}
+                                        onChange={(e) => updateTaskField(t.id, { priority: e.target.value })}
+                                      >
+                                        <option value="HIGH">חם / דחוף</option>
+                                        <option value="MEDIUM">בינוני</option>
+                                        <option value="LOW">נמוך</option>
+                                      </select>
+                                    </div>
+                                    {/* סוג לקוח */}
+                                    <div>
+                                      <label className="block text-[11px] font-medium text-slate-500 mb-1">סוג לקוח</label>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-bold" style={{ background: customerType === 'עסקי' ? '#eff6ff' : '#f0fdf4', color: customerType === 'עסקי' ? '#2563eb' : '#16a34a' }}>{customerType}</span>
+                                      </div>
+                                    </div>
+                                    {/* מקור ליד */}
+                                    <div>
+                                      <label className="block text-[11px] font-medium text-slate-500 mb-1">מקור ליד</label>
+                                      <div className="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-bold" style={{ background: '#faf5ff', color: '#7c3aed' }}>{sourceDisplay}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* ═══ BLOCK 2: מה עושים עכשיו ═══ */}
+                              <div className="px-8 pb-4">
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5" style={{ direction: 'rtl' }}>
+                                  <div className="flex items-center gap-2 mb-4">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#ede9fe' }}>
+                                      <Zap className="h-4 w-4 text-indigo-600" />
+                                    </div>
+                                    <span className="text-sm font-bold text-slate-700" style={{ fontFamily: 'var(--font-sans)' }}>מה עושים עכשיו?</span>
+                                  </div>
+                                  {/* Quick action buttons row */}
+                                  <div className="flex flex-wrap gap-3 justify-center mb-5">
+                                    {contactPhone && (
+                                      <a href={`tel:${phoneClean(contactPhone)}`} className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#3b82f6' }}>
+                                          <PhoneCall className="h-5 w-5 text-white" />
+                                        </div>
+                                        <span className="text-[11px] font-bold text-slate-600">התקשר</span>
+                                      </a>
+                                    )}
+                                    {contactPhone && (
+                                      <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#22c55e' }}>
+                                          <MessageCircle className="h-5 w-5 text-white" />
+                                        </div>
+                                        <span className="text-[11px] font-bold text-slate-600">WhatsApp</span>
+                                      </a>
+                                    )}
+                                    <button onClick={() => { updateTaskField(t.id, { status: 'IN_PROGRESS' }); }} className="flex flex-col items-center gap-1.5 group">
+                                      <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#f97316' }}>
+                                        <PhoneCall className="h-5 w-5 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">אין מענה</span>
+                                    </button>
+                                    {!isDone && (
+                                      <div className="relative flex flex-col items-center gap-1.5">
+                                        <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex flex-col items-center gap-1.5 group">
+                                          <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#64748b' }}>
+                                            <RotateCcw className="h-5 w-5 text-white" />
+                                          </div>
+                                          <span className="text-[11px] font-bold text-slate-600">קבע חזרה</span>
+                                        </button>
+                                        {isPostponeOpen && renderSnoozePopup(t.id, 'top-14')}
+                                      </div>
+                                    )}
+                                    {(t.leadId || t.leadName) && onOpenLead && (
+                                      <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex flex-col items-center gap-1.5 group">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#ef4444' }}>
+                                          <Flame className="h-5 w-5 text-white" />
+                                        </div>
+                                        <span className="text-[11px] font-bold text-slate-600">פתח ליד</span>
+                                      </button>
+                                    )}
+                                    {(t.customerId || t.customerName) && onOpenCustomer && (
+                                      <button onClick={() => { const cust = customers.find((c) => c.id === t.customerId); if (cust) onOpenCustomer(cust); }} className="flex flex-col items-center gap-1.5 group">
+                                        <div className="flex h-12 w-12 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#8b5cf6' }}>
+                                          <Building2 className="h-5 w-5 text-white" />
+                                        </div>
+                                        <span className="text-[11px] font-bold text-slate-600">פתח לקוח</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                  {/* Main CTA — העבר לשיחה */}
+                                  <div className="flex justify-center">
+                                    <button
+                                      onClick={() => {
+                                        setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
+                                        updateTaskField(t.id, { type: 'SALES_CALL', status: 'IN_PROGRESS' });
+                                      }}
+                                      className="flex items-center gap-2.5 rounded-2xl px-8 py-3.5 font-bold text-white text-base shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-[1.03]"
+                                      style={{ background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', fontFamily: 'var(--font-sans)' }}
+                                    >
+                                      <PlayCircle className="h-5 w-5" />
+                                      העבר לשיחה
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* ═══ BLOCK 3: מידע מהיר ═══ */}
+                              <div className="px-8 pb-4">
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-5" style={{ direction: 'rtl' }}>
+                                  <div className="flex items-center gap-2 mb-4">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#ecfeff' }}>
+                                      <Clock3 className="h-4 w-4 text-cyan-600" />
+                                    </div>
+                                    <span className="text-sm font-bold text-slate-700" style={{ fontFamily: 'var(--font-sans)' }}>מידע מהיר</span>
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    {/* זמן מאז הפנייה */}
+                                    <div className="rounded-xl bg-slate-50 p-3.5">
+                                      <div className="text-[10px] text-slate-400 font-medium mb-1">זמן מאז הפנייה</div>
+                                      <div className="text-sm font-bold text-slate-800">{timeAgo || 'עכשיו'}</div>
+                                      {createdDisplay && <div className="text-[10px] text-slate-400 mt-0.5">{createdDisplay} {createdTime}</div>}
+                                    </div>
+                                    {/* דחיפות */}
+                                    <div className="rounded-xl bg-slate-50 p-3.5">
+                                      <div className="text-[10px] text-slate-400 font-medium mb-1">דחיפות</div>
+                                      <span className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: urgencyBadge.bg, color: urgencyBadge.color, border: `1px solid ${urgencyBadge.color}30` }}>{urgencyBadge.label}</span>
+                                    </div>
+                                    {/* פרטי קשר */}
+                                    <div className="rounded-xl bg-slate-50 p-3.5">
+                                      <div className="text-[10px] text-slate-400 font-medium mb-1">פרטי קשר</div>
+                                      <div className="space-y-1">
+                                        {(t.leadName || t.customerName) && <div className="text-sm font-bold text-slate-800">{t.leadName || t.customerName}</div>}
+                                        {t.leadCompany && <div className="text-[11px] text-slate-500">{t.leadCompany}</div>}
+                                        {contactPhone && <div className="text-[11px] text-slate-600 font-medium" dir="ltr">{contactPhone}</div>}
+                                        {t.leadEmail && <div className="text-[11px] text-slate-500 truncate">{t.leadEmail}</div>}
+                                        {cityDisplay && <div className="text-[11px] text-slate-500">{cityDisplay}</div>}
+                                      </div>
+                                    </div>
+                                    {/* על מה הפנייה */}
+                                    <div className="rounded-xl bg-slate-50 p-3.5">
+                                      <div className="text-[10px] text-slate-400 font-medium mb-1">על מה הפנייה</div>
+                                      <div className="text-sm font-bold text-slate-800">{serviceRaw}</div>
+                                      {t.projectName && <div className="text-[11px] text-slate-500 mt-0.5">פרויקט: {t.projectName}</div>}
+                                    </div>
+                                  </div>
+                                  {/* הערה אחרונה */}
+                                  {t.description && (
+                                    <div className="mt-4 rounded-xl bg-amber-50/60 border border-amber-100 p-3.5">
+                                      <div className="flex items-center gap-1.5 mb-1">
+                                        <Pencil className="h-3.5 w-3.5 text-amber-500" />
+                                        <span className="text-[11px] font-bold text-amber-700">הערה אחרונה</span>
+                                      </div>
+                                      <div className="text-sm text-slate-700 leading-relaxed">{t.description}</div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </>
+                            );
+                          })() : currentStep === 1 ? (() => {
+                            /* ── שיחה stage — needs assessment / intake form ── */
+                            const linkedLead = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
+                            const agentFirst = (t.owner || currentUser.name || 'הנציג').split(' ')[0];
+                            const contactFirst = (t.leadName || t.customerName || 'הלקוח').split(' ')[0];
+                            const serviceRaw = linkedLead?.service || linkedLead?.serviceType || t.projectName || taskTypeLabel(t.type || 'GENERAL');
+                            /* init form data from lead/task if not yet initialized */
+                            initCallFormIfNeeded(t.id, linkedLead, t);
+                            const fd = callFormData[t.id] || getCallForm(t.id, linkedLead, t);
+                            const setF = (field: string, value: string) => updateCallForm(t.id, field, value);
+                            /* call script */
+                            const callScript = `שלום ${contactFirst}, מדבר ${agentFirst} מגלית.\nראיתי שפנית לגבי ${serviceRaw}.\nרציתי להבין במה מדובר ולעזור לך.`;
+                            /* suggested questions */
+                            const suggestedQs = [
+                              'שלום, איך אפשר לעזור?',
+                              'מה בדיוק הבעיה?',
+                              'באיזה נכס מדובר?',
+                              'איפה זה נמצא?',
+                              'מתי תרצה טיפול?',
+                              'יש תמונות / תוכניות / דוח קודם?',
+                            ];
+                            /* validation for advancing to quote */
+                            const derivedFullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
+                            const canAdvance = !!(derivedFullName && fd.phone?.trim() && fd.serviceType?.trim() && fd.needDescription?.trim());
+                            /* save handler */
+                            const saveCallData = async (advance?: boolean) => {
+                              /* save lead data */
+                              const saveFullName = derivedFullName;
+                              if (t.leadId) {
+                                try {
+                                  await apiFetch(apiUrl(`/leads/${t.leadId}`), {
+                                    method: 'PATCH',
+                                    authUser: currentUser,
+                                    body: JSON.stringify({
+                                      fullName: saveFullName,
+                                      firstName: fd.firstName || saveFullName.split(' ')[0] || '',
+                                      lastName: fd.lastName || saveFullName.split(' ').slice(1).join(' ') || '',
+                                      company: fd.company,
+                                      phone: fd.phone,
+                                      email: fd.email,
+                                      city: fd.city,
+                                      address: fd.address,
+                                      serviceType: fd.serviceType,
+                                      service: fd.serviceType,
+                                      source: fd.leadSource || undefined,
+                                      notes: fd.callSummary ? `[סיכום שיחה] ${fd.callSummary}` : undefined,
+                                    }),
+                                  });
+                                  await onReloadLeads?.();
+                                } catch { /* silent */ }
+                              }
+                              /* save task description with structured intake data */
+                              const intakeLines = [
+                                fd.needDescription ? `צורך: ${fd.needDescription}` : '',
+                                fd.solutionDescription ? `פתרון: ${fd.solutionDescription}` : '',
+                                fd.propertyType ? `סוג נכס: ${fd.propertyType}` : '',
+                                fd.urgency ? `דחיפות: ${fd.urgency}` : '',
+                                fd.budget ? `תקציב: ${fd.budget}` : '',
+                                fd.hasDocuments ? `מסמכים: ${fd.hasDocuments}` : '',
+                                fd.customerType ? `סוג לקוח: ${fd.customerType}` : '',
+                                fd.callNotes ? `הערות: ${fd.callNotes}` : '',
+                                fd.callSummary ? `סיכום: ${fd.callSummary}` : '',
+                                fd.nextAction ? `פעולה הבאה: ${fd.nextAction}` : '',
+                              ].filter(Boolean).join('\n');
+                              if (intakeLines) {
+                                await updateTaskField(t.id, { description: intakeLines });
+                              }
+                              if (advance) {
+                                setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }));
+                                await updateTaskField(t.id, { type: 'QUOTE_PREPARATION' });
+                                await onReloadTasks?.();
+                                // Open quote-new tab with lead data prefilled
+                                onCreateQuote?.(t.customerId || null, t.id, {
+                                  name: fd.company || saveFullName || '',
+                                  phone: fd.phone || undefined,
+                                  email: fd.email || undefined,
+                                  company: fd.company || undefined,
+                                  city: fd.city || undefined,
+                                  address: fd.address || undefined,
+                                  contactName: saveFullName || undefined,
+                                  service: fd.serviceType || undefined,
+                                  notes: fd.needDescription || undefined,
+                                  leadId: t.leadId || undefined,
+                                  customerType: fd.customerType || undefined,
+                                });
+                                return;
+                              }
+                              await onReloadTasks?.();
+                            };
+                            /* ── helper: input class ── */
+                            const inp = 'w-full rounded-2xl border border-slate-200 bg-white px-6 py-5 text-2xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder:text-slate-300 placeholder:font-normal';
+                            const lbl = 'block text-xl font-semibold text-slate-600 mb-2.5';
+                            /* ── need categories state (comma-separated) ── */
+                            const needCats = (fd.needCategories || '').split(',').filter(Boolean);
+                            const toggleCat = (cat: string) => {
+                              const next = needCats.includes(cat) ? needCats.filter((c) => c !== cat) : [...needCats, cat];
+                              setF('needCategories', next.join(','));
+                            };
+                            /* urgency numeric 0-100 */
+                            const urgencyNum = fd.urgency === 'נמוכה' ? 15 : fd.urgency === 'בינונית' ? 50 : fd.urgency === 'גבוהה' ? 85 : 50;
+                            return (
+                            <div className="px-3 flex flex-col" style={{ direction: 'rtl', gap: '4px', paddingBottom: '2px' }}>
+
+                              {/* ═══ FULL-SCREEN: 3 CARDS + CIRCULAR ACTIONS ═══ */}
+
+                              {/* ── MAIN ROW: 2-column layout — stretches to fill screen ── */}
+                              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm flex flex-row overflow-hidden flex-1" style={{ minHeight: '520px' }}>
+
+                                {/* ── RIGHT (~30%): פרטי הלקוח ── */}
+                                <div className="w-[30%] flex flex-col px-5 pt-4 pb-3" style={{ borderLeft: '1px solid #e2e8f0' }}>
+                                  <div className="flex flex-row-reverse items-center gap-3 mb-3">
+                                    <div className="flex items-center justify-center rounded-full" style={{ background: '#dbeafe', width: '44px', height: '44px' }}>
+                                      <UserCircle2 className="h-7 w-7 text-blue-600" />
+                                    </div>
+                                    <span className="font-extrabold text-slate-800" style={{ fontSize: '28px' }}>פרטי הלקוח</span>
+                                  </div>
+                                  <div className="flex flex-col gap-1 flex-1">
+                                    {/* Row 1: שם מלא | טלפון */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>שם מלא</label>
+                                        <input type="text" value={`${fd.firstName || ''} ${fd.lastName || ''}`.trim()} onChange={(e) => { const parts = e.target.value.split(' '); setF('firstName', parts[0] || ''); setF('lastName', parts.slice(1).join(' ') || ''); }} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="שם מלא" style={{ height: '52px', fontSize: '26px' }} />
+                                      </div>
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>טלפון</label>
+                                        <input type="tel" dir="ltr" value={fd.phone || ''} onChange={(e) => setF('phone', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 text-left focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="050-1234567" style={{ height: '52px', fontSize: '26px' }} />
+                                      </div>
+                                    </div>
+                                    {/* Row 2: אימייל | חברה */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>אימייל</label>
+                                        <input type="email" dir="ltr" value={fd.email || ''} onChange={(e) => setF('email', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 text-left focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="email@example.com" style={{ height: '52px', fontSize: '26px' }} />
+                                      </div>
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>חברה</label>
+                                        <input type="text" value={fd.company || ''} onChange={(e) => setF('company', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="שם חברה" style={{ height: '52px', fontSize: '26px' }} />
+                                      </div>
+                                    </div>
+                                    {/* Row 3: תפקיד | סיווג */}
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>תפקיד</label>
+                                        <input type="text" value={fd.role || ''} onChange={(e) => setF('role', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="תפקיד" style={{ height: '52px', fontSize: '26px' }} />
+                                      </div>
+                                      <div>
+                                        <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>סיווג</label>
+                                        <div className="relative">
+                                          <select value={fd.customerType || ''} onChange={(e) => setF('customerType', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white appearance-none cursor-pointer" style={{ height: '52px', fontSize: '26px' }}>
+                                            <option value="">בחר סיווג</option>
+                                            <option value="לקוח פוטנציאלי">לקוח פוטנציאלי</option>
+                                            <option value="לקוח חדש">לקוח חדש</option>
+                                            <option value="לקוח חוזר">לקוח חוזר</option>
+                                            <option value="עסקי">עסקי</option>
+                                            <option value="פרטי">פרטי</option>
+                                          </select>
+                                          <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 h-6 w-6 text-slate-400 pointer-events-none" />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Row 4: עיר (full width) */}
+                                    <div>
+                                      <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>עיר</label>
+                                      <input type="text" value={fd.city || ''} onChange={(e) => setF('city', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="עיר" style={{ height: '52px', fontSize: '26px' }} />
+                                    </div>
+                                    {/* Row 5: כתובת מלאה (full width) */}
+                                    <div>
+                                      <label className="block font-bold text-slate-500 text-right" style={{ fontSize: '22px', marginBottom: '1px' }}>כתובת מלאה</label>
+                                      <input type="text" value={fd.address || ''} onChange={(e) => setF('address', e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50/60 px-3 font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white placeholder:text-slate-300" placeholder="רחוב הרצל 123, קומה 4, תל אביב" style={{ height: '52px', fontSize: '26px' }} />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* ── LEFT (~70%): תמלול שיחה + מה הלקוח צריך — ONE BOX ── */}
+                                <div className="w-[70%] flex flex-col px-5 pt-4 pb-3">
+                                  <div className="flex flex-row-reverse items-center gap-3 mb-3">
+                                    <div className="flex items-center justify-center rounded-full" style={{ background: '#e0e7ff', width: '44px', height: '44px' }}>
+                                      <Mic className="h-7 w-7 text-indigo-600" />
+                                    </div>
+                                    <span className="font-extrabold text-indigo-700" style={{ fontSize: '28px' }}>תמלול שיחה</span>
+                                    <span className="font-extrabold text-slate-400" style={{ fontSize: '28px' }}>|</span>
+                                    <span className="font-extrabold text-purple-700" style={{ fontSize: '28px' }}>מה הלקוח צריך</span>
+                                  </div>
+                                  <div className="flex-1 relative">
+                                    <div className="absolute top-2 bottom-2 right-0 w-2 rounded-full" style={{ background: '#8b5cf6' }} />
+                                    <textarea value={fd.callNotes || ''} onChange={(e) => { if (e.target.value.length <= 5000) setF('callNotes', e.target.value); }} className="w-full h-full bg-transparent pr-6 pl-3 py-2 font-bold text-slate-800 focus:outline-none placeholder:text-slate-400 placeholder:font-normal resize-none" style={{ lineHeight: 2.0, fontSize: '32px' }} placeholder="שלום יוסי, מדבר זאביק,&#10;ראיתי שפנית אלינו בנושא האסבסט שלכם.&#10;אשמח להבין קצת יותר לעומק&#10;כדי שאוכל להציע לכם את הפתרון המדויק.&#10;ספר לי בבקשה,&#10;מה בדיוק הבעיה שאתם נתקלים בה?&#10;האם מדובר באסבסט בגג, בקירות או במקום אחר?&#10;האם יש כבר דיגום או סקר מוכן?" />
+                                  </div>
+                                </div>
+
+                              </div>
+
+                              {/* ── CIRCULAR ACTION BUTTONS ── */}
+                              <div id={`step2-${t.id}`} className="flex justify-center items-start gap-12 py-1">
+                                {([
+                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#4f46e5', activeRing: 'ring-4 ring-indigo-300', icon: <ArrowUpRight className="h-10 w-10 text-white" /> },
+                                  { key: 'קביעת פגישה', label: 'קביעת פגישה', circleBg: '#0d9488', activeRing: 'ring-4 ring-teal-300', icon: <CalendarCheck className="h-10 w-10 text-white" /> },
+                                  { key: 'העברה למומחה', label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-10 w-10 text-white" /> },
+                                  { key: 'חזרה מאוחרת', label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-10 w-10 text-white" /> },
+                                  { key: 'לא רלוונטי', label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-10 w-10 text-white" /> },
+                                ] as const).map((act) => {
+                                  const isActive = fd.nextAction === act.key;
+                                  return (
+                                    <button key={act.key} onClick={() => setF('nextAction', act.key)} className="flex flex-col items-center gap-2 cursor-pointer group">
+                                      <div className={`flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl ${isActive ? `${act.activeRing} scale-110 shadow-xl` : ''}`} style={{ background: act.circleBg, width: '80px', height: '80px' }}>
+                                        {act.icon}
+                                      </div>
+                                      <span className={`font-extrabold text-center leading-tight ${isActive ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '24px' }}>{act.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+
+                              {/* ═══ BOTTOM BUTTONS BAR ═══ */}
+                              <div className="flex flex-wrap gap-3 items-center" style={{ direction: 'rtl' }}>
+                                {/* Main CTA — large green */}
+                                <button
+                                  disabled={!canAdvance}
+                                  onClick={() => saveCallData(true)}
+                                  className={`flex items-center gap-2.5 rounded-2xl px-8 py-3.5 font-bold text-white text-base shadow-lg transition-all duration-200 ${canAdvance ? 'hover:shadow-xl hover:scale-[1.03] cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                                  style={{ background: canAdvance ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)' : '#94a3b8', fontFamily: 'var(--font-sans)' }}
+                                >
+                                  <CheckCircle2 className="h-5 w-5" />
+                                  שמור ועבור להצעה
+                                  <ChevronRight className="h-4 w-4 mr-1" style={{ transform: 'rotate(180deg)' }} />
+                                </button>
+
+                                {/* Secondary buttons */}
+                                <button onClick={() => { saveCallData(false); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
+                                  סגור שיחה
+                                </button>
+                                <button onClick={() => { saveCallData(false); snoozeByMinutes(t.id, 60); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
+                                  <Timer className="h-4 w-4" />
+                                  שמור וחזור תוך שעה
+                                </button>
+                                {!isDone && (
+                                  <div className="relative">
+                                    <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
+                                      <Calendar className="h-4 w-4" />
+                                      קבע חזרה
+                                    </button>
+                                    {isPostponeOpen && renderSnoozePopup(t.id, 'top-12')}
+                                  </div>
+                                )}
+                                {contactPhone && (
+                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-green-200 text-green-600 bg-white hover:bg-green-50 transition-all">
+                                    <MessageCircle className="h-4 w-4" />
+                                    WhatsApp
+                                  </a>
+                                )}
+                                {/* Save as potential customer — green outline, far left */}
+                                <button onClick={() => { saveCallData(false); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border-2 border-emerald-400 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 transition-all mr-auto">
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  שמור ללקוח פוטנציאלי
+                                </button>
+                              </div>
+                            </div>
+                            );
+                          })() : currentStep === 2 ? (() => {
+                            /* ── הצעה stage — quote workspace ── */
+                            const linkedLead = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
+                            const serviceRaw = linkedLead?.service || linkedLead?.serviceType || t.projectName || taskTypeLabel(t.type || 'GENERAL');
+                            /* find related quote */
+                            const relatedQuote = (allQuotes || []).find((q) => (t.customerId && q.customerId === t.customerId) || (t.leadId && q.leadId === t.leadId));
+                            const hasQuote = !!relatedQuote;
+                            const qStatus = (relatedQuote?.status || '').toLowerCase();
+                            const isSent = qStatus === 'sent' || qStatus === 'נשלחה';
+                            const isApproved = qStatus === 'approved' || qStatus === 'אושרה';
+                            const isDraft = hasQuote && !isSent && !isApproved;
+                            /* quote status display */
+                            const quoteStatusDisplay = (() => {
+                              if (!hasQuote) return { label: 'לא נוצרה הצעה', color: '#94a3b8', bg: '#f8fafc', icon: FileText };
+                              if (isApproved) return { label: 'אושרה', color: '#22c55e', bg: '#f0fdf4', icon: CheckCircle2 };
+                              if (isSent) return { label: 'נשלחה — ממתינה לתשובה', color: '#3b82f6', bg: '#eff6ff', icon: MailOpen };
+                              return { label: 'טיוטה', color: '#f59e0b', bg: '#fffbeb', icon: Pencil };
+                            })();
+                            const QStatusIcon = quoteStatusDisplay.icon;
+                            /* smart recommendation */
+                            const recommendation = (() => {
+                              if (!hasQuote) return 'עדיין לא נוצרה הצעה — מומלץ להכין עכשיו';
+                              if (isSent && relatedQuote?.createdAt) {
+                                const days = Math.floor((Date.now() - new Date(relatedQuote.updatedAt || relatedQuote.createdAt).getTime()) / 86400000);
+                                if (days >= 3) return `הצעה נשלחה לפני ${days} ימים — מומלץ לבצע פולואפ היום`;
+                                if (days >= 1) return `הצעה נשלחה לפני ${days} ימים — המתן לתשובה או בצע פולואפ`;
+                                return 'הצעה נשלחה היום — ניתן להמתין לתשובה';
+                              }
+                              if (isDraft) return 'יש טיוטה — מומלץ להשלים ולשלוח ללקוח';
+                              if (isApproved) return 'ההצעה אושרה — ניתן להתקדם לשלב הבא';
+                              return 'מומלץ ליצור את ההצעה עוד היום';
+                            })();
+                            /* format amount */
+                            const fmtAmount = (n?: number | null) => n ? `₪${n.toLocaleString('he-IL')}` : null;
+                            return (
+                            <>
+                              {/* ── QUOTE ACTION BUTTONS ── */}
+                              <div className="px-8 pb-4">
+                                <div className="flex items-center gap-2 mb-3" style={{ direction: 'rtl' }}>
+                                  <FileText className="h-4 w-4 text-amber-500" />
+                                  <h3 className="text-sm font-extrabold text-slate-700">פעולות לשלב הצעה</h3>
+                                </div>
+                                <div className="flex flex-wrap gap-4 justify-center" style={{ direction: 'rtl' }}>
+                                  {/* main CTA */}
+                                  <button onClick={() => { if (onCreateQuote) onCreateQuote(t.customerId, t.id); }} className="flex flex-col items-center gap-1.5 group">
+                                    <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#f59e0b' }}>
+                                      <FileText className="h-6 w-6 text-white" />
+                                    </div>
+                                    <span className="text-[11px] font-bold text-slate-600">{!hasQuote ? 'צור הצעה' : isDraft ? 'המשך עריכה' : 'עדכן הצעה'}</span>
+                                  </button>
+                                  {contactPhone && (
+                                    <a href={`tel:${phoneClean(contactPhone)}`} className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                      <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#3b82f6' }}>
+                                        <PhoneCall className="h-6 w-6 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">{isSent ? 'בצע פולואפ' : 'התקשר'}</span>
+                                    </a>
+                                  )}
+                                  {contactPhone && (
+                                    <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                      <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#22c55e' }}>
+                                        <MessageCircle className="h-6 w-6 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">שלח בוואטסאפ</span>
+                                    </a>
+                                  )}
+                                  {hasQuote && (
+                                    <button onClick={() => { updateTaskField(t.id, { type: 'SALES_FOLLOWUP' }); }} className="flex flex-col items-center gap-1.5 group">
+                                      <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#f97316' }}>
+                                        <PhoneCall className="h-6 w-6 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">עבור לפולואפ</span>
+                                    </button>
+                                  )}
+                                  {isApproved && (
+                                    <button onClick={() => { markDone(t.id); }} className="flex flex-col items-center gap-1.5 group">
+                                      <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#22c55e' }}>
+                                        <CheckCircle2 className="h-6 w-6 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">סמן אושר</span>
+                                    </button>
+                                  )}
+                                  {(t.leadId || t.leadName) && onOpenLead && (
+                                    <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex flex-col items-center gap-1.5 group">
+                                      <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#ef4444' }}>
+                                        <Flame className="h-6 w-6 text-white" />
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-600">פתח ליד</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* ── QUOTE INFO BLOCKS ── */}
+                              <div className="px-8 pb-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4" style={{ direction: 'rtl' }}>
+
+                                  {/* BLOCK: מצב ההצעה */}
+                                  <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: quoteStatusDisplay.bg }}>
+                                        <QStatusIcon className="h-4 w-4" style={{ color: quoteStatusDisplay.color }} />
+                                      </div>
+                                      <span className="text-sm font-extrabold text-slate-700">מצב ההצעה</span>
+                                    </div>
+                                    <div className="space-y-3">
+                                      <span className="inline-flex items-center rounded-full px-3 py-1 text-xs font-extrabold" style={{ background: quoteStatusDisplay.bg, color: quoteStatusDisplay.color, border: `1px solid ${quoteStatusDisplay.color}30` }}>{quoteStatusDisplay.label}</span>
+                                      {hasQuote && relatedQuote.quoteNumber && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">מספר הצעה</div><div className="text-sm font-bold text-slate-800">{relatedQuote.quoteNumber}</div></div>
+                                      )}
+                                      {fmtAmount(relatedQuote?.totalAmount || relatedQuote?.amount) && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">סכום</div><div className="text-lg font-extrabold text-slate-800">{fmtAmount(relatedQuote?.totalAmount || relatedQuote?.amount)}</div></div>
+                                      )}
+                                      <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">שירות</div><div className="text-sm font-semibold text-slate-700">{relatedQuote?.service || serviceRaw}</div></div>
+                                    </div>
+                                  </div>
+
+                                  {/* BLOCK: למי נשלחה */}
+                                  <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#eff6ff' }}>
+                                        <UserCircle2 className="h-4 w-4 text-blue-500" />
+                                      </div>
+                                      <span className="text-sm font-extrabold text-slate-700">פרטי לקוח</span>
+                                    </div>
+                                    <div className="space-y-2">
+                                      {(t.leadName || t.customerName) && <div className="flex items-center gap-2"><UserCircle2 className="h-4 w-4 text-slate-400 flex-shrink-0" /><span className="text-sm font-bold text-slate-800">{t.leadName || t.customerName}</span></div>}
+                                      {t.leadCompany && <div className="flex items-center gap-2"><Building2 className="h-4 w-4 text-slate-400 flex-shrink-0" /><span className="text-sm text-slate-600">{t.leadCompany}</span></div>}
+                                      {contactPhone && <div className="flex items-center gap-2"><Phone className="h-4 w-4 text-cyan-500 flex-shrink-0" /><span className="text-sm font-semibold text-slate-700" dir="ltr">{contactPhone}</span></div>}
+                                      {t.leadEmail && <div className="flex items-center gap-2"><Mail className="h-4 w-4 text-purple-500 flex-shrink-0" /><span className="text-sm text-slate-600 truncate">{t.leadEmail}</span></div>}
+                                      {t.owner && <div className="flex items-center gap-2"><UserCircle2 className="h-4 w-4 text-indigo-400 flex-shrink-0" /><span className="text-[10px] text-slate-400 ml-1">נציג:</span><span className="text-sm text-slate-700">{t.owner}</span></div>}
+                                    </div>
+                                  </div>
+
+                                  {/* BLOCK: פרטי ההצעה + תאריכים */}
+                                  <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5">
+                                    <div className="flex items-center gap-2 mb-3">
+                                      <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: '#ecfeff' }}>
+                                        <Calendar className="h-4 w-4 text-cyan-500" />
+                                      </div>
+                                      <span className="text-sm font-extrabold text-slate-700">תאריכים</span>
+                                    </div>
+                                    <div className="space-y-2.5">
+                                      {hasQuote && relatedQuote.createdAt && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">תאריך יצירה</div><div className="text-sm text-slate-700">{new Date(relatedQuote.createdAt).toLocaleDateString('he-IL')}</div></div>
+                                      )}
+                                      {hasQuote && relatedQuote.updatedAt && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">עדכון אחרון</div><div className="text-sm text-slate-700">{new Date(relatedQuote.updatedAt).toLocaleDateString('he-IL')}</div></div>
+                                      )}
+                                      {hasQuote && (relatedQuote.validityDate || relatedQuote.validTo) && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">תוקף עד</div><div className="text-sm font-semibold text-slate-700">{relatedQuote.validityDate ? new Date(relatedQuote.validityDate).toLocaleDateString('he-IL') : relatedQuote.validTo}</div></div>
+                                      )}
+                                      {t.dueDate && (
+                                        <div><div className="text-[10px] text-slate-400 font-medium mb-0.5">תאריך יעד משימה</div><div className="text-sm text-slate-700">{new Date(t.dueDate).toLocaleDateString('he-IL')}</div></div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                </div>
+                              </div>
+
+                              {/* ── RECOMMENDATION ── */}
+                              <div className="px-8 pb-6">
+                                <div className="rounded-2xl bg-gradient-to-l from-amber-50 to-orange-50 border border-amber-200 p-4 flex items-center gap-3" style={{ direction: 'rtl' }}>
+                                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 flex-shrink-0">
+                                    <Zap className="h-5 w-5 text-amber-600" />
+                                  </div>
+                                  <div>
+                                    <div className="text-xs font-extrabold text-amber-700 mb-0.5">המלצת מערכת</div>
+                                    <div className="text-sm font-semibold text-amber-900">{recommendation}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </>
+                            );
+                          })() : (
+                          <>
+                          {/* ═══ 3. INFO CARDS (generic stages) ═══ */}
+                          <div className="px-8 pb-3">
+                            <div className="grid grid-cols-3 gap-3">
+                              {[
+                                { icon: Phone, color: '#06b6d4', bg: '#ecfeff', label: 'טלפון', value: contactPhone || '-' },
+                                { icon: Mail, color: '#a855f7', bg: '#faf5ff', label: 'אימייל', value: t.leadEmail || '-' },
+                                { icon: FolderKanban, color: '#22c55e', bg: '#f0fdf4', label: 'פרויקט', value: t.projectName || taskTypeLabel(t.type || 'GENERAL') },
+                              ].map((card) => {
+                                const CIcon = card.icon;
+                                return (
+                                  <div key={card.label} className="flex items-center gap-3 rounded-2xl bg-white border border-slate-200 p-4 shadow-sm" style={{ direction: 'rtl' }}>
+                                    <div className="flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0" style={{ background: card.bg }}>
+                                      <CIcon className="h-5 w-5" style={{ color: card.color }} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="text-[10px] text-slate-400 font-medium">{card.label}</div>
+                                      <div className="text-sm font-bold text-slate-800 truncate">{card.value}</div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* ═══ 4. ACTION BUTTONS — כפתורי פעולה (generic) ═══ */}
+                          <div className="px-8 pb-4">
+                            <div className="flex items-center gap-2 mb-3" style={{ direction: 'rtl' }}>
+                              <Zap className="h-4 w-4 text-amber-500" />
+                              <h3 className="text-sm font-extrabold text-slate-700">פעולות מהירות</h3>
+                            </div>
+                            <div className="flex flex-wrap gap-4 justify-center" style={{ direction: 'rtl' }}>
+                              {contactPhone && (
+                                <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#22c55e' }}>
+                                    <MessageCircle className="h-6 w-6 text-white" />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-600">WhatsApp</span>
+                                </a>
+                              )}
+                              <button onClick={() => { if (onCreateQuote) onCreateQuote(t.customerId, t.id); else alert('יצירת הצעת מחיר'); }} className="flex flex-col items-center gap-1.5 group">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#f59e0b' }}>
+                                  <FileText className="h-6 w-6 text-white" />
+                                </div>
+                                <span className="text-[11px] font-bold text-slate-600">צור הצעה</span>
+                              </button>
+                              {contactPhone && (
+                                <a href={`tel:${phoneClean(contactPhone)}`} className="flex flex-col items-center gap-1.5 group cursor-pointer">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#3b82f6' }}>
+                                    <PhoneCall className="h-6 w-6 text-white" />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-600">התקשר</span>
+                                </a>
+                              )}
+                              {(t.customerId || t.customerName) && onOpenCustomer && (
+                                <button onClick={() => { const cust = customers.find((c) => c.id === t.customerId); if (cust) onOpenCustomer(cust); }} className="flex flex-col items-center gap-1.5 group">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#8b5cf6' }}>
+                                    <Building2 className="h-6 w-6 text-white" />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-600">פתח לקוח</span>
+                                </button>
+                              )}
+                              {!isDone && (
+                                <div className="relative flex flex-col items-center gap-1.5">
+                                  <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex flex-col items-center gap-1.5 group">
+                                    <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#64748b' }}>
+                                      <RotateCcw className="h-6 w-6 text-white" />
+                                    </div>
+                                    <span className="text-[11px] font-bold text-slate-600">דחה משימה</span>
+                                  </button>
+                                  {isPostponeOpen && renderSnoozePopup(t.id, 'top-16')}
+                                </div>
+                              )}
+                              {!isDone && (
+                                <button onClick={() => markDone(t.id)} className="flex flex-col items-center gap-1.5 group">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#10b981' }}>
+                                    <CheckCircle2 className="h-6 w-6 text-white" />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-600">דווח השלמה</span>
+                                </button>
+                              )}
+                              {(t.leadId || t.leadName) && onOpenLead && (
+                                <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex flex-col items-center gap-1.5 group">
+                                  <div className="flex h-14 w-14 items-center justify-center rounded-full shadow transition-all duration-200 group-hover:shadow-lg group-hover:scale-110" style={{ background: '#ef4444' }}>
+                                    <Flame className="h-6 w-6 text-white" />
+                                  </div>
+                                  <span className="text-[11px] font-bold text-slate-600">פתח ליד</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* ═══ 5. DETAILED INFO GRID (generic) ═══ */}
+                          <div className="px-8 pb-4">
+                            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5" style={{ direction: 'rtl' }}>
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
+                                {infoFields.map((f) => {
+                                  const FIcon = f.icon;
+                                  return (
+                                    <div key={f.label} className="flex items-center gap-2.5 py-1.5">
+                                      <div className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0" style={{ background: f.bg }}>
+                                        <FIcon className="h-4 w-4" style={{ color: f.color }} />
+                                      </div>
+                                      <div className="min-w-0">
+                                        <div className="text-[10px] text-slate-400 leading-none">{f.label}</div>
+                                        <div className="text-sm font-semibold text-slate-800 truncate">{f.value}</div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* ═══ 6. NOTES (generic) ═══ */}
+                          {(t.description || t.leadCompany) && (
+                            <div className="px-8 pb-6">
+                              <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm" style={{ direction: 'rtl' }}>
+                                {t.description && (
+                                  <div className="mb-3">
+                                    <div className="flex items-center gap-2 mb-1.5">
+                                      <Pencil className="h-4 w-4 text-slate-400" />
+                                      <span className="text-sm font-bold text-slate-500">הערות</span>
+                                    </div>
+                                    <div className="text-sm text-slate-700 leading-relaxed">{t.description}</div>
+                                  </div>
+                                )}
+                                {t.leadCompany && (
+                                  <div className="flex items-center gap-2 text-sm">
+                                    <Building2 className="h-4 w-4 text-blue-500" />
+                                    <span className="font-bold text-blue-600">חברה:</span>
+                                    <span className="text-blue-800">{t.leadCompany}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          </>
+                          )}
+
+                        </div>
+                      </td>
+                    </tr>
+                    );
+                  })()}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ═══ NEW TASK MODAL ═══ */}
       <Modal open={open} onClose={() => setOpen(false)} title="משימה חדשה" maxWidth="max-w-2xl">
         <div className="grid gap-3 md:grid-cols-2">
           <div className="md:col-span-2">
             <FormField label="כותרת משימה">
-              <Input
-                value={form.title}
-                onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
-                placeholder="כותרת משימה"
-              />
+              <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="כותרת משימה" />
             </FormField>
           </div>
           <div className="md:col-span-2">
-            <FormField label="תיאור/הערות">
-              <Textarea
-                value={form.description}
-                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                placeholder="תיאור/הערות"
-              />
-            </FormField>
-          </div>
-          <div className="md:col-span-2">
-            <FormField label="שיוך">
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <div className="mb-1 text-xs text-slate-500">פרויקט</div>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    value={form.projectId}
-                    onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.projectNumber ? `${p.projectNumber} · ${p.name}` : p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <div className="mb-1 text-xs text-slate-500">לקוח</div>
-                  <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    value={form.customerId}
-                    onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}
-                  >
-                    <option value="">—</option>
-                    {customers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+            <FormField label="תיאור / הערות">
+              <Textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} placeholder="תיאור / הערות" />
             </FormField>
           </div>
 
+          {/* type */}
           <div>
-            <FormField label="אחראי">
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={form.ownerId}
-                onChange={(e) => setForm((p) => ({ ...p, ownerId: e.target.value }))}
-                disabled={currentUser.role === 'sales' || currentUser.role === 'technician'}
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="תאריך יעד">
-              <input
-                type="date"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={form.dueDate}
-                onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
-              />
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="עדיפות">
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={form.priority}
-                onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}
-              >
-                <option value="LOW">{priorityLabel('LOW')}</option>
-                <option value="MEDIUM">{priorityLabel('MEDIUM')}</option>
-                <option value="HIGH">{priorityLabel('HIGH')}</option>
-                <option value="URGENT">{priorityLabel('URGENT')}</option>
-              </select>
-            </FormField>
-          </div>
-
-          <div>
-            <FormField label="סטטוס">
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={form.status}
-                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
-              >
-                <option value="OPEN">{statusLabel('OPEN')}</option>
-                <option value="IN_PROGRESS">{statusLabel('IN_PROGRESS')}</option>
-                <option value="DONE">{statusLabel('DONE')}</option>
-                <option value="CANCELLED">{statusLabel('CANCELLED')}</option>
-              </select>
-            </FormField>
-          </div>
-
-          <div className="md:col-span-2">
-            <FormField label="סוג">
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                value={form.type}
-                onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}
-              >
+            <FormField label="סוג משימה">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}>
                 <option value="SALES_FOLLOWUP">{taskTypeLabel('SALES_FOLLOWUP')}</option>
                 <option value="QUOTE_PREPARATION">{taskTypeLabel('QUOTE_PREPARATION')}</option>
                 <option value="COORDINATION">{taskTypeLabel('COORDINATION')}</option>
@@ -11890,11 +14324,86 @@ function TasksPage({
             </FormField>
           </div>
 
-          {error && <div className="md:col-span-2 rounded-2xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
+          {/* priority */}
+          <div>
+            <FormField label="עדיפות">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}>
+                <option value="LOW">{priorityLabel('LOW')}</option>
+                <option value="MEDIUM">{priorityLabel('MEDIUM')}</option>
+                <option value="HIGH">{priorityLabel('HIGH')}</option>
+                <option value="URGENT">{priorityLabel('URGENT')}</option>
+              </select>
+            </FormField>
+          </div>
+
+          {/* lead */}
+          <div>
+            <FormField label="קשור לליד">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.leadId} onChange={(e) => setForm((p) => ({ ...p, leadId: e.target.value }))}>
+                <option value="">—</option>
+                {leads.map((l) => (
+                  <option key={l.id} value={l.id}>{l.fullName || l.name || l.phone}</option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+
+          {/* customer */}
+          <div>
+            <FormField label="קשור ללקוח">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
+                <option value="">—</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+
+          {/* project */}
+          <div>
+            <FormField label="פרויקט">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
+                <option value="">—</option>
+                {projects.map((pr) => (
+                  <option key={pr.id} value={pr.id}>{pr.projectNumber ? `${pr.projectNumber} · ${pr.name}` : pr.name}</option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+
+          {/* owner */}
+          <div>
+            <FormField label="אחראי">
+              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.ownerId} onChange={(e) => setForm((p) => ({ ...p, ownerId: e.target.value }))} disabled={currentUser.role === 'sales' || currentUser.role === 'technician'}>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+
+          {/* date + time */}
+          <div>
+            <FormField label="תאריך יעד">
+              <input type="date" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueDate} onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))} />
+            </FormField>
+          </div>
+          <div>
+            <FormField label="שעה">
+              <input type="time" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueTime} onChange={(e) => setForm((p) => ({ ...p, dueTime: e.target.value }))} />
+            </FormField>
+          </div>
+
+          {error && <div className="md:col-span-2 rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
           <div className="md:col-span-2">
-            <Button className="w-full" style={{ background: galit.primary }} onClick={createTask}>
-              {saving ? 'שומר...' : 'שמור'}
-            </Button>
+            <button
+              className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
+              style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
+              onClick={createTask}
+            >
+              {saving ? 'שומר...' : 'שמור משימה'}
+            </button>
           </div>
         </div>
       </Modal>
@@ -12335,6 +14844,12 @@ function LoginPage({
 export default function GalitCRMPrototype() {
   const [current, setCurrent] = useState('dashboard');
   const [view, setView] = useState('dashboard');
+
+  /* ── Internal Tabs System ── */
+  type InternalTab = { id: string; type: string; label: string; customerId?: string | null; leadId?: string | null };
+  const [internalTabs, setInternalTabs] = useState<InternalTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const isTabMode = internalTabs.length > 0;
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -12351,6 +14866,16 @@ export default function GalitCRMPrototype() {
   const [newQuoteCustomerId, setNewQuoteCustomerId] = useState<string | null>(null);
   /** Set when opening QuoteNewScreen from customer card contact — pre-fills contact field */
   const [newQuoteContactId, setNewQuoteContactId] = useState<string | null>(null);
+  /** When set, QuoteNewScreen loads this quote (עריכה / צפייה מכרטיס לקוח). Cleared on יציאה או הצעה חדשה. */
+  const [quoteEditorInitialId, setQuoteEditorInitialId] = useState<string | null>(null);
+  /** Workspace tabs: which tab is active inside customer context ('card' | 'quote-new' | 'quote-edit') */
+  const [workspaceTab, setWorkspaceTab] = useState<'card' | 'quote-new' | 'quote-edit'>('card');
+  /** Track if a workspace quote tab is open (so we can show the tab bar) */
+  const [workspaceQuoteOpen, setWorkspaceQuoteOpen] = useState(false);
+  /** Quote ID being edited in workspace (null = new quote) */
+  const [workspaceQuoteId, setWorkspaceQuoteId] = useState<string | null>(null);
+  /** נספר אחרי שמירת הצעה — מרענן את טאב "הצעות מחיר" בכרטיס לקוח */
+  const [customerQuotesRefreshKey, setCustomerQuotesRefreshKey] = useState(0);
   const [newInteractionContactId, setNewInteractionContactId] = useState<string | null>(null);
   const [customerCardContactName, setCustomerCardContactName] = useState<string | null>(null);
   /** Tracks whichever contact row the user last clicked inside the customer card.
@@ -12361,6 +14886,41 @@ export default function GalitCRMPrototype() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [parentExpandedTaskId, setParentExpandedTaskId] = useState<string | null>(null);
+  const [parentManualStepOverride, setParentManualStepOverride] = useState<Record<string, number>>({});
+  /** Tracks which task opened the current quote — used to advance to פולואפ after send */
+  const [quoteOriginTaskId, setQuoteOriginTaskId] = useState<string | null>(null);
+  /** Lead-based prefill data for QuoteNewScreen when opening from call stage (no customer yet) */
+  const [quotePrefillFromLead, setQuotePrefillFromLead] = useState<{ name: string; phone?: string; email?: string; company?: string; city?: string; address?: string; contactName?: string; service?: string; notes?: string; leadId?: string; customerType?: string } | null>(null);
+
+  /** After a quote is emailed — advance the originating task to פולואפ (step 3) */
+  const handleQuoteSent = useCallback((_quoteId: string) => {
+    // 1. Try the explicit linkage: which task triggered this quote?
+    let targetTaskId = quoteOriginTaskId;
+    // 2. Fallback: if no explicit linkage, search by customerId
+    if (!targetTaskId) {
+      const sentQuote = quotes.find((q) => q.id === _quoteId);
+      if (sentQuote?.customerId) {
+        const related = tasks.find((t) => t.customerId === sentQuote.customerId);
+        if (related) targetTaskId = related.id;
+      }
+    }
+    if (!targetTaskId) return;
+    // Advance to פולואפ (step index 3)
+    setParentManualStepOverride((prev) => ({ ...prev, [targetTaskId!]: 3 }));
+    // Update the task type on the server
+    fetch(`/api/tasks/${targetTaskId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'SALES_FOLLOWUP' }),
+    }).catch(() => { /* silent */ });
+    // Update local tasks array
+    const tid = targetTaskId;
+    setTasks((prev) => prev.map((tk) =>
+      tk.id === tid ? { ...tk, type: 'SALES_FOLLOWUP' } : tk
+    ));
+  }, [quoteOriginTaskId, quotes, tasks, setTasks]);
+
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [leadsError, setLeadsError] = useState('');
   const [customersError, setCustomersError] = useState('');
@@ -12438,6 +14998,72 @@ export default function GalitCRMPrototype() {
       isMounted = false;
     };
   }, [currentUser]);
+
+  /* ── Demo leads (shown when no real leads in DB) ── */
+  const demoLeads: Lead[] = useMemo(() => {
+    if (leads.length > 0) return [];
+    const now = new Date();
+    const demoLeadData: Omit<Lead, 'id'>[] = [
+      { firstName: 'נדב', lastName: 'שלום', fullName: 'נדב שלום', name: 'נדב שלום', phone: '052-4001234', email: 'nadav.shalom@gmail.com', company: 'פרטי', source: 'facebook', city: 'רעננה', service: 'קרינה', serviceType: 'בדיקת קרינה בדירה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מעוניין בבדיקת קרינה בדירה חדשה.' },
+      { firstName: 'הדס', lastName: 'אורן', fullName: 'הדס אורן', name: 'הדס אורן', phone: '054-5012345', email: 'hadas.oren@gmail.com', company: 'פרטי', source: 'google', city: 'כפר סבא', service: 'רעש', serviceType: 'בדיקת רעש שכנים', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'רעש ממזגן שכן.' },
+      { firstName: 'עידו', lastName: 'רם', fullName: 'עידו רם', name: 'עידו רם', phone: '050-6023456', email: 'ido.ram@gmail.com', company: 'פרטי', source: 'website', city: 'הרצליה', service: 'ראדון', serviceType: 'בדיקת ראדון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'דירת קרקע, חושש מראדון.' },
+      { firstName: 'ליאור', lastName: 'כהן', fullName: 'ליאור כהן', name: 'ליאור כהן', phone: '053-7034567', email: 'lior.cohen.biz@gmail.com', company: 'כהן אינסטלציה', source: 'whatsapp', city: 'תל אביב', service: 'איכות אוויר', serviceType: 'בדיקת איכות אוויר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ריח מוזר ממיזוג במשרד.' },
+      { firstName: 'מורן', lastName: 'דוד', fullName: 'מורן דוד', name: 'מורן דוד', phone: '054-8045678', email: 'moran.david@gmail.com', company: 'פרטי', source: 'referral', city: 'רמת גן', service: 'עובש', serviceType: 'בדיקת עובש', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'עובש בחדר רחצה.' },
+      { firstName: 'אסף', lastName: 'ברוש', fullName: 'אסף ברוש', name: 'אסף ברוש', phone: '052-9056789', email: 'assaf.brosh@brosh-eng.co.il', company: 'ברוש הנדסה', source: 'google', city: 'נתניה', service: 'אקוסטיקה', serviceType: 'דוח אקוסטי להיתר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'דוח אקוסטי לוועדה.' },
+      { firstName: 'שירלי', lastName: 'גבע', fullName: 'שירלי גבע', name: 'שירלי גבע', phone: '050-1067890', email: 'shirly.geva@gmail.com', company: 'פרטי', source: 'facebook', city: 'יבנה', service: 'מים', serviceType: 'בדיקת מים', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'באר פרטית, בדיקת מים.' },
+      { firstName: 'גל', lastName: 'עוז', fullName: 'גל עוז', name: 'גל עוז', phone: '053-2078901', email: 'gal.oz@oztech.co.il', company: 'עוז טכנולוגיות', source: 'returning', city: 'ירושלים', service: 'קרינה', serviceType: 'מדידת קרינה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'לקוח חוזר, מדידה חוזרת.' },
+      { firstName: 'יעל', lastName: 'מזור', fullName: 'יעל מזור', name: 'יעל מזור', phone: '054-3089012', email: 'yael.mazor@gmail.com', company: 'פרטי', source: 'website', city: 'פתח תקווה', service: 'רעש מזגן', serviceType: 'בדיקת רעש מזגן', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'רעש מזגן מרכזי בלילה.' },
+      { firstName: 'דביר', lastName: 'אלוני', fullName: 'דביר אלוני', name: 'דביר אלוני', phone: '050-4090123', email: 'dvir.aloni@aloni-build.co.il', company: 'אלוני בנייה', source: 'partner', city: 'הוד השרון', service: 'אקוסטיקה', serviceType: 'בדיקות אקוסטיות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'קבלן, 3 בניינים.' },
+      { firstName: 'נועה', lastName: 'פלד', fullName: 'נועה פלד', name: 'נועה פלד', phone: '052-5101234', email: 'noa.peled@gmail.com', company: 'פרטי', source: 'facebook', city: 'רעננה', service: 'ראדון', serviceType: 'בדיקת ראדון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'בדיקה לפני אכלוס.' },
+      { firstName: 'רועי', lastName: 'חזן', fullName: 'רועי חזן', name: 'רועי חזן', phone: '054-6112345', email: 'roi.hazan@hazan-group.co.il', company: 'קבוצת חזן', source: 'google', city: 'תל אביב', service: 'איכות אוויר', serviceType: 'ניטור איכות אוויר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ניטור ב-3 קומות.' },
+      { firstName: 'טלי', lastName: 'שגב', fullName: 'טלי שגב', name: 'טלי שגב', phone: '050-7123456', email: 'tali.segev@school.edu.il', company: 'בי"ס השרון', source: 'referral', city: 'כפר סבא', service: 'בדיקות למוסדות', serviceType: 'בדיקות סביבתיות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'הורים לוחצים, קרינה ורעש.' },
+      { firstName: 'אורי', lastName: 'נווה', fullName: 'אורי נווה', name: 'אורי נווה', phone: '053-8134567', email: 'ori.nave@gmail.com', company: 'פרטי', source: 'whatsapp', city: 'הרצליה', service: 'ריח חריג', serviceType: 'בדיקת ריח', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ריח ביוב בחדר שינה.' },
+      { firstName: 'דנה', lastName: 'אשכנזי', fullName: 'דנה אשכנזי', name: 'דנה אשכנזי', phone: '054-9145678', email: 'dana.ashkenazi@gmail.com', company: 'פרטי', source: 'google', city: 'רמת גן', service: 'עובש', serviceType: 'דיגום עובש', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'עובש על קירות, צריכה דוח לביטוח.' },
+      { firstName: 'עמית', lastName: 'זהבי', fullName: 'עמית זהבי', name: 'עמית זהבי', phone: '052-1156789', email: 'amit.zahavi@zahavi-dev.co.il', company: 'זהבי יזמות', source: 'partner', city: 'נתניה', service: 'קרינה', serviceType: 'בדיקת קרינה לפני בנייה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'יזם, בדיקה לפני חפירות.' },
+      { firstName: 'קרן', lastName: 'אביב', fullName: 'קרן אביב', name: 'קרן אביב', phone: '050-2167890', email: 'keren.aviv@gmail.com', company: 'פרטי', source: 'facebook', city: 'יבנה', service: 'מים', serviceType: 'בדיקת מים', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מים עם טעם מוזר.' },
+      { firstName: 'תום', lastName: 'רוזן', fullName: 'תום רוזן', name: 'תום רוזן', phone: '053-3178901', email: 'tom.rozen@gmail.com', company: 'פרטי', source: 'website', city: 'ירושלים', service: 'רעש', serviceType: 'בדיקת רעש תשתיות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'רעש מצנרת או חימום.' },
+      { firstName: 'מיכאל', lastName: 'פרץ', fullName: 'מיכאל פרץ', name: 'מיכאל פרץ', phone: '054-4189012', email: 'michael.peretz@peretz-factory.co.il', company: 'מפעלי פרץ', source: 'google', city: 'פתח תקווה', service: 'איכות אוויר', serviceType: 'ניטור פליטות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ממונה בטיחות דורש דוח.' },
+      { firstName: 'שני', lastName: 'לוי', fullName: 'שני לוי', name: 'שני לוי', phone: '050-5190123', email: 'shani.levi88@gmail.com', company: 'פרטי', source: 'referral', city: 'הוד השרון', service: 'אקוסטיקה', serviceType: 'בדיקת רעש בדירה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'רעש מדירה מעל.' },
+      { firstName: 'יונתן', lastName: 'בר', fullName: 'יונתן בר', name: 'יונתן בר', phone: '052-6201234', email: 'yonatan.bar@bar-office.co.il', company: 'בר משרדים', source: 'whatsapp', city: 'תל אביב', service: 'ריח חריג', serviceType: 'בדיקת ריח', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ריח מהמטבחון.' },
+      { firstName: 'עדי', lastName: 'סער', fullName: 'עדי סער', name: 'עדי סער', phone: '054-7212345', email: 'adi.saar@gmail.com', company: 'פרטי', source: 'returning', city: 'רעננה', service: 'קרינה', serviceType: 'בדיקת קרינה חוזרת', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'אנטנה חדשה בשכונה.' },
+      { firstName: 'איתי', lastName: 'גולן', fullName: 'איתי גולן', name: 'איתי גולן', phone: '050-8223456', email: 'itay.golan@golan-construction.co.il', company: 'גולן בנייה', source: 'partner', city: 'נתניה', service: 'אקוסטיקה', serviceType: 'דוח אקוסטי להיתר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'קבלן, דוח דחוף להיתר.' },
+      { firstName: 'רותם', lastName: 'ניר', fullName: 'רותם ניר', name: 'רותם ניר', phone: '053-9234567', email: 'rotem.nir@gmail.com', company: 'פרטי', source: 'facebook', city: 'ירושלים', service: 'ראדון', serviceType: 'בדיקת ראדון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'קומת קרקע, קראה כתבה.' },
+      { firstName: 'מעיין', lastName: 'שפירא', fullName: 'מעיין שפירא', name: 'מעיין שפירא', phone: '054-1245678', email: 'maayan.shapira@school.edu.il', company: 'בי"ס שפירא', source: 'referral', city: 'כפר סבא', service: 'בדיקות למוסדות', serviceType: 'בדיקות קרינה ורעש', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מנהלת ביה"ס, הורים דורשים.' },
+      { firstName: 'אלעד', lastName: 'טל', fullName: 'אלעד טל', name: 'אלעד טל', phone: '050-2256789', email: 'elad.tal@talwater.co.il', company: 'טל מים', source: 'google', city: 'הרצליה', service: 'מים', serviceType: 'בדיקת מים תעשייתית', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מפעל מיחזור מים.' },
+      { firstName: 'ליהי', lastName: 'קדם', fullName: 'ליהי קדם', name: 'ליהי קדם', phone: '052-3267890', email: 'lihi.kedem@gmail.com', company: 'פרטי', source: 'website', city: 'רמת גן', service: 'רעש מזגן', serviceType: 'בדיקת רעש מזגן', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מזגן מרכזי גורם לרעידות.' },
+      { firstName: 'ניר', lastName: 'אדם', fullName: 'ניר אדם', name: 'ניר אדם', phone: '054-4278901', email: 'nir.adam@adam-properties.co.il', company: 'אדם נכסים', source: 'whatsapp', city: 'פתח תקווה', service: 'עובש', serviceType: 'בדיקת עובש', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מנהל נכסים, עובש ב-3 דירות.' },
+      { firstName: 'שיר', lastName: 'ארזי', fullName: 'שיר ארזי', name: 'שיר ארזי', phone: '050-5289012', email: 'shir.arzi@gmail.com', company: 'פרטי', source: 'facebook', city: 'הוד השרון', service: 'איכות אוויר', serviceType: 'בדיקת איכות אוויר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ילד אסטמטי, בדיקת אוויר.' },
+      { firstName: 'אופיר', lastName: 'יוסף', fullName: 'אופיר יוסף', name: 'אופיר יוסף', phone: '053-6290123', email: 'ofir.yosef@yosef-eng.co.il', company: 'יוסף הנדסה', source: 'google', city: 'תל אביב', service: 'אקוסטיקה', serviceType: 'דוח אקוסטי למסחרי', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'דוח לרישוי עסק.' },
+      // ── 20 additional leads ──
+      { firstName: 'אורן', lastName: 'דגן', fullName: 'אורן דגן', name: 'אורן דגן', phone: '052-7301234', email: 'oren.dagan@gmail.com', company: 'פרטי', source: 'facebook', city: 'חיפה', service: 'קרינה', serviceType: 'בדיקת קרינה סלולרית', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'אנטנה חדשה על הגג.' },
+      { firstName: 'ליאת', lastName: 'מור', fullName: 'ליאת מור', name: 'ליאת מור', phone: '054-8312345', email: 'liat.mor@mor-law.co.il', company: 'מור עורכי דין', source: 'google', city: 'ראשון לציון', service: 'רעש', serviceType: 'חוות דעת רעש לתביעה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'צריכה חוות דעת לבית משפט.' },
+      { firstName: 'בועז', lastName: 'קריף', fullName: 'בועז קריף', name: 'בועז קריף', phone: '050-9323456', email: 'boaz.krif@gmail.com', company: 'פרטי', source: 'website', city: 'באר שבע', service: 'ראדון', serviceType: 'בדיקת ראדון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'בית חדש בנגב, קומת קרקע.' },
+      { firstName: 'הילה', lastName: 'עמר', fullName: 'הילה עמר', name: 'הילה עמר', phone: '053-1334567', email: 'hila.amar@amar-clinic.co.il', company: 'מרפאת עמר', source: 'referral', city: 'רחובות', service: 'איכות אוויר', serviceType: 'בדיקת איכות אוויר במרפאה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מטופלים מתלוננים על ריח.' },
+      { firstName: 'תמיר', lastName: 'חן', fullName: 'תמיר חן', name: 'תמיר חן', phone: '052-2345678', email: 'tamir.chen@chen-build.co.il', company: 'חן בנייה', source: 'partner', city: 'אשדוד', service: 'אקוסטיקה', serviceType: 'דוח אקוסטי להיתר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'פרויקט 80 יח"ד, דחוף.' },
+      { firstName: 'סיגל', lastName: 'הראל', fullName: 'סיגל הראל', name: 'סיגל הראל', phone: '054-3356789', email: 'sigal.harel@gmail.com', company: 'פרטי', source: 'whatsapp', city: 'גבעתיים', service: 'עובש', serviceType: 'בדיקת עובש ולחות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'עובש חוזר אחרי שיפוץ.' },
+      { firstName: 'אייל', lastName: 'פישר', fullName: 'אייל פישר', name: 'אייל פישר', phone: '050-4367890', email: 'eyal.fisher@fisher-ind.co.il', company: 'פישר תעשיות', source: 'google', city: 'חולון', service: 'ניטור פליטות', serviceType: 'ניטור פליטות למפעל', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'דרישה של המשרד להגנ"ס.' },
+      { firstName: 'נטע', lastName: 'שמעון', fullName: 'נטע שמעון', name: 'נטע שמעון', phone: '053-5378901', email: 'neta.shimon@gmail.com', company: 'פרטי', source: 'facebook', city: 'מודיעין', service: 'קרינה', serviceType: 'בדיקת קרינה בדירה', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'בהריון, חוששת מקרינה.' },
+      { firstName: 'דרור', lastName: 'בן דוד', fullName: 'דרור בן דוד', name: 'דרור בן דוד', phone: '052-6389012', email: 'dror.bd@bd-arch.co.il', company: 'בן דוד אדריכלים', source: 'partner', city: 'תל אביב', service: 'אקוסטיקה', serviceType: 'ייעוץ אקוסטי לתכנון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'פרויקט שימור, צריך ייעוץ.' },
+      { firstName: 'ענבר', lastName: 'צור', fullName: 'ענבר צור', name: 'ענבר צור', phone: '054-7390123', email: 'inbar.tzur@gmail.com', company: 'פרטי', source: 'website', city: 'רמת השרון', service: 'מים', serviceType: 'בדיקת מים מהברז', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מים צהובים מהברז.' },
+      { firstName: 'יגאל', lastName: 'נוי', fullName: 'יגאל נוי', name: 'יגאל נוי', phone: '050-8401234', email: 'yigal.noy@noy-hotels.co.il', company: 'נוי מלונאות', source: 'returning', city: 'אילת', service: 'בדיקות למוסדות', serviceType: 'בדיקות סביבתיות למלון', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ביקורת שנתית, 200 חדרים.' },
+      { firstName: 'רונית', lastName: 'גלעד', fullName: 'רונית גלעד', name: 'רונית גלעד', phone: '053-9412345', email: 'ronit.gilad@gmail.com', company: 'פרטי', source: 'google', city: 'הרצליה', service: 'ריח חריג', serviceType: 'בדיקת ריח חריג', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'ריח דלק ליד הבית.' },
+      { firstName: 'עמרי', lastName: 'שלו', fullName: 'עמרי שלו', name: 'עמרי שלו', phone: '052-1423456', email: 'omri.shilo@shilo-dev.co.il', company: 'שילו פיתוח', source: 'partner', city: 'נתניה', service: 'קרינה', serviceType: 'סקר קרינה לפרויקט', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'יזם, 3 מגדלים ליד קו מתח.' },
+      { firstName: 'אפרת', lastName: 'רוזנפלד', fullName: 'אפרת רוזנפלד', name: 'אפרת רוזנפלד', phone: '054-2434567', email: 'efrat.rosen@school.edu.il', company: 'גן הילדים שקד', source: 'referral', city: 'כפר סבא', service: 'בדיקות למוסדות', serviceType: 'בדיקת קרינה לגן', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'הורים מודאגים מאנטנה.' },
+      { firstName: 'גיא', lastName: 'אשר', fullName: 'גיא אשר', name: 'גיא אשר', phone: '050-3445678', email: 'guy.asher@gmail.com', company: 'פרטי', source: 'whatsapp', city: 'פתח תקווה', service: 'רעש', serviceType: 'בדיקת רעש מפעל סמוך', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'רעש לילי ממפעל סמוך.' },
+      { firstName: 'מיטל', lastName: 'אריאלי', fullName: 'מיטל אריאלי', name: 'מיטל אריאלי', phone: '053-4456789', email: 'meital.arieli@arieli-office.co.il', company: 'אריאלי משרדים', source: 'google', city: 'רעננה', service: 'איכות אוויר', serviceType: 'בדיקת SBS במשרד', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'עובדים חולים, חשד ל-SBS.' },
+      { firstName: 'נדב', lastName: 'ברק', fullName: 'נדב ברק', name: 'נדב ברק', phone: '052-5467890', email: 'nadav.barak@gmail.com', company: 'פרטי', source: 'facebook', city: 'ירושלים', service: 'ראדון', serviceType: 'בדיקת ראדון בנגב', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'בית בהרי ירושלים, חשש.' },
+      { firstName: 'שלומית', lastName: 'ויס', fullName: 'שלומית ויס', name: 'שלומית ויס', phone: '054-6478901', email: 'shlomit.weiss@weiss-prop.co.il', company: 'ויס נכסים', source: 'returning', city: 'רמת גן', service: 'עובש', serviceType: 'בדיקת עובש לדירות', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'לקוחה חוזרת, 5 דירות.' },
+      { firstName: 'רז', lastName: 'כרמל', fullName: 'רז כרמל', name: 'רז כרמל', phone: '050-7489012', email: 'raz.carmel@carmel-eng.co.il', company: 'כרמל הנדסה', source: 'partner', city: 'חיפה', service: 'אקוסטיקה', serviceType: 'דוח אקוסטי תעשייתי', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'מפעל ליד שכונת מגורים.' },
+      { firstName: 'דקלה', lastName: 'יפרח', fullName: 'דקלה יפרח', name: 'דקלה יפרח', phone: '053-8490123', email: 'dikla.ifrach@gmail.com', company: 'פרטי', source: 'website', city: 'אשקלון', service: 'מים', serviceType: 'בדיקת מים בבאר', stage: 'NEW', status: 'NEW', leadStatus: 'NEW', assignee: '', site: '', notes: 'באר פרטית, חששות בריאותיים.' },
+    ];
+    return demoLeadData.map((l, i) => ({
+      ...l,
+      id: `demo-lead-${i + 1}`,
+      createdAt: new Date(now.getTime() - i * 1800000).toISOString(),
+    }));
+  }, [leads.length]);
+
+  const effectiveLeads = leads.length > 0 ? leads : demoLeads;
 
   useEffect(() => {
     if (!currentUser) return;
@@ -12693,11 +15319,17 @@ export default function GalitCRMPrototype() {
         projectName: t.project?.name ?? undefined,
         customerId: t.customerId ?? undefined,
         customerName: t.customer?.name ?? undefined,
+        leadId: t.leadId ?? undefined,
+        leadName: t.lead?.fullName ?? undefined,
+        leadPhone: t.lead?.phone ?? undefined,
+        leadEmail: t.lead?.email ?? undefined,
+        leadCompany: t.lead?.company ?? undefined,
         dueDate: t.dueDate ?? undefined,
         due: t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL') : '',
         priority: t.priority || 'MEDIUM',
         status: t.status ?? undefined,
         type: t.type ?? undefined,
+        createdAt: t.createdAt ?? undefined,
       }));
       setTasks(normalized);
     } catch {
@@ -12934,6 +15566,10 @@ export default function GalitCRMPrototype() {
     setIsNewCustomerMode(false);
     setCurrent('customer-profile');
     setCustomerFull(null);
+    // Reset workspace tabs when opening a new customer
+    setWorkspaceTab('card');
+    setWorkspaceQuoteOpen(false);
+    setWorkspaceQuoteId(null);
 
     if (typeof window !== 'undefined') {
       const url = `${window.location.pathname}?view=customer&id=${customer.id}`;
@@ -12946,10 +15582,10 @@ export default function GalitCRMPrototype() {
   };
 
   /** חדש → לקוח: פתיחת כרטיס לקוח חדש ריק */
-  const handleNewCustomer = () => {
+  const handleNewCustomer = (prefillName?: string) => {
     const emptyCustomer: Customer = {
       id: '__new__',
-      name: '',
+      name: prefillName || '',
       type: '',
       contactName: '',
       phone: '',
@@ -13257,19 +15893,109 @@ export default function GalitCRMPrototype() {
     }
   };
 
+  /* ── Tab helpers ── */
+  const tabScreenLabels: Record<string, string> = {
+    tasks: 'משימות', 'quote-new': 'הצעת מחיר חדשה', 'customer-profile': 'כרטיס לקוח',
+    'lead-profile': 'כרטיס ליד', dashboard: 'דשבורד', leads: 'לידים', quotes: 'הצעות מחיר',
+  };
+
+  const openInTab = (type: string, label?: string, extra?: { customerId?: string | null; leadId?: string | null }) => {
+    const tabLabel = label || tabScreenLabels[type] || type;
+    const newId = `tab-${type}-${Date.now()}`;
+    setInternalTabs((prev) => {
+      if (prev.length === 0) {
+        // First time: save current screen as origin tab
+        return [
+          { id: `tab-${current}-origin`, type: current, label: tabScreenLabels[current] || current },
+          { id: newId, type, label: tabLabel, ...extra },
+        ];
+      }
+      // Don't add duplicate type
+      const existing = prev.find((t) => t.type === type);
+      if (existing) {
+        setActiveTabId(existing.id);
+        return prev;
+      }
+      return [...prev, { id: newId, type, label: tabLabel, ...extra }];
+    });
+    setActiveTabId(newId);
+    setCurrent(type);
+  };
+
+  const closeTab = (tabId: string) => {
+    setInternalTabs((prev) => {
+      const closing = prev.find((t) => t.id === tabId);
+      // Clear lead prefill when closing quote-new tab
+      if (closing?.type === 'quote-new') setQuotePrefillFromLead(null);
+      const remaining = prev.filter((t) => t.id !== tabId);
+      if (remaining.length <= 1) {
+        // Exit tab mode — navigate to last remaining tab
+        const last = remaining[0];
+        if (last) {
+          setCurrent(last.type);
+          if (last.type === 'customer-profile' && last.customerId) {
+            const c = customers.find((x) => x.id === last.customerId);
+            if (c) setSelectedCustomer(c);
+          }
+          if (last.type === 'lead-profile' && last.leadId) {
+            const l = leads.find((x) => x.id === last.leadId);
+            if (l) setSelectedLead(l);
+          }
+        }
+        setActiveTabId(null);
+        return [];
+      }
+      // If we closed the active tab, switch to neighbor
+      if (closing && activeTabId === tabId) {
+        const idx = prev.findIndex((t) => t.id === tabId);
+        const next = remaining[Math.min(idx, remaining.length - 1)];
+        setActiveTabId(next.id);
+        setCurrent(next.type);
+        if (next.type === 'customer-profile' && next.customerId) {
+          const c = customers.find((x) => x.id === next.customerId);
+          if (c) setSelectedCustomer(c);
+        }
+        if (next.type === 'lead-profile' && next.leadId) {
+          const l = leads.find((x) => x.id === next.leadId);
+          if (l) setSelectedLead(l);
+        }
+      }
+      return remaining;
+    });
+  };
+
+  const switchToTab = (tabId: string) => {
+    const tab = internalTabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    setActiveTabId(tabId);
+    setCurrent(tab.type);
+    if (tab.type === 'customer-profile' && tab.customerId) {
+      const c = customers.find((x) => x.id === tab.customerId);
+      if (c) { setSelectedCustomer(c); setSelectedLead(null); }
+    }
+    if (tab.type === 'lead-profile' && tab.leadId) {
+      const l = leads.find((x) => x.id === tab.leadId);
+      if (l) { setSelectedLead(l); setSelectedCustomer(null); }
+    }
+  };
+
   const navigateSafely = (target: string) => {
     if (!currentUser) return;
     if (!canAccess(currentUser.role, target)) return;
 
+    // Clear internal tabs on toolbar navigation
+    setInternalTabs([]);
+    setActiveTabId(null);
+
     // When the toolbar "חדש → הצעה" fires while a customer card is open,
-    // redirect to the real QuoteNewScreen instead of QuotesPage.
+    // open QuoteNewScreen as a workspace tab instead of navigating away.
     // selectedCustomer must NOT be cleared — QuoteNewScreen needs it for prefill.
     if (target === 'quotes' && current === 'customer-profile' && selectedCustomer) {
+      setQuoteEditorInitialId(null);
       setNewQuoteContactId(customerCardContactId);
-      setCurrent('quote-new');
-      if (typeof window !== 'undefined') {
-        window.history.pushState({}, '', window.location.pathname);
-      }
+      setWorkspaceQuoteId(null);
+      setWorkspaceQuoteOpen(true);
+      setWorkspaceTab('quote-new');
       return;
     }
 
@@ -13407,118 +16133,7 @@ export default function GalitCRMPrototype() {
             </>
           )}
           <div className={cn("min-h-0 flex-1 overflow-y-auto", (current === 'customer-profile' || current === 'interaction-new' || current === 'order-new') ? 'p-2 sm:p-3 lg:p-4' : 'p-4 sm:p-6 lg:p-8')}>
-          <div className={cn("flex flex-col gap-3", (current === 'customer-profile' || current === 'interaction-new' || current === 'order-new') ? 'mb-1' : 'mb-4')}>
-            <div className="flex items-center justify-between">
-              <div className="hidden lg:block">
-                {current !== 'customers' && current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
-                  <div className="text-2xl font-bold" style={{ color: galit.text }}>גלית CRM</div>
-                )}
-                <div className="text-xs text-slate-500">{currentUser.name} · {roleLabel(currentUser.role)}</div>
-              </div>
-              {current !== 'customers' && current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
-                <div className="flex-1 lg:flex lg:justify-center">
-                  <GlobalSearchBar
-                    inputId={GLOBAL_SEARCH_INPUT_ID}
-                    currentUser={currentUser}
-                    customers={customers}
-                    leads={leads}
-                    projects={projects}
-                    onOpenCustomer={(c) => {
-                      navigateSafely('customers');
-                      openCustomerPage(c);
-                    }}
-                    onOpenLead={(l) => {
-                      navigateSafely('leads');
-                      openLeadPage(l);
-                    }}
-                    onOpenProject={(p) => {
-                      navigateSafely('projects');
-                      openProjectDetails(p);
-                    }}
-                  />
-                </div>
-              )}
-              {current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
-              <div className="hidden lg:flex lg:items-center lg:gap-2">
-                {current !== 'customers' && (
-                  <>
-                    <div className="flex items-center gap-2 rounded-2xl bg-white px-2 py-2 shadow-sm ring-1 ring-slate-200">
-                      <button
-                        className={cn(
-                          'rounded-xl px-3 py-2 text-xs font-semibold transition',
-                          workMode === 'OFFICE'
-                            ? 'bg-emerald-600 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                        )}
-                        onClick={() => setMyWorkMode('OFFICE')}
-                      >
-                        אני במשרד
-                      </button>
-                      <button
-                        className={cn(
-                          'rounded-xl px-3 py-2 text-xs font-semibold transition',
-                          workMode === 'FIELD'
-                            ? 'bg-sky-600 text-white'
-                            : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
-                        )}
-                        onClick={() => setMyWorkMode('FIELD')}
-                      >
-                        אני בשטח
-                      </button>
-                    </div>
-                    {workMode === 'FIELD' && (
-                      <select
-                        className="w-64 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm outline-none transition focus:border-slate-400"
-                        value={currentProjectId}
-                        onChange={(e) => setMyCurrentProject(e.target.value)}
-                      >
-                        <option value="">פרויקט נוכחי</option>
-                        {projects
-                          .filter((p) => !['CLOSED', 'CANCELLED'].includes((p.status || '').toString()))
-                          .slice(0, 50)
-                          .map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.projectNumber ? `${p.projectNumber} - ${p.name}` : p.name}
-                            </option>
-                          ))}
-                      </select>
-                    )}
-                  </>
-                )}
-                {current !== 'dashboard' && current !== 'customers' && (
-                  <Button
-                    style={{ background: galit.primary }}
-                    onClick={() => {
-                      resetQuickCreate();
-                      setQuickCreateOpen(true);
-                    }}
-                  >
-                    + לקוח / ליד חדש
-                  </Button>
-                )}
-                <Button variant="outline" onClick={handleLogout}>התנתק</Button>
-              </div>
-              )}
-            </div>
-
-            {current !== 'customer-profile' && current !== 'interaction-new' && current !== 'order-new' && (
-            <div className="flex items-center justify-between lg:hidden">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center rounded-full bg-white shadow-sm" style={{ width: 32, height: 32 }}>
-                <img
-                  src={galitLogo}
-                  alt="גלית"
-                  style={{ maxWidth: '70%', maxHeight: '70%' }}
-                />
-              </div>
-              <div className="text-right">
-                <div className="text-lg font-bold" style={{ color: galit.text }}>גלית CRM</div>
-                <div className="text-xs text-slate-500">{currentUser.name} · {roleLabel(currentUser.role)}</div>
-              </div>
-            </div>
-            </div>
-            )}
-          </div>
+          {/* Header bar removed — page starts directly from the green toolbar */}
 
           {topNotice && (
             <div className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
@@ -13675,23 +16290,19 @@ export default function GalitCRMPrototype() {
             </div>
           </Modal>
 
-          {/* ── Customer Search Modal (חפש → לקוח) ──────────────────── */}
+          {/* ── Customer Search Modal ── */}
           <CustomerSearchModal
             open={customerSearchOpen}
             customers={customers}
             onClose={() => setCustomerSearchOpen(false)}
             onSelect={(customer) => {
               setCustomerSearchOpen(false);
-              setSelectedCustomer(customer);
-              setSelectedLead(null);
-              setCurrent('customer-profile');
-              if (typeof window !== 'undefined') {
-                window.history.pushState({}, '', `${window.location.pathname}?view=customer&id=${customer.id}`);
-              }
+              openCustomerPage(customer);
             }}
+            onNewCustomer={handleNewCustomer}
           />
 
-          {/* ── Quote Search Modal (חפש → הצעה) ──────────────────── */}
+          {/* ── Quote Search Modal ── */}
           <QuoteSearchModal
             open={quoteSearchOpen}
             quotes={quotes}
@@ -13705,6 +16316,35 @@ export default function GalitCRMPrototype() {
               }
             }}
           />
+
+          {/* ── Internal Tab Bar ── */}
+          {isTabMode && (
+            <div className="mb-3 flex items-center gap-1 rounded-xl bg-white/90 shadow ring-1 ring-slate-200 px-2 py-1.5" style={{ direction: 'rtl' }}>
+              {internalTabs.map((tab) => {
+                const isActive = tab.id === activeTabId;
+                return (
+                  <div key={tab.id} className="flex items-center">
+                    <button
+                      onClick={() => switchToTab(tab.id)}
+                      className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold transition-all ${isActive ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
+                    >
+                      {tab.type === 'tasks' && <ClipboardList className="h-4 w-4" />}
+                      {tab.type === 'quote-new' && <FileText className="h-4 w-4" />}
+                      {tab.type === 'customer-profile' && <Building2 className="h-4 w-4" />}
+                      {tab.type === 'lead-profile' && <Flame className="h-4 w-4" />}
+                      {tab.label}
+                    </button>
+                    <button
+                      onClick={() => closeTab(tab.id)}
+                      className="rounded p-1 text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors mr-0.5"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {current === 'dashboard' && (
             currentUser.role === 'admin' || currentUser.role === 'manager' ? (
@@ -13722,12 +16362,12 @@ export default function GalitCRMPrototype() {
                 }}
               />
             ) : (
-              <DashboardPage leads={leads} quotes={quotes} opportunities={opportunities} projects={projects} tasks={tasks} stats={dashboardStats} />
+              <DashboardPage leads={effectiveLeads} quotes={quotes} opportunities={opportunities} projects={projects} tasks={tasks} stats={dashboardStats} />
             )
           )}
           {current === 'leads' && canAccess(currentUser.role, 'leads') && (
             <LeadsPage
-              leads={leads}
+              leads={effectiveLeads}
               setLeads={setLeads}
               customers={customers}
               users={users}
@@ -13747,81 +16387,171 @@ export default function GalitCRMPrototype() {
             />
           )}
           {current === 'pipeline' && canAccess(currentUser.role, 'pipeline') && (
-            <PipelinePage leads={leads} setLeads={setLeads} currentUser={currentUser} />
+            <PipelinePage leads={effectiveLeads} setLeads={setLeads} currentUser={currentUser} />
           )}
           {current === 'customers' && canAccess(currentUser.role, 'customers') && (
-        <CustomersPage
-          customers={customers}
-          leads={leads}
-          quotes={quotes}
-          projects={projects}
-          tasks={tasks}
-          opportunities={opportunities}
-          users={users}
-          onOpenCustomer={openCustomerPage}
-          onCreateCustomer={(c) => setCustomers((prev) => [...prev, c])}
-          onUpdateCustomer={(updated) =>
-            setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-          }
-          onDeleteCustomer={(id) => setCustomers((prev) => prev.filter((c) => c.id !== id))}
-          error={customersError}
-          currentUser={currentUser}
-          typeLabelMap={customerTypeLabelMap}
-          classifications={customerClassifications}
-          onReloadClassifications={reloadCustomerClassifications}
-        />
-      )}
+            <CustomersPage
+              customers={customers}
+              leads={effectiveLeads}
+              quotes={quotes}
+              projects={projects}
+              tasks={tasks}
+              opportunities={opportunities}
+              users={users}
+              onOpenCustomer={openCustomerPage}
+              onCreateCustomer={(c) => setCustomers((prev) => [...prev, c])}
+              onUpdateCustomer={(updated) =>
+                setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+              }
+              onDeleteCustomer={(id) => setCustomers((prev) => prev.filter((c) => c.id !== id))}
+              error={customersError}
+              currentUser={currentUser}
+              typeLabelMap={customerTypeLabelMap}
+              classifications={customerClassifications}
+              onReloadClassifications={reloadCustomerClassifications}
+            />
+          )}
+
+          {/* ── Customer Workspace: tab-based card + quote ── */}
           {current === 'customer-profile' && selectedCustomer && (
-            <div className="space-y-4">
-              <CustomerLegacyCard
-                customer={selectedCustomer}
-                full={customerFull}
-                currentUser={currentUser}
-                onCustomerUpdated={(next) => {
-                  setSelectedCustomer(next as Customer);
-                  setCustomers((prev) => prev.map((c) => (c.id === next.id ? { ...c, ...(next as Customer) } : c)));
-                }}
-                onFullReload={async () => {
-                  if (selectedCustomer.id && selectedCustomer.id !== '__new__') {
-                    await loadCustomerFull(selectedCustomer.id);
-                  }
-                }}
-                onContactSelected={(id, name) => { setCustomerCardContactId(id ?? null); setCustomerCardContactName(name ?? null); }}
-                onNewQuote={(contactId) => {
-                  setNewQuoteContactId(contactId ?? null);
-                  setCurrent('quote-new');
-                  if (typeof window !== 'undefined') {
-                    window.history.pushState({}, '', window.location.pathname);
-                  }
-                }}
-                onNewInteraction={(contactId) => {
-                  setNewInteractionContactId(contactId ?? null);
-                  setCurrent('interaction-new');
-                  if (typeof window !== 'undefined') {
-                    window.history.pushState({}, '', window.location.pathname);
-                  }
-                }}
-                typeLabelMap={customerTypeLabelMap}
-                classifications={customerClassifications}
-                primaryColor={galit.primary}
-                isNew={isNewCustomerMode}
-                onBack={() => setCurrent('customers')}
-                onCustomerCreated={(created) => {
-                  const c = created as Customer;
-                  setSelectedCustomer(c);
-                  setIsNewCustomerMode(false);
-                  setCustomers((prev) => [...prev, c]);
-                  // Update URL with real customer ID
-                  if (typeof window !== 'undefined') {
-                    const url = `${window.location.pathname}?view=customer&id=${c.id}`;
-                    window.history.pushState({}, '', url);
-                  }
-                  // Load full customer data now that it exists
-                  void loadCustomerFull(c.id).catch(() => {});
-                }}
-              />
+            <div className="space-y-0">
+              {/* Workspace tab bar */}
+              {workspaceQuoteOpen && (
+                <div className="mb-3 flex items-center gap-1 rounded-xl bg-white p-1 shadow-sm ring-1 ring-slate-200" dir="rtl">
+                  <button
+                    type="button"
+                    onClick={() => setWorkspaceTab('card')}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
+                      workspaceTab === 'card'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    )}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                    כרטיס לקוח
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkspaceTab(workspaceQuoteId ? 'quote-edit' : 'quote-new')}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
+                      (workspaceTab === 'quote-new' || workspaceTab === 'quote-edit')
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    )}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    הצעת מחיר
+                  </button>
+                  <div className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkspaceQuoteOpen(false);
+                      setWorkspaceQuoteId(null);
+                      setWorkspaceTab('card');
+                    }}
+                    className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500 transition-colors"
+                    title="סגור טאב הצעת מחיר"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              )}
+
+              {/* Customer card tab content */}
+              <div style={{ display: workspaceTab === 'card' ? 'block' : 'none' }}>
+                <CustomerLegacyCard
+                  customer={selectedCustomer}
+                  full={customerFull}
+                  currentUser={currentUser}
+                  showCustomerQuotesTab={true}
+                  customerQuotesRefreshKey={customerQuotesRefreshKey}
+                  onCustomerUpdated={(next) => {
+                    setSelectedCustomer(next as Customer);
+                    setCustomers((prev) => prev.map((c) => (c.id === next.id ? { ...c, ...(next as Customer) } : c)));
+                  }}
+                  onFullReload={async () => {
+                    if (selectedCustomer.id && selectedCustomer.id !== '__new__') {
+                      await loadCustomerFull(selectedCustomer.id);
+                    }
+                  }}
+                  onContactSelected={(id, name) => { setCustomerCardContactId(id ?? null); setCustomerCardContactName(name ?? null); }}
+                  onNewQuote={(contactId) => {
+                    setNewQuoteContactId(contactId ?? null);
+                    setWorkspaceQuoteId(null);
+                    setWorkspaceQuoteOpen(true);
+                    setWorkspaceTab('quote-new');
+                  }}
+                  onOpenQuote={(quoteId) => {
+                    setQuoteEditorInitialId(quoteId);
+                    setWorkspaceQuoteId(quoteId);
+                    setWorkspaceQuoteOpen(true);
+                    setWorkspaceTab('quote-edit');
+                  }}
+                  onNewInteraction={(contactId) => {
+                    setNewInteractionContactId(contactId ?? null);
+                    setCurrent('interaction-new');
+                    if (typeof window !== 'undefined') {
+                      window.history.pushState({}, '', window.location.pathname);
+                    }
+                  }}
+                  typeLabelMap={customerTypeLabelMap}
+                  classifications={customerClassifications}
+                  primaryColor={galit.primary}
+                  isNew={isNewCustomerMode}
+                  onBack={() => {
+                    setWorkspaceQuoteOpen(false);
+                    setWorkspaceQuoteId(null);
+                    setWorkspaceTab('card');
+                    setCurrent('customers');
+                  }}
+                  onCustomerCreated={(created) => {
+                    const c = created as Customer;
+                    setSelectedCustomer(c);
+                    setIsNewCustomerMode(false);
+                    setCustomers((prev) => [...prev, c]);
+                    if (typeof window !== 'undefined') {
+                      const url = `${window.location.pathname}?view=customer&id=${c.id}`;
+                      window.history.pushState({}, '', url);
+                    }
+                    void loadCustomerFull(c.id).catch(() => {});
+                  }}
+                />
+              </div>
+
+              {/* Quote tab content — kept mounted so state is preserved */}
+              {workspaceQuoteOpen && (
+                <div style={{ display: (workspaceTab === 'quote-new' || workspaceTab === 'quote-edit') ? 'block' : 'none' }}>
+                  <QuoteNewScreen
+                    key={`workspace-quote-${workspaceQuoteId || 'new'}`}
+                    embedded
+                    prefillCustomer={selectedCustomer ? {
+                      id: selectedCustomer.id,
+                      name: selectedCustomer.name || '',
+                      phone: (selectedCustomer.phone as string | undefined) ?? undefined,
+                      fax: (selectedCustomer.fax as string | undefined) ?? undefined,
+                      companyRegNumber: (selectedCustomer.companyRegNumber as string | undefined) ?? undefined,
+                      customerType: selectedCustomer.type || null,
+                    } : undefined}
+                    prefillContactId={newQuoteContactId}
+                    initialQuoteId={workspaceQuoteId}
+                    onExit={() => {
+                      setWorkspaceQuoteOpen(false);
+                      setWorkspaceQuoteId(null);
+                      setWorkspaceTab('card');
+                    }}
+                    onQuoteSaved={() => {
+                      setCustomerQuotesRefreshKey((k) => k + 1);
+                    }}
+                    onQuoteSent={handleQuoteSent}
+                  />
+                </div>
+              )}
             </div>
           )}
+
           {current === 'quote-new' && (
             <QuoteNewScreen
               embedded
@@ -13831,11 +16561,28 @@ export default function GalitCRMPrototype() {
                 phone: (selectedCustomer.phone as string | undefined) ?? undefined,
                 fax: (selectedCustomer.fax as string | undefined) ?? undefined,
                 companyRegNumber: (selectedCustomer.companyRegNumber as string | undefined) ?? undefined,
+                customerType: selectedCustomer.type || null,
+              } : quotePrefillFromLead ? {
+                name: quotePrefillFromLead.name,
+                phone: quotePrefillFromLead.phone,
+                email: quotePrefillFromLead.email,
+                city: quotePrefillFromLead.city,
+                address: quotePrefillFromLead.address,
+                contactName: quotePrefillFromLead.contactName,
+                customerType: quotePrefillFromLead.customerType === 'פרטי' ? 'PRIVATE' : quotePrefillFromLead.customerType === 'עסקי' ? 'COMPANY' : quotePrefillFromLead.customerType || null,
               } : undefined}
               prefillContactId={newQuoteContactId}
               onExit={() => {
-                setCurrent(selectedCustomer ? 'customer-profile' : 'quotes');
+                setQuotePrefillFromLead(null);
+                // If in tab mode, close the quote-new tab instead of navigating
+                const quoteTab = internalTabs.find((tb) => tb.type === 'quote-new');
+                if (quoteTab) {
+                  closeTab(quoteTab.id);
+                } else {
+                  setCurrent(selectedCustomer ? 'customer-profile' : 'quotes');
+                }
               }}
+              onQuoteSent={handleQuoteSent}
             />
           )}
           {current === 'interaction-new' && (
@@ -13863,7 +16610,7 @@ export default function GalitCRMPrototype() {
                 lead={selectedLead}
                 customer={linkedCustomerForSelectedLead}
                 customers={customers}
-                leads={leads}
+                leads={effectiveLeads}
                 users={users}
                 opportunities={opportunities}
                 currentUser={currentUser}
@@ -13925,7 +16672,7 @@ export default function GalitCRMPrototype() {
             <SettingsPage
               currentUser={currentUser}
               customers={customers}
-              leads={leads}
+              leads={effectiveLeads}
               projects={projects}
               quotes={quotes}
               users={users}
@@ -13958,7 +16705,42 @@ export default function GalitCRMPrototype() {
               currentUser={currentUser}
               projects={projects}
               customers={customers}
+              leads={effectiveLeads}
               users={users}
+              quotes={quotes}
+              onOpenLead={(lead) => {
+                setSelectedLead(lead);
+                setSelectedCustomer(null);
+                openInTab('lead-profile', `ליד: ${lead.fullName || ''}`, { leadId: lead.id });
+              }}
+              onOpenCustomer={(customer) => {
+                setSelectedCustomer(customer);
+                setSelectedLead(null);
+                setIsNewCustomerMode(false);
+                setCustomerFull(null);
+                setWorkspaceTab('card');
+                setWorkspaceQuoteOpen(false);
+                openInTab('customer-profile', `לקוח: ${customer.name || ''}`, { customerId: customer.id });
+              }}
+              onCreateQuote={(custId, taskId, leadPrefill) => {
+                if (custId) {
+                  const cust = customers.find((c) => c.id === custId);
+                  if (cust) setSelectedCustomer(cust);
+                  setNewQuoteCustomerId(custId);
+                }
+                if (leadPrefill) {
+                  setQuotePrefillFromLead(leadPrefill);
+                  // Clear selectedCustomer so prefillFromLead is used instead
+                  if (!custId) setSelectedCustomer(null);
+                }
+                if (taskId) setQuoteOriginTaskId(taskId);
+                openInTab('quote-new', 'הצעת מחיר חדשה');
+              }}
+              parentExpandedTaskId={parentExpandedTaskId}
+              setParentExpandedTaskId={setParentExpandedTaskId}
+              parentManualStepOverride={parentManualStepOverride}
+              setParentManualStepOverride={setParentManualStepOverride}
+              onReloadLeads={reloadLeads}
             />
           )}
           {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage />}
@@ -13966,9 +16748,6 @@ export default function GalitCRMPrototype() {
             <UsersPage users={users} onReloadUsers={reloadUsers} currentUser={currentUser} />
           )}
 
-          <div className="mt-8 flex justify-end border-t pt-4">
-            <Button variant="outline" onClick={handleLogout}><LogOut className="h-4 w-4" />התנתק</Button>
-          </div>
           </div>
         </main>
       </div>

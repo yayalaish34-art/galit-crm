@@ -1,0 +1,208 @@
+@echo off
+setlocal EnableDelayedExpansion
+title CRM Galit - Restore
+
+echo.
+echo ============================================================
+echo CRM Galit - Restore from Backup
+echo ============================================================
+echo.
+
+set "PROJECT_ROOT=%CD%"
+set "BACKUP_ROOT=%PROJECT_ROOT%\_backups"
+
+if not exist "%BACKUP_ROOT%" (
+  echo [ERROR] No _backups folder found. Run backup-crm.bat first.
+  goto :fail
+)
+
+set "LATEST="
+for /f "delims=" %%D in ('dir /b /ad /o-n "%BACKUP_ROOT%" 2^>nul') do (
+  if not defined LATEST (
+    echo %%D | findstr /i "^safety_" >nul 2>&1
+    if errorlevel 1 set "LATEST=%%D"
+  )
+)
+
+if not defined LATEST (
+  echo [ERROR] No valid backup folders found in _backups
+  goto :fail
+)
+
+set "BACKUP_DIR=%BACKUP_ROOT%\%LATEST%"
+
+echo Latest backup: %LATEST%
+echo Folder: %BACKUP_DIR%
+echo.
+
+if not exist "%BACKUP_DIR%\project.zip" (
+  echo [ERROR] project.zip not found in backup: %BACKUP_DIR%
+  goto :fail
+)
+
+if not exist "%BACKUP_DIR%\database.sql" (
+  echo [ERROR] database.sql not found in backup: %BACKUP_DIR%
+  goto :fail
+)
+
+for %%F in ("%BACKUP_DIR%\database.sql") do set "SQL_SIZE=%%~zF"
+if !SQL_SIZE! LSS 102400 (
+  echo [ERROR] database.sql is too small: !SQL_SIZE! bytes
+  goto :fail
+)
+
+echo Backup contents verified:
+echo   project.zip   - OK
+echo   database.sql  - OK (!SQL_SIZE! bytes)
+echo.
+
+docker --version >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Docker is not found on PATH.
+  goto :fail
+)
+
+set "CONTAINER_ID="
+for /f "tokens=*" %%C in ('docker ps --filter "name=galit_postgres" --filter "status=running" -q 2^>nul') do set "CONTAINER_ID=%%C"
+
+if not defined CONTAINER_ID (
+  echo [ERROR] Container galit_postgres is not running.
+  echo Start it with: docker-compose up -d
+  goto :fail
+)
+
+echo Docker OK. Container galit_postgres is running.
+echo.
+
+echo WARNING - THIS WILL OVERWRITE:
+echo   Project files : %PROJECT_ROOT%
+echo   Database      : galit_crm (in Docker container galit_postgres)
+echo.
+echo Backup to restore: %LATEST%
+echo.
+echo A safety snapshot of the current DB will be saved first.
+echo.
+
+set /p CONFIRM=Type YES to continue (anything else cancels): 
+if /i not "!CONFIRM!"=="YES" (
+  echo.
+  echo Restore cancelled.
+  pause
+  exit /b 0
+)
+
+echo.
+echo [0/4] Saving safety snapshot of current database...
+
+for /f "delims=" %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyy-MM-dd_HH-mm-ss"') do set "SAFETY_TS=%%T"
+set "SAFETY_DIR=%BACKUP_ROOT%\safety_%SAFETY_TS%"
+
+mkdir "%SAFETY_DIR%" >nul 2>&1
+
+docker exec galit_postgres sh -c "pg_dump -U galit -d galit_crm" > "%SAFETY_DIR%\database.sql" 2>nul
+if errorlevel 1 (
+  echo WARNING: safety snapshot failed. Continuing...
+) else (
+  for %%F in ("%SAFETY_DIR%\database.sql") do set "SAFETY_SIZE=%%~zF"
+  echo Safety snapshot saved: %SAFETY_DIR%\database.sql (!SAFETY_SIZE! bytes)
+)
+
+echo.
+echo [1/4] Restoring project files...
+
+tar -xf "%BACKUP_DIR%\project.zip" -C "%PROJECT_ROOT%"
+if errorlevel 1 (
+  echo [ERROR] Failed to extract project.zip into project root
+  goto :fail
+)
+
+echo Project files restored.
+
+echo.
+echo [2/4] Restoring database...
+
+docker exec galit_postgres psql -U galit -d postgres -q -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='galit_crm' AND pid <> pg_backend_pid();" >nul 2>&1
+
+docker exec galit_postgres psql -U galit -d postgres -q -c "DROP DATABASE IF EXISTS galit_crm;"
+if errorlevel 1 (
+  echo [ERROR] Failed to drop database galit_crm
+  goto :fail
+)
+
+docker exec galit_postgres psql -U galit -d postgres -q -c "CREATE DATABASE galit_crm OWNER galit;"
+if errorlevel 1 (
+  echo [ERROR] Failed to create database galit_crm
+  goto :fail
+)
+
+docker cp "%BACKUP_DIR%\database.sql" galit_postgres:/tmp/restore_database.sql >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Failed to copy database.sql into Docker container
+  goto :fail
+)
+
+docker exec galit_postgres psql -U galit -d galit_crm -q -f /tmp/restore_database.sql
+if errorlevel 1 (
+  echo [ERROR] psql restore failed
+  echo Safety backup is at: %SAFETY_DIR%\database.sql
+  goto :cleanup_fail
+)
+
+docker exec galit_postgres rm -f /tmp/restore_database.sql >nul 2>&1
+
+echo Database restored.
+
+echo.
+echo [3/4] Verifying restored database...
+
+set "TABLE_COUNT="
+for /f "usebackq delims=" %%L in (`docker exec galit_postgres psql -U galit -d galit_crm -q -t -A -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE';"`) do (
+  set "TABLE_COUNT=%%L"
+)
+
+if not defined TABLE_COUNT (
+  echo [ERROR] Could not verify restored table count
+  goto :cleanup_fail
+)
+
+echo !TABLE_COUNT!| findstr /r "^[0-9][0-9]*$" >nul
+if errorlevel 1 (
+  echo [ERROR] Restored table count is invalid: !TABLE_COUNT!
+  goto :cleanup_fail
+)
+
+if "!TABLE_COUNT!"=="0" (
+  echo [ERROR] Restore completed but found 0 tables
+  goto :cleanup_fail
+)
+
+echo Restored tables: !TABLE_COUNT!
+
+echo.
+echo [4/4] Final cleanup...
+docker exec galit_postgres rm -f /tmp/restore_database.sql >nul 2>&1
+
+echo.
+echo ============================================================
+echo SUCCESS: Restore completed successfully
+echo Backup used: %LATEST%
+echo Tables restored: !TABLE_COUNT!
+echo ============================================================
+echo.
+pause
+exit /b 0
+
+:cleanup_fail
+echo.
+echo Cleaning up failed restore...
+docker exec galit_postgres rm -f /tmp/restore_database.sql >nul 2>&1
+
+:fail
+echo.
+echo ============================================================
+echo ERROR: Restore failed
+echo Check the messages above
+echo ============================================================
+echo.
+pause
+exit /b 1

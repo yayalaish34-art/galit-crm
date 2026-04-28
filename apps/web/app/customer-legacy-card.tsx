@@ -181,6 +181,34 @@ function israeliPhoneLooksValid(phone: string): boolean {
   return /^0[2-9]\d{7,8}$/.test(t);
 }
 
+/**
+ * Auto-format an Israeli phone number by inserting a dash on blur.
+ * Mobile (05X): 0501234567 → 050-1234567
+ * Landline (02-9): 039876543 → 03-9876543
+ * If the value already contains a dash, or is partial/invalid, return as-is.
+ */
+function autoFormatIsraeliPhone(raw: string): string {
+  const trimmed = raw.trim();
+  // Already has a dash — don't touch
+  if (trimmed.includes('-')) return trimmed;
+  // Strip everything except digits
+  const digits = trimmed.replace(/\D/g, '');
+  // Mobile: 05X + 7 digits = 10 digits total
+  if (/^05\d{8}$/.test(digits)) {
+    return digits.slice(0, 3) + '-' + digits.slice(3);
+  }
+  // Landline: 0[2-4,8-9] + 7 digits = 9 digits total
+  if (/^0[2-489]\d{7}$/.test(digits)) {
+    return digits.slice(0, 2) + '-' + digits.slice(2);
+  }
+  // Landline: 07[1-9] + 7 digits = 10 digits (special landline/voip)
+  if (/^07[1-9]\d{7}$/.test(digits)) {
+    return digits.slice(0, 3) + '-' + digits.slice(3);
+  }
+  // Doesn't match known patterns — return as-is, don't break input
+  return trimmed;
+}
+
 /** סיווג לקוח — classification dropdown options */
 const CUSTOMER_CLASSIFICATION_OPTIONS: string[] = [
   'אדריכלים',
@@ -807,6 +835,7 @@ type LowerTabKey =
   | 'notes'
   | 'relations'
   | 'documents'
+  | 'quotes'
   | 'additionalData'
   | 'moreDetails'
   | 'externalData';
@@ -817,6 +846,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
   { key: 'documents', label: 'מסמכים' },
+  { key: 'quotes', label: 'הצעות מחיר' },
 ];
 
 function formatLegacyDate(v: unknown): string {
@@ -828,6 +858,23 @@ function formatLegacyDate(v: unknown): string {
   return String(v);
 }
 
+type CustomerQuoteListRow = {
+  id: string;
+  quoteNumber?: string | null;
+  quoteDate?: string | null;
+  createdAt?: string | null;
+  status?: string | null;
+  totalAmount?: number | null;
+  amount?: number | null;
+  validityDate?: string | null;
+  validTo?: string | null;
+  lastMergedDocPath?: string | null;
+  customerName?: string | null;
+  phoneSummary?: string | null;
+  contactEmail?: string | null;
+  latestDocFileName?: string | null;
+};
+
 export function CustomerLegacyCard({
   customer,
   full,
@@ -835,6 +882,7 @@ export function CustomerLegacyCard({
   onCustomerUpdated,
   onFullReload,
   onNewQuote,
+  onOpenQuote,
   onNewInteraction,
   onContactSelected,
   typeLabelMap = PRESET_CUSTOMER_TYPE_LABELS,
@@ -843,6 +891,8 @@ export function CustomerLegacyCard({
   isNew = false,
   onCustomerCreated,
   onBack,
+  showCustomerQuotesTab = false,
+  customerQuotesRefreshKey = 0,
 }: {
   customer: CustomerCardCustomer;
   full: CustomerFull | null;
@@ -852,6 +902,8 @@ export function CustomerLegacyCard({
   /** Called when the user clicks "חדש הצעה" from the contacts panel.
    *  contactId is the ID of the currently selected contact (null if none selected). */
   onNewQuote?: (contactId?: string | null) => void;
+  /** Open the quote editor for an existing quote (dashboard navigates to quote-new). */
+  onOpenQuote?: (quoteId: string) => void;
   /** Called when the user clicks "פנייה חדשה" from the contacts panel. */
   onNewInteraction?: (contactId?: string | null) => void;
   /** Called whenever a contact row is selected (or deselected — null).
@@ -866,6 +918,10 @@ export function CustomerLegacyCard({
   onCustomerCreated?: (created: CustomerCardCustomer) => void;
   /** Navigate back to the previous page (e.g. customers list) */
   onBack?: () => void;
+  /** When true, show the lower tab "הצעות מחיר" (requires quotes API access). */
+  showCustomerQuotesTab?: boolean;
+  /** Incremented by the parent after a quote is saved — forces refetch of GET /quotes?customerId=… */
+  customerQuotesRefreshKey?: number;
 }) {
   console.log('CUSTOMER LEGACY CARD RUNTIME MARKER', customer?.id);
   /** true while we're creating a brand-new customer (POST). Flips to false after first save. */
@@ -876,6 +932,16 @@ export function CustomerLegacyCard({
   }, [isNew]);
   const [mode, setMode] = useState<'view' | 'edit'>('edit');
   const [activeLowerTab, setActiveLowerTab] = useState<LowerTabKey>('contacts');
+  const [customerQuotes, setCustomerQuotes] = useState<CustomerQuoteListRow[]>([]);
+  const [customerQuotesLoading, setCustomerQuotesLoading] = useState(false);
+  const [customerQuotesError, setCustomerQuotesError] = useState('');
+  const lowerTabsVisible = useMemo(() => {
+    if (showCustomerQuotesTab) return LOWER_TABS;
+    return LOWER_TABS.filter((t) => t.key !== 'quotes');
+  }, [showCustomerQuotesTab]);
+  useEffect(() => {
+    if (!showCustomerQuotesTab && activeLowerTab === 'quotes') setActiveLowerTab('contacts');
+  }, [showCustomerQuotesTab, activeLowerTab]);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const saveMainInFlightRef = useRef(false);
   const [contactBusy, setContactBusy] = useState(false);
@@ -927,12 +993,24 @@ export function CustomerLegacyCard({
   const [customerForm, setCustomerForm] = useState(() => buildFormFromCustomer(customer));
 
   const prevCustomerIdRef = useRef(customer?.id);
+  const prevCustomerNameRef = useRef(customer?.name);
   useEffect(() => {
-    // Only reset form when the customer ID actually changes (e.g. switching customers).
-    // Skip in new mode to avoid wiping the form while user is typing.
-    if (isNewMode) return;
-    if (prevCustomerIdRef.current === customer?.id) return;
+    const idChanged = prevCustomerIdRef.current !== customer?.id;
+    const nameChanged = prevCustomerNameRef.current !== customer?.name;
     prevCustomerIdRef.current = customer?.id;
+    prevCustomerNameRef.current = customer?.name;
+
+    // New mode: only rebuild form if a prefill name arrived (search → new customer).
+    // This avoids wiping the form while user is typing.
+    if (isNewMode || customer?.id === '__new__') {
+      if ((idChanged || nameChanged) && customer?.name) {
+        setCustomerForm(buildFormFromCustomer(customer));
+      }
+      return;
+    }
+
+    // Existing customer: reset form when customer ID changes.
+    if (!idChanged) return;
     setCustomerForm(buildFormFromCustomer(customer));
   }, [customer, buildFormFromCustomer, isNewMode]);
 
@@ -980,6 +1058,100 @@ export function CustomerLegacyCard({
     })();
     return () => { cancelled = true; };
   }, [customer?.id, currentUser, contactsKey, isNewMode]);
+
+  const loadCustomerQuotes = useCallback(async () => {
+    if (!customer?.id || isNewMode || customer.id === '__new__') {
+      setCustomerQuotes([]);
+      return;
+    }
+    setCustomerQuotesError('');
+    const cid = String(customer.id).trim();
+    if (!cid) {
+      setCustomerQuotes([]);
+      return;
+    }
+    setCustomerQuotesLoading(true);
+    try {
+      const quotesListUrl = new URL(apiUrl('/quotes'));
+      quotesListUrl.searchParams.set('customerId', cid);
+      const res = await apiFetch(quotesListUrl.toString(), {
+        method: 'GET',
+        authUser: currentUser,
+      });
+      if (!res.ok) {
+        const errText = await parseApiErrorResponse(res);
+        throw new Error(errText || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (!Array.isArray(data)) {
+        setCustomerQuotes([]);
+        return;
+      }
+      /* השרת מסנן לפי ?customerId= — לא מסננים שוב ב-UI (סינון כפול הסיר הצעות תקינות) */
+      setCustomerQuotes(
+        data.map((q: Record<string, unknown>) => ({
+          id: String(q.id ?? ''),
+          quoteNumber: (q.quoteNumber as string | null | undefined) ?? null,
+          quoteDate: (q.quoteDate as string | null | undefined) ?? null,
+          createdAt: (q.createdAt as string | null | undefined) ?? null,
+          status: (q.status as string | null | undefined) ?? null,
+          totalAmount: q.totalAmount != null ? Number(q.totalAmount) : null,
+          amount: q.amount != null ? Number(q.amount) : null,
+          validityDate: (q.validityDate as string | null | undefined) ?? null,
+          validTo: (q.validTo as string | null | undefined) ?? null,
+          lastMergedDocPath: (q.lastMergedDocPath as string | null | undefined) ?? null,
+          customerName: (q.customerName as string | null | undefined) ?? null,
+          phoneSummary: (q.phoneSummary as string | null | undefined) ?? null,
+          contactEmail: ((q.customer as Record<string, unknown> | undefined)?.email as string | null | undefined) ?? null,
+          latestDocFileName: (() => {
+            const docs = q.quoteDocuments as Array<Record<string, unknown>> | undefined;
+            if (docs && docs.length > 0) return (docs[0].fileName as string | null) ?? null;
+            return null;
+          })(),
+        })),
+      );
+    } catch {
+      setCustomerQuotesError('טעינת הצעות מחיר נכשלה');
+      setCustomerQuotes([]);
+    } finally {
+      setCustomerQuotesLoading(false);
+    }
+  }, [customer?.id, isNewMode, currentUser]);
+
+  useEffect(() => {
+    if (!showCustomerQuotesTab || isNewMode || !customer?.id || customer.id === '__new__') return;
+    /* טאב quotes: טעינה. אחרי שמירת הצעה (refresh key>0): רענון גם כשעדיין בטאב אחר */
+    if (activeLowerTab !== 'quotes' && customerQuotesRefreshKey === 0) return;
+    void loadCustomerQuotes();
+  }, [
+    activeLowerTab,
+    showCustomerQuotesTab,
+    loadCustomerQuotes,
+    customerQuotesRefreshKey,
+    customer?.id,
+    isNewMode,
+  ]);
+
+  const deleteCustomerQuote = useCallback(
+    async (quoteId: string) => {
+      if (!confirm('למחוק את הצעת המחיר?')) return;
+      try {
+        const res = await apiFetch(apiUrl(`/quotes/${encodeURIComponent(quoteId)}`), {
+          method: 'DELETE',
+          authUser: currentUser,
+        });
+        if (!res.ok) {
+          const errText = await parseApiErrorResponse(res);
+          alert(errText || 'מחיקה נכשלה');
+          return;
+        }
+        await loadCustomerQuotes();
+      } catch {
+        alert('מחיקה נכשלה');
+      }
+    },
+    [currentUser, loadCustomerQuotes],
+  );
 
   const [leadSourceRows, setLeadSourceRows] = useState<CustomerLeadSourceRow[]>(() =>
     buildLeadSourceRowsFromFull(full, customer),
@@ -1531,6 +1703,390 @@ export function CustomerLegacyCard({
     prevTypeRef.current = customerForm.type;
   }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
 
+  /* ══════════════════════════════════════════════════
+     NEW-CUSTOMER MODAL — pixel-perfect match to screenshots
+     ══════════════════════════════════════════════════ */
+  if (isNewMode) {
+    const mInput =
+      'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-[#F7F9FC] px-5 text-[15px] text-right text-[#24364B] placeholder-[#A0AEC0] outline-none transition-all focus:border-emerald-400 focus:ring-[3px] focus:ring-emerald-100';
+    const mLabel = 'block text-[13px] font-semibold text-[#5A6A7E] mb-1.5';
+    const locationIcon = (
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+    );
+
+    return (
+      <div className="fixed inset-0 z-[9999] flex items-center justify-center" dir="rtl">
+        {/* Dark overlay */}
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onBack} />
+
+        {/* Modal container */}
+        <div
+          className="relative z-10 flex flex-col w-full max-w-[680px] mx-4 rounded-3xl overflow-hidden bg-white"
+          style={{
+            maxHeight: 'calc(100vh - 40px)',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.3)',
+          }}
+        >
+          {/* ── DARK HEADER ── */}
+          <div
+            className="shrink-0 flex items-center justify-between px-7 py-4"
+            style={{ background: '#1E293B' }}
+          >
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl flex items-center justify-center"
+                style={{ background: '#334155' }}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <line x1="19" y1="8" x2="19" y2="14"/>
+                  <line x1="22" y1="11" x2="16" y2="11"/>
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-[17px] font-bold text-white leading-tight">הוספת לקוח חדש</h2>
+                <p className="text-[12px] text-slate-400 mt-0.5">כרטיס לקוח מהיר</p>
+              </div>
+            </div>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="w-9 h-9 rounded-xl flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+                title="סגור"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            )}
+          </div>
+
+          {/* ── FORM BODY ── */}
+          <div className="flex-1 overflow-y-auto px-7 py-5" style={{ background: '#F8FAFC' }}>
+            {/* Error / success message */}
+            {legacyMsg && (
+              <div className={cn(
+                'mb-4 rounded-2xl px-4 py-3 text-[14px] font-medium',
+                legacyMsg.includes('בהצלחה') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'
+              )}>
+                {legacyMsg}
+              </div>
+            )}
+
+            {/* Row 1: שם מלא + ח.פ / ת.ז */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={mLabel}>שם מלא *</label>
+                <input
+                  className={mInput}
+                  value={customerForm.name}
+                  onChange={(e) => setCustomerForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="לדוגמה: ענבל כהן"
+                />
+              </div>
+              <div>
+                <label className={mLabel}>ח.פ / ת.ז</label>
+                <input
+                  className={mInput}
+                  value={customerForm.companyRegNumber}
+                  onChange={(e) => setCustomerForm((p) => ({ ...p, companyRegNumber: e.target.value }))}
+                  placeholder="מספר מזהה"
+                />
+              </div>
+            </div>
+
+            {/* Row 2: נייד ליצירת קשר + כתובת אימייל */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={mLabel}>נייד ליצירת קשר *</label>
+                <div className="relative">
+                  <input
+                    className={cn(mInput, 'pr-12', phoneWarn && 'border-red-400 bg-red-50/50')}
+                    value={customerForm.phone}
+                    onChange={(e) => { setCustomerForm((p) => ({ ...p, phone: e.target.value })); if (phoneWarn) setPhoneWarn(''); }}
+                    onBlur={() => { const f = autoFormatIsraeliPhone(customerForm.phone); if (f !== customerForm.phone) setCustomerForm((p) => ({ ...p, phone: f })); if (f.trim() && !israeliPhoneLooksValid(f)) setPhoneWarn('פורמט לא תקין'); else setPhoneWarn(''); }}
+                    placeholder="050-0000000"
+                  />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A0AEC0]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                    </svg>
+                  </div>
+                  {phoneWarn && <div className="mt-1 text-[11px] font-medium text-red-600">{phoneWarn}</div>}
+                </div>
+              </div>
+              <div>
+                <label className={mLabel}>כתובת אימייל</label>
+                <div className="relative">
+                  <input
+                    className={cn(mInput, 'pr-5 pl-12', emailWarn && 'border-red-400 bg-red-50/50')}
+                    type="email"
+                    dir="ltr"
+                    style={{ textAlign: 'left' }}
+                    value={customerForm.email}
+                    onChange={(e) => { setCustomerForm((p) => ({ ...p, email: e.target.value })); if (emailWarn) setEmailWarn(''); }}
+                    onBlur={() => { if (customerForm.email.trim() && !customerEmailLooksValid(customerForm.email)) setEmailWarn('כתובת דוא״ל אינה תקינה'); else setEmailWarn(''); }}
+                    placeholder="name@example.com"
+                  />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A0AEC0]">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="4" width="20" height="16" rx="2"/>
+                      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+                    </svg>
+                  </div>
+                  {emailWarn && <div className="mt-1 text-[11px] font-medium text-red-600">{emailWarn}</div>}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: סיווג לקוח + מקור הגעה */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={mLabel}>סיווג לקוח</label>
+                <select
+                  className={cn(mInput, 'appearance-none cursor-pointer')}
+                  value={customerForm.type}
+                  onChange={(e) => setCustomerForm((p) => ({ ...p, type: e.target.value, classificationCode: e.target.value }))}
+                >
+                  <option value="">בחר סיווג...</option>
+                  {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={mLabel}>מקור הגעה</label>
+                <select
+                  className={cn(mInput, 'appearance-none cursor-pointer')}
+                  value={customerForm.leadSource}
+                  onChange={(e) => setCustomerForm((p) => ({ ...p, leadSource: e.target.value }))}
+                >
+                  <option value="">בחר מקור...</option>
+                  {LEAD_SOURCE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Row 4: עיר + כתובת מלאה */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className={mLabel}>עיר</label>
+                <div className="relative" ref={cityRef}>
+                  <input
+                    className={cn(mInput, 'pr-12')}
+                    value={customerForm.city}
+                    onChange={(e) => { setCustomerForm((p) => ({ ...p, city: e.target.value })); setCityFilter(e.target.value); setCityOpen(true); }}
+                    onFocus={() => setCityOpen(true)}
+                    placeholder="הקלד עיר..."
+                  />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A0AEC0]">
+                    {locationIcon}
+                  </div>
+                  {cityOpen && (
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border border-[#D9E4EF] bg-white" style={{ boxShadow: '0 8px 24px rgba(135,160,190,0.18)' }}>
+                      {filteredCities.length === 0 && customerForm.city.trim() ? (
+                        <button
+                          type="button"
+                          className="w-full px-3 py-2 text-right text-sm text-[#2E7D32] hover:bg-[#F0F7EF] rounded-lg transition-colors"
+                          onClick={() => { setCityOpen(false); }}
+                        >
+                          + הוסף &quot;{customerForm.city.trim()}&quot; כעיר חדשה
+                        </button>
+                      ) : (
+                        filteredCities.slice(0, 50).map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            className={cn('w-full px-3 py-1.5 text-right text-sm hover:bg-[#F0F7EF] rounded-lg transition-colors', c === customerForm.city && 'bg-[#E8F5E9] font-medium')}
+                            onClick={() => { setCustomerForm((p) => ({ ...p, city: c })); setCityOpen(false); setCityFilter(''); }}
+                          >
+                            {c}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className={mLabel}>כתובת מלאה</label>
+                <div className="relative">
+                  <input
+                    className={cn(mInput, 'pr-12')}
+                    value={customerForm.address}
+                    onChange={(e) => setCustomerForm((p) => ({ ...p, address: e.target.value }))}
+                    placeholder="רחוב, מספר בית..."
+                  />
+                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#A0AEC0]">
+                    {locationIcon}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 5: הערות לטיפול — full width */}
+            <div>
+              <label className={mLabel}>הערות לטיפול</label>
+              <textarea
+                className={cn(mInput, 'min-h-[90px] resize-none !h-auto pt-4')}
+                value={customerForm.notes}
+                onChange={(e) => setCustomerForm((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="פרטים נוספים שחשוב לדעת על הלקוח החדש..."
+              />
+            </div>
+
+            {/* ── אנשי קשר ── */}
+            <div className="mt-5">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[14px] font-bold text-[#24364B]">אנשי קשר</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pendingIdCounter.current += 1;
+                    setPendingContacts((prev) => [
+                      ...prev,
+                      {
+                        id: `pending-${pendingIdCounter.current}`,
+                        fullName: '',
+                        phone: '',
+                        email: '',
+                        roleTitle: '',
+                        isPrimary: prev.length === 0,
+                        isActive: true,
+                      },
+                    ]);
+                  }}
+                  className="h-[36px] rounded-xl flex items-center gap-1.5 px-4 text-[13px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-all"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  הוסף איש קשר
+                </button>
+              </div>
+
+              {pendingContacts.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-[#D9E4EF] bg-white/60 px-5 py-4 text-center text-[13px] text-[#8A9BB0]">
+                  לא נוספו אנשי קשר עדיין
+                </div>
+              )}
+
+              {pendingContacts.map((pc, idx) => (
+                <div
+                  key={pc.id}
+                  className="rounded-2xl border border-[#E2E8F0] bg-white p-4 mb-3"
+                  style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[13px] font-semibold text-[#24364B]">
+                      איש קשר {idx + 1}
+                      {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-emerald-600">(ראשי)</span>}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingContacts((prev) => prev.filter((c) => c.id !== pc.id))}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 transition-all"
+                      title="הסר"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">שם איש קשר</label>
+                      <input
+                        className={cn(mInput, '!h-[42px] text-[14px]')}
+                        value={pc.fullName}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, fullName: v } : c));
+                        }}
+                        placeholder="שם מלא"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">טלפון</label>
+                      <input
+                        className={cn(mInput, '!h-[42px] text-[14px]')}
+                        value={pc.phone || ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, phone: v } : c));
+                        }}
+                        placeholder="050-0000000"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">אימייל</label>
+                      <input
+                        className={cn(mInput, '!h-[42px] text-[14px]')}
+                        type="email"
+                        dir="ltr"
+                        style={{ textAlign: 'left' }}
+                        value={pc.email || ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, email: v } : c));
+                        }}
+                        placeholder="name@example.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">תפקיד</label>
+                      <input
+                        className={cn(mInput, '!h-[42px] text-[14px]')}
+                        value={pc.roleTitle || ''}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, roleTitle: v } : c));
+                        }}
+                        placeholder="תפקיד בחברה"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Hidden fields — keep form state for API (contactName, etc.) */}
+            <div className="hidden">
+              <input value={customerForm.contactName} onChange={(e) => setCustomerForm((p) => ({ ...p, contactName: e.target.value }))} />
+            </div>
+          </div>
+
+          {/* ── MODAL FOOTER ── */}
+          <div
+            className="shrink-0 flex items-center gap-3 px-7 py-4 bg-white"
+            style={{ borderTop: '1px solid #E8EFF6' }}
+          >
+            <button
+              type="button"
+              disabled={savingCustomer}
+              onClick={onSaveCustomerMain}
+              className="flex-1 h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105"
+              style={{
+                background: '#22C55E',
+                boxShadow: '0 4px 16px rgba(34,197,94,0.3)',
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              {savingCustomer ? 'שומר...' : 'שמור לקוח חדש'}
+            </button>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                className="h-[50px] rounded-2xl border border-[#D9E4EF] bg-white px-7 text-[15px] font-medium text-[#50657D] hover:bg-[#F3F7FB] transition-all shrink-0"
+              >
+                סגור
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ══════════════════════════════════════════════════
+     EXISTING CUSTOMER CARD — original layout
+     ══════════════════════════════════════════════════ */
   return (
     <div className="space-y-0" dir="rtl" style={{ minHeight: '100vh', background: '#F2F6FA' }}>
 
@@ -1545,24 +2101,22 @@ export function CustomerLegacyCard({
         <div className="flex items-center justify-between">
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: '#24364B', lineHeight: 1.2, margin: 0 }}>
-              {isNewMode ? 'הוספת לקוח חדש' : 'כרטיס לקוח'}
+              כרטיס לקוח
             </h1>
             <div style={{ fontSize: 13, color: '#8A9BB0', marginTop: 3 }}>
-              {!isNewMode && customer.name ? <span style={{ color: '#5E7186' }}>{customer.name}</span> : null}
-              {!isNewMode && customer.name && <span style={{ margin: '0 6px', opacity: 0.5 }}>·</span>}
-              {!isNewMode && <span style={{ fontFamily: 'monospace', fontSize: 12, opacity: 0.7 }}>#{customer.id.slice(0, 8)}</span>}
+              {customer.name ? <span style={{ color: '#5E7186' }}>{customer.name}</span> : null}
+              {customer.name && <span style={{ margin: '0 6px', opacity: 0.5 }}>·</span>}
+              <span style={{ fontFamily: 'monospace', fontSize: 12, opacity: 0.7 }}>#{customer.id.slice(0, 8)}</span>
             </div>
           </div>
           <div className="flex items-center gap-2.5">
-            {!isNewMode && (
-              <button
-                type="button"
-                onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
-                className="h-[38px] rounded-[14px] border border-[#DCE7F2] bg-white/70 px-4 text-[13px] font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
-              >
-                {mode === 'edit' ? 'ביטול' : 'עריכה'}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
+              className="h-[38px] rounded-[14px] border border-[#DCE7F2] bg-white/70 px-4 text-[13px] font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+            >
+              {mode === 'edit' ? 'ביטול' : 'עריכה'}
+            </button>
             <button
               type="button"
               disabled={savingCustomer}
@@ -1573,7 +2127,7 @@ export function CustomerLegacyCard({
                 boxShadow: '0 4px 14px rgba(143,191,143,0.28)',
               }}
             >
-              {savingCustomer ? 'שומר...' : isNewMode ? 'צור לקוח' : 'שמור'}
+              {savingCustomer ? 'שומר...' : 'שמור'}
             </button>
           </div>
         </div>
@@ -1641,7 +2195,7 @@ export function CustomerLegacyCard({
                       className={cn(inputConnected, phoneWarn && 'border-red-400 bg-red-50/50')}
                       value={customerForm.phone}
                       onChange={(e) => { setCustomerForm((p) => ({ ...p, phone: e.target.value })); if (phoneWarn) setPhoneWarn(''); }}
-                      onBlur={() => { if (customerForm.phone.trim() && !israeliPhoneLooksValid(customerForm.phone)) setPhoneWarn('פורמט לא תקין'); else setPhoneWarn(''); }}
+                      onBlur={() => { const f = autoFormatIsraeliPhone(customerForm.phone); if (f !== customerForm.phone) setCustomerForm((p) => ({ ...p, phone: f })); if (f.trim() && !israeliPhoneLooksValid(f)) setPhoneWarn('פורמט לא תקין'); else setPhoneWarn(''); }}
                       placeholder="050-1234567"
                     />
                     {phoneWarn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phoneWarn}</div>}
@@ -1658,7 +2212,7 @@ export function CustomerLegacyCard({
                       className={cn(inputConnected, phone2Warn && 'border-red-400 bg-red-50/50')}
                       value={customerForm.phone2}
                       onChange={(e) => { setCustomerForm((p) => ({ ...p, phone2: e.target.value })); if (phone2Warn) setPhone2Warn(''); }}
-                      onBlur={() => { if (customerForm.phone2.trim() && !israeliPhoneLooksValid(customerForm.phone2)) setPhone2Warn('פורמט לא תקין'); else setPhone2Warn(''); }}
+                      onBlur={() => { const f = autoFormatIsraeliPhone(customerForm.phone2); if (f !== customerForm.phone2) setCustomerForm((p) => ({ ...p, phone2: f })); if (f.trim() && !israeliPhoneLooksValid(f)) setPhone2Warn('פורמט לא תקין'); else setPhone2Warn(''); }}
                       placeholder="09-9621006"
                     />
                     {phone2Warn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phone2Warn}</div>}
@@ -1807,7 +2361,7 @@ export function CustomerLegacyCard({
                 className="h-[44px] rounded-[18px] px-6 text-sm font-bold text-[#2E4A2D] disabled:opacity-50 transition-all"
                 style={{ background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)', boxShadow: '0 8px 18px rgba(143,191,143,0.28)' }}
               >
-                {savingCustomer ? 'שומר...' : isNewMode ? 'צור לקוח' : 'שמור כרטיס לקוח'}
+                {savingCustomer ? 'שומר...' : 'שמור כרטיס לקוח'}
               </button>
               {!isNewMode && (
                 <button
@@ -1826,7 +2380,7 @@ export function CustomerLegacyCard({
       {/* טאבים תחתונים */}
       <div className={cn(sectionShell)} style={{ background: 'rgba(255,255,255,0.78)', boxShadow: '0 10px 30px rgba(135,160,190,0.18)', backdropFilter: 'blur(12px)' }}>
         <div className="flex flex-wrap justify-start gap-2 px-6 pt-5 pb-3">
-          {LOWER_TABS.map((t) => (
+          {lowerTabsVisible.map((t) => (
             <button
               key={t.key}
               type="button"
@@ -3070,6 +3624,167 @@ export function CustomerLegacyCard({
           </div>
         )}
 
+        {activeLowerTab === 'quotes' && (
+          <div className="space-y-3" dir="rtl">
+            <div className="text-lg font-bold text-[#23364B]">הצעות מחיר</div>
+            {isNewMode || customer.id === '__new__' ? (
+              <p className="text-sm text-[#5E7186]">שמירת הלקוח נדרשת לפני שיוך הצעות מחיר.</p>
+            ) : customerQuotesLoading ? (
+              <p className="text-sm text-[#5E7186]">טוען…</p>
+            ) : customerQuotesError ? (
+              <p className="text-sm text-red-600">{customerQuotesError}</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-[#D9E4EF] bg-white shadow-sm">
+                <table className="w-full min-w-[44rem] border-collapse text-sm">
+                  <thead className="border-b border-[#DCE7F2] bg-[#F0F6FB] text-right text-xs font-semibold text-[#2C3F55]">
+                    <tr>
+                      <th className="px-3 py-2.5 whitespace-nowrap">מספר הצעה</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">תאריך הצעה</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">סטטוס</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">סכום כולל</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">תוקף הצעה</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">מסמך</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">פעולות</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customerQuotes.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                          אין הצעות מחיר ללקוח זה
+                        </td>
+                      </tr>
+                    ) : (
+                      customerQuotes.map((row) => {
+                        const quoteWhen = row.quoteDate || row.createdAt;
+                        const quoteWhenDisp = quoteWhen
+                          ? (Number.isNaN(new Date(quoteWhen).getTime())
+                              ? String(quoteWhen)
+                              : new Date(quoteWhen).toLocaleDateString('he-IL'))
+                          : '—';
+                        const validWhen = row.validityDate || row.validTo;
+                        const validDisp = validWhen
+                          ? (Number.isNaN(new Date(validWhen).getTime())
+                              ? String(validWhen)
+                              : new Date(validWhen).toLocaleDateString('he-IL'))
+                          : '—';
+                        const totalNum = row.totalAmount ?? row.amount ?? 0;
+                        const totalDisp =
+                          totalNum != null && Number.isFinite(Number(totalNum))
+                            ? `${Number(totalNum).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₪`
+                            : '—';
+                        return (
+                          <tr key={row.id} className="border-b border-slate-100 text-right hover:bg-slate-50/80">
+                            <td className="px-3 py-2 whitespace-nowrap">{row.quoteNumber || row.id.slice(0, 8)}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{quoteWhenDisp}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{row.status || '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{totalDisp}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{validDisp}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              {(row.latestDocFileName || row.lastMergedDocPath) ? (
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                  onClick={async () => {
+                                    try {
+                                      const r = await apiFetch(apiUrl(`/quotes/${row.id}/merged-doc`), { authUser: currentUser });
+                                      if (!r.ok) { alert('המסמך לא נמצא'); return; }
+                                      const blob = await r.blob();
+                                      const url = URL.createObjectURL(blob);
+                                      const a = document.createElement('a');
+                                      a.href = url;
+                                      a.download = row.latestDocFileName || `הצעה_${row.quoteNumber || row.id.slice(0,8)}.docx`;
+                                      document.body.appendChild(a);
+                                      a.click();
+                                      document.body.removeChild(a);
+                                      setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                    } catch { alert('שגיאה בהורדת המסמך'); }
+                                  }}
+                                >
+                                  פתח מסמך
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 whitespace-nowrap">
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                {onOpenQuote && (
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-[#2C3F55] hover:bg-[#F0F6FB]"
+                                    onClick={() => onOpenQuote(row.id)}
+                                  >
+                                    צפייה
+                                  </button>
+                                )}
+                                {onOpenQuote && (
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-[#2C3F55] hover:bg-[#F0F6FB]"
+                                    onClick={() => onOpenQuote(row.id)}
+                                  >
+                                    עריכה
+                                  </button>
+                                )}
+                                {row.contactEmail && (
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                                    onClick={async () => {
+                                      try {
+                                        const r = await apiFetch(apiUrl(`/quotes/${row.id}/send-email`), {
+                                          method: 'POST',
+                                          body: JSON.stringify({ email: row.contactEmail }),
+                                          authUser: currentUser,
+                                        });
+                                        if (!r.ok) {
+                                          const err = await r.json().catch(() => null);
+                                          alert(err?.message || 'שגיאה בשליחת מייל');
+                                          return;
+                                        }
+                                        alert(`מייל נשלח ל-${row.contactEmail}`);
+                                      } catch (_e) {
+                                        alert('שגיאה בשליחת מייל');
+                                      }
+                                    }}
+                                  >
+                                    מייל
+                                  </button>
+                                )}
+                                {row.phoneSummary && (
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+                                    onClick={() => {
+                                      const ph = (row.phoneSummary || '').replace(/\D/g, '');
+                                      const msg = encodeURIComponent(`הצעת מחיר ${row.quoteNumber || row.id.slice(0, 8)} - ${row.customerName || ''}`);
+                                      window.open(`https://wa.me/${ph}?text=${msg}`, '_blank');
+                                    }}
+                                  >
+                                    וואטסאפ
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+                                  onClick={() => void deleteCustomerQuote(row.id)}
+                                >
+                                  מחיקה
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeLowerTab === 'additionalData' && (
           <div className="space-y-2" dir="rtl">
             <div className="rounded-lg border-2 border-blue-700 bg-white p-2 shadow-sm">
@@ -3345,7 +4060,7 @@ export function CustomerLegacyCard({
             <div className="rounded-lg border-2 border-blue-700 bg-white p-2 shadow-sm">
               <div className={sectionHeader}>נתונים חיצוניים</div>
               <p className="mb-2 mt-2 rounded border border-blue-200 bg-blue-50/80 px-2 py-2 text-right text-[11px] font-semibold leading-snug text-slate-800">
-                נטען מ־<span dir="ltr" className="font-mono text-[10px]">full.externalDataRows</span> (או גיבוי
+                נטען מ׳<span dir="ltr" className="font-mono text-[10px]">full.externalDataRows</span> (או גיבוי
                 externalData). נשמר עם &quot;שמור כרטיס לקוח&quot; (PUT /customers/:id/external-data-rows).
               </p>
               {customer.importLegacyId ? (

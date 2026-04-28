@@ -28,13 +28,14 @@ import {
   ClipboardCheck,
   Target,
   TrendingUp,
+  Bot,
 } from 'lucide-react';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
 
-/** ירוק מותג (כמו ב-page.tsx galit.primary) */
-const GALIT_GREEN = '#4ba647';
-const GALIT_GREEN_DARK = '#2f5c32';
+/** אפור גרפיט מודרני */
+const GALIT_BAR = '#e2e8f0';
+const GALIT_BAR_DARK = '#e2e8f0';
 
 export { GLOBAL_SEARCH_INPUT_ID };
 
@@ -60,7 +61,7 @@ function cn(...classes: Array<string | false | null | undefined>) {
 function Sep() {
   return (
     <span
-      className="hidden w-px shrink-0 self-stretch bg-white/35 sm:block"
+      className="hidden w-px shrink-0 self-stretch bg-slate-400/30 sm:block"
       style={{ minHeight: '3.25rem' }}
       aria-hidden
     />
@@ -84,15 +85,15 @@ function NavBtn({ label, Icon, onClick, disabled, title, active }: NavBtnProps) 
       disabled={disabled}
       onClick={disabled ? undefined : onClick}
       className={cn(
-        'flex h-full min-h-[3.25rem] w-auto min-w-[4.75rem] shrink-0 flex-col items-center justify-center gap-1 rounded-sm border px-2 py-2 text-xs font-semibold leading-snug text-white transition sm:min-w-[5.25rem] sm:px-2.5 sm:text-sm',
+        'flex h-full min-h-[3.25rem] w-auto min-w-[4.75rem] shrink-0 flex-col items-center justify-center gap-1 rounded-sm border px-2 py-2 text-xs font-semibold leading-snug text-slate-700 transition sm:min-w-[5.25rem] sm:px-2.5 sm:text-sm',
         active
-          ? 'border-white/80 bg-black/20 text-white shadow-inner'
-          : 'border-transparent bg-transparent hover:border-white/50 hover:bg-white/15',
+          ? 'border-slate-400/60 bg-white/50 text-slate-900 shadow-inner'
+          : 'border-transparent bg-transparent hover:border-slate-400/40 hover:bg-white/40',
         disabled && 'cursor-not-allowed opacity-45 hover:border-transparent hover:bg-transparent',
       )}
     >
-      <Icon className="h-6 w-6 shrink-0 text-white sm:h-7 sm:w-7" />
-      <span className="line-clamp-2 max-w-[6rem] text-center text-white">{label}</span>
+      <Icon className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
+      <span className="line-clamp-2 max-w-[6rem] text-center text-slate-700">{label}</span>
     </button>
   );
 }
@@ -385,8 +386,8 @@ export function CrmLegacyTopNav({
 
   const triggerClass = (active: boolean) =>
     cn(
-      'flex h-full min-h-[3.25rem] w-auto min-w-[4.75rem] shrink-0 flex-col items-center justify-center gap-1 rounded-sm border px-2 py-2 text-xs font-semibold leading-snug text-white transition sm:min-w-[5.25rem] sm:text-sm',
-      active ? 'border-white/80 bg-black/20' : 'border-transparent hover:border-white/50 hover:bg-white/15',
+      'flex h-full min-h-[3.25rem] w-auto min-w-[4.75rem] shrink-0 flex-col items-center justify-center gap-1 rounded-sm border px-2 py-2 text-xs font-semibold leading-snug text-slate-700 transition sm:min-w-[5.25rem] sm:text-sm',
+      active ? 'border-slate-400/60 bg-white/50' : 'border-transparent hover:border-slate-400/40 hover:bg-white/40',
     );
 
   const settingsOk = canAccess(role, 'settings');
@@ -637,9 +638,9 @@ export function CrmLegacyTopNav({
       document.body,
     );
 
-  const greenBar = (
+  const mainBar = (
     <div
-      className={cn('w-full border-b-2 shadow-md', isCustomerCard && 'galit-premium-bar')}
+      className={cn('w-full border-b shadow-sm', isCustomerCard && 'galit-premium-bar')}
       style={isCustomerCard
         ? {
             background: 'linear-gradient(180deg, #EAF5EA 0%, #F6FBF6 100%)',
@@ -647,19 +648,15 @@ export function CrmLegacyTopNav({
             boxShadow: '0 2px 8px rgba(100,140,100,0.08)',
           }
         : {
-            background: `linear-gradient(180deg, ${GALIT_GREEN} 0%, ${GALIT_GREEN_DARK} 100%)`,
-            borderColor: GALIT_GREEN_DARK,
+            background: GALIT_BAR,
+            borderColor: '#cbd5e1',
           }
       }
     >
       <div className="flex min-h-[4.5rem] w-full items-stretch sm:min-h-[4.75rem]">
-        <div className="flex shrink-0 items-center justify-center border-e border-white/30 px-2 sm:px-4">
-          <img src="/logo.png" alt="גלית" className="h-9 w-auto max-h-11 object-contain sm:h-11" />
-        </div>
-
         <div
           className="flex min-h-[4.5rem] min-w-0 shrink-0 items-stretch overflow-x-auto overflow-y-hidden sm:min-h-[4.75rem]"
-          style={{ width: 'min(75vw, calc(100% - 5.5rem))' }}
+          style={{ width: 'min(80vw, calc(100% - 5rem))' }}
         >
           <div className="flex min-w-min flex-nowrap items-stretch">
             {ribbonTab === 'file' && (
@@ -727,7 +724,7 @@ export function CrmLegacyTopNav({
                   onClick={toggleMenu('new')}
                   className={triggerClass(openMenu === 'new')}
                 >
-                  <Plus className="h-6 w-6 shrink-0 text-white sm:h-7 sm:w-7" />
+                  <Plus className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
                   <span className="line-clamp-2 max-w-[5.5rem] text-center">חדש</span>
                 </button>
                 <Sep />
@@ -738,21 +735,12 @@ export function CrmLegacyTopNav({
                   onClick={toggleMenu('search')}
                   className={triggerClass(openMenu === 'search')}
                 >
-                  <Search className="h-6 w-6 shrink-0 text-white sm:h-7 sm:w-7" />
+                  <Search className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
                   <span className="line-clamp-2 max-w-[5.5rem] text-center">חפש</span>
                 </button>
                 <Sep />
                 <NavBtn
-                  label="אירועים היסטוריה"
-                  Icon={History}
-                  disabled={!canAccess(role, 'alerts')}
-                  title={!canAccess(role, 'alerts') ? 'אין הרשאה' : 'התראות ואירועים'}
-                  active={current === 'alerts'}
-                  onClick={() => go('alerts')}
-                />
-                <Sep />
-                <NavBtn
-                  label="פניות היסטוריה"
+                  label="לידים"
                   Icon={Inbox}
                   disabled={!canAccess(role, 'leads')}
                   title={!canAccess(role, 'leads') ? 'אין הרשאה' : 'לידים / פניות'}
@@ -761,16 +749,16 @@ export function CrmLegacyTopNav({
                 />
                 <Sep />
                 <NavBtn
-                  label="מבצע פעילויות שנה"
+                  label="משימות"
                   Icon={CalendarDays}
-                  disabled={!canAccess(role, 'dashboard') && !canAccess(role, 'reports')}
-                  title="סיכום פעילות — דשבורד או דוחות"
-                  active={current === 'dashboard' || current === 'reports'}
-                  onClick={() => (canAccess(role, 'dashboard') ? go('dashboard') : go('reports'))}
+                  disabled={!canAccess(role, 'tasks')}
+                  title={!canAccess(role, 'tasks') ? 'אין הרשאה' : 'משימות'}
+                  active={current === 'tasks'}
+                  onClick={() => go('tasks')}
                 />
                 <Sep />
                 <NavBtn
-                  label="לוח נתונים"
+                  label="דשבורד"
                   Icon={LayoutDashboard}
                   disabled={!canAccess(role, 'dashboard')}
                   title={!canAccess(role, 'dashboard') ? 'אין הרשאה' : 'דשבורד'}
@@ -778,38 +766,7 @@ export function CrmLegacyTopNav({
                   onClick={() => go('dashboard')}
                 />
                 <Sep />
-                <NavBtn
-                  label="מייל"
-                  Icon={Mail}
-                  title="פתיחת לקוח דואר"
-                  onClick={() => window.open('mailto:', '_blank', 'noopener,noreferrer')}
-                />
-                <Sep />
                 <NavBtn label="חיוג" Icon={Phone} disabled title="חיוג — מודול טלפוניה לא מחובר (שלב מעבר)" />
-                <Sep />
-                <NavBtn label="פקס כללי" Icon={Printer} disabled title="פקס — לא זמין במערכת (שלב מעבר)" />
-                <Sep />
-                <NavBtn label="מסרון" Icon={MessageSquare} disabled title="מסרונים — לא זמין במערכת (שלב מעבר)" />
-                <Sep />
-                <NavBtn
-                  label="קישור"
-                  Icon={Link2}
-                  disabled={!canAccess(role, 'documents')}
-                  title={!canAccess(role, 'documents') ? 'אין הרשאה' : 'מסמכים / קבצים'}
-                  active={current === 'documents'}
-                  onClick={() => go('documents')}
-                />
-                <Sep />
-                <NavBtn
-                  label="תמיכה"
-                  Icon={LifeBuoy}
-                  title="מידע תמיכה"
-                  onClick={() =>
-                    window.alert(
-                      'תמיכה טכנית — בשלב מעבר הנתונים.\nלשאלות פנה למנהל המערכת או לצוות IT.',
-                    )
-                  }
-                />
               </>
             )}
 
@@ -890,12 +847,26 @@ export function CrmLegacyTopNav({
                   active={current === 'dashboard' || current === 'reports'}
                   onClick={() => (canAccess(role, 'dashboard') ? go('dashboard') : go('reports'))}
                 />
+                <Sep />
+                <NavBtn
+                  label="סוכן פיתוח"
+                  Icon={Bot}
+                  title="סוכן פיתוח — ניהול משימות והפעלת Claude Code"
+                  onClick={() => window.open('/dev-assistant', '_blank')}
+                />
               </>
             )}
           </div>
         </div>
 
-        <div className="hidden min-w-0 flex-1 sm:block" aria-hidden />
+        <div className="min-w-0 flex-1" aria-hidden />
+
+        {/* Logo — left side (end in RTL) */}
+        <div className="flex shrink-0 items-center justify-center px-3 sm:px-4">
+          <div className="flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-full bg-white sm:h-[4.75rem] sm:w-[4.75rem] p-[5px]" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.10)', border: '1px solid rgba(0,0,0,0.06)' }}>
+            <img src="/logo-clean.png" alt="גלית" className="h-full w-full object-contain" style={{ imageRendering: 'auto' }} />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -907,15 +878,14 @@ export function CrmLegacyTopNav({
           .galit-premium-bar button { color: #2E4A2D !important; }
           .galit-premium-bar button svg { color: #3D6B3A !important; }
           .galit-premium-bar button span { color: #2E4A2D !important; }
-          .galit-premium-bar button:hover { background: rgba(76,140,70,0.10) !important; border-color: rgba(76,140,70,0.25) !important; }
-          .galit-premium-bar button[class*="bg-black"] { background: rgba(76,140,70,0.15) !important; border-color: rgba(76,140,70,0.35) !important; }
-          .galit-premium-bar span[class*="bg-white"] { background: #C8DCC5 !important; }
-          .galit-premium-bar .border-e { border-color: #C8DCC5 !important; }
-          .galit-premium-ribbon { background: #F0F5EF !important; border-color: #C8DCC5 !important; }
-          .galit-premium-ribbon button { color: #3D6B3A !important; }
-          .galit-premium-ribbon button[class*="bg-[#f2efe8]"] { background: #FFFFFF !important; border-color: #C8DCC5 !important; color: #2E4A2D !important; }
-          .galit-premium-ribbon button[class*="bg-[#d8d4cc]"] { background: #E4EDE3 !important; color: #4A7047 !important; }
-          .galit-premium-ribbon button:hover { background: #E8F0E7 !important; }
+          .galit-premium-bar button:hover { background: rgba(63,70,80,0.08) !important; border-color: rgba(63,70,80,0.20) !important; }
+          .galit-premium-bar button[class*="bg-black"] { background: rgba(63,70,80,0.12) !important; border-color: rgba(63,70,80,0.30) !important; }
+          .galit-premium-bar span[class*="bg-white"] { background: #D0D4D8 !important; }
+          .galit-premium-ribbon { background: #F0F0F0 !important; border-color: #D0D4D8 !important; }
+          .galit-premium-ribbon button { color: #3f4650 !important; }
+          .galit-premium-ribbon button[class*="bg-[#f2efe8]"] { background: #FFFFFF !important; border-color: #D0D4D8 !important; color: #333a42 !important; }
+          .galit-premium-ribbon button[class*="bg-[#d8d4cc]"] { background: #E4E6E8 !important; color: #3f4650 !important; }
+          .galit-premium-ribbon button:hover { background: #E8EAEC !important; }
         `}</style>
       )}
       <div ref={rootRef} className="fixed inset-x-0 top-0 z-[200] w-full" dir="rtl">
@@ -950,7 +920,7 @@ export function CrmLegacyTopNav({
             />
           </div>
         )}
-        {greenBar}
+        {mainBar}
       </div>
       {filePanelPortal}
       {dropdownPortal}

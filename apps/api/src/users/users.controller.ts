@@ -70,6 +70,17 @@ export class UsersController {
     return this.usersService.update(id, body, req.user);
   }
 
+  /**
+   * POST /users/:id/test-smtp
+   * בדיקת חיבור SMTP עם הגדרות אישיות של המשתמש
+   */
+  @Post(':id/test-smtp')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  testSmtp(@Param('id') id: string, @Body() body: any) {
+    return this.usersService.testSmtpConnection(id, body);
+  }
+
   @Patch(':id/presence')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')

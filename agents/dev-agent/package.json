@@ -1,0 +1,14 @@
+{
+  "name": "galit-dev-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dev agent for Galit CRM — runs Claude Code tasks from the terminal",
+  "scripts": {
+    "agent": "npx tsx agent.ts",
+    "agent:dry": "npx tsx agent.ts --dry-run"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

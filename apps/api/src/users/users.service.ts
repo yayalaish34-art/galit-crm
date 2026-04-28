@@ -2,6 +2,30 @@ import { BadRequestException, ForbiddenException, Injectable, UnauthorizedExcept
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, User, UserRole, UserStatus, WorkMode, WorkStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import * as crypto from 'crypto';
+import * as nodemailer from 'nodemailer';
+
+// ── AES-256-CBC encryption helpers for SMTP password ──
+const SMTP_ENC_ALGO = 'aes-256-cbc';
+function getEncKey(): Buffer {
+  const secret = process.env.JWT_SECRET || 'change-me-now';
+  return crypto.createHash('sha256').update(secret).digest();
+}
+function encryptSmtpPassword(plain: string): string {
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(SMTP_ENC_ALGO, getEncKey(), iv);
+  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
+  return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+export function decryptSmtpPassword(encoded: string): string {
+  const [ivHex, encHex] = encoded.split(':');
+  if (!ivHex || !encHex) return '';
+  const decipher = crypto.createDecipheriv(SMTP_ENC_ALGO, getEncKey(), Buffer.from(ivHex, 'hex'));
+  return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString('utf8');
+}
+
+/** Fields that must never be sent to the frontend */
+const OMIT_SENSITIVE = { password: true as const, smtpPassword: true as const };
 
 @Injectable()
 export class UsersService {
@@ -33,14 +57,14 @@ export class UsersService {
   async findAll(_actor?: { id?: string; role?: string }) {
     try {
       return await this.prisma.user.findMany({
-        omit: { password: true },
+        omit: OMIT_SENSITIVE,
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
         const rows = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM "User"`);
         return rows.map((r) => {
           const u = this.normalizeUserRow(r);
-          const { password: _omit, ...safe } = u;
+          const { password: _omit, smtpPassword: _omit2, ...safe } = u;
           return safe;
         });
       }
@@ -52,7 +76,7 @@ export class UsersService {
     try {
       return await this.prisma.user.findUnique({
         where: { id },
-        omit: { password: true },
+        omit: OMIT_SENSITIVE,
       });
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
@@ -63,7 +87,7 @@ export class UsersService {
         const row = rows[0];
         if (!row) return null;
         const u = this.normalizeUserRow(row);
-        const { password: _omit, ...safe } = u;
+        const { password: _omit, smtpPassword: _omit2, ...safe } = u;
         return safe;
       }
       throw e;
@@ -128,7 +152,7 @@ export class UsersService {
     try {
       return await this.prisma.user.create({
         data: payload,
-        omit: { password: true },
+        omit: OMIT_SENSITIVE,
       });
     } catch (e: any) {
       // eslint-disable-next-line no-console
@@ -157,6 +181,15 @@ export class UsersService {
         normalized.password = await bcrypt.hash(String(p), 10);
       }
     }
+    // ── SMTP password: encrypt if provided, skip if empty ──
+    if ('smtpPassword' in normalized) {
+      const sp = normalized.smtpPassword;
+      if (sp === undefined || sp === null || String(sp).trim() === '') {
+        delete normalized.smtpPassword; // don't overwrite existing
+      } else {
+        normalized.smtpPassword = encryptSmtpPassword(String(sp));
+      }
+    }
     if ('serviceDepartments' in normalized) {
       normalized.serviceDepartments = Array.isArray(normalized.serviceDepartments)
         ? normalized.serviceDepartments.map((x: any) => String(x)).filter(Boolean)
@@ -164,7 +197,7 @@ export class UsersService {
       // keep legacy field in sync for display-only
       if (!('department' in normalized)) normalized.department = normalized.serviceDepartments[0] ?? null;
     }
-    return this.prisma.user.update({ where: { id }, data: normalized });
+    return this.prisma.user.update({ where: { id }, data: normalized, omit: OMIT_SENSITIVE });
   }
 
   async remove(id: string, actor?: { id?: string; role?: string }) {
@@ -384,6 +417,64 @@ export class UsersService {
           : null
       ),
     }));
+  }
+
+  /**
+   * בדיקת חיבור SMTP עם הגדרות אישיות של משתמש.
+   * מקבל או את ה-ID של המשתמש (קורא מה-DB ומפענח סיסמה),
+   * או הגדרות ישירות מה-body (לבדיקה לפני שמירה).
+   */
+  async testSmtpConnection(
+    userId: string,
+    override?: { smtpHost?: string; smtpPort?: number; smtpUser?: string; smtpPassword?: string; smtpSecure?: boolean },
+  ): Promise<{ ok: true; message: string }> {
+    let host: string | undefined;
+    let port: number;
+    let user: string | undefined;
+    let pass: string | undefined;
+    let secure: boolean;
+
+    if (override?.smtpHost && override?.smtpUser && override?.smtpPassword) {
+      // Use values from body (pre-save test)
+      host = override.smtpHost;
+      port = override.smtpPort || 587;
+      user = override.smtpUser;
+      pass = override.smtpPassword;
+      secure = !!override.smtpSecure;
+    } else {
+      // Read from DB
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { smtpHost: true, smtpPort: true, smtpUser: true, smtpPassword: true, smtpSecure: true },
+      });
+      if (!dbUser?.smtpHost || !dbUser?.smtpUser || !dbUser?.smtpPassword) {
+        throw new BadRequestException('הגדרות SMTP לא מוגדרות למשתמש זה');
+      }
+      host = dbUser.smtpHost;
+      port = dbUser.smtpPort || 587;
+      user = dbUser.smtpUser;
+      pass = decryptSmtpPassword(dbUser.smtpPassword);
+      secure = !!dbUser.smtpSecure;
+    }
+
+    if (!host || !user || !pass) {
+      throw new BadRequestException('חסרים שדות SMTP — יש למלא host, user וסיסמה');
+    }
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass },
+      connectionTimeout: 10000,
+    });
+
+    try {
+      await transporter.verify();
+      return { ok: true, message: 'חיבור SMTP תקין' };
+    } catch (e: any) {
+      throw new BadRequestException(`חיבור SMTP נכשל: ${e.message || e}`);
+    }
   }
 }
 

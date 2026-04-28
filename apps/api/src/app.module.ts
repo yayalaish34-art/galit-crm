@@ -20,9 +20,10 @@ import { CustomerClassificationsModule } from './customer-classifications/custom
 import { FollowupImportModule } from './followup-import/followup-import.module';
 import { AuthModule } from './auth/auth.module';
 import { PaymentTermsModule } from './payment-terms/payment-terms.module';
+import { DevAgentModule } from './dev-agent/dev-agent.module';
 
 @Module({
-  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule],
+  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule],
   controllers: [AppController],
   providers: [AppService],
 })

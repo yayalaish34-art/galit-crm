@@ -23,6 +23,7 @@ export class TasksService {
         owner: { select: { id: true, name: true, email: true } },
         project: { select: { id: true, name: true, projectNumber: true } },
         customer: { select: { id: true, name: true } },
+        lead: { select: { id: true, fullName: true, phone: true, email: true, company: true } },
       },
       orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
     });

@@ -10,6 +10,7 @@ type CustomerRow = {
   phone: string | null;
   email: string | null;
   city: string | null;
+  address: string | null;
   contactName: string | null;
 };
 

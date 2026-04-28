@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { QuotesService } from './quotes.service';
+import { QuoteMailService } from './quote-mail.service';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { Response } from 'express';
@@ -10,7 +11,10 @@ import * as fs from 'fs';
 @UseGuards(RolesGuard)
 @Roles('ADMIN', 'MANAGER', 'SALES')
 export class QuotesController {
-  constructor(private readonly quotesService: QuotesService) {}
+  constructor(
+    private readonly quotesService: QuotesService,
+    private readonly quoteMailService: QuoteMailService,
+  ) {}
 
   @Get()
   findAll(
@@ -57,6 +61,33 @@ export class QuotesController {
       return;
     }
     res.sendFile(absolute);
+  }
+
+  @Get(':id/merged-doc')
+  async getMergedDoc(@Param('id') id: string, @Res() res: Response) {
+    const quote: any = await this.quotesService.findOne(id);
+    if (!quote || !quote.lastMergedDocPath) {
+      res.status(404).send('Merged document not found');
+      return;
+    }
+    const absolute = path.join(process.cwd(), quote.lastMergedDocPath);
+    if (!fs.existsSync(absolute)) {
+      res.status(404).send('Merged document file missing on disk');
+      return;
+    }
+    const filename = path.basename(quote.lastMergedDocPath);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.sendFile(absolute);
+  }
+
+  /**
+   * POST /quotes/:id/send-email
+   * שליחת המסמך האחרון של ההצעה כקובץ מצורף במייל
+   */
+  @Post(':id/send-email')
+  sendEmail(@Param('id') id: string, @Body() body: { email: string }) {
+    return this.quoteMailService.sendQuoteEmail(id, body.email);
   }
 
   @Patch(':id')

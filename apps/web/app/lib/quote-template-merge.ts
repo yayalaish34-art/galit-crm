@@ -8,6 +8,9 @@ export type QuoteTemplateLineItem = {
   quantity: number;
   unitPrice: number;
   lineTotal?: number;
+  code?: string;
+  sku?: string;
+  discountPct?: number;
 };
 
 export type MergeQuoteTemplateInput = {
@@ -27,6 +30,9 @@ export type MergeQuoteTemplateInput = {
   vatPercent: number;
   discountType: string;
   discountValue: number;
+  paymentTerms?: string;
+  validityDate?: string;
+  approverName?: string;
 };
 
 function stripHtml(html: string): string {
@@ -54,14 +60,33 @@ export function buildItemsTableHtml(items: QuoteTemplateLineItem[], formatMoney:
   if (!items.length) {
     return '<p dir="rtl">—</p>';
   }
+  const hasSkuOrCode = items.some((li) => li.code || li.sku);
+  const hasDiscount = items.some((li) => (li.discountPct ?? 0) > 0);
   const rows = items
-    .map((li) => {
+    .map((li, idx) => {
+      const disc = li.discountPct ?? 0;
       const line =
-        li.lineTotal !== undefined ? li.lineTotal : Math.round(li.quantity * li.unitPrice * 100) / 100;
-      return `<tr><td>${escapeHtml(li.name)}</td><td>${li.quantity}</td><td>${formatMoney(li.unitPrice)}</td><td>${formatMoney(line)}</td></tr>`;
+        li.lineTotal !== undefined ? li.lineTotal : Math.round(li.quantity * li.unitPrice * (1 - disc / 100) * 100) / 100;
+      const cs = 'border:1px solid #bbb;padding:4px 8px;';
+      return `<tr>
+        <td style="${cs}text-align:center">${idx + 1}</td>
+        ${hasSkuOrCode ? `<td style="${cs}">${escapeHtml(li.code || li.sku || '')}</td>` : ''}
+        <td style="${cs}">${escapeHtml(li.name)}</td>
+        <td style="${cs}text-align:center">${li.quantity}</td>
+        <td style="${cs}text-align:left">${formatMoney(li.unitPrice)}</td>
+        ${hasDiscount ? `<td style="${cs}text-align:center">${disc > 0 ? disc + '%' : '—'}</td>` : ''}
+        <td style="${cs}text-align:left;font-weight:bold">${formatMoney(line)}</td>
+      </tr>`;
     })
     .join('');
-  return `<table dir="rtl" class="quote-items-table" border="1" cellpadding="8" style="border-collapse:collapse;width:100%;max-width:720px;"><thead><tr><th>תיאור</th><th>כמות</th><th>מחיר יחידה</th><th>סה״כ שורה</th></tr></thead><tbody>${rows}</tbody></table>`;
+  const ths = `<th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">שורה</th>
+    ${hasSkuOrCode ? '<th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">מק&quot;ט</th>' : ''}
+    <th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">תיאור המוצר</th>
+    <th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">כמות</th>
+    <th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">מחיר ליחידה</th>
+    ${hasDiscount ? '<th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">% הנחה לשורה</th>' : ''}
+    <th style="border:1px solid #bbb;padding:4px 8px;background:#f5f5f5;">סה&quot;כ ₪</th>`;
+  return `<table dir="rtl" class="quote-items-table" border="1" cellpadding="8" style="border-collapse:collapse;width:100%;max-width:720px;"><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function escapeHtml(s: string): string {
@@ -91,6 +116,15 @@ export function buildQuoteTemplateContext(
     discountValue: input.discountValue,
   });
 
+  const discType = (input.discountType || 'NONE').toUpperCase();
+  const discVal = Number(input.discountValue) || 0;
+  const discountPctStr = discType === 'PERCENT' ? String(discVal) : '0';
+  const subtotalAfterDiscount = discType === 'PERCENT'
+    ? Math.round(subtotal * (1 - discVal / 100) * 100) / 100
+    : discType === 'CURRENCY'
+      ? Math.round((subtotal - discVal) * 100) / 100
+      : subtotal;
+
   return {
     customerName: c?.name ?? '',
     contactName: c?.contactName ?? '',
@@ -107,6 +141,11 @@ export function buildQuoteTemplateContext(
     total: formatMoney(total),
     notes: input.notes || '',
     terms: '',
+    discountPercent: discountPctStr,
+    subtotalAfterDiscount: formatMoney(subtotalAfterDiscount),
+    paymentTerms: input.paymentTerms || '',
+    validityDate: input.validityDate || '',
+    approverName: input.approverName || c?.contactName || '',
   };
 }
 
@@ -179,10 +218,15 @@ export const QUOTE_TEMPLATE_VARIABLES_HELP = `
 {{quoteDate}} — תאריך הצעה
 {{quoteNumber}} — מספר הצעה
 {{serviceName}} — שם שירות
-{{itemsTable}} — טבלת פריטים (HTML)
+{{itemsTable}} — טבלת פריטים (HTML) כולל מק״ט, כמות, מחיר, הנחה וסה״כ
 {{subtotal}} — סכום לפני מע״מ (מחושב מפריטים)
 {{vat}} — סכום מע״מ
 {{total}} — סה״כ כולל מע״מ (אחרי הנחה)
 {{notes}} — הערות מהטופס
 {{terms}} — בלוק תנאים (מתבנית או מהטופס)
+{{discountPercent}} — אחוז הנחה כללי
+{{subtotalAfterDiscount}} — סה״כ לאחר הנחה
+{{paymentTerms}} — תנאי תשלום
+{{validityDate}} — תוקף ההצעה
+{{approverName}} — שם מלא של מאשר ההצעה (איש קשר)
 `.trim();

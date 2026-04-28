@@ -2,7 +2,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Search as SearchIcon, X } from 'lucide-react';
 
-export type QuoteLookupRow = { id: string; label: string; subLabel?: string };
+export type QuoteLookupRow = {
+  id: string;
+  label: string;
+  subLabel?: string;
+  /** ממופה מ־GET /quote-templates — לשימוש במסך מיזוג Word בלבד */
+  docxTemplatePath?: string | null;
+};
 
 type Props = {
   open: boolean;
