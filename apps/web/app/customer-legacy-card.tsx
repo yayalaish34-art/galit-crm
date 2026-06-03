@@ -1325,8 +1325,8 @@ export function CustomerLegacyCard({
         setEmailWarn('כתובת דוא״ל אינה תקינה');
         return;
       }
-      /* Fix 6: at least one contact must exist (or will be auto-created for private) */
-      if (allContacts.length === 0) {
+      /* For new customers: at least one contact required */
+      if (isNewMode && allContacts.length === 0) {
         setLegacyMsg('חובה להוסיף לפחות איש קשר אחד לפני שמירה.');
         setActiveLowerTab('contacts');
         return;
