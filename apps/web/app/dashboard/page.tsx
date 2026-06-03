@@ -16604,12 +16604,8 @@ export default function GalitCRMPrototype() {
                     }
                     void loadCustomerFull(c.id).catch(() => {});
                     // Auto-open task creation for the new customer
-                    // Clear URL first so syncFromUrl effect doesn't revert navigation
-                    if (typeof window !== 'undefined') {
-                      window.history.pushState({}, '', window.location.pathname);
-                    }
                     setPendingTaskCustomer({ id: c.id, name: c.name });
-                    setCurrent('tasks');
+                    navigateSafely('tasks');
                   }}
                 />
               </div>
