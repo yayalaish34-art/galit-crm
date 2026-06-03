@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, apiUrl } from './lib/api-base';
 import { parseApiErrorResponse } from './lib/api-error';
+import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -988,6 +989,7 @@ export function CustomerLegacyCard({
       notes: (c.notes as string) || '',
       internalNotes: (c.internalNotes as string) || '',
       leadSource: (x.leadSource as string) || '',
+      services: Array.isArray(c.services) ? c.services : [],
     };
   }, []);
 
@@ -1353,6 +1355,7 @@ export function CustomerLegacyCard({
         zipLegacy: (customerForm.zipLegacy || '').trim() || null,
         cityCodeLegacy: (customerForm.cityCodeLegacy || '').trim() || null,
         notes: (customerForm.notes || '').trim() || null,
+        services: customerForm.services ?? [],
         companyRegNumber: (customerForm.companyRegNumber || '').trim() || null,
         internalNotes: (customerForm.internalNotes || '').trim() || null,
         birthdayLegacy: moreDetailsForm.birthDate ? isoNoon(moreDetailsForm.birthDate) : null,
@@ -2353,6 +2356,16 @@ export function CustomerLegacyCard({
                 <div className={cn(viewClass, 'min-h-[96px] whitespace-pre-wrap !h-auto !rounded-[16px]')}>{customerForm.notes || '—'}</div>
               )}
             </Field>
+
+            {/* שירותים */}
+            <div>
+              <label className={labelClass + ' mb-2'}>שירותים</label>
+              <ServiceCategorySelector
+                selected={customerForm.services ?? []}
+                onChange={(ids) => setCustomerForm((p) => ({ ...p, services: ids }))}
+                disabled={!isEdit}
+              />
+            </div>
           </div>
         </div>
 
