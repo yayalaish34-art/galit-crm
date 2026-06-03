@@ -1570,7 +1570,6 @@ export function CustomerLegacyCard({
         await onFullReload();
         setLegacyMsg('הלקוח נשמר בהצלחה');
       }
-      setMode('view');
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
       setLegacyMsg(detail ? `לא ניתן היה לשמור: ${detail}` : 'לא ניתן היה לשמור. נסה שוב.');
@@ -2149,18 +2148,20 @@ export function CustomerLegacyCard({
             >
               {mode === 'edit' ? 'ביטול' : 'עריכה'}
             </button>
-            <button
-              type="button"
-              disabled={savingCustomer}
-              onClick={onSaveCustomerMain}
-              className="h-[38px] rounded-[16px] px-6 text-[13px] font-bold text-[#2E4A2D] disabled:opacity-50 transition-all hover:brightness-105"
-              style={{
-                background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)',
-                boxShadow: '0 4px 14px rgba(143,191,143,0.28)',
-              }}
-            >
-              {savingCustomer ? 'שומר...' : 'שמור'}
-            </button>
+            {isEdit && (
+              <button
+                type="button"
+                disabled={savingCustomer}
+                onClick={onSaveCustomerMain}
+                className="h-[38px] rounded-[16px] px-6 text-[13px] font-bold text-[#2E4A2D] disabled:opacity-50 transition-all hover:brightness-105"
+                style={{
+                  background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)',
+                  boxShadow: '0 4px 14px rgba(143,191,143,0.28)',
+                }}
+              >
+                {savingCustomer ? 'שומר...' : 'שמור'}
+              </button>
+            )}
           </div>
         </div>
       </div>
