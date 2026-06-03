@@ -40,10 +40,15 @@ function parseDocumentType(v: unknown): DocumentType {
 export class CustomersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  private static readonly PRESET_CLASSIFICATION_CODES = new Set(['COMPANY', 'PUBLIC', 'PRIVATE']);
+
   private async assertClassificationCode(code: string | undefined) {
     if (code == null || code === '') {
       throw new BadRequestException('סיווג לקוח הוא שדה חובה');
     }
+    // Preset codes are always valid — no DB round-trip needed
+    if (CustomersService.PRESET_CLASSIFICATION_CODES.has(code)) return;
+
     try {
       const row = await this.prisma.customerClassification.findUnique({ where: { code } });
       if (!row) throw new BadRequestException('סיווג לא תקין');
