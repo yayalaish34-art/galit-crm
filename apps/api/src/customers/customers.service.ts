@@ -44,11 +44,20 @@ export class CustomersService {
     if (code == null || code === '') {
       throw new BadRequestException('סיווג לקוח הוא שדה חובה');
     }
-    const row = await this.prisma.customerClassification.findUnique({
-      where: { code },
-    });
-    if (!row) {
-      throw new BadRequestException('סיווג לא תקין');
+    try {
+      const row = await this.prisma.customerClassification.findUnique({ where: { code } });
+      if (!row) throw new BadRequestException('סיווג לא תקין');
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
+        const rows = await this.prisma.$queryRawUnsafe<{ code: string }[]>(
+          `SELECT "code" FROM "CustomerClassification" WHERE "code" = $1 LIMIT 1`,
+          code,
+        );
+        if (rows.length === 0) throw new BadRequestException('סיווג לא תקין');
+      } else {
+        throw e;
+      }
     }
   }
 
