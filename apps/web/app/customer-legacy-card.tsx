@@ -271,7 +271,7 @@ const ISRAEL_CITIES: string[] = [
  */
 const FIELD_BOX = 'space-y-1.5';
 const FIELD_BOX_CONNECTED = 'space-y-1.5';
-const FIELD_LABEL = 'block text-[12px] font-semibold text-[#24364B]';
+const FIELD_LABEL = 'block text-[12px] font-semibold text-black';
 
 function CardField({ label, children }: { label: string; children: React.ReactNode; connected?: boolean }) {
   return (
@@ -1259,16 +1259,16 @@ export function CustomerLegacyCard({
   }, [classifications]);
 
   const sectionShell = 'rounded-3xl border border-white/65 overflow-hidden';
-  const sectionHeader = 'px-6 py-3 text-base font-bold text-[#23364B]';
+  const sectionHeader = 'px-6 py-3 text-base font-bold text-black';
   const briefBoxClass = 'space-y-1.5';
   const briefBoxConnected = 'space-y-1.5';
-  const labelClass = 'block text-[12px] font-semibold text-[#24364B]';
+  const labelClass = 'block text-[12px] font-semibold text-black';
   const inputClass =
-    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] placeholder-[#8A9BB0] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
+    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-white px-3 py-2 text-sm text-right text-black placeholder-[#999] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
   const inputConnected =
-    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] placeholder-[#8A9BB0] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
+    'h-[44px] w-full rounded-[14px] border border-[#D9E4EF] bg-white px-3 py-2 text-sm text-right text-black placeholder-[#999] outline-none transition-all focus:border-[#8FBF8F] focus:ring-[3px] focus:ring-[rgba(143,191,143,0.18)]';
   const viewClass =
-    'h-[44px] rounded-[14px] border border-[#D9E4EF] bg-[#F3F7FB] px-3 py-2 text-sm text-right text-[#24364B] flex items-center';
+    'h-[44px] rounded-[14px] border border-[#D9E4EF] bg-white px-3 py-2 text-sm text-right text-black flex items-center';
 
   const isEdit = mode === 'edit';
 
@@ -1739,8 +1739,8 @@ export function CustomerLegacyCard({
      ══════════════════════════════════════════════════ */
   if (isNewMode) {
     const mInput =
-      'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-[#F7F9FC] px-5 text-[15px] text-right text-[#24364B] placeholder-[#A0AEC0] outline-none transition-all focus:border-emerald-400 focus:ring-[3px] focus:ring-emerald-100';
-    const mLabel = 'block text-[13px] font-semibold text-[#5A6A7E] mb-1.5';
+      'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-emerald-400 focus:ring-[3px] focus:ring-emerald-100';
+    const mLabel = 'block text-[13px] font-semibold text-black mb-1.5';
     const locationIcon = (
       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
@@ -1968,7 +1968,7 @@ export function CustomerLegacyCard({
             {/* ── אנשי קשר ── */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-[14px] font-bold text-[#24364B]">אנשי קשר</span>
+                <span className="text-[14px] font-bold text-black">אנשי קשר</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -2006,7 +2006,7 @@ export function CustomerLegacyCard({
                   style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}
                 >
                   <div className="flex items-center justify-between mb-3">
-                    <span className="text-[13px] font-semibold text-[#24364B]">
+                    <span className="text-[13px] font-semibold text-black">
                       איש קשר {idx + 1}
                       {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-emerald-600">(ראשי)</span>}
                     </span>
@@ -2021,7 +2021,7 @@ export function CustomerLegacyCard({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">שם איש קשר</label>
+                      <label className="block text-[12px] font-semibold text-black mb-1">שם איש קשר</label>
                       <input
                         className={cn(mInput, '!h-[42px] text-[14px]')}
                         value={pc.fullName}
@@ -2033,7 +2033,7 @@ export function CustomerLegacyCard({
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">טלפון</label>
+                      <label className="block text-[12px] font-semibold text-black mb-1">טלפון</label>
                       <input
                         className={cn(mInput, '!h-[42px] text-[14px]')}
                         value={pc.phone || ''}
@@ -2045,7 +2045,7 @@ export function CustomerLegacyCard({
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">אימייל</label>
+                      <label className="block text-[12px] font-semibold text-black mb-1">אימייל</label>
                       <input
                         className={cn(mInput, '!h-[42px] text-[14px]')}
                         type="email"
@@ -2060,7 +2060,7 @@ export function CustomerLegacyCard({
                       />
                     </div>
                     <div>
-                      <label className="block text-[12px] font-semibold text-[#5A6A7E] mb-1">תפקיד</label>
+                      <label className="block text-[12px] font-semibold text-black mb-1">תפקיד</label>
                       <input
                         className={cn(mInput, '!h-[42px] text-[14px]')}
                         value={pc.roleTitle || ''}
@@ -2104,7 +2104,7 @@ export function CustomerLegacyCard({
               <button
                 type="button"
                 onClick={onBack}
-                className="h-[50px] rounded-2xl border border-[#D9E4EF] bg-white px-7 text-[15px] font-medium text-[#50657D] hover:bg-[#F3F7FB] transition-all shrink-0"
+                className="h-[50px] rounded-2xl border border-[#D9E4EF] bg-white px-7 text-[15px] font-medium text-black hover:bg-white transition-all shrink-0"
               >
                 סגור
               </button>
@@ -2144,7 +2144,7 @@ export function CustomerLegacyCard({
             <button
               type="button"
               onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
-              className="h-[38px] rounded-[14px] border border-[#DCE7F2] bg-white/70 px-4 text-[13px] font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+              className="h-[38px] rounded-[14px] border border-[#DCE7F2] bg-white/70 px-4 text-[13px] font-medium text-black hover:bg-[#E5ECF3] transition-all"
             >
               {mode === 'edit' ? 'ביטול' : 'עריכה'}
             </button>
@@ -2389,7 +2389,7 @@ export function CustomerLegacyCard({
                 <button
                   type="button"
                   onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
-                  className="h-[44px] rounded-[16px] border border-[#D9E4EF] bg-[#EEF4F8] px-5 text-sm font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+                  className="h-[44px] rounded-[16px] border border-[#D9E4EF] bg-[#EEF4F8] px-5 text-sm font-medium text-black hover:bg-[#E5ECF3] transition-all"
                 >
                   {mode === 'edit' ? 'ביטול' : 'עריכה'}
                 </button>
@@ -2409,7 +2409,7 @@ export function CustomerLegacyCard({
               className={cn(
                 'h-[42px] rounded-[16px] px-[18px] text-[13px] font-medium transition-all',
                 activeLowerTab === t.key
-                  ? 'bg-white text-[#2C3F55] border border-[#DCE7F2]'
+                  ? 'bg-white text-black border border-[#DCE7F2]'
                   : 'bg-[#EDF3F8] text-[#5E7186] border border-transparent hover:bg-[#E5ECF3]',
               )}
               style={activeLowerTab === t.key ? { boxShadow: '0 2px 8px rgba(135,160,190,0.15)' } : undefined}
@@ -2425,7 +2425,7 @@ export function CustomerLegacyCard({
           <div className="space-y-2">
             {/* Header row: title + action buttons */}
             <div className="flex items-center justify-between gap-3">
-              <div className="text-lg font-bold text-[#23364B]">
+              <div className="text-lg font-bold text-black">
                 אנשי קשר ({allContacts.length})
               </div>
               <div className="flex items-center gap-2">
@@ -2470,7 +2470,7 @@ export function CustomerLegacyCard({
                     👤
                   </div>
                   <div>
-                    <div className="text-sm font-bold text-[#23364B]">
+                    <div className="text-sm font-bold text-black">
                       {contactEdit.id ? 'עריכת איש קשר' : 'איש קשר חדש'}
                     </div>
                     <div className="text-xs text-[#7A8CA3]">איש קשר חיישן</div>
@@ -2478,7 +2478,7 @@ export function CustomerLegacyCard({
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                   <div className="space-y-1.5">
-                    <label className="block text-[12px] font-semibold text-[#24364B]">Full Name</label>
+                    <label className="block text-[12px] font-semibold text-black">Full Name</label>
                     <input
                       className={inputClass}
                       placeholder="שם מלא"
@@ -2487,7 +2487,7 @@ export function CustomerLegacyCard({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="block text-[12px] font-semibold text-[#24364B]">Role</label>
+                    <label className="block text-[12px] font-semibold text-black">Role</label>
                     <input
                       className={inputClass}
                       placeholder="תפקיד"
@@ -2496,7 +2496,7 @@ export function CustomerLegacyCard({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="block text-[12px] font-semibold text-[#24364B]">Phone</label>
+                    <label className="block text-[12px] font-semibold text-black">Phone</label>
                     <input
                       className={inputClass}
                       placeholder="טלפון"
@@ -2505,7 +2505,7 @@ export function CustomerLegacyCard({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="block text-[12px] font-semibold text-[#24364B]">Mobile</label>
+                    <label className="block text-[12px] font-semibold text-black">Mobile</label>
                     <input
                       className={inputClass}
                       placeholder="סלולארי"
@@ -2514,7 +2514,7 @@ export function CustomerLegacyCard({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="block text-[12px] font-semibold text-[#24364B]">Email</label>
+                    <label className="block text-[12px] font-semibold text-black">Email</label>
                     <input
                       className={inputClass}
                       placeholder="Email"
@@ -2526,7 +2526,7 @@ export function CustomerLegacyCard({
                 <div className="mt-4 flex items-center gap-2 justify-end">
                   <button
                     type="button"
-                    className="h-[36px] rounded-[14px] border border-[#D9E4EF] bg-[#EEF4F8] px-4 text-xs font-medium text-[#50657D] hover:bg-[#E5ECF3] transition-all"
+                    className="h-[36px] rounded-[14px] border border-[#D9E4EF] bg-[#EEF4F8] px-4 text-xs font-medium text-black hover:bg-[#E5ECF3] transition-all"
                     onClick={() => setContactEdit(null)}
                   >
                     ביטול
@@ -2605,10 +2605,10 @@ export function CustomerLegacyCard({
                           <div className="w-8 h-8 rounded-full bg-[#EDF3F8] flex items-center justify-center text-sm">👤</div>
                         </td>
                         <td className="px-4 py-3 text-[#66768B]">{c.roleTitle || '—'}</td>
-                        <td className="px-4 py-3 font-semibold text-[#24364B]">{c.fullName || '—'}</td>
-                        <td className="px-4 py-3 text-[#24364B]">{c.phone || '—'}</td>
-                        <td className="px-4 py-3 text-[#24364B]">{c.mobile || '—'}</td>
-                        <td className="px-4 py-3 text-[#24364B]" dir="ltr">{c.email || '—'}</td>
+                        <td className="px-4 py-3 font-semibold text-black">{c.fullName || '—'}</td>
+                        <td className="px-4 py-3 text-black">{c.phone || '—'}</td>
+                        <td className="px-4 py-3 text-black">{c.mobile || '—'}</td>
+                        <td className="px-4 py-3 text-black" dir="ltr">{c.email || '—'}</td>
                       </tr>
                     ))
                   )}
@@ -3648,7 +3648,7 @@ export function CustomerLegacyCard({
 
         {activeLowerTab === 'quotes' && (
           <div className="space-y-3" dir="rtl">
-            <div className="text-lg font-bold text-[#23364B]">הצעות מחיר</div>
+            <div className="text-lg font-bold text-black">הצעות מחיר</div>
             {isNewMode || customer.id === '__new__' ? (
               <p className="text-sm text-[#5E7186]">שמירת הלקוח נדרשת לפני שיוך הצעות מחיר.</p>
             ) : customerQuotesLoading ? (
@@ -3658,7 +3658,7 @@ export function CustomerLegacyCard({
             ) : (
               <div className="overflow-x-auto rounded-lg border border-[#D9E4EF] bg-white shadow-sm">
                 <table className="w-full min-w-[44rem] border-collapse text-sm">
-                  <thead className="border-b border-[#DCE7F2] bg-[#F0F6FB] text-right text-xs font-semibold text-[#2C3F55]">
+                  <thead className="border-b border-[#DCE7F2] bg-[#F0F6FB] text-right text-xs font-semibold text-black">
                     <tr>
                       <th className="px-3 py-2.5 whitespace-nowrap">מספר הצעה</th>
                       <th className="px-3 py-2.5 whitespace-nowrap">תאריך הצעה</th>
@@ -3734,7 +3734,7 @@ export function CustomerLegacyCard({
                                 {onOpenQuote && (
                                   <button
                                     type="button"
-                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-[#2C3F55] hover:bg-[#F0F6FB]"
+                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-black hover:bg-[#F0F6FB]"
                                     onClick={() => onOpenQuote(row.id)}
                                   >
                                     צפייה
@@ -3743,7 +3743,7 @@ export function CustomerLegacyCard({
                                 {onOpenQuote && (
                                   <button
                                     type="button"
-                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-[#2C3F55] hover:bg-[#F0F6FB]"
+                                    className="rounded-md border border-[#C5D7EA] bg-white px-2 py-1 text-xs font-medium text-black hover:bg-[#F0F6FB]"
                                     onClick={() => onOpenQuote(row.id)}
                                   >
                                     עריכה
