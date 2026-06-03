@@ -953,31 +953,6 @@ export function CustomerLegacyCard({
   const pendingIdCounter = useRef(0);
   const [legacyMsg, setLegacyMsg] = useState('');
 
-  const AUTO_CONTACT_ID = '__auto_private__';
-
-  // Auto-add/update a pending contact when type is PRIVATE in new customer mode
-  useEffect(() => {
-    if (!isNewMode) return;
-    const isPrivateType = customerForm.type === 'PRIVATE';
-    const hasOtherContacts = pendingContacts.some(c => c.id !== AUTO_CONTACT_ID);
-
-    if (isPrivateType && !hasOtherContacts) {
-      const autoContact: CustomerLegacyContact = {
-        id: AUTO_CONTACT_ID,
-        fullName: (customerForm.name || '').trim(),
-        phone: (customerForm.phone || '').trim() || undefined,
-        mobile: (customerForm.phone2 || '').trim() || undefined,
-        email: (customerForm.email || '').trim() || undefined,
-        isPrimary: true,
-        isActive: true,
-        notes: null,
-      };
-      setPendingContacts(prev => [...prev.filter(c => c.id !== AUTO_CONTACT_ID), autoContact]);
-    } else if (!isPrivateType) {
-      setPendingContacts(prev => prev.filter(c => c.id !== AUTO_CONTACT_ID));
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, isNewMode]);
 
   const buildFormFromCustomer = useCallback((c: CustomerCardCustomer) => {
     const x = c as Record<string, unknown>;
@@ -1017,6 +992,31 @@ export function CustomerLegacyCard({
   }, []);
 
   const [customerForm, setCustomerForm] = useState(() => buildFormFromCustomer(customer));
+
+  const AUTO_CONTACT_ID = '__auto_private__';
+
+  // Auto-add/update a pending contact when type is PRIVATE in new customer mode
+  useEffect(() => {
+    if (!isNewMode) return;
+    const isPrivateType = customerForm.type === 'PRIVATE';
+    const hasOtherContacts = pendingContacts.some(c => c.id !== AUTO_CONTACT_ID);
+    if (isPrivateType && !hasOtherContacts) {
+      const autoContact: CustomerLegacyContact = {
+        id: AUTO_CONTACT_ID,
+        fullName: (customerForm.name || '').trim(),
+        phone: (customerForm.phone || '').trim() || undefined,
+        mobile: (customerForm.phone2 || '').trim() || undefined,
+        email: (customerForm.email || '').trim() || undefined,
+        isPrimary: true,
+        isActive: true,
+        notes: null,
+      };
+      setPendingContacts(prev => [...prev.filter(c => c.id !== AUTO_CONTACT_ID), autoContact]);
+    } else if (!isPrivateType && pendingContacts.some(c => c.id === AUTO_CONTACT_ID)) {
+      setPendingContacts(prev => prev.filter(c => c.id !== AUTO_CONTACT_ID));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, isNewMode]);
 
   const prevCustomerIdRef = useRef(customer?.id);
   const prevCustomerNameRef = useRef(customer?.name);
