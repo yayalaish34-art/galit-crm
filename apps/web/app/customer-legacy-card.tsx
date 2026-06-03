@@ -2159,7 +2159,7 @@ export function CustomerLegacyCard({
                 {isEdit ? (
                   <select className={inputClass} value={customerForm.classificationNumber} onChange={(e) => setCustomerForm((p) => ({ ...p, classificationNumber: e.target.value }))}>
                     <option value="">— בחר סיווג —</option>
-                    {CUSTOMER_CLASSIFICATION_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                    {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
                   </select>
                 ) : (
                   <div className={viewClass}>{customerForm.classificationNumber || '—'}</div>
