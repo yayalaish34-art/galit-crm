@@ -15,6 +15,7 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
+import { SERVICE_CATEGORIES } from '../lib/service-categories';
 import {
   Users,
   FileText,
@@ -12487,6 +12488,8 @@ function TasksPage({
   parentManualStepOverride: extManualStepOverride,
   setParentManualStepOverride: extSetManualStepOverride,
   onReloadLeads,
+  openForCustomer,
+  onOpenForCustomerDone,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
@@ -12505,9 +12508,14 @@ function TasksPage({
   parentManualStepOverride?: Record<string, number>;
   setParentManualStepOverride?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   onReloadLeads?: () => void | Promise<void>;
+  openForCustomer?: { id: string; name: string } | null;
+  onOpenForCustomerDone?: () => void;
 }) {
   /* ── state ── */
   const [open, setOpen] = useState(false);
+  const [taskStep, setTaskStep] = useState(1);
+  const [taskServiceId, setTaskServiceId] = useState('');
+  const [taskHoveredCat, setTaskHoveredCat] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [searchQ, setSearchQ] = useState('');
@@ -12650,6 +12658,18 @@ function TasksPage({
   useEffect(() => {
     setForm((p) => ({ ...p, ownerId: currentUser.id }));
   }, [currentUser.id]);
+
+  // Auto-open task modal when a new customer was just created
+  useEffect(() => {
+    if (openForCustomer) {
+      setForm((p) => ({ ...p, customerId: openForCustomer.id, title: '' }));
+      setTaskStep(1);
+      setTaskServiceId('');
+      setOpen(true);
+      onOpenForCustomerDone?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openForCustomer]);
 
   /* ── demo data (shown when no real tasks exist) ── */
   const demoTasks: Task[] = useMemo(() => {
@@ -13047,6 +13067,7 @@ function TasksPage({
         priority: form.priority,
         status: form.status,
         type: form.type,
+        productName: taskServiceId || null,
       };
       const res = await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
@@ -13057,6 +13078,8 @@ function TasksPage({
       await res.json();
       await onReloadTasks?.();
       setOpen(false);
+      setTaskStep(1);
+      setTaskServiceId('');
       setForm({ title: '', description: '', ownerId: currentUser.id, projectId: '', customerId: '', leadId: '', dueDate: '', dueTime: '', priority: 'MEDIUM', status: 'OPEN', type: 'GENERAL' });
     } catch {
       setError('יצירת משימה נכשלה. נסה שוב מאוחר יותר.');
@@ -14294,118 +14317,180 @@ function TasksPage({
         </table>
       </div>
 
-      {/* ═══ NEW TASK MODAL ═══ */}
-      <Modal open={open} onClose={() => setOpen(false)} title="משימה חדשה" maxWidth="max-w-2xl">
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <FormField label="כותרת משימה">
-              <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="כותרת משימה" />
-            </FormField>
+      {/* ═══ NEW TASK MODAL — 2 steps ═══ */}
+      <Modal
+        open={open}
+        onClose={() => { setOpen(false); setTaskStep(1); setTaskServiceId(''); setTaskHoveredCat(null); }}
+        title={taskStep === 1 ? 'בחר שירות' : 'פרטי משימה'}
+        maxWidth="max-w-2xl"
+      >
+        {/* ── STEP 1: Service selection ── */}
+        {taskStep === 1 && (
+          <div className="space-y-4" dir="rtl">
+            <p className="text-sm text-slate-500">העבר עכבר על קטגוריה לבחירת שירות ספציפי</p>
+            <div className="flex flex-wrap gap-2">
+              {SERVICE_CATEGORIES.map((cat) => (
+                <div key={cat.id} className="relative">
+                  <button
+                    type="button"
+                    onMouseEnter={() => setTaskHoveredCat(cat.id)}
+                    onMouseLeave={() => setTaskHoveredCat(null)}
+                    className={[
+                      'px-4 py-2 rounded-full text-sm font-medium border transition-all',
+                      taskServiceId && SERVICE_CATEGORIES.find(c=>c.id===cat.id)?.services.some(s=>s.id===taskServiceId)
+                        ? 'bg-black text-white border-black'
+                        : 'bg-white text-black border-gray-300 hover:border-black',
+                    ].join(' ')}
+                  >
+                    {cat.name}
+                  </button>
+                  {taskHoveredCat === cat.id && (
+                    <div
+                      className="absolute top-full mt-1 right-0 z-50 bg-white border border-gray-200 rounded-xl shadow-lg py-1 min-w-[280px]"
+                      onMouseEnter={() => setTaskHoveredCat(cat.id)}
+                      onMouseLeave={() => setTaskHoveredCat(null)}
+                      style={{ animation: 'fadeSlideDown 0.15s ease' }}
+                    >
+                      {cat.services.map((svc) => (
+                        <button
+                          key={svc.id}
+                          type="button"
+                          onClick={() => {
+                            setTaskServiceId(svc.id);
+                            setForm((p: any) => ({ ...p, title: svc.name }));
+                            setTaskHoveredCat(null);
+                            setTaskStep(2);
+                          }}
+                          className="w-full text-right px-4 py-2 text-[13px] text-black hover:bg-gray-50 transition-colors flex items-center gap-2"
+                        >
+                          <span className="w-2 h-2 rounded-full bg-gray-300 flex-shrink-0" />
+                          {svc.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="pt-2 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => setTaskStep(2)}
+                className="text-sm text-slate-400 hover:text-slate-600 underline"
+              >
+                דלג — ללא שירות ספציפי
+              </button>
+            </div>
+            <style>{`@keyframes fadeSlideDown{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}`}</style>
           </div>
-          <div className="md:col-span-2">
-            <FormField label="תיאור / הערות">
-              <Textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} placeholder="תיאור / הערות" />
-            </FormField>
-          </div>
+        )}
 
-          {/* type */}
-          <div>
-            <FormField label="סוג משימה">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value }))}>
-                <option value="SALES_FOLLOWUP">{taskTypeLabel('SALES_FOLLOWUP')}</option>
-                <option value="QUOTE_PREPARATION">{taskTypeLabel('QUOTE_PREPARATION')}</option>
-                <option value="COORDINATION">{taskTypeLabel('COORDINATION')}</option>
-                <option value="FIELD_WORK">{taskTypeLabel('FIELD_WORK')}</option>
-                <option value="REPORT_WRITING">{taskTypeLabel('REPORT_WRITING')}</option>
-                <option value="REVIEW">{taskTypeLabel('REVIEW')}</option>
-                <option value="COLLECTION">{taskTypeLabel('COLLECTION')}</option>
-                <option value="GENERAL">{taskTypeLabel('GENERAL')}</option>
-              </select>
-            </FormField>
+        {/* ── STEP 2: Task form ── */}
+        {taskStep === 2 && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {taskServiceId && (
+              <div className="md:col-span-2 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm">
+                <span className="text-slate-400">שירות:</span>
+                <span className="font-medium text-black">
+                  {SERVICE_CATEGORIES.flatMap(c=>c.services).find(s=>s.id===taskServiceId)?.name}
+                </span>
+                <button type="button" onClick={() => setTaskStep(1)} className="mr-auto text-xs text-slate-400 hover:text-black underline">שנה</button>
+              </div>
+            )}
+            <div className="md:col-span-2">
+              <FormField label="כותרת משימה">
+                <Input value={form.title} onChange={(e) => setForm((p: any) => ({ ...p, title: e.target.value }))} placeholder="כותרת משימה" />
+              </FormField>
+            </div>
+            <div className="md:col-span-2">
+              <FormField label="תיאור / הערות">
+                <Textarea value={form.description} onChange={(e) => setForm((p: any) => ({ ...p, description: e.target.value }))} placeholder="תיאור / הערות" />
+              </FormField>
+            </div>
+            <div>
+              <FormField label="סוג משימה">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm((p: any) => ({ ...p, type: e.target.value }))}>
+                  <option value="SALES_FOLLOWUP">{taskTypeLabel('SALES_FOLLOWUP')}</option>
+                  <option value="QUOTE_PREPARATION">{taskTypeLabel('QUOTE_PREPARATION')}</option>
+                  <option value="COORDINATION">{taskTypeLabel('COORDINATION')}</option>
+                  <option value="FIELD_WORK">{taskTypeLabel('FIELD_WORK')}</option>
+                  <option value="REPORT_WRITING">{taskTypeLabel('REPORT_WRITING')}</option>
+                  <option value="REVIEW">{taskTypeLabel('REVIEW')}</option>
+                  <option value="COLLECTION">{taskTypeLabel('COLLECTION')}</option>
+                  <option value="GENERAL">{taskTypeLabel('GENERAL')}</option>
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="עדיפות">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.priority} onChange={(e) => setForm((p: any) => ({ ...p, priority: e.target.value }))}>
+                  <option value="LOW">{priorityLabel('LOW')}</option>
+                  <option value="MEDIUM">{priorityLabel('MEDIUM')}</option>
+                  <option value="HIGH">{priorityLabel('HIGH')}</option>
+                  <option value="URGENT">{priorityLabel('URGENT')}</option>
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="קשור לליד">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.leadId} onChange={(e) => setForm((p: any) => ({ ...p, leadId: e.target.value }))}>
+                  <option value="">—</option>
+                  {leads.map((l) => <option key={l.id} value={l.id}>{l.fullName || l.name || l.phone}</option>)}
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="קשור ללקוח">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p: any) => ({ ...p, customerId: e.target.value }))}>
+                  <option value="">—</option>
+                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="פרויקט">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p: any) => ({ ...p, projectId: e.target.value }))}>
+                  <option value="">—</option>
+                  {projects.map((pr) => <option key={pr.id} value={pr.id}>{pr.projectNumber ? `${pr.projectNumber} · ${pr.name}` : pr.name}</option>)}
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="אחראי">
+                <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.ownerId} onChange={(e) => setForm((p: any) => ({ ...p, ownerId: e.target.value }))} disabled={currentUser.role === 'sales' || currentUser.role === 'technician'}>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </FormField>
+            </div>
+            <div>
+              <FormField label="תאריך יעד">
+                <input type="date" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueDate} onChange={(e) => setForm((p: any) => ({ ...p, dueDate: e.target.value }))} />
+              </FormField>
+            </div>
+            <div>
+              <FormField label="שעה">
+                <input type="time" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueTime} onChange={(e) => setForm((p: any) => ({ ...p, dueTime: e.target.value }))} />
+              </FormField>
+            </div>
+            {error && <div className="md:col-span-2 rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
+            <div className="md:col-span-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setTaskStep(1)}
+                className="px-4 py-2.5 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-50"
+              >
+                ← חזור
+              </button>
+              <button
+                className="flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all"
+                style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
+                onClick={createTask}
+              >
+                {saving ? 'שומר...' : 'שמור משימה'}
+              </button>
+            </div>
           </div>
-
-          {/* priority */}
-          <div>
-            <FormField label="עדיפות">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.priority} onChange={(e) => setForm((p) => ({ ...p, priority: e.target.value }))}>
-                <option value="LOW">{priorityLabel('LOW')}</option>
-                <option value="MEDIUM">{priorityLabel('MEDIUM')}</option>
-                <option value="HIGH">{priorityLabel('HIGH')}</option>
-                <option value="URGENT">{priorityLabel('URGENT')}</option>
-              </select>
-            </FormField>
-          </div>
-
-          {/* lead */}
-          <div>
-            <FormField label="קשור לליד">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.leadId} onChange={(e) => setForm((p) => ({ ...p, leadId: e.target.value }))}>
-                <option value="">—</option>
-                {leads.map((l) => (
-                  <option key={l.id} value={l.id}>{l.fullName || l.name || l.phone}</option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          {/* customer */}
-          <div>
-            <FormField label="קשור ללקוח">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
-                <option value="">—</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          {/* project */}
-          <div>
-            <FormField label="פרויקט">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
-                <option value="">—</option>
-                {projects.map((pr) => (
-                  <option key={pr.id} value={pr.id}>{pr.projectNumber ? `${pr.projectNumber} · ${pr.name}` : pr.name}</option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          {/* owner */}
-          <div>
-            <FormField label="אחראי">
-              <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.ownerId} onChange={(e) => setForm((p) => ({ ...p, ownerId: e.target.value }))} disabled={currentUser.role === 'sales' || currentUser.role === 'technician'}>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-
-          {/* date + time */}
-          <div>
-            <FormField label="תאריך יעד">
-              <input type="date" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueDate} onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))} />
-            </FormField>
-          </div>
-          <div>
-            <FormField label="שעה">
-              <input type="time" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.dueTime} onChange={(e) => setForm((p) => ({ ...p, dueTime: e.target.value }))} />
-            </FormField>
-          </div>
-
-          {error && <div className="md:col-span-2 rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
-          <div className="md:col-span-2">
-            <button
-              className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
-              style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
-              onClick={createTask}
-            >
-              {saving ? 'שומר...' : 'שמור משימה'}
-            </button>
-          </div>
-        </div>
+        )}
       </Modal>
     </div>
   );
@@ -14931,6 +15016,7 @@ export default function GalitCRMPrototype() {
   const [quoteSearchOpen, setQuoteSearchOpen] = useState(false);
   /** true when we opened the customer card in "new customer" creation mode */
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
+  const [pendingTaskCustomer, setPendingTaskCustomer] = useState<{ id: string; name: string } | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
   const [quickCreateSuccess, setQuickCreateSuccess] = useState('');
@@ -16517,6 +16603,9 @@ export default function GalitCRMPrototype() {
                       window.history.pushState({}, '', url);
                     }
                     void loadCustomerFull(c.id).catch(() => {});
+                    // Auto-open task creation for the new customer
+                    setPendingTaskCustomer({ id: c.id, name: c.name });
+                    setCurrent('tasks');
                   }}
                 />
               </div>
@@ -16741,6 +16830,8 @@ export default function GalitCRMPrototype() {
               parentManualStepOverride={parentManualStepOverride}
               setParentManualStepOverride={setParentManualStepOverride}
               onReloadLeads={reloadLeads}
+              openForCustomer={pendingTaskCustomer}
+              onOpenForCustomerDone={() => setPendingTaskCustomer(null)}
             />
           )}
           {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage />}
