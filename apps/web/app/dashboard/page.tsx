@@ -14979,6 +14979,7 @@ export default function GalitCRMPrototype() {
   /** true when we opened the customer card in "new customer" creation mode */
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
+  const [newlyCreatedTaskId, setNewlyCreatedTaskId] = useState<string | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
   const [quickCreateSuccess, setQuickCreateSuccess] = useState('');
@@ -16508,6 +16509,33 @@ export default function GalitCRMPrototype() {
                 </div>
               )}
 
+              {/* Banner: newly created task ready */}
+              {newlyCreatedTaskId && workspaceTab === 'card' && (
+                <div className="mb-3 flex items-center justify-between rounded-2xl px-5 py-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', direction: 'rtl' }}>
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-white">הלקוח נוצר בהצלחה!</div>
+                      <div className="text-xs text-white/80">משימת פנייה נוצרה — לחץ להתחיל את זרימת הטיפול</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingExpandTaskId(newlyCreatedTaskId);
+                      setNewlyCreatedTaskId(null);
+                      navigateSafely('tasks');
+                    }}
+                    className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition-all hover:scale-105"
+                    style={{ background: 'white', color: '#16a34a' }}
+                  >
+                    עבור לזרימת הטיפול ←
+                  </button>
+                </div>
+              )}
+
               {/* Customer card tab content */}
               <div style={{ display: workspaceTab === 'card' ? 'block' : 'none' }}>
                 <CustomerLegacyCard
@@ -16565,7 +16593,8 @@ export default function GalitCRMPrototype() {
                       window.history.pushState({}, '', url);
                     }
                     void loadCustomerFull(c.id).catch(() => {});
-                    // Auto-create initial task + navigate to tasks
+                    // Create task silently in background — stay on customer card
+                    setNewlyCreatedTaskId(null);
                     void (async () => {
                       try {
                         const res = await apiFetch(apiUrl('/tasks'), {
@@ -16583,10 +16612,9 @@ export default function GalitCRMPrototype() {
                         if (res.ok) {
                           const task = await res.json();
                           await reloadTasks();
-                          setPendingExpandTaskId(task.id);
+                          setNewlyCreatedTaskId(task.id);
                         }
                       } catch { /* ignore */ }
-                      navigateSafely('tasks');
                     })();
                   }}
                 />
