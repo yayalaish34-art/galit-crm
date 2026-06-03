@@ -1221,10 +1221,16 @@ export function CustomerLegacyCard({
     setExternalDataRows(buildExternalDataRows(customer, full));
   }, [customer, full]);
 
-  const sortedClassifications = useMemo(
-    () => [...classifications].sort((a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he')),
-    [classifications],
-  );
+  const sortedClassifications = useMemo(() => {
+    const source = classifications.length > 0
+      ? classifications
+      : [
+          { id: 'preset-company', code: 'COMPANY', labelHe: 'חברה / קבלן', sortOrder: 0, isPreset: true },
+          { id: 'preset-public',  code: 'PUBLIC',  labelHe: 'רשות / מוסד',  sortOrder: 1, isPreset: true },
+          { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי',    sortOrder: 2, isPreset: true },
+        ];
+    return [...source].sort((a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he'));
+  }, [classifications]);
 
   const sectionShell = 'rounded-3xl border border-white/65 overflow-hidden';
   const sectionHeader = 'px-6 py-3 text-base font-bold text-[#23364B]';
