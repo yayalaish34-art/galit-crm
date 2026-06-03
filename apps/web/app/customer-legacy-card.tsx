@@ -2175,27 +2175,16 @@ export function CustomerLegacyCard({
         <div className="flex gap-6">
           {/* ── Right side: main rows ── */}
           <div className="flex-1 space-y-4">
-            {/* ── Row 1: סוג לקוח + סיווג לקוח + מקור הגעה — same row, 3 columns ── */}
-            <div className="grid grid-cols-3 gap-4">
-              <Field label="סוג לקוח *">
+            {/* ── Row 1: סיווג לקוח + מקור הגעה — same row, 2 columns ── */}
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="סיווג לקוח *">
                 {isEdit ? (
                   <select className={inputClass} value={customerForm.type} onChange={(e) => setCustomerForm((p) => ({ ...p, type: e.target.value, classificationCode: e.target.value }))}>
-                    <option value="">— בחר סוג —</option>
-                    {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
-                  </select>
-                ) : (
-                  <div className={viewClass}>{typeLabelMap[customerForm.type] || customerForm.type || '—'}</div>
-                )}
-              </Field>
-
-              <Field label="סיווג לקוח">
-                {isEdit ? (
-                  <select className={inputClass} value={customerForm.classificationNumber} onChange={(e) => setCustomerForm((p) => ({ ...p, classificationNumber: e.target.value }))}>
                     <option value="">— בחר סיווג —</option>
                     {sortedClassifications.map((cl) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
                   </select>
                 ) : (
-                  <div className={viewClass}>{customerForm.classificationNumber || '—'}</div>
+                  <div className={viewClass}>{typeLabelMap[customerForm.type] || customerForm.type || '—'}</div>
                 )}
               </Field>
 
