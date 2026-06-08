@@ -13698,8 +13698,16 @@ function TasksPage({
                       t,
                       t.customerId ? customers.find((c) => c.id === t.customerId) : null
                     );
-                    const totalSteps = progressSteps.length;
-                    const stepsReversed = [...progressSteps].reverse();
+                    /* UI-only: hide the דוח/גבייה/משוב/נסגר stages from the visual progress bar.
+                       progressSteps / detectStep / currentStep stay untouched — origIdx preserves
+                       the real stage index so colors, "current" highlighting and the smart header
+                       card (which reads progressSteps[currentStep]) keep working exactly as before. */
+                    const hiddenStageKeysUI = ['report', 'collection', 'feedback', 'closed'];
+                    const visibleProgressSteps = progressSteps
+                      .map((step, origIdx) => ({ ...step, origIdx }))
+                      .filter((step) => !hiddenStageKeysUI.includes(step.key));
+                    const totalSteps = visibleProgressSteps.length;
+                    const stepsReversed = [...visibleProgressSteps].reverse();
                     const isPostponeOpen = postponeDropdownId === t.id;
                     /* info fields — only show if value exists */
                     const infoFields = [
@@ -13723,12 +13731,25 @@ function TasksPage({
 
                           {/* ═══ 1. PROGRESS ARROWS — פס חצים RTL ═══ */}
                           <div className="px-8 pt-6 pb-2">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="flex items-center gap-2">
-                                <span className="text-base font-bold text-slate-800">ניהול משימה</span>
-                                <span className="text-xs text-slate-400 font-medium">גלית CRM · מעקב ליד</span>
+                            <div className="flex items-center justify-between mb-3 flex-wrap gap-2" style={{ direction: 'rtl' }}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-base font-bold text-slate-800 flex-shrink-0">ניהול משימה</span>
+                                <span className="text-slate-300 flex-shrink-0">·</span>
+                                <span className="text-sm font-bold text-slate-600 truncate">{t.title || 'לא צוין'}</span>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                {t.owner && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                    <UserCircle2 className="h-3.5 w-3.5" />
+                                    {t.owner}
+                                  </span>
+                                )}
+                                {t.due && (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                                    <Calendar className="h-3.5 w-3.5" />
+                                    {t.due}
+                                  </span>
+                                )}
                                 <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${priorityColor(p)}`}>{priorityLabel(p)}</span>
                                 <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
                                 <button className="rounded-full p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors" onClick={() => setExpandedTaskId(null)}>
@@ -13737,15 +13758,18 @@ function TasksPage({
                               </div>
                             </div>
                             <div className="rounded-2xl bg-white border border-slate-200 shadow-sm px-5 py-5">
+                              <div className="flex items-center gap-2 mb-3" style={{ direction: 'rtl' }}>
+                                <BarChart3 className="h-4 w-4 text-slate-400" />
+                                <h3 className="text-sm font-extrabold text-slate-700">התקדמות</h3>
+                              </div>
                               <div className="flex" style={{ direction: 'ltr', gap: 0 }}>
                                 {stepsReversed.map((step, vi) => {
-                                  const origIdx = totalSteps - 1 - vi;
+                                  const origIdx = step.origIdx;
                                   const isActive = origIdx <= currentStep;
                                   const isCurrent = origIdx === currentStep;
                                   const isLeftmost = vi === 0;
                                   const isRightmost = vi === totalSteps - 1;
-                                  /* last step (נסגר, leftmost visually) always green when active */
-                                  const stepColor = isLeftmost && isActive ? '#22c55e' : step.color;
+                                  const stepColor = step.color;
                                   const bg = isActive ? stepColor : '#e2e8f0';
                                   const textColor = isActive ? '#fff' : '#64748b';
                                   const h = 64;
@@ -13767,6 +13791,30 @@ function TasksPage({
                                     </div>
                                   );
                                 })}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* ═══ 1.5 TASK SUMMARY CARD — תקציר משימה (presentation-only, missing values shown as "לא צוין") ═══ */}
+                          <div className="px-8 pb-2">
+                            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5" style={{ direction: 'rtl' }}>
+                              <div className="text-sm font-extrabold text-slate-700 mb-4">תקציר משימה</div>
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
+                                {[
+                                  { label: 'שם לקוח', value: t.customerName || t.leadName },
+                                  { label: 'טלפון', value: contactPhone },
+                                  { label: 'שירות / קטגוריה', value: taskTypeLabel(t.type || 'GENERAL') },
+                                  { label: 'סטטוס נוכחי', value: taskStatusLabel(s) },
+                                  { label: 'אחראי', value: t.owner },
+                                  { label: 'עדכון אחרון', value: t.createdAt ? new Date(t.createdAt).toLocaleDateString('he-IL') : null },
+                                  { label: 'תאריך יעד', value: t.due },
+                                  { label: 'הערות', value: t.description },
+                                ].map((f) => (
+                                  <div key={f.label} className="min-w-0">
+                                    <div className="text-[11px] font-semibold text-slate-400 mb-0.5">{f.label}</div>
+                                    <div className="text-sm font-bold text-slate-700 truncate">{f.value || 'לא צוין'}</div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           </div>
@@ -13836,6 +13884,7 @@ function TasksPage({
                             <div className="rounded-2xl flex items-center" style={{ background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}dd 100%)`, minHeight: 130, padding: '24px 32px', direction: 'rtl', gap: 24 }}>
                               {/* RIGHT SIDE — headline + meta underneath aligned right */}
                               <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(255,255,255,0.65)' }}>פעולות להמשך</div>
                                 <div className="font-bold text-white" style={{ fontSize: 36, lineHeight: 1.3, letterSpacing: '-0.01em', marginBottom: 10, fontFamily: 'var(--font-sans)' }}>{smartSentence}</div>
                                 <div className="flex items-center gap-3 flex-wrap" style={{ direction: 'rtl' }}>
                                   <span className="inline-flex items-center rounded-full px-4 py-1 text-xs font-bold" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
@@ -14616,9 +14665,13 @@ function TasksPage({
                             </div>
                           </div>
 
-                          {/* ═══ 5. DETAILED INFO GRID (generic) ═══ */}
+                          {/* ═══ 5. DETAILED INFO GRID (generic) — פרטי המשימה ═══ */}
                           <div className="px-8 pb-4">
                             <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5" style={{ direction: 'rtl' }}>
+                              <div className="flex items-center gap-2 mb-3">
+                                <ClipboardList className="h-4 w-4 text-slate-400" />
+                                <h3 className="text-sm font-extrabold text-slate-700">פרטי המשימה</h3>
+                              </div>
                               <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
                                 {infoFields.map((f) => {
                                   const FIcon = f.icon;
@@ -14638,29 +14691,25 @@ function TasksPage({
                             </div>
                           </div>
 
-                          {/* ═══ 6. NOTES (generic) ═══ */}
-                          {(t.description || t.leadCompany) && (
-                            <div className="px-8 pb-6">
-                              <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm" style={{ direction: 'rtl' }}>
-                                {t.description && (
-                                  <div className="mb-3">
-                                    <div className="flex items-center gap-2 mb-1.5">
-                                      <Pencil className="h-4 w-4 text-slate-400" />
-                                      <span className="text-sm font-bold text-slate-500">הערות</span>
-                                    </div>
-                                    <div className="text-sm text-slate-700 leading-relaxed">{t.description}</div>
-                                  </div>
-                                )}
-                                {t.leadCompany && (
-                                  <div className="flex items-center gap-2 text-sm">
-                                    <Building2 className="h-4 w-4 text-blue-500" />
-                                    <span className="font-bold text-blue-600">חברה:</span>
-                                    <span className="text-blue-800">{t.leadCompany}</span>
-                                  </div>
-                                )}
+                          {/* ═══ 6. NOTES (generic) — הערות (always shown; falls back to "לא צוין") ═══ */}
+                          <div className="px-8 pb-6">
+                            <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm" style={{ direction: 'rtl' }}>
+                              <div className="mb-3">
+                                <div className="flex items-center gap-2 mb-1.5">
+                                  <Pencil className="h-4 w-4 text-slate-400" />
+                                  <span className="text-sm font-bold text-slate-500">הערות</span>
+                                </div>
+                                <div className="text-sm text-slate-700 leading-relaxed">{t.description || 'לא צוין'}</div>
                               </div>
+                              {t.leadCompany && (
+                                <div className="flex items-center gap-2 text-sm">
+                                  <Building2 className="h-4 w-4 text-blue-500" />
+                                  <span className="font-bold text-blue-600">חברה:</span>
+                                  <span className="text-blue-800">{t.leadCompany}</span>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                           </>
                           )}
 
