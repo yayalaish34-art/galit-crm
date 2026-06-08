@@ -12,3 +12,4 @@ do
 *.bat
 /‏‏מסמך טקסט חדש.txt
 apps/api/scripts/repro-*.json
+.vercel

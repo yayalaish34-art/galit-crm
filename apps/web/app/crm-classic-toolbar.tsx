@@ -7,7 +7,6 @@ import {
   Plus,
   Search,
   History,
-  Inbox,
   CalendarDays,
   LayoutDashboard,
   Mail,
@@ -738,15 +737,6 @@ export function CrmLegacyTopNav({
                   <Search className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
                   <span className="line-clamp-2 max-w-[5.5rem] text-center">חפש</span>
                 </button>
-                <Sep />
-                <NavBtn
-                  label="לידים"
-                  Icon={Inbox}
-                  disabled={!canAccess(role, 'leads')}
-                  title={!canAccess(role, 'leads') ? 'אין הרשאה' : 'לידים / פניות'}
-                  active={current === 'leads' || current === 'lead-profile' || current === 'pipeline'}
-                  onClick={() => go('leads')}
-                />
                 <Sep />
                 <NavBtn
                   label="משימות"

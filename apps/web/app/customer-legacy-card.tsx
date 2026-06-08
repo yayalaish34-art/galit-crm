@@ -1476,6 +1476,17 @@ export function CustomerLegacyCard({
           } catch { /* non-critical — customer was already created */ }
         }
 
+        /* Save lead source selected in the new-customer modal */
+        if (customerForm.leadSource) {
+          try {
+            await putTab(
+              `/customers/${created.id}/referral-sources`,
+              { items: [{ date: null, sourceName: customerForm.leadSource }] },
+              'מקורות הגעה',
+            );
+          } catch { /* non-critical — customer was already created */ }
+        }
+
         setIsNewMode(false);
         if (onCustomerCreated) onCustomerCreated(created);
         onCustomerUpdated(created);
@@ -2357,15 +2368,6 @@ export function CustomerLegacyCard({
               )}
             </Field>
 
-            {/* שירותים */}
-            <div>
-              <label className={labelClass + ' mb-2'}>שירותים</label>
-              <ServiceCategorySelector
-                selected={customerForm.services ?? []}
-                onChange={(ids) => setCustomerForm((p) => ({ ...p, services: ids }))}
-                disabled={!isEdit}
-              />
-            </div>
           </div>
         </div>
 

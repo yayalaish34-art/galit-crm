@@ -9,6 +9,10 @@ import {
   mergeQuoteTemplateFull,
   type QuoteTemplateLineItem,
 } from '../../lib/quote-template-merge';
+import { SERVICE_CATEGORIES } from '../../lib/service-categories';
+
+/** Flat list of every service name we actually offer, for the "שם הפריט" autocomplete */
+const SERVICE_NAMES: string[] = SERVICE_CATEGORIES.flatMap((cat) => cat.services.map((s) => s.name));
 
 /* ── Quote line-item types & helpers ── */
 type LineItem = {
@@ -402,6 +406,7 @@ export function QuoteNewScreen({
   embedded = true,
   prefillCustomer = null,
   prefillContactId = null,
+  prefillServiceName = null,
   initialQuoteId = null,
   onExit,
   onQuoteSaved,
@@ -411,6 +416,8 @@ export function QuoteNewScreen({
   prefillCustomer?: PrefillCustomer | null;
   /** When set, pre-select this contact after customer contacts are loaded */
   prefillContactId?: string | null;
+  /** When set, automatically adds the selected service (from the פנייה stage) as the first line item */
+  prefillServiceName?: string | null;
   /** When set (or `?quoteId=` in the URL), load quote and restore תנאי תשלום from the server */
   initialQuoteId?: string | null;
   onExit?: () => void;
@@ -515,6 +522,25 @@ export function QuoteNewScreen({
     if (cType === 'PRIVATE') setPaymentTerms('מזומן');
     else if (cType === 'COMPANY') setPaymentTerms('שוטף +30');
   }, [prefillCustomer]);
+
+  /* ── Auto-add the service selected back in שלב הפנייה as the first line item ── */
+  const servicePrefillAppliedRef = useRef(false);
+  useEffect(() => {
+    if (servicePrefillAppliedRef.current) return;
+    if (!prefillServiceName) return;
+    servicePrefillAppliedRef.current = true;
+    setLineItems((prev) => {
+      if (prev.length > 0) return prev;
+      const catalogMatch = CATALOG_ITEMS.find((c) => c.description === prefillServiceName);
+      return [{
+        ...newLineItem(),
+        description: prefillServiceName,
+        code: catalogMatch?.code ?? '',
+        sku: catalogMatch?.sku ?? '',
+        price: catalogMatch?.price ?? '',
+      }];
+    });
+  }, [prefillServiceName]);
 
   /* ── Default follow date: 3 days from today (only for new quotes) ── */
   useEffect(() => {
@@ -1814,7 +1840,7 @@ export function QuoteNewScreen({
                 </div>
               )}
               <datalist id="quote-catalog-list">
-                {CATALOG_ITEMS.map((c) => <option key={c.code} value={c.description} />)}
+                {SERVICE_NAMES.map((name) => <option key={name} value={name} />)}
               </datalist>
             </section>
 
