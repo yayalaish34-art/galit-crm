@@ -13731,107 +13731,98 @@ function TasksPage({
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
                       <td colSpan={10} className="p-0">
-                        <div className="fixed inset-0 z-[100] flex flex-col bg-white">
+                        <div className="fixed inset-0 z-[100] flex flex-col" style={{ background: '#f1f5f9' }}>
 
-                          {/* ══════ STICKY HEADER AREA ══════ */}
-                          <div className="flex-shrink-0 bg-white border-b border-slate-200 shadow-sm">
-                          {/* ═══ 1. PROGRESS ARROWS — פס חצים RTL ═══ */}
-                          <div className="px-6 pt-3 pb-3">
-                            <div className="flex items-center justify-between gap-3 flex-wrap" style={{ direction: 'rtl' }}>
-                              <div className="flex items-center gap-3 min-w-0 flex-1">
-                                <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors flex-shrink-0">
-                                  <ArrowRight className="h-4 w-4" />
-                                  חזרה למשימות
-                                </button>
-                                <span className="text-slate-300 flex-shrink-0">|</span>
-                                <span className="text-sm font-bold text-slate-800 flex-shrink-0">ניהול משימה</span>
-                                <span className="text-slate-300 flex-shrink-0">·</span>
-                                <span className="text-sm font-semibold text-slate-500 truncate">{t.title || 'לא צוין'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                {t.owner && (
-                                  <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                                    <UserCircle2 className="h-3 w-3" />
-                                    {t.owner}
-                                  </span>
-                                )}
-                                {t.due && (
-                                  <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
-                                    <Calendar className="h-3 w-3" />
-                                    {t.due}
-                                  </span>
-                                )}
-                                <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
-                                <button className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors" onClick={() => setExpandedTaskId(null)}>
-                                  <X className="h-4 w-4" />
-                                </button>
-                              </div>
+                          {/* ──── TOP NAV BAR (h-11) ──── */}
+                          <div className="flex-shrink-0 bg-white border-b border-slate-200 flex items-center px-4 gap-2" style={{ height: 44, direction: 'rtl' }}>
+                            <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors flex-shrink-0">
+                              <ArrowRight className="h-3.5 w-3.5" />
+                              חזרה
+                            </button>
+                            <span className="text-slate-200 select-none flex-shrink-0">|</span>
+                            <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider flex-shrink-0">ניהול משימה</span>
+                            <span className="text-slate-200 select-none flex-shrink-0">·</span>
+                            <span className="text-sm font-bold text-slate-800 truncate flex-1 min-w-0">{t.title || 'לא צוין'}</span>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {t.owner && <span className="hidden md:block text-xs text-slate-500">{t.owner}</span>}
+                              {t.due && <span className="hidden md:block text-xs text-slate-400">{t.due}</span>}
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
+                              <button className="rounded-full p-1 text-slate-400 hover:bg-slate-100" onClick={() => setExpandedTaskId(null)}>
+                                <X className="h-3.5 w-3.5" />
+                              </button>
                             </div>
-                            <div className="flex" style={{ direction: 'ltr', gap: 0 }}>
+                          </div>
+
+                          {/* ──── PROGRESS STRIP (h-9) ──── */}
+                          <div className="flex-shrink-0 bg-white border-b border-slate-200" style={{ height: 36 }}>
+                            <div className="flex h-full" style={{ direction: 'ltr', gap: 0 }}>
                               {stepsReversed.map((step, vi) => {
                                 const origIdx = step.origIdx;
                                 const isActive = origIdx <= currentStep;
                                 const isCurrent = origIdx === currentStep;
                                 const isLeftmost = vi === 0;
                                 const isRightmost = vi === totalSteps - 1;
-                                const stepColor = step.color;
-                                const bg = isActive ? stepColor : '#e2e8f0';
+                                const bg = isActive ? step.color : '#e2e8f0';
                                 const textColor = isActive ? '#fff' : '#94a3b8';
-                                const h = 48;
-                                const tip = 22;
-                                let points: string;
-                                if (isRightmost) { points = `200,0 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
-                                else if (isLeftmost) { points = `200,0 ${200-tip},${h/2} 200,${h} 0,${h} 0,0`; }
-                                else { points = `200,0 ${200-tip},${h/2} 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
+                                const h = 36; const tip = 15;
+                                let pts: string;
+                                if (isRightmost) { pts = `200,0 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
+                                else if (isLeftmost) { pts = `200,0 ${200-tip},${h/2} 200,${h} 0,${h} 0,0`; }
+                                else { pts = `200,0 ${200-tip},${h/2} 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
                                 return (
                                   <div key={step.key} className="flex-1 min-w-0" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }))}>
-                                    <svg viewBox={`0 0 200 ${h}`} preserveAspectRatio="none" className="w-full" style={{ height: h, display: 'block' }}>
-                                      <polygon points={points} fill={bg} style={{ transition: 'fill 0.2s ease' }} />
+                                    <svg viewBox={`0 0 200 ${h}`} preserveAspectRatio="none" className="w-full h-full" style={{ display: 'block' }}>
+                                      <polygon points={pts} fill={bg} style={{ transition: 'fill 0.2s' }} />
                                     </svg>
-                                    <div className="absolute inset-0 flex items-center justify-center gap-1" style={{ pointerEvents: 'none' }}>
-                                      {isCurrent && isActive && <CheckCircle2 className="h-3.5 w-3.5 flex-shrink-0" style={{ color: textColor }} />}
-                                      <span style={{ color: textColor, fontWeight: isCurrent ? 700 : 500, fontSize: 13, letterSpacing: '0.01em', fontFamily: 'var(--font-sans)' }}>{step.label}</span>
+                                    <div className="absolute inset-0 flex items-center justify-center gap-0.5" style={{ pointerEvents: 'none' }}>
+                                      {isCurrent && isActive && <CheckCircle2 className="h-3 w-3 flex-shrink-0" style={{ color: textColor }} />}
+                                      <span style={{ color: textColor, fontWeight: isCurrent ? 700 : 500, fontSize: 11, fontFamily: 'var(--font-sans)' }}>{step.label}</span>
                                     </div>
                                   </div>
                                 );
                               })}
                             </div>
                           </div>
-                          </div>{/* ═══ end sticky header ═══ */}
 
-                          {/* ══════ SCROLLABLE BODY ══════ */}
-                          <div className="flex-1 overflow-y-auto bg-slate-50">
+                          {/* ──── MAIN PANEL: sidebar + content ──── */}
+                          <div className="flex-1 flex min-h-0 overflow-hidden" style={{ direction: 'rtl' }}>
 
-                          {/* ═══ 1.5 + 2. SIDE-BY-SIDE: summary sidebar (right) + hero action card (left) ═══ */}
-                          <div className="px-6 pt-4 pb-3">
-                            <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4" style={{ direction: 'rtl' }}>
-
-                              {/* ── SUMMARY SIDEBAR (right in RTL) ── */}
-                              <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-4 self-start" style={{ direction: 'rtl' }}>
-                                <div className="flex items-center gap-2 mb-3">
-                                  <UserCircle2 className="h-4 w-4 text-slate-400" />
-                                  <span className="text-xs font-extrabold text-slate-600 uppercase tracking-wide">תקציר לקוח</span>
-                                </div>
-                                <div className="space-y-2.5">
-                                  {[
-                                    { label: 'שם', value: t.customerName || t.leadName },
-                                    { label: 'טלפון', value: contactPhone },
-                                    { label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
-                                    { label: 'סטטוס', value: taskStatusLabel(s) },
-                                    { label: 'אחראי', value: t.owner },
-                                    { label: 'תאריך יעד', value: t.due },
-                                    { label: 'הערות', value: t.description },
-                                  ].map((f) => (
-                                    <div key={f.label} className="flex justify-between items-start gap-2 min-w-0">
-                                      <span className="text-[11px] font-semibold text-slate-400 flex-shrink-0">{f.label}</span>
-                                      <span className="text-xs font-bold text-slate-700 text-left truncate max-w-[150px]">{f.value || 'לא צוין'}</span>
-                                    </div>
-                                  ))}
-                                </div>
+                            {/* SIDEBAR: תקציר לקוח (right in RTL) */}
+                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 200, direction: 'rtl', padding: '12px' }}>
+                              <div className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">תקציר לקוח</div>
+                              <div className="space-y-1.5">
+                                {([
+                                  { label: 'שם', value: t.customerName || t.leadName },
+                                  { label: 'טלפון', value: contactPhone },
+                                  { label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
+                                  { label: 'סטטוס', value: taskStatusLabel(s) },
+                                  { label: 'אחראי', value: t.owner },
+                                  { label: 'תאריך יעד', value: t.due },
+                                  { label: 'הערות', value: t.description },
+                                ] as {label:string;value:string|null|undefined}[]).map((f) => (
+                                  <div key={f.label} className="flex justify-between items-baseline gap-1 min-w-0">
+                                    <span className="text-[10px] font-semibold text-slate-400 flex-shrink-0">{f.label}</span>
+                                    <span className="text-[11px] font-bold text-slate-700 truncate">{f.value || 'לא צוין'}</span>
+                                  </div>
+                                ))}
                               </div>
+                              {contactPhone && (
+                                <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
+                                  <a href={`tel:${phoneClean(contactPhone)}`} className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition-colors">
+                                    <PhoneCall className="h-3 w-3" />התקשר
+                                  </a>
+                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 rounded-lg bg-green-50 py-1.5 text-[11px] font-bold text-green-700 hover:bg-green-100 transition-colors">
+                                    <MessageCircle className="h-3 w-3" />WhatsApp
+                                  </a>
+                                </div>
+                              )}
+                            </div>
 
-                              {/* ── HERO ACTION CARD (left in RTL) — IIFE computes dynamic sentence + CTA ── */}
-                              {(() => {
+                            {/* CONTENT AREA (left in RTL) */}
+                            <div className="flex-1 min-w-0 overflow-y-auto flex flex-col gap-2.5 p-3">
+
+                          {/* ──── HERO ACTION CARD ──── */}
+                          {(() => {
                               /* stageColor / stageKey / linkedLeadForHeader are hoisted to outer IIFE scope */
                               /* ── build human-readable action sentence ── */
                               const agentName = t.owner || currentUser.name || 'הנציג';
@@ -13890,34 +13881,21 @@ function TasksPage({
                               const cta = stageCTA[stageKey] || stageCTA.inquiry;
                               const CTAIcon = cta.icon;
                               return (
-                            <div className="rounded-2xl flex items-center" style={{ background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}dd 100%)`, minHeight: 130, padding: '24px 32px', direction: 'rtl', gap: 24 }}>
-                              {/* RIGHT SIDE — headline + meta underneath aligned right */}
+                            <div className="rounded-xl flex items-center gap-4" style={{ background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, padding: '14px 18px', direction: 'rtl', flexShrink: 0 }}>
                               <div className="flex-1 min-w-0">
-                                <div className="text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(255,255,255,0.65)' }}>פעולות להמשך</div>
-                                <div className="font-bold text-white" style={{ fontSize: 36, lineHeight: 1.3, letterSpacing: '-0.01em', marginBottom: 10, fontFamily: 'var(--font-sans)' }}>{smartSentence}</div>
-                                <div className="flex items-center gap-3 flex-wrap" style={{ direction: 'rtl' }}>
-                                  <span className="inline-flex items-center rounded-full px-4 py-1 text-xs font-bold" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff', border: '1px solid rgba(255,255,255,0.3)' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
-                                  <span className="text-sm font-semibold" style={{ color: 'rgba(255,255,255,0.8)' }}>{t.due || ''}</span>
-                                  {t.owner && <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.7)' }}>{t.owner}</span>}
-                                </div>
+                                <div className="text-[9px] font-bold uppercase tracking-wider mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>פעולות להמשך</div>
+                                <div className="font-bold text-white leading-snug" style={{ fontSize: 16, fontFamily: 'var(--font-sans)', marginBottom: 6 }}>{smartSentence}</div>
+                                <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
                               </div>
-                              {/* LEFT SIDE — avatar + CTA button together */}
-                              <div className="flex items-center gap-4 flex-shrink-0">
-                                <div className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }}>
-                                  <UserCircle2 className="h-8 w-8 text-white" />
-                                </div>
-                                {stageKey !== 'closed' && (
-                                  <button onClick={cta.action} className="flex items-center gap-2.5 rounded-2xl px-7 py-4 font-bold text-base transition-all duration-200 hover:scale-105 hover:shadow-xl" style={{ background: '#fff', color: stageColor, border: `3px solid rgba(255,255,255,0.5)`, boxShadow: '0 4px 20px rgba(0,0,0,0.15)', fontFamily: 'var(--font-sans)' }}>
-                                    <CTAIcon className="h-6 w-6" />
-                                    {cta.label}
-                                  </button>
-                                )}
-                              </div>
+                              {stageKey !== 'closed' && (
+                                <button onClick={cta.action} className="flex items-center gap-1.5 rounded-xl px-4 py-2 font-bold text-sm transition-all hover:scale-105 flex-shrink-0" style={{ background: '#fff', color: stageColor, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+                                  <CTAIcon className="h-4 w-4" />
+                                  {cta.label}
+                                </button>
+                              )}
                             </div>
                               );
                             })()}
-                            </div>{/* end grid */}
-                          </div>{/* end px-6 grid wrapper */}
 
                           {/* ═══ STAGE-SPECIFIC CONTENT ═══ */}
                           {currentStep === 0 ? (() => {
@@ -14584,139 +14562,76 @@ function TasksPage({
                             );
                           })() : (
                           <>
-                          {/* ═══ 3. INFO CARDS (generic stages) ═══ */}
-                          <div className="px-8 pb-3">
-                            <div className="grid grid-cols-3 gap-3">
-                              {[
-                                { icon: Phone, color: '#06b6d4', bg: '#ecfeff', label: 'טלפון', value: contactPhone || '-' },
-                                { icon: Mail, color: '#a855f7', bg: '#faf5ff', label: 'אימייל', value: t.leadEmail || '-' },
-                                { icon: FolderKanban, color: '#22c55e', bg: '#f0fdf4', label: 'פרויקט', value: t.projectName || taskTypeLabel(t.type || 'GENERAL') },
-                              ].map((card) => {
-                                const CIcon = card.icon;
-                                return (
-                                  <div key={card.label} className="flex items-center gap-3 rounded-2xl bg-white border border-slate-200 p-4 shadow-sm" style={{ direction: 'rtl' }}>
-                                    <div className="flex h-11 w-11 items-center justify-center rounded-xl flex-shrink-0" style={{ background: card.bg }}>
-                                      <CIcon className="h-5 w-5" style={{ color: card.color }} />
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-[10px] text-slate-400 font-medium">{card.label}</div>
-                                      <div className="text-sm font-bold text-slate-800 truncate">{card.value}</div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
 
-                          {/* Section 4 action buttons moved to sticky bottom bar below */}
-
-                          {/* ═══ 5. DETAILED INFO GRID (generic) — פרטי המשימה ═══ */}
-                          <div className="px-8 pb-4">
-                            <div className="rounded-2xl bg-white border border-slate-200 shadow-sm p-5" style={{ direction: 'rtl' }}>
-                              <div className="flex items-center gap-2 mb-3">
-                                <ClipboardList className="h-4 w-4 text-slate-400" />
-                                <h3 className="text-sm font-extrabold text-slate-700">פרטי המשימה</h3>
+                          {/* הערות compact */}
+                          {(t.description || t.leadCompany) && (
+                            <div className="rounded-xl bg-white border border-slate-200 p-3 shadow-sm flex-shrink-0" style={{ direction: 'rtl' }}>
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <Pencil className="h-3 w-3 text-slate-400" />
+                                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">הערות</span>
                               </div>
-                              <div className="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-3">
-                                {infoFields.map((f) => {
-                                  const FIcon = f.icon;
-                                  return (
-                                    <div key={f.label} className="flex items-center gap-2.5 py-1.5">
-                                      <div className="flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0" style={{ background: f.bg }}>
-                                        <FIcon className="h-4 w-4" style={{ color: f.color }} />
-                                      </div>
-                                      <div className="min-w-0">
-                                        <div className="text-[10px] text-slate-400 leading-none">{f.label}</div>
-                                        <div className="text-sm font-semibold text-slate-800 truncate">{f.value}</div>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                              <div className="text-xs text-slate-600 leading-relaxed line-clamp-3">{t.description || ''}</div>
+                              {t.leadCompany && <div className="text-xs font-bold text-blue-600 mt-1">{t.leadCompany}</div>}
                             </div>
-                          </div>
-
-                          {/* ═══ 6. NOTES (generic) — הערות (always shown; falls back to "לא צוין") ═══ */}
-                          <div className="px-8 pb-6">
-                            <div className="rounded-2xl bg-white border border-slate-200 p-5 shadow-sm" style={{ direction: 'rtl' }}>
-                              <div className="mb-3">
-                                <div className="flex items-center gap-2 mb-1.5">
-                                  <Pencil className="h-4 w-4 text-slate-400" />
-                                  <span className="text-sm font-bold text-slate-500">הערות</span>
-                                </div>
-                                <div className="text-sm text-slate-700 leading-relaxed">{t.description || 'לא צוין'}</div>
-                              </div>
-                              {t.leadCompany && (
-                                <div className="flex items-center gap-2 text-sm">
-                                  <Building2 className="h-4 w-4 text-blue-500" />
-                                  <span className="font-bold text-blue-600">חברה:</span>
-                                  <span className="text-blue-800">{t.leadCompany}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                          )}
                           </>
                           )}
-                          </div>{/* end flex-1 scrollable body */}
 
-                          {/* ══════ STICKY BOTTOM ACTION BAR ══════ */}
-                          <div className="flex-shrink-0 bg-white border-t border-slate-200 px-6 py-3" style={{ direction: 'rtl' }}>
-                            <div className="flex items-center gap-2 flex-wrap justify-between">
-                              {/* ── SECONDARY actions (left in RTL) ── */}
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">
-                                  <ArrowRight className="h-4 w-4" />
-                                  חזרה למשימות
+                            </div>{/* end content area */}
+                          </div>{/* end main panel flex row */}
+
+                          {/* ──── BOTTOM ACTION BAR ──── */}
+                          <div className="flex-shrink-0 bg-white border-t border-slate-200 px-4" style={{ height: 52, direction: 'rtl', display: 'flex', alignItems: 'center' }}>
+                            <div className="flex items-center gap-1.5 justify-between w-full">
+                              {/* ── secondary (left in RTL) ── */}
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+                                  <ArrowRight className="h-3.5 w-3.5" />
+                                  שמור שלב
                                 </button>
                                 {!isDone && (
                                   <div className="relative">
-                                    <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex items-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2 text-sm font-bold text-orange-700 hover:bg-orange-100 transition-colors">
-                                      <RotateCcw className="h-4 w-4" />
+                                    <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition-colors">
+                                      <RotateCcw className="h-3.5 w-3.5" />
                                       קבע חזרה ללקוח
                                     </button>
                                     {isPostponeOpen && renderSnoozePopup(t.id, 'bottom-12')}
                                   </div>
                                 )}
                                 {(t.leadId || t.leadName) && onOpenLead && (
-                                  <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-100 transition-colors">
-                                    <Flame className="h-4 w-4" />
+                                  <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors">
+                                    <Flame className="h-3.5 w-3.5" />
                                     פתח ליד
                                   </button>
                                 )}
                               </div>
-                              {/* ── PRIMARY actions (right in RTL) ── */}
-                              <div className="flex items-center gap-2 flex-wrap">
+                              {/* ── primary (right in RTL) ── */}
+                              <div className="flex items-center gap-1.5">
                                 {(t.customerId || t.customerName) && onOpenCustomer && (
-                                  <button onClick={() => { const cust = customers.find((c) => c.id === t.customerId); if (cust) onOpenCustomer(cust); }} className="flex items-center gap-1.5 rounded-xl border border-purple-200 bg-purple-50 px-4 py-2 text-sm font-bold text-purple-700 hover:bg-purple-100 transition-colors">
-                                    <Building2 className="h-4 w-4" />
+                                  <button onClick={() => { const cust = customers.find((c) => c.id === t.customerId); if (cust) onOpenCustomer(cust); }} className="flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-bold text-purple-700 hover:bg-purple-100 transition-colors">
+                                    <Building2 className="h-3.5 w-3.5" />
                                     פתח לקוח
                                   </button>
                                 )}
-                                <button onClick={() => { if (onCreateQuote) { const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader); onCreateQuote(t.customerId, t.id, svcName ? { name: t.leadName || t.customerName || '', service: svcName } : undefined); } else alert('יצירת הצעת מחיר'); }} className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-100 transition-colors">
-                                  <FileText className="h-4 w-4" />
+                                <button onClick={() => { if (onCreateQuote) { const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader); onCreateQuote(t.customerId, t.id, svcName ? { name: t.leadName || t.customerName || '', service: svcName } : undefined); } else alert('יצירת הצעת מחיר'); }} className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 transition-colors">
+                                  <FileText className="h-3.5 w-3.5" />
                                   עבור להצעת מחיר
                                 </button>
                                 {contactPhone && (
-                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl border border-green-300 bg-green-50 px-4 py-2 text-sm font-bold text-green-700 hover:bg-green-100 transition-colors">
-                                    <MessageCircle className="h-4 w-4" />
-                                    WhatsApp
-                                  </a>
-                                )}
-                                {contactPhone && (
-                                  <a href={`tel:${phoneClean(contactPhone)}`} className="flex items-center gap-1.5 rounded-xl border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100 transition-colors">
-                                    <PhoneCall className="h-4 w-4" />
+                                  <a href={`tel:${phoneClean(contactPhone)}`} className="flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors">
+                                    <PhoneCall className="h-3.5 w-3.5" />
                                     התקשר
                                   </a>
                                 )}
                                 {!isDone && (
-                                  <button onClick={() => markDone(t.id)} className="flex items-center gap-1.5 rounded-xl px-5 py-2 text-sm font-bold text-white transition-colors" style={{ background: '#10b981' }}>
-                                    <CheckCircle2 className="h-4 w-4" />
+                                  <button onClick={() => markDone(t.id)} className="flex items-center gap-1 rounded-lg px-4 py-1.5 text-xs font-bold text-white transition-colors" style={{ background: '#10b981' }}>
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
                                     דווח השלמה
                                   </button>
                                 )}
                                 {isDone && (
-                                  <span className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-bold text-white" style={{ background: '#6b7280' }}>
-                                    <CheckCircle2 className="h-4 w-4" />
+                                  <span className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: '#6b7280' }}>
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
                                     הושלם
                                   </span>
                                 )}
