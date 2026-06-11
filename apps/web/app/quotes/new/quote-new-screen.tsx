@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { Save, Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle } from 'lucide-react';
+import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save } from 'lucide-react';
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
 import { apiUrl, apiFetch } from '../../lib/api-base';
@@ -9,10 +9,7 @@ import {
   mergeQuoteTemplateFull,
   type QuoteTemplateLineItem,
 } from '../../lib/quote-template-merge';
-import { SERVICE_CATEGORIES } from '../../lib/service-categories';
-
-/** Flat list of every service name we actually offer, for the "שם הפריט" autocomplete */
-const SERVICE_NAMES: string[] = SERVICE_CATEGORIES.flatMap((cat) => cat.services.map((s) => s.name));
+import { SERVICE_CATEGORIES, flattenAllServices } from '../../lib/service-categories';
 
 /* ── Quote line-item types & helpers ── */
 type LineItem = {
@@ -234,19 +231,6 @@ function downloadWordDoc(html: string, customerName: string, quoteNo: string) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-/* ── Built-in catalog: 10 items for Galit Environmental Company ── */
-const CATALOG_ITEMS: ReadonlyArray<{ code: string; sku: string; description: string; price: string }> = [
-  { code: 'RAD-C01', sku: 'CEL-RAD',  description: 'בדיקת קרינה סלולרית בדירה',         price: '950'  },
-  { code: 'RAD-C02', sku: 'ELF-RAD',  description: 'בדיקת קרינה בתדר נמוך (ELF)',        price: '1200' },
-  { code: 'ACO-C01', sku: 'NOI-ENV',  description: 'בדיקת רעש סביבתי',                   price: '1600' },
-  { code: 'ACO-C02', sku: 'SND-APT',  description: 'בדיקת מעבר קול בין דירות',           price: '1400' },
-  { code: 'RDN-C01', sku: 'RDN-90D',  description: 'בדיקת ראדון 90 יום',                 price: '850'  },
-  { code: 'RDN-C02', sku: 'RDN-48H',  description: 'בדיקת ראדון קצרה 48 שעות',           price: '550'  },
-  { code: 'IAQ-C01', sku: 'AIR-IND',  description: 'בדיקת איכות אוויר פנים מבנה',        price: '1100' },
-  { code: 'IAQ-C02', sku: 'MOL-SMP',  description: 'דיגום עובש באוויר',                  price: '850'  },
-  { code: 'ASB-C01', sku: 'ASB-SRV',  description: 'סקר אסבסט',                          price: '2200' },
-  { code: 'ACO-C03', sku: 'ACO-CNS',  description: 'ייעוץ אקוסטי לפרויקט',              price: '700'  },
-] as const;
 
 /** Generates a local draft reference synchronously so the field is never blank.
  *  Format: Q-YYYYMM-NNNN  where NNNN is derived from the current time-of-day
@@ -402,15 +386,278 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+/** Convert a Blob to a base64 string (chunked to avoid call-stack limits on large files) */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+/* ── Quote template → service category mapping (for filtered merge picker) ──
+ * Matched by keyword instead of exact template name, since the exact wording
+ * (dashes, phrasing) of templates stored in the DB can drift from any hardcoded
+ * name list. Order matters: more specific keywords should come first. */
+const TEMPLATE_CATEGORY_KEYWORDS: { keyword: string; category: string }[] = [
+  { keyword: 'אסבסט', category: 'asbestos' },
+  { keyword: 'ראדון', category: 'radon' },
+  { keyword: 'קרינה', category: 'radiation' },
+  { keyword: 'קרקע', category: 'soil' },
+  { keyword: 'ריח', category: 'odor' },
+  { keyword: 'אקוסטי', category: 'noise' },
+  { keyword: 'קול הולם', category: 'noise' },
+  { keyword: 'קול נישא', category: 'noise' },
+  { keyword: 'רעש', category: 'noise' },
+  { keyword: 'תרמי', category: 'thermal' },
+  { keyword: 'אנרגטי', category: 'thermal' },
+  { keyword: 'איכות אוויר', category: 'air' },
+  { keyword: 'עובש', category: 'air' },
+  { keyword: 'מים', category: 'water' },
+  { keyword: 'בנייה ירוקה', category: 'green-building' },
+  { keyword: 'גהות', category: 'occupational-health' },
+  { keyword: 'חוות דעת סביבתית', category: 'environmental-opinion' },
+];
+
+/** Find the service category id matching a quote template's name, by keyword */
+function getTemplateCategory(name: string): string | null {
+  for (const { keyword, category } of TEMPLATE_CATEGORY_KEYWORDS) {
+    if (name.includes(keyword)) return category;
+  }
+  return null;
+}
+
+/* ── Default options for the תנאי תשלום dropdown ── */
+const DEFAULT_PAYMENT_TERMS = [
+  'מזומן בעת ביצוע ההזמנה',
+  'תשלום מראש מלא',
+  '50% מקדמה, 50% בסיום העבודה',
+  'תשלום עם קבלת החשבונית',
+  'שוטף + 30',
+  'שוטף + 60',
+  'שוטף + 90',
+];
+
+/** Find the SERVICE_CATEGORIES category id for a given SKU/id */
+function getSkuCategory(sku: string): string | null {
+  for (const cat of SERVICE_CATEGORIES) {
+    for (const svc of cat.services) {
+      if (svc.sku === sku || svc.id === sku) return cat.id;
+      if (svc.subServices?.some((sub) => sub.sku === sku || sub.id === sku)) return cat.id;
+    }
+  }
+  return null;
+}
+
+/* ── Category color map for tree picker ── */
+const CAT_COLOR: Record<string, string> = {
+  water: '#3b82f6', odor: '#8b5cf6', soil: '#16a34a', asbestos: '#f59e0b',
+  air: '#06b6d4', radon: '#ef4444', noise: '#f97316', radiation: '#7c3aed',
+  'green-building': '#15803d', thermal: '#dc2626', 'environmental-opinion': '#0f766e',
+  general: '#64748b', 'occupational-health': '#0284c7',
+};
+
+/* ── ServiceTreePicker — hierarchical service selector for quote line items ── */
+function ServiceTreePicker({
+  value,
+  onSelect,
+}: {
+  value: string;
+  onSelect: (item: { description: string; sku: string; price: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [catId, setCatId] = useState<string | null>(null);
+  const [groupId, setGroupId] = useState<string | null>(null);
+  const closePanel = () => { setOpen(false); setCatId(null); setGroupId(null); };
+
+  const activeCat = catId ? SERVICE_CATEGORIES.find((c) => c.id === catId) : null;
+  const activeGroup = groupId && activeCat
+    ? activeCat.services.find((s) => s.id === groupId && !!s.subServices)
+    : null;
+
+  const pickService = (description: string, sku: string, price: number | undefined) => {
+    onSelect({ description, sku: sku ?? '', price: price != null ? String(price) : '' });
+    closePanel();
+  };
+
+  return (
+    <div className="relative w-full" dir="rtl">
+      {/* Trigger button */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="h-11 w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-400 transition-colors hover:border-blue-300"
+      >
+        <span className={value ? 'text-gray-800 truncate text-right text-sm' : 'text-gray-400 text-sm'}>
+          {value || 'בחר שירות מהקטלוג...'}
+        </span>
+        <ChevronLeft
+          size={14}
+          className="flex-shrink-0 text-gray-400 transition-transform duration-200"
+          style={{ transform: open ? 'rotate(90deg)' : 'rotate(-90deg)' }}
+        />
+      </button>
+
+      {/* Side panel */}
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-[9998] bg-black/20" onClick={closePanel} />
+          <div
+            className="fixed top-0 right-0 bottom-0 z-[9999] bg-white shadow-2xl border-l border-gray-200 overflow-hidden flex flex-col"
+            style={{ width: 'clamp(280px, 28vw, 380px)', direction: 'rtl' }}
+          >
+            {/* Panel header */}
+            <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-gray-50/80">
+              {(catId || groupId) ? (
+                <button
+                  type="button"
+                  onClick={() => groupId ? setGroupId(null) : setCatId(null)}
+                  className="flex items-center gap-1 text-xs font-semibold rounded-lg px-2 py-1 transition-colors hover:bg-gray-200"
+                  style={{ color: catId ? (CAT_COLOR[catId] ?? '#64748b') : '#64748b' }}
+                >
+                  <ChevronRight size={12} />
+                  {groupId ? (activeGroup?.name ?? 'חזרה') : 'קטגוריות'}
+                </button>
+              ) : (
+                <span className="text-xs font-bold text-gray-700">בחר שירות מהקטלוג</span>
+              )}
+              {catId && !groupId && (
+                <span className="text-xs font-bold flex-1" style={{ color: CAT_COLOR[catId] ?? '#64748b' }}>
+                  {activeCat?.name}
+                </span>
+              )}
+              {groupId && (
+                <span className="text-xs font-bold flex-1" style={{ color: catId ? (CAT_COLOR[catId] ?? '#64748b') : '#64748b' }}>
+                  {activeCat?.name} › {activeGroup?.name}
+                </span>
+              )}
+              {!catId && !groupId && <span className="flex-1" />}
+              <button
+                type="button"
+                onClick={closePanel}
+                className="flex items-center justify-center rounded-full hover:bg-gray-200 transition flex-shrink-0"
+                style={{ width: 28, height: 28 }}
+              >
+                <X size={14} className="text-gray-500" />
+              </button>
+            </div>
+
+          {/* Content */}
+          <div className="overflow-y-auto flex-1 p-2">
+            {!catId ? (
+              /* Level 1: category grid */
+              <div className="grid grid-cols-3 gap-1.5">
+                {SERVICE_CATEGORIES.map((cat) => {
+                  const color = CAT_COLOR[cat.id] ?? '#64748b';
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => { setCatId(cat.id); setGroupId(null); }}
+                      className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl transition-all hover:scale-[1.03] hover:shadow-md active:scale-95 border border-transparent hover:border-opacity-30 text-center"
+                      style={{ background: `${color}12`, borderColor: `${color}30` }}
+                    >
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${color} 0%, ${color}bb 100%)` }}>
+                        <span className="text-white text-[11px] font-black">{cat.name.slice(0, 2)}</span>
+                      </div>
+                      <span className="text-[11px] font-bold leading-tight" style={{ color }}>{cat.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : !groupId ? (
+              /* Level 2: services in category */
+              <div className="flex flex-col gap-1">
+                {activeCat!.services.map((svc) => {
+                  const color = CAT_COLOR[catId] ?? '#64748b';
+                  if (svc.subServices) {
+                    return (
+                      <button
+                        key={svc.id}
+                        type="button"
+                        onClick={() => setGroupId(svc.id)}
+                        className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm font-semibold text-[13px]"
+                        style={{ background: `${color}10`, color: '#1e293b', border: `1px solid ${color}25` }}
+                      >
+                        <span className="flex-shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white" style={{ background: color }}>
+                          {svc.subServices.length}
+                        </span>
+                        <span className="flex-1">{svc.name}</span>
+                        <ChevronLeft size={13} style={{ color, flexShrink: 0 }} />
+                      </button>
+                    );
+                  }
+                  return (
+                    <button
+                      key={svc.id}
+                      type="button"
+                      onClick={() => pickService(svc.name, svc.sku ?? svc.id, svc.price)}
+                      className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm text-[13px] font-medium"
+                      style={{ background: `${color}08`, color: '#334155', border: `1px solid ${color}18` }}
+                    >
+                      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                      <span className="flex-1">{svc.name}</span>
+                      {svc.price != null && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${color}15`, color }}>
+                          {svc.price === 0 ? 'כלול' : `₪${svc.price.toLocaleString('he-IL')}`}
+                          {svc.unit ? ` ${svc.unit}` : ''}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Level 3: sub-services */
+              <div className="flex flex-col gap-1">
+                {activeGroup!.subServices!.map((sub) => {
+                  const color = CAT_COLOR[catId] ?? '#64748b';
+                  return (
+                    <button
+                      key={sub.id}
+                      type="button"
+                      onClick={() => pickService(sub.name, sub.sku ?? sub.id, sub.price)}
+                      className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm text-[12px] font-medium"
+                      style={{ background: `${color}08`, color: '#334155', border: `1px solid ${color}18` }}
+                    >
+                      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                      <span className="flex-1">{sub.name}</span>
+                      {sub.price != null && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${color}15`, color }}>
+                          {sub.price === 0 ? 'כלול' : `₪${sub.price.toLocaleString('he-IL')}`}
+                          {sub.unit ? ` ${sub.unit}` : ''}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function QuoteNewScreen({
   embedded = true,
   prefillCustomer = null,
   prefillContactId = null,
   prefillServiceName = null,
   initialQuoteId = null,
+  taskId = null,
   onExit,
   onQuoteSaved,
   onQuoteSent,
+  onAttachmentSaved,
+  existingAttachments,
+  onDownloadAttachment,
 }: {
   embedded?: boolean;
   prefillCustomer?: PrefillCustomer | null;
@@ -420,11 +667,19 @@ export function QuoteNewScreen({
   prefillServiceName?: string | null;
   /** When set (or `?quoteId=` in the URL), load quote and restore תנאי תשלום from the server */
   initialQuoteId?: string | null;
+  /** When set, the merged quote DOCX is also stored as a permanent attachment on this task */
+  taskId?: string | null;
   onExit?: () => void;
   /** Called after a successful save (POST or PATCH) — does not replace `onExit` for navigation/back. */
   onQuoteSaved?: (quoteId: string) => void;
   /** Called after a quote is successfully sent via email */
   onQuoteSent?: (quoteId: string) => void;
+  /** Called after a merged DOCX is successfully saved as a task attachment */
+  onAttachmentSaved?: () => void;
+  /** DB-persisted task attachments to show in the files section (loaded from server) */
+  existingAttachments?: Array<{ id: string; fileName: string; mimeType: string; createdAt: string }>;
+  /** Called when user wants to download a persisted attachment */
+  onDownloadAttachment?: (att: { id: string; fileName: string }) => void;
 }) {
   const [tab, setTab] = useState<'פרטי תשלום' | 'מלל' | 'הערות' | 'שונות' | 'תחזית' | 'מסמכים מקושרים'>('תחזית');
   const [quoteNo, setQuoteNo] = useState('חדש');
@@ -471,6 +726,7 @@ export function QuoteNewScreen({
   const [mergeTemplateLoading, setMergeTemplateLoading] = useState(false);
   const [mergedHtml, setMergedHtml] = useState('');
   const [wordDocHtml, setWordDocHtml] = useState('');
+  const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string }[]>([]);
   const [orderSource, setOrderSource] = useState('');
   const [employeeNumber, setEmployeeNumber] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -524,20 +780,17 @@ export function QuoteNewScreen({
   }, [prefillCustomer]);
 
   /* ── Auto-add the service selected back in שלב הפנייה as the first line item ── */
-  const servicePrefillAppliedRef = useRef(false);
   useEffect(() => {
-    if (servicePrefillAppliedRef.current) return;
     if (!prefillServiceName) return;
-    servicePrefillAppliedRef.current = true;
     setLineItems((prev) => {
       if (prev.length > 0) return prev;
-      const catalogMatch = CATALOG_ITEMS.find((c) => c.description === prefillServiceName);
+      const allSvcs = flattenAllServices();
+      const svcMatch = allSvcs.find((s) => s.name === prefillServiceName);
       return [{
         ...newLineItem(),
         description: prefillServiceName,
-        code: catalogMatch?.code ?? '',
-        sku: catalogMatch?.sku ?? '',
-        price: catalogMatch?.price ?? '',
+        sku: svcMatch?.sku ?? '',
+        price: svcMatch?.price != null ? String(svcMatch.price) : '',
       }];
     });
   }, [prefillServiceName]);
@@ -624,16 +877,61 @@ export function QuoteNewScreen({
     }
   }, [initialQuoteId]);
 
-  /* ── Load existing quote: id for PATCH + restore saved fields (payment tab, lines, customer, סימוכין) ── */
+  /* ── When embedded in a task workspace (no explicit quote id given), look up any draft quote already linked to this task ── */
+  const [taskLinkedQuoteId, setTaskLinkedQuoteId] = useState<string | null>(null);
+  const [taskLookupChecked, setTaskLookupChecked] = useState<boolean>(!taskId);
+  const [draftReady, setDraftReady] = useState<boolean>(false);
+  const [lastMergedDocPath, setLastMergedDocPath] = useState<string | null>(null);
   useEffect(() => {
-    const user = getSessionUser();
-    if (!user) return;
+    if (!taskId) return;
     const fromUrl =
       typeof window !== 'undefined'
         ? new URLSearchParams(window.location.search).get('quoteId')?.trim() || ''
         : '';
-    const id = (initialQuoteId?.trim() || fromUrl).trim();
-    if (!id) return;
+    if (initialQuoteId?.trim() || fromUrl) {
+      setTaskLookupChecked(true);
+      return;
+    }
+    const user = getSessionUser();
+    if (!user) {
+      setTaskLookupChecked(true);
+      return;
+    }
+    let cancelled = false;
+    apiFetch(apiUrl(`/quotes?linkedEntityId=${encodeURIComponent(taskId)}`), { authUser: user })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: unknown) => {
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        const first = list[0] as { id?: string } | undefined;
+        if (first?.id) setTaskLinkedQuoteId(String(first.id));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setTaskLookupChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId, initialQuoteId]);
+
+  /* ── Load existing quote: id for PATCH + restore saved fields (payment tab, lines, customer, סימוכין) ── */
+  useEffect(() => {
+    if (taskId && !taskLookupChecked) return;
+    const user = getSessionUser();
+    if (!user) {
+      setDraftReady(true);
+      return;
+    }
+    const fromUrl =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('quoteId')?.trim() || ''
+        : '';
+    const id = (initialQuoteId?.trim() || fromUrl || taskLinkedQuoteId || '').trim();
+    if (!id) {
+      setDraftReady(true);
+      return;
+    }
     let cancelled = false;
     apiFetch(apiUrl(`/quotes/${encodeURIComponent(id)}`), { authUser: user })
       .then((r) => (r.ok ? r.json() : null))
@@ -723,29 +1021,44 @@ export function QuoteNewScreen({
         } else {
           setQuoteTemplateId(null);
         }
+        if (typeof q.lastMergedDocPath === 'string' && q.lastMergedDocPath) {
+          setLastMergedDocPath(q.lastMergedDocPath);
+        }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setDraftReady(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [initialQuoteId]);
+  }, [initialQuoteId, taskId, taskLookupChecked, taskLinkedQuoteId]);
 
   useEffect(() => {
+    const mergeWithDefaults = (apiRows: Array<{ id: string; label: string }>) => {
+      const merged = [...apiRows];
+      for (const label of DEFAULT_PAYMENT_TERMS) {
+        if (!merged.some((r) => r.label === label)) merged.push({ id: `default-${label}`, label });
+      }
+      return merged.sort((a, b) => a.label.localeCompare(b.label, 'he'));
+    };
     const user = getSessionUser();
-    if (!user) return;
+    if (!user) {
+      setPaymentTermRows(mergeWithDefaults([]));
+      return;
+    }
     apiFetch(apiUrl('/payment-terms'), { authUser: user })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows: unknown) => {
-        if (!Array.isArray(rows)) return;
-        setPaymentTermRows(
-          rows
-            .filter((x): x is { id: string; label: string } => typeof x === 'object' && x !== null && 'label' in x && typeof (x as { label: unknown }).label === 'string')
-            .map((x) => ({ id: String((x as { id?: unknown }).id ?? ''), label: String((x as { label: string }).label) }))
-            .filter((x) => x.label)
-            .sort((a, b) => a.label.localeCompare(b.label, 'he')),
-        );
+        const apiRows = Array.isArray(rows)
+          ? rows
+              .filter((x): x is { id: string; label: string } => typeof x === 'object' && x !== null && 'label' in x && typeof (x as { label: unknown }).label === 'string')
+              .map((x) => ({ id: String((x as { id?: unknown }).id ?? ''), label: String((x as { label: string }).label) }))
+              .filter((x) => x.label)
+          : [];
+        setPaymentTermRows(mergeWithDefaults(apiRows));
       })
-      .catch(() => {});
+      .catch(() => setPaymentTermRows(mergeWithDefaults([])));
   }, []);
 
   async function submitNewPaymentTerm() {
@@ -796,7 +1109,6 @@ export function QuoteNewScreen({
   const [customerContactId, setCustomerContactId] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  const [savedIndicator, setSavedIndicator] = useState(false);
 
   /* ── אנשי קשר לפי לקוח נבחר: רענון מ-/customers/:id/contacts, בחירה מחדש אם צריך ── */
   useEffect(() => {
@@ -879,6 +1191,176 @@ export function QuoteNewScreen({
       : '';
   const paymentXDisplay = installmentsCountParsed > 0 ? installmentEach.toFixed(2) : '';
 
+  /* ── Build the full quote payload from current form state — shared by doSave() and the silent autosave ── */
+  function buildQuotePayload(): Record<string, unknown> {
+    // Prisma DateTime fields reject date-only strings ("2026-03-27") — must be full ISO-8601
+    const toISO = (s: string | null | undefined): string | null => {
+      if (!s) return null;
+      try { return new Date(s).toISOString(); } catch { return null; }
+    };
+
+    // Compute validTo: prefer the form's validity date, fallback to today + validityDays
+    const validToDate = paymentValidityDate
+      ? new Date(paymentValidityDate).toISOString()
+      : (() => {
+          const d = new Date();
+          d.setDate(d.getDate() + (parseInt(validityDays) || 30));
+          return d.toISOString();
+        })();
+
+    const safeValidTo = (() => {
+      try { const d = new Date(validToDate); if (isNaN(d.getTime())) throw new Error(); return d.toISOString(); }
+      catch { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString(); }
+    })();
+
+    // lineItemsJson — store full item objects so they round-trip correctly
+    const lineItemsJsonVal = lineItems
+      .filter((li) => li.description.trim() || parseFloat(li.price) > 0)
+      .map((li) => ({
+        id: li.id,
+        code: li.code,
+        sku: li.sku,
+        description: li.description,
+        channel: li.channel,
+        qty: li.qty,
+        price: li.price,
+        discountPct: li.discountPct,
+      }));
+
+    // amountBeforeVat — sum of line totals (qty × price × (1 - disc/100))
+    const amountBeforeVat = lineItemsJsonVal.reduce((sum, li) => {
+      const q = parseFloat(li.qty) || 0;
+      const p = parseFloat(li.price) || 0;
+      const d = parseFloat(li.discountPct) || 0;
+      return sum + q * p * (1 - d / 100);
+    }, 0);
+
+    const discPct = parseFloat(discountPercent) || 0;
+
+    const payload: Record<string, unknown> = {
+      customerId,
+      customerName: customer || null,
+      customerContactId: customerContactId.trim() || null,
+      service: 'הצעת מחיר',
+      quoteNumber: quoteNo !== 'חדש' ? quoteNo : undefined,
+      quoteDate: toISO(date) || new Date().toISOString(),
+      followupDate: toISO(follow) || null,
+      status: status || 'DRAFT',
+      orderReferenceNumber: reference || null,
+      salesRepresentativeName: salesRep || null,
+      executorName: contact || null,
+      phoneSummary: phone || null,
+      faxSummary: fax || null,
+      addressSummary: customerAddress || null,
+      accountingNumber: accountingNo || null,
+      companyRegNumber: companyNo || null,
+      priceList: priceList || null,
+      exchangeRate: parseFloat(rate) || null,
+      orderSource: orderSource || null,
+      notes: notes || null,
+      internalNotes: internalNotes || null,
+      lineItemsJson: lineItemsJsonVal,
+      amountBeforeVat: roundMoney2(amountBeforeVat),
+      amount: roundMoney2(amountBeforeVat),
+      vatPercent: parseFloat(vatPercent) || 0,
+      discountType: discPct > 0 ? 'PERCENT' : 'NONE',
+      discountValue: discPct > 0 ? discPct : 0,
+      validTo: safeValidTo,
+      validityDate: toISO(paymentValidityDate) || safeValidTo,
+      validityDays: parseInt(validityDays) || 30,
+      paymentTerms: paymentTerms || null,
+      paymentsCount: parseInt(paymentsCount) || 0,
+      paymentDueDate: toISO(paymentDueDate) || null,
+      functionalLabel: fFunctional || null,
+      forecastClosePercent: fClosePercent || null,
+      forecastUpdatedAt: toISO(fLastDate) || null,
+      forecastUpdatedBy: fLastUser || null,
+      forecastUpdatedTime: fLastTime || null,
+      quoteTemplateId: quoteTemplateId || null,
+    };
+
+    if (taskId) payload.linkedEntityId = taskId;
+
+    // Strip undefined values so the backend doesn't receive them
+    for (const k of Object.keys(payload)) {
+      if (payload[k] === undefined) delete payload[k];
+    }
+    return payload;
+  }
+
+  /* ── Silent autosave: persists the current draft (line items, generated docs link, etc.) without alerts/validation ── */
+  const autosaveBusyRef = useRef(false);
+  async function silentSaveDraft(): Promise<string | null> {
+    if (!customerId || autosaveBusyRef.current) return null;
+    const user = getSessionUser();
+    if (!user) return null;
+    autosaveBusyRef.current = true;
+    try {
+      const payload = buildQuotePayload();
+      const currentId = quoteIdRef.current;
+      const url = currentId ? apiUrl(`/quotes/${currentId}`) : apiUrl('/quotes');
+      const method = currentId ? 'PATCH' : 'POST';
+      const r = await apiFetch(url, { method, body: JSON.stringify(payload), authUser: user });
+      if (!r.ok) return null;
+      const saved = await r.json();
+      const savedId = saved?.id ? String(saved.id) : null;
+      if (!currentId && savedId) {
+        setQuoteId(savedId);
+        if (saved.quoteNumber != null) setQuoteNo(String(saved.quoteNumber));
+        // Standalone mode: reflect the new id in the URL so a refresh restores this draft
+        if (!taskId && typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          if (!params.get('quoteId')) {
+            params.set('quoteId', savedId);
+            window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+          }
+        }
+      }
+      return savedId || currentId;
+    } catch {
+      return null;
+    } finally {
+      autosaveBusyRef.current = false;
+    }
+  }
+
+  /* ── Standalone mode: download the last generated DOCX stored on the quote record ── */
+  async function handleDownloadMergedDoc() {
+    if (!quoteId) return;
+    const user = getSessionUser();
+    if (!user) return;
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${quoteId}/merged-doc`), { authUser: user });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const fallbackName = lastMergedDocPath ? lastMergedDocPath.split(/[\\/]/).pop() || 'quote.docx' : 'quote.docx';
+      a.href = url;
+      a.download = fallbackName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      /* silent */
+    }
+  }
+
+  /* ── Debounced autosave of the draft quote — keeps line items / DOCX link alive across page refreshes ── */
+  useEffect(() => {
+    if (!draftReady || !customerId) return;
+    const t = setTimeout(() => { void silentSaveDraft(); }, 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    draftReady, customerId, lineItems, customer, phone, paymentTerms, validityDays,
+    paymentValidityDate, paymentDueDate, notes, internalNotes, discountPercent, vatPercent,
+    paymentsCount, follow, customerContactId, salesRep, contact, customerAddress, customerCity,
+    customerEmail, fax, accountingNo, companyNo, priceList, orderSource, rate, fFunctional,
+    fClosePercent, status, quoteTemplateId, date,
+  ]);
+
   /* ── Save (POST new / PATCH existing) — returns saved id or null on failure ── */
   async function doSave(): Promise<string | null> {
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
@@ -902,98 +1384,7 @@ export function QuoteNewScreen({
     setIsBusy(true);
     setStatusMsg('שומר...');
     try {
-      // Prisma DateTime fields reject date-only strings ("2026-03-27") — must be full ISO-8601
-      const toISO = (s: string | null | undefined): string | null => {
-        if (!s) return null;
-        try { return new Date(s).toISOString(); } catch { return null; }
-      };
-
-      // Compute validTo: prefer the form's validity date, fallback to today + validityDays
-      const validToDate = paymentValidityDate
-        ? new Date(paymentValidityDate).toISOString()
-        : (() => {
-            const d = new Date();
-            d.setDate(d.getDate() + (parseInt(validityDays) || 30));
-            return d.toISOString();
-          })();
-
-      // ── Build full payload — all fields the backend schema accepts ──
-      const safeValidTo = (() => {
-        try { const d = new Date(validToDate); if (isNaN(d.getTime())) throw new Error(); return d.toISOString(); }
-        catch { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString(); }
-      })();
-
-      // lineItemsJson — store full item objects so they round-trip correctly
-      const lineItemsJsonVal = lineItems
-        .filter((li) => li.description.trim() || parseFloat(li.price) > 0)
-        .map((li) => ({
-          id: li.id,
-          code: li.code,
-          sku: li.sku,
-          description: li.description,
-          channel: li.channel,
-          qty: li.qty,
-          price: li.price,
-          discountPct: li.discountPct,
-        }));
-
-      // amountBeforeVat — sum of line totals (qty × price × (1 - disc/100))
-      const amountBeforeVat = lineItemsJsonVal.reduce((sum, li) => {
-        const q = parseFloat(li.qty) || 0;
-        const p = parseFloat(li.price) || 0;
-        const d = parseFloat(li.discountPct) || 0;
-        return sum + q * p * (1 - d / 100);
-      }, 0);
-
-      const discPct = parseFloat(discountPercent) || 0;
-
-      const payload: Record<string, unknown> = {
-        customerId,
-        customerName: customer || null,
-        customerContactId: customerContactId.trim() || null,
-        service: 'הצעת מחיר',
-        quoteNumber: quoteNo !== 'חדש' ? quoteNo : undefined,
-        quoteDate: toISO(date) || new Date().toISOString(),
-        followupDate: toISO(follow) || null,
-        status: status || 'DRAFT',
-        orderReferenceNumber: reference || null,
-        salesRepresentativeName: salesRep || null,
-        executorName: contact || null,
-        phoneSummary: phone || null,
-        faxSummary: fax || null,
-        addressSummary: customerAddress || null,
-        accountingNumber: accountingNo || null,
-        companyRegNumber: companyNo || null,
-        priceList: priceList || null,
-        exchangeRate: parseFloat(rate) || null,
-        orderSource: orderSource || null,
-        notes: notes || null,
-        internalNotes: internalNotes || null,
-        lineItemsJson: lineItemsJsonVal,
-        amountBeforeVat: roundMoney2(amountBeforeVat),
-        amount: roundMoney2(amountBeforeVat),
-        vatPercent: parseFloat(vatPercent) || 0,
-        discountType: discPct > 0 ? 'PERCENT' : 'NONE',
-        discountValue: discPct > 0 ? discPct : 0,
-        validTo: safeValidTo,
-        validityDate: toISO(paymentValidityDate) || safeValidTo,
-        validityDays: parseInt(validityDays) || 30,
-        paymentTerms: paymentTerms || null,
-        paymentsCount: parseInt(paymentsCount) || 0,
-        paymentDueDate: toISO(paymentDueDate) || null,
-        functionalLabel: fFunctional || null,
-        forecastClosePercent: fClosePercent || null,
-        forecastUpdatedAt: toISO(fLastDate) || null,
-        forecastUpdatedBy: fLastUser || null,
-        forecastUpdatedTime: fLastTime || null,
-        quoteTemplateId: quoteTemplateId || null,
-      };
-
-      // Strip undefined values so the backend doesn't receive them
-      for (const k of Object.keys(payload)) {
-        if (payload[k] === undefined) delete payload[k];
-      }
-      console.log('FINAL PAYLOAD', payload);
+      const payload = buildQuotePayload();
       const currentId = quoteIdRef.current;
       const url = currentId ? apiUrl(`/quotes/${currentId}`) : apiUrl('/quotes');
       const method = currentId ? 'PATCH' : 'POST';
@@ -1036,13 +1427,10 @@ export function QuoteNewScreen({
         }
       }
       setStatusMsg('');
-      setSavedIndicator(true);
-      setTimeout(() => setSavedIndicator(false), 1000);
       if (savedId && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
     } catch {
       setStatusMsg('שגיאה בשמירה');
-      setSavedIndicator(false);
       setTimeout(() => setStatusMsg(''), 3000);
       return null;
     } finally {
@@ -1269,6 +1657,10 @@ export function QuoteNewScreen({
   }
 
   async function handleMergeClick() {
+    if (lineItems.length === 0 || !paymentTerms.trim()) {
+      alert('יש להוסיף לפחות פריט אחד בהצעת המחיר ולמלא תנאי תשלום לפני המיזוג');
+      return;
+    }
     const user = getSessionUser();
     if (!user) {
       alert('אין משתמש מחובר');
@@ -1328,7 +1720,19 @@ export function QuoteNewScreen({
           label: t.name ?? String(t.id),
           subLabel: t.serviceType || undefined,
         }));
-      setMergeTemplateRows(rows);
+
+      // Filter templates to match the categories of current line items
+      // Templates with no category mapping (e.g. the generic "הצעת מחיר") always show
+      const lineItemCats = new Set(
+        lineItems.map((li) => getSkuCategory(li.sku)).filter((c): c is string => c !== null)
+      );
+      const filteredRows = lineItemCats.size === 0
+        ? rows.filter((r) => !getTemplateCategory(r.label)) // no categorized items → show only uncategorized/generic
+        : rows.filter((r) => {
+            const tplCat = getTemplateCategory(r.label);
+            return !tplCat || lineItemCats.has(tplCat); // uncategorized or matching
+          });
+      setMergeTemplateRows(filteredRows);
     } catch {
       setMergeTemplateRows([]);
     } finally {
@@ -1442,6 +1846,11 @@ export function QuoteNewScreen({
    * ומחזיר קובץ Word (.docx) אמיתי להורדה ישירה.
    */
   async function handleDocxMerge(templateId: string, user: { id: string; role: string }) {
+    // Ensure the draft is saved first so the generated DOCX can be linked to a quote record
+    if (!quoteIdRef.current && customerId) {
+      await silentSaveDraft();
+    }
+
     const fmtMoney = (n: number) =>
       n.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -1544,12 +1953,43 @@ export function QuoteNewScreen({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const safeName = (customer || 'quote').replace(/[^\u0590-\u05FFa-zA-Z0-9 _-]/g, '').trim() || 'quote';
+      const fileName = `הצעת_מחיר_${safeName}_${reference || quoteNo || 'חדש'}.docx`;
       a.href = url;
-      a.download = `הצעת_מחיר_${safeName}_${reference || quoteNo || 'חדש'}.docx`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setMergedFiles((prev) => [...prev, { name: fileName, url }]);
+      setTimeout(() => URL.revokeObjectURL(url), 300000); // keep alive 5 min for re-download
+
+      // ── Persist the merged file to task attachment and/or quote record ──
+      const currentQuoteId = quoteIdRef.current;
+      if (taskId || currentQuoteId) {
+        try {
+          const dataBase64 = await blobToBase64(blob);
+          if (taskId) {
+            await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
+              authUser: user,
+              method: 'POST',
+              body: JSON.stringify({
+                fileName,
+                mimeType: blob.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                dataBase64,
+              }),
+            });
+            onAttachmentSaved?.();
+          }
+          if (currentQuoteId) {
+            await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
+              authUser: user,
+              method: 'POST',
+              body: JSON.stringify({ base64Data: dataBase64, fileName }),
+            });
+          }
+        } catch (e) {
+          console.error('Failed to attach merged DOCX:', e);
+        }
+      }
     } catch (err) {
       console.error('DOCX merge error:', err);
       alert('שגיאה בהורדת קובץ Word');
@@ -1651,6 +2091,7 @@ export function QuoteNewScreen({
   /* ── shared input classes ── */
   const inp = 'h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-colors';
   const lbl = 'text-sm font-medium text-gray-500 mb-0.5';
+  const canMerge = lineItems.length > 0 && paymentTerms.trim() !== '';
 
   return (
     <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
@@ -1672,17 +2113,13 @@ export function QuoteNewScreen({
           )}
         </div>
         <div className="flex items-center gap-3">
-          {/* שמור — rightmost (first in RTL) */}
-          <div className="relative">
-            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave()}>
-              <span className="h-10 w-10 rounded-full border border-emerald-300 bg-emerald-50 flex items-center justify-center text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700"><Save size={18} /></span>
-              <span className="text-[10px] text-emerald-600 font-medium">שמור</span>
-            </button>
-            {savedIndicator && <span className="absolute top-1/2 -translate-y-1/2 left-full ml-1 text-xs font-semibold text-emerald-600 whitespace-nowrap">נשמר</span>}
-          </div>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => handleMergeClick()}>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!canMerge} title={!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined} onClick={() => handleMergeClick()}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
+          </button>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave()}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Save size={18} /></span>
+            <span className="text-[10px] text-gray-500">שמור</span>
           </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => {
             const id = await doSave();
@@ -1727,6 +2164,7 @@ export function QuoteNewScreen({
           )}
         </div>
       </header>
+
 
       {/* ── Scrollable Content — 2-column landscape layout on desktop ── */}
       <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-3 pb-4">
@@ -1798,23 +2236,62 @@ export function QuoteNewScreen({
                       <div key={item.id} className={`rounded-xl border-2 ${sel ? 'border-blue-200 bg-blue-50/40 shadow-sm' : 'border-gray-100 bg-gray-50/30'} p-3 transition-all cursor-pointer hover:border-blue-100`} onClick={() => setSelectedLineIdx(idx)}>
                         <div className="grid gap-2 items-end sm:grid-cols-2 lg:grid-cols-12">
                           <div className="lg:col-span-1">
-                            <div className="text-sm font-medium text-gray-400 mb-0.5">קוד</div>
-                            <input value={item.code} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, code: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400" />
-                          </div>
-                          <div className="lg:col-span-1">
                             <div className="text-sm font-medium text-gray-400 mb-0.5">מק&quot;ט</div>
                             <input value={item.sku} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, sku: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400" />
                           </div>
-                          <div className="sm:col-span-2 lg:col-span-4">
+                          <div className="sm:col-span-2 lg:col-span-5">
                             <div className="text-sm font-medium text-gray-400 mb-0.5">תיאור השירות / מוצר</div>
-                            <input value={item.description} list="quote-catalog-list" onChange={(e) => { const val = e.target.value; const match = CATALOG_ITEMS.find((c) => c.description === val); if (match) { setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: match.description, code: match.code, sku: match.sku, price: match.price } : r)); } else { setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: val } : r)); } }} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-400" placeholder="שם הפריט" />
+                            <ServiceTreePicker
+                              value={item.description}
+                              onSelect={({ description, sku, price }) => {
+                                setLineItems((prev) => prev.map((r, i) =>
+                                  i === idx ? { ...r, description, sku, price } : r
+                                ));
+                              }}
+                            />
+                            {/* Free-text override — shown below the picker */}
+                            <input
+                              value={item.description}
+                              onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, description: e.target.value } : r))}
+                              className="mt-1 h-8 w-full rounded-lg border border-gray-100 bg-gray-50 px-3 text-xs outline-none focus:border-blue-300 text-gray-600"
+                              placeholder="או הקלד שם חופשי..."
+                            />
                           </div>
                           <div className="lg:col-span-2">
-                            <div className="text-sm font-medium text-gray-400 mb-0.5">מחיר ליחידה</div>
-                            <div className="relative">
-                              <input value={item.price} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white pl-7 pr-3 text-base outline-none focus:border-blue-400 text-left" placeholder="0" />
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₪</span>
-                            </div>
+                            {(() => {
+                              const catalogSvc = flattenAllServices().find((s) => s.sku === item.sku || s.id === item.sku);
+                              const minPrice = catalogSvc?.price && catalogSvc.price > 0 ? catalogSvc.price : null;
+                              const enteredPrice = parseFloat(item.price) || 0;
+                              const isBelowMin = minPrice != null && enteredPrice > 0 && enteredPrice < minPrice;
+                              return (
+                                <>
+                                  <div className="text-sm font-medium text-gray-400 mb-0.5 flex items-center gap-1">
+                                    מחיר ליחידה
+                                    {minPrice != null && <span className="text-[10px] text-gray-300">מינ׳ ₪{minPrice.toLocaleString('he-IL')}</span>}
+                                  </div>
+                                  <div className="relative">
+                                    <input
+                                      value={item.price}
+                                      onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))}
+                                      onBlur={() => {
+                                        if (minPrice != null) {
+                                          const entered = parseFloat(item.price) || 0;
+                                          if (entered > 0 && entered < minPrice) {
+                                            setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: String(minPrice) } : r));
+                                          }
+                                        }
+                                      }}
+                                      className={`h-11 w-full rounded-lg border bg-white pl-7 pr-3 text-base outline-none text-left transition-colors ${isBelowMin ? 'border-red-400 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:border-blue-400'}`}
+                                      placeholder="0"
+                                    />
+                                    <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₪</span>
+                                  </div>
+                                  {isBelowMin && (
+                                    <div className="text-[10px] text-red-500 mt-0.5">מחיר מינימלי: ₪{minPrice!.toLocaleString('he-IL')}</div>
+                                  )}
+                                </>
+                              );
+                            })()}
                           </div>
                           <div className="lg:col-span-1">
                             <div className="text-sm font-medium text-gray-400 mb-0.5">כמות</div>
@@ -1839,24 +2316,43 @@ export function QuoteNewScreen({
                   })}
                 </div>
               )}
-              <datalist id="quote-catalog-list">
-                {SERVICE_NAMES.map((name) => <option key={name} value={name} />)}
-              </datalist>
             </section>
 
-            {/* ── Notes ── */}
-            <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div className={lbl}>הערות</div>
-                  <textarea className="mt-1 h-16 w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-base outline-none focus:border-blue-400 transition-colors" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="הערות להצעה..." />
+            {/* ── קבצים שנוצרו ── */}
+            {(mergedFiles.length > 0 || (existingAttachments && existingAttachments.length > 0) || (!taskId && !!quoteId && !!lastMergedDocPath)) && (
+              <section className="rounded-2xl bg-white border border-emerald-100 shadow-sm p-4" dir="rtl">
+                <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500">
+                    <FileText size={12} />
+                  </span>
+                  קבצים שנוצרו
+                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.length ?? 0) + (!taskId && quoteId && lastMergedDocPath ? 1 : 0)})</span>
+                </h3>
+                <div className="space-y-2">
+                  {mergedFiles.map((f, i) => (
+                    <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 hover:bg-emerald-100 transition-colors" title={f.name}>
+                      <FileText size={15} className="text-emerald-600 flex-shrink-0" />
+                      <span className="flex-1 text-sm font-semibold text-emerald-800 truncate">{f.name}</span>
+                      <span className="text-[11px] font-bold text-emerald-600 flex-shrink-0 border border-emerald-300 rounded-lg px-2 py-0.5">הורד</span>
+                    </a>
+                  ))}
+                  {existingAttachments?.map((att) => (
+                    <button key={att.id} type="button" onClick={() => onDownloadAttachment?.(att)} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
+                      <FileText size={15} className="text-slate-500 flex-shrink-0" />
+                      <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
+                      <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')}</span>
+                    </button>
+                  ))}
+                  {!taskId && mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
+                    <button type="button" onClick={handleDownloadMergedDoc} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
+                      <FileText size={15} className="text-slate-500 flex-shrink-0" />
+                      <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
+                      <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>
+                    </button>
+                  )}
                 </div>
-                <div>
-                  <div className={lbl}>הערה פנימית</div>
-                  <textarea className="mt-1 h-16 w-full resize-none rounded-xl border border-gray-200 px-3 py-2 text-base outline-none focus:border-blue-400 transition-colors" value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} placeholder="הערה פנימית (לא תופיע במסמך)..." />
-                </div>
-              </div>
-            </section>
+              </section>
+            )}
           </div>
 
           {/* ══════ LEFT / SIDEBAR COLUMN (desktop ~38%) ══════ */}

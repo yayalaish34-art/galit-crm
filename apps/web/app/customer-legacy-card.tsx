@@ -243,28 +243,24 @@ const LEAD_SOURCE_OPTIONS: string[] = [
 const ISRAEL_CITIES: string[] = [
   'אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון',
   'באר שבע','בית שאן','בית שמש','בני ברק','בת ים',
-  'גבעת שמואל','גבעתיים',
+  'גבעת שמואל','גבעתיים','גדרה','גני תקווה',
   'דימונה',
-  'הוד השרון','הרצליה',
+  'הוד השרון','הרצליה','זכרון יעקב',
   'חדרה','חולון','חיפה',
   'טבריה','טירה','טירת כרמל',
-  'יבנה','יהוד-מונוסון','ירושלים',
-  'כפר יונה','כפר סבא','כרמיאל',
-  'לוד',
-  'מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מעלה אדומים','מעלות-תרשיחא',
+  'יבנה','יהוד-מונוסון','יקנעם','ירושלים',
+  'כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל',
+  'להבים','לוד',
+  'מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא',
   'נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה',
-  'עכו','עפולה','ערד',
-  'פתח תקווה',
+  'עכו','עומר','עפולה','ערד',
+  'פרדס חנה-כרכור','פתח תקווה',
   'צפת',
-  'קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה',
+  'קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין',
   'ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה',
-  'שדרות','שפרעם',
+  'שגב-שלום','שדרות','שהם','שפרעם',
   'תל אביב-יפו',
-  'גדרה','זכרון יעקב','פרדס חנה-כרכור','יקנעם','מגדל','קצרין','אבו גוש','כפר קרע','טמרה','סח\'נין',
-  'באקה אל-גרביה','ג\'סר א-זרקא','ג\'לג\'וליה','דאלית אל-כרמל','עספיא','ירכא','כסיפה','לקיה','רהט','שגב-שלום',
-  'גני תקווה','כוכב יאיר','מזכרת בתיה','מיתר','עומר','להבים','שהם','גבעת זאב','ביתר עילית',
-  'הרצליה','תל אביב','חיפה','ירושלים','באר שבע','נתניה','ראשון לציון','פתח תקווה','אשדוד','חולון',
-].filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a.localeCompare(b, 'he'));
+].sort((a, b) => a.localeCompare(b, 'he'));
 
 /*
  * Module-level Field component — avoids re-creating component identity
@@ -894,6 +890,7 @@ export function CustomerLegacyCard({
   onBack,
   showCustomerQuotesTab = false,
   customerQuotesRefreshKey = 0,
+  initialLowerTab,
 }: {
   customer: CustomerCardCustomer;
   full: CustomerFull | null;
@@ -923,6 +920,8 @@ export function CustomerLegacyCard({
   showCustomerQuotesTab?: boolean;
   /** Incremented by the parent after a quote is saved — forces refetch of GET /quotes?customerId=… */
   customerQuotesRefreshKey?: number;
+  /** Initial lower tab to show (defaults to 'contacts'). Resets when customer.id changes. */
+  initialLowerTab?: LowerTabKey;
 }) {
   console.log('CUSTOMER LEGACY CARD RUNTIME MARKER', customer?.id);
   /** true while we're creating a brand-new customer (POST). Flips to false after first save. */
@@ -932,7 +931,14 @@ export function CustomerLegacyCard({
     setIsNewMode(isNew);
   }, [isNew]);
   const [mode, setMode] = useState<'view' | 'edit'>('edit');
-  const [activeLowerTab, setActiveLowerTab] = useState<LowerTabKey>('contacts');
+  const [activeLowerTab, setActiveLowerTab] = useState<LowerTabKey>(initialLowerTab ?? 'contacts');
+  const prevCustomerIdForTabRef = useRef(customer?.id);
+  useEffect(() => {
+    if (customer?.id !== prevCustomerIdForTabRef.current) {
+      prevCustomerIdForTabRef.current = customer?.id;
+      setActiveLowerTab(initialLowerTab ?? 'contacts');
+    }
+  }, [customer?.id, initialLowerTab]);
   const [customerQuotes, setCustomerQuotes] = useState<CustomerQuoteListRow[]>([]);
   const [customerQuotesLoading, setCustomerQuotesLoading] = useState(false);
   const [customerQuotesError, setCustomerQuotesError] = useState('');
@@ -1726,10 +1732,15 @@ export function CustomerLegacyCard({
     return () => document.removeEventListener('mousedown', handler);
   }, [cityOpen]);
 
-  /* Fix 5: when type becomes PRIVATE and no contacts exist, auto-populate first contact from top fields */
-  const prevTypeRef = useRef(customerForm.type);
+  /* When the customer type is/becomes PRIVATE and has no contacts yet, auto-populate
+     a first contact from the top fields — covers both an existing PRIVATE customer
+     with no saved contacts (on load) and switching an existing customer to PRIVATE.
+     New-customer mode is handled separately by the AUTO_CONTACT_ID effect above. */
+  const prevTypeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (customerForm.type === 'PRIVATE' && prevTypeRef.current !== 'PRIVATE' && allContacts.length === 0) {
+    if (isNewMode) return;
+    const wasPrivate = prevTypeRef.current === 'PRIVATE';
+    if (customerForm.type === 'PRIVATE' && !wasPrivate && allContacts.length === 0) {
       setContactEdit({
         id: '',
         fullName: customerForm.name || '',
@@ -1746,7 +1757,7 @@ export function CustomerLegacyCard({
       setActiveLowerTab('contacts');
     }
     prevTypeRef.current = customerForm.type;
-  }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
+  }, [isNewMode, customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
 
   /* ══════════════════════════════════════════════════
      NEW-CUSTOMER MODAL — pixel-perfect match to screenshots
@@ -1903,7 +1914,15 @@ export function CustomerLegacyCard({
                 <select
                   className={cn(mInput, 'appearance-none cursor-pointer')}
                   value={customerForm.leadSource}
-                  onChange={(e) => setCustomerForm((p) => ({ ...p, leadSource: e.target.value }))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomerForm((p) => ({ ...p, leadSource: val }));
+                    setLeadSourceRows((rows) =>
+                      rows.length === 0
+                        ? (val ? [{ id: `ls-sync-${Date.now()}`, date: '', sourceName: val }] : rows)
+                        : rows.map((r, i) => i === 0 ? { ...r, sourceName: val } : r)
+                    );
+                  }}
                 >
                   <option value="">בחר מקור...</option>
                   {LEAD_SOURCE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -2204,7 +2223,15 @@ export function CustomerLegacyCard({
 
               <Field label="מקור הגעה">
                 {isEdit ? (
-                  <select className={inputClass} value={customerForm.leadSource} onChange={(e) => setCustomerForm((p) => ({ ...p, leadSource: e.target.value }))}>
+                  <select className={inputClass} value={customerForm.leadSource} onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomerForm((p) => ({ ...p, leadSource: val }));
+                    setLeadSourceRows((rows) =>
+                      rows.length === 0
+                        ? (val ? [{ id: `ls-sync-${Date.now()}`, date: '', sourceName: val }] : rows)
+                        : rows.map((r, i) => i === 0 ? { ...r, sourceName: val } : r)
+                    );
+                  }}>
                     <option value="">— בחר מקור —</option>
                     {LEAD_SOURCE_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                   </select>
@@ -2382,36 +2409,6 @@ export function CustomerLegacyCard({
           </div>
         )}
 
-        {/* ── Save button ── */}
-        {isEdit && (
-          <div className="mt-5 flex items-center justify-between pt-4" style={{ borderTop: '1px solid #E8EFF6' }}>
-            {legacyMsg && (
-              <span className={cn('text-sm font-medium', legacyMsg.includes('בהצלחה') ? 'text-green-700' : 'text-red-600')}>
-                {legacyMsg}
-              </span>
-            )}
-            <div className="flex items-center gap-3 mr-auto">
-              <button
-                type="button"
-                disabled={savingCustomer}
-                onClick={onSaveCustomerMain}
-                className="h-[44px] rounded-[18px] px-6 text-sm font-bold text-[#2E4A2D] disabled:opacity-50 transition-all"
-                style={{ background: 'linear-gradient(180deg, #BFE3B8 0%, #9FCF96 100%)', boxShadow: '0 8px 18px rgba(143,191,143,0.28)' }}
-              >
-                {savingCustomer ? 'שומר...' : 'שמור כרטיס לקוח'}
-              </button>
-              {!isNewMode && (
-                <button
-                  type="button"
-                  onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
-                  className="h-[44px] rounded-[16px] border border-[#D9E4EF] bg-[#EEF4F8] px-5 text-sm font-medium text-black hover:bg-[#E5ECF3] transition-all"
-                >
-                  {mode === 'edit' ? 'ביטול' : 'עריכה'}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* טאבים תחתונים */}

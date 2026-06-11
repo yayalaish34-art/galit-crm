@@ -15,7 +15,7 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
-import { SERVICE_CATEGORIES } from '../lib/service-categories';
+import { SERVICE_CATEGORIES, flattenAllServices } from '../lib/service-categories';
 import {
   Users,
   FileText,
@@ -40,9 +40,11 @@ import {
   Settings,
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   CalendarDays,
   CheckSquare,
   BarChart3,
+  LayoutDashboard,
   Loader2,
   Pencil,
   MessageCircle,
@@ -72,6 +74,7 @@ import {
   Sparkles,
   MessagesSquare,
   Upload,
+  Download,
   MoreHorizontal,
   Wind,
   Volume2,
@@ -143,6 +146,28 @@ const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
   PUBLIC: 'רשות / מוסד',
   PRIVATE: 'לקוח פרטי',
 };
+
+const REMINDER_QUICK_OPTIONS: { key: string; label: string; minutes?: number; days?: number }[] = [
+  { key: '15m', label: '15 דק׳', minutes: 15 },
+  { key: '1h', label: 'שעה', minutes: 60 },
+  { key: '4h', label: '4 שעות', minutes: 240 },
+  { key: '3d', label: '3 ימים', days: 3 },
+];
+
+function formatTimeAgo(dateStr?: string | null): string {
+  if (!dateStr) return '—';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'עכשיו';
+  if (mins < 60) return `לפני ${mins} דק'`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `לפני ${hrs} שע'`;
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return 'אתמול';
+  if (days < 7) return `לפני ${days} ימים`;
+  if (days < 30) return `לפני ${Math.floor(days / 7)} שבועות`;
+  return new Date(dateStr).toLocaleDateString('he-IL');
+}
 
 function buildCustomerTypeLabelMap(classifications: CustomerClassificationDto[]): Record<string, string> {
   const m: Record<string, string> = { ...PRESET_CUSTOMER_TYPE_LABELS };
@@ -560,6 +585,8 @@ type Task = {
   status?: string;
   type?: string;
   productName?: string | null;
+  currentStage?: number | null;
+  currentStageChangedAt?: string | null;
   createdAt?: string;
 };
 
@@ -5302,13 +5329,18 @@ const ISRAEL_CITIES_SORTED = [
   'אריאל',
   'אשדוד',
   'אשקלון',
+  'באר יעקב',
   'באר שבע',
   'בית שאן',
   'בית שמש',
+  'ביתר עילית',
   'בני ברק',
   'בת ים',
+  'גבעת אדה',
   'גבעת שמואל',
   'גבעתיים',
+  'גדרה',
+  'גן יבנה',
   'דימונה',
   'הוד השרון',
   'הרצליה',
@@ -5317,12 +5349,19 @@ const ISRAEL_CITIES_SORTED = [
   'חולון',
   'חיפה',
   'טבריה',
+  'טייבה',
+  'טירת כרמל',
+  'טמרה',
   'יבנה',
   'יהוד-מונוסון',
+  'יקנעם עילית',
   'ירוחם',
   'ירושלים',
   'כפר יונה',
+  'כפר יסיף',
   'כפר סבא',
+  'כפר קאסם',
+  'כפר ורדים',
   'כרמיאל',
   'לוד',
   'מגדל העמק',
@@ -5331,6 +5370,7 @@ const ISRAEL_CITIES_SORTED = [
   'מעלה אדומים',
   'מעלות-תרשיחא',
   'נהריה',
+  'נוף הגליל',
   'נס ציונה',
   'נצרת',
   'נשר',
@@ -5340,8 +5380,11 @@ const ISRAEL_CITIES_SORTED = [
   'עומר',
   'עפולה',
   'ערד',
+  'פרדס חנה-כרכור',
   'פתח תקווה',
   'צפת',
+  'קלנסווה',
+  'קציר-חריש',
   'קרית אונו',
   'קרית אתא',
   'קרית ביאליק',
@@ -5350,12 +5393,17 @@ const ISRAEL_CITIES_SORTED = [
   'קרית מוצקין',
   'קרית מלאכי',
   'קרית שמונה',
+  'ראמה',
+  'ראש העין',
   'ראשון לציון',
+  'רהט',
   'רחובות',
   'רמלה',
   'רמת גן',
   'רמת השרון',
   'שדרות',
+  'שפרעם',
+  'שלומי',
   'תל אביב-יפו',
 ].sort((a, b) => a.localeCompare(b, 'he'));
 
@@ -5363,19 +5411,24 @@ function CitySearchInput({
   value,
   onChange,
   inputClassName,
+  cities,
+  icon,
 }: {
   value: string;
   onChange: (v: string) => void;
   inputClassName?: string;
+  cities?: string[];
+  icon?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cityList = cities || ISRAEL_CITIES_SORTED;
 
   const filtered = useMemo(() => {
     const q = value.trim();
-    if (!q) return ISRAEL_CITIES_SORTED.slice(0, 18);
-    return ISRAEL_CITIES_SORTED.filter((c) => c.includes(q)).slice(0, 28);
-  }, [value]);
+    if (!q) return cityList.slice(0, 18);
+    return cityList.filter((c) => c.includes(q)).slice(0, 28);
+  }, [value, cityList]);
 
   const cancelBlur = () => {
     if (blurTimer.current) {
@@ -5403,6 +5456,7 @@ function CitySearchInput({
           blurTimer.current = setTimeout(() => setOpen(false), 180);
         }}
       />
+      {icon}
       {open && filtered.length > 0 && (
         <ul
           className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-2xl border border-slate-200 bg-white py-1 shadow-lg"
@@ -12491,6 +12545,10 @@ function TasksPage({
   onReloadLeads,
   pendingExpandTaskId,
   onExpandHandled,
+  customerClassifications: extCustomerClassifications,
+  onNavigate,
+  onNewCustomer,
+  onSearchCustomer,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
@@ -12511,6 +12569,10 @@ function TasksPage({
   onReloadLeads?: () => void | Promise<void>;
   pendingExpandTaskId?: string | null;
   onExpandHandled?: () => void;
+  customerClassifications?: CustomerClassificationDto[];
+  onNavigate?: (target: string) => void;
+  onNewCustomer?: () => void;
+  onSearchCustomer?: () => void;
 }) {
   /* ── state ── */
   const [open, setOpen] = useState(false);
@@ -12578,6 +12640,10 @@ function TasksPage({
   }, [extExpandedTaskId, pendingExpandTaskId]);
   /* ── Open category in פנייה block (click-based, no hover) ── */
   const [openCategoryId, setOpenCategoryId] = useState<string | null>(null);
+  /* ── Open parent-service group within a category (drill-down level 2) ── */
+  const [openSubServiceId, setOpenSubServiceId] = useState<string | null>(null);
+  /* ── Expand "עוד שירותים" section in service selector ── */
+  const [showMoreCategories, setShowMoreCategories] = useState<boolean>(false);
   /* ── AI sales coach data per task ── */
   const [aiCoach, setAiCoach] = useState<Record<string, {
     loading: boolean;
@@ -12588,24 +12654,72 @@ function TasksPage({
   }>>({});
   /* ── מאמן המכירות: האם להציג את כל ההתנגדויות (ברירת מחדל: רק שתיים ראשונות + כפתור הרחבה) ── */
   const [expandedObjections, setExpandedObjections] = useState<Record<string, boolean>>({});
+  /* ── מסמכים מצורפים למשימה (למשל קובץ הצעת מחיר ממוזג) ── */
+  const [taskAttachments, setTaskAttachments] = useState<Record<string, { id: string; fileName: string; mimeType: string; createdAt: string }[]>>({});
+  const [attachmentDownloading, setAttachmentDownloading] = useState<Record<string, boolean>>({});
+  const loadAttachmentsIfNeeded = (taskId: string) => {
+    if (taskAttachments[taskId]) return;
+    setTaskAttachments((prev) => ({ ...prev, [taskId]: [] })); /* placeholder so we don't refetch */
+    apiFetch(apiUrl(`/tasks/${taskId}/attachments`), { authUser: currentUser })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list) => setTaskAttachments((prev) => ({ ...prev, [taskId]: Array.isArray(list) ? list : [] })))
+      .catch(() => {});
+  };
+  const downloadTaskAttachment = async (taskId: string, att: { id: string; fileName: string }) => {
+    setAttachmentDownloading((prev) => ({ ...prev, [att.id]: true }));
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${att.id}`), { authUser: currentUser });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = att.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (e) {
+      console.error('Failed to download attachment:', e);
+    } finally {
+      setAttachmentDownloading((prev) => { const n = { ...prev }; delete n[att.id]; return n; });
+    }
+  };
   /* ── שלב הפולואפ: תזמון תזכורת + שיתוף/העברה לעובד אחר ── */
-  const [followupDays, setFollowupDays] = useState<Record<string, number>>({});
   const [followupAssignee, setFollowupAssignee] = useState<Record<string, string>>({});
   const [followupBusy, setFollowupBusy] = useState<Record<string, boolean>>({});
-  const scheduleFollowup = async (taskId: string, days: number) => {
+  const [followupSuccess, setFollowupSuccess] = useState<Record<string, string>>({});
+  const [followupReturnArrow, setFollowupReturnArrow] = useState<Record<string, boolean>>({});
+  const [followupManualOpen, setFollowupManualOpen] = useState<Record<string, boolean>>({});
+  const [followupManualValue, setFollowupManualValue] = useState<Record<string, string>>({});
+  const [copiedPhrase, setCopiedPhrase] = useState<string | null>(null);
+  const clearFollowupSuccess = (taskId: string) =>
+    window.setTimeout(() => setFollowupSuccess((p) => { const n = { ...p }; delete n[taskId]; return n; }), 3000);
+  const scheduleFollowupAt = async (taskId: string, dueDate: Date) => {
     setFollowupBusy((p) => ({ ...p, [taskId]: true }));
     try {
-      const d = new Date();
-      d.setDate(d.getDate() + days);
-      d.setHours(9, 0, 0, 0);
       await apiFetch(apiUrl(`/tasks/${taskId}`), {
         method: 'PATCH',
         authUser: currentUser,
-        body: JSON.stringify({ dueDate: d.toISOString(), priority: 'HIGH' }),
+        body: JSON.stringify({ dueDate: dueDate.toISOString(), priority: 'HIGH' }),
       });
       await onReloadTasks?.();
+      setFollowupSuccess((p) => ({ ...p, [taskId]: 'schedule' }));
+      clearFollowupSuccess(taskId);
+      setFollowupReturnArrow((p) => ({ ...p, [taskId]: true }));
+      window.setTimeout(() => setFollowupReturnArrow((p) => { const n = { ...p }; delete n[taskId]; return n; }), 1800);
     } catch { /* silent */ }
     setFollowupBusy((p) => ({ ...p, [taskId]: false }));
+  };
+  const scheduleFollowup = async (taskId: string, days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(9, 0, 0, 0);
+    await scheduleFollowupAt(taskId, d);
+  };
+  const scheduleFollowupMinutes = async (taskId: string, minutes: number) => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + minutes);
+    await scheduleFollowupAt(taskId, d);
   };
   const transferTaskToEmployee = async (taskId: string, newOwnerId: string) => {
     setFollowupBusy((p) => ({ ...p, [taskId]: true }));
@@ -12617,6 +12731,8 @@ function TasksPage({
       });
       if (expandedTaskId === taskId) setExpandedTaskId(null);
       await onReloadTasks?.();
+      setFollowupSuccess((p) => ({ ...p, [taskId]: 'transfer' }));
+      clearFollowupSuccess(taskId);
     } catch { /* silent */ }
     setFollowupBusy((p) => ({ ...p, [taskId]: false }));
   };
@@ -12638,11 +12754,64 @@ function TasksPage({
         }),
       });
       await onReloadTasks?.();
+      setFollowupSuccess((p) => ({ ...p, [task.id]: 'share' }));
+      clearFollowupSuccess(task.id);
     } catch { /* silent */ }
     setFollowupBusy((p) => ({ ...p, [task.id]: false }));
   };
   /* ── Call intake form data per task ── */
   const [callFormData, setCallFormData] = useState<Record<string, Record<string, string>>>({});
+  type TaskContact = { id: string; fullName: string; phone: string; email: string; roleTitle: string; isPrimary: boolean };
+  const [taskContactsMap, setTaskContactsMap] = useState<Record<string, TaskContact[]>>({});
+  const taskContactsCounter = useRef<Record<string, number>>({});
+  // ── Stage persistence: sync manualStepOverride ↔ DB ──
+  const dbStagesRef = useRef<Record<string, number>>({});
+  const dbStagesInitRef = useRef(false);
+  // Initialize dbStagesRef from DB values once tasks first load (non-empty)
+  useEffect(() => {
+    if (dbStagesInitRef.current || tasks.length === 0) return;
+    const db: Record<string, number> = {};
+    for (const t of tasks) {
+      if (t.currentStage != null) db[t.id] = t.currentStage;
+    }
+    dbStagesRef.current = db;
+    dbStagesInitRef.current = true;
+  }, [tasks]);
+  // Persist user-triggered stage changes to DB
+  useEffect(() => {
+    if (!dbStagesInitRef.current) return;
+    for (const [taskId, step] of Object.entries(manualStepOverride)) {
+      if ((dbStagesRef.current[taskId] ?? -1) !== step) {
+        dbStagesRef.current[taskId] = step;
+        apiFetch(apiUrl(`/tasks/${taskId}`), {
+          method: 'PATCH',
+          authUser: currentUser,
+          body: JSON.stringify({ currentStage: step, currentStageChangedAt: new Date().toISOString() }),
+        }).catch(() => {});
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualStepOverride]);
+
+  const coachInitializedRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const t of tasks) {
+      if (!t.productName || coachInitializedRef.current.has(t.id)) continue;
+      const catId = SERVICE_CATEGORIES.find((c) =>
+        c.services.some((s) => s.id === t.productName || s.sku === t.productName || s.subServices?.some((sub) => sub.id === t.productName || sub.sku === t.productName))
+      )?.id ?? null;
+      if (!catId) continue;
+      coachInitializedRef.current.add(t.id);
+      const allSvcs = flattenAllServices();
+      const svc = allSvcs.find((s: any) => s.sku === t.productName || s.id === t.productName);
+      const svcName: string = svc?.name || t.productName;
+      const custName = t.leadName || t.customerName || 'הלקוח';
+      const fixedServiceInfo = getServiceInfoForCategory(catId);
+      const coachCopy = buildSalesCoachCopy(catId, svcName, custName);
+      setAiCoach((prev) => ({ ...prev, [t.id]: { loading: false, objections: coachCopy.objections, closings: coachCopy.closings, serviceInfo: fixedServiceInfo, serviceName: svcName } }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks]);
   const getCallForm = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any) => {
     if (callFormData[taskId]) return callFormData[taskId];
     // Initialize from existing data — prefer the lead, then fall back to the linked customer card
@@ -12663,6 +12832,11 @@ function TasksPage({
       inquiryDate: new Date().toISOString().slice(0, 10),
       customerType: linkedLead?.company ? 'עסקי' : (linkedCustomer ? (linkedCustomer.type === 'PRIVATE' ? 'פרטי' : 'עסקי') : 'פרטי'),
       serviceType: linkedLead?.serviceType || linkedLead?.service || '',
+      contactName: linkedCustomer?.contactName || '',
+      assignedUserId: task.ownerId || currentUser?.id || '',
+      internalNotes: '',
+      companyRegNumber: '',
+      notes: linkedCustomer?.notes || linkedLead?.notes || '',
       serviceSubType: linkedLead?.serviceSubType || '',
       serviceSubTypeOther: '',
       needDescription: '',
@@ -13121,12 +13295,40 @@ function TasksPage({
   const serviceNameFromProductId = (productName?: string | null, fallbackLead?: { service?: string | null; serviceType?: string | null } | null): string | undefined => {
     if (productName) {
       for (const cat of SERVICE_CATEGORIES) {
-        const svc = cat.services.find((s) => s.id === productName);
-        if (svc) return svc.name;
+        for (const svc of cat.services) {
+          if (svc.id === productName) return svc.name;
+          if (svc.subServices) {
+            const sub = svc.subServices.find((s) => s.id === productName);
+            if (sub) return sub.name;
+          }
+        }
       }
     }
     const raw = fallbackLead?.service || fallbackLead?.serviceType;
     return raw ? String(raw) : undefined;
+  };
+
+  /* ── resolve the price/unit of the service chosen back in שלב התאמת הפתרון ── */
+  const servicePriceFromProductId = (productName?: string | null): { price: number; unit?: string } | undefined => {
+    if (!productName) return undefined;
+    for (const cat of SERVICE_CATEGORIES) {
+      for (const svc of cat.services) {
+        if (svc.id === productName) return svc.price !== undefined ? { price: svc.price, unit: svc.unit } : undefined;
+        if (svc.subServices) {
+          const sub = svc.subServices.find((s) => s.id === productName);
+          if (sub) return sub.price !== undefined ? { price: sub.price, unit: sub.unit } : undefined;
+        }
+      }
+    }
+    return undefined;
+  };
+
+  /* ── format a service price for display (₪X,XXX or "כלול" when 0) ── */
+  const formatServicePrice = (productName?: string | null): string | null => {
+    const info = servicePriceFromProductId(productName);
+    if (!info) return null;
+    const amount = info.price === 0 ? 'כלול' : `₪${info.price.toLocaleString('he-IL')}`;
+    return info.unit ? `${amount} ${info.unit}` : amount;
   };
 
   /* ── actions ── */
@@ -13209,7 +13411,9 @@ function TasksPage({
 
   const [postponeDropdownId, setPostponeDropdownId] = useState<string | null>(null);
   /* ── coach action popups: "חזרה מאוחרת יותר" (snooze to high priority) / "העברה למומחה" (transfer to colleague) ── */
-  const [coachActionPopup, setCoachActionPopup] = useState<{ taskId: string; type: 'snooze' | 'transfer' } | null>(null);
+  const [coachActionPopup, setCoachActionPopup] = useState<{ taskId: string; type: 'snooze' | 'transfer' | 'lost' } | null>(null);
+  const [coachSnoozeCustom, setCoachSnoozeCustom] = useState<Record<string, string>>({});
+  const [coachLostOtherReason, setCoachLostOtherReason] = useState<Record<string, string>>({});
 
   /* ── snooze task: set future dueDate & advance to next task ── */
   const [snoozeCustomTaskId, setSnoozeCustomTaskId] = useState<string | null>(null);
@@ -13334,26 +13538,50 @@ function TasksPage({
     </div>
   );
 
-  /* ── "חזרה מאוחרת יותר" — popup מהמאמן: מחזיר את המשימה לעדיפות גבוהה בעוד X ימים ── */
+  /* ── "חזרה מאוחרת יותר" — popup מהמאמן: מחזיר את המשימה לעדיפות גבוהה בעוד X זמן ── */
   const renderCoachSnoozePopup = (taskId: string) => {
-    const busy = !!followupBusy[taskId];
+    const customVal = coachSnoozeCustom[taskId] || '';
     return (
-      <div className="absolute top-full mt-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[260px]" style={{ direction: 'rtl' }}>
-        <div className="text-sm font-extrabold text-slate-800 mb-1">להחזיר את המשימה אליך מאוחר יותר?</div>
-        <div className="text-[12px] text-slate-400 font-medium mb-3">המשימה תיפתח מחדש בעדיפות גבוהה במועד שתבחרו</div>
-        <div className="flex flex-wrap gap-2">
-          {[1, 3, 7, 14].map((d) => (
+      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+        <button type="button" onClick={() => setCoachActionPopup(null)} className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" style={{ width: 24, height: 24 }}>
+          <X className="h-4 w-4" />
+        </button>
+        <div className="text-sm font-extrabold text-slate-800 mb-3">חזרה מאוחרת יותר</div>
+        <div className="flex flex-col gap-2">
+          {[
+            { label: '15 דק', min: 15 },
+            { label: 'שעה', min: 60 },
+            { label: '4 שעות', min: 240 },
+            { label: 'יום', min: 1440 },
+            { label: '3 ימים', min: 4320 },
+          ].map((opt) => (
             <button
-              key={d}
-              disabled={busy}
-              onClick={() => { void scheduleFollowup(taskId, d); setCoachActionPopup(null); }}
-              className="rounded-xl px-4 py-2 text-sm font-bold border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors disabled:opacity-40"
+              key={opt.min}
+              onClick={() => { snoozeByMinutes(taskId, opt.min); setCoachActionPopup(null); setExpandedTaskId(null); onNavigate?.('tasks'); }}
+              className="rounded-xl px-4 py-2 text-sm font-bold border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors text-right"
             >
-              בעוד {d} {d === 1 ? 'יום' : 'ימים'}
+              {opt.label}
             </button>
           ))}
+          <div className="border-t border-slate-100 my-1" />
+          <div className="flex gap-2 items-center">
+            <input
+              type="number"
+              min={1}
+              placeholder="דקות ידנית"
+              className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-center font-bold focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={customVal}
+              onChange={(e) => setCoachSnoozeCustom((p) => ({ ...p, [taskId]: e.target.value }))}
+            />
+            <button
+              disabled={!customVal || Number(customVal) < 1}
+              onClick={() => { if (customVal && Number(customVal) >= 1) { snoozeByMinutes(taskId, Number(customVal)); setCoachActionPopup(null); setExpandedTaskId(null); onNavigate?.('tasks'); } }}
+              className="rounded-xl px-3 py-2 text-sm font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              אישור
+            </button>
+          </div>
         </div>
-        {busy && <div className="mt-3 flex items-center gap-2 text-[12px] text-slate-400 font-semibold"><Loader2 className="h-3.5 w-3.5 animate-spin" />מעדכן...</div>}
       </div>
     );
   };
@@ -13363,7 +13591,10 @@ function TasksPage({
     const busy = !!followupBusy[task.id];
     const otherUsers = users.filter((u) => u.id !== task.ownerId && u.status === 'פעיל');
     return (
-      <div className="absolute top-full mt-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[280px]" style={{ direction: 'rtl' }}>
+      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[280px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+        <button type="button" onClick={() => setCoachActionPopup(null)} className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" style={{ width: 24, height: 24 }}>
+          <X className="h-4 w-4" />
+        </button>
         <div className="text-sm font-extrabold text-slate-800 mb-1">להעביר את המשימה לעובד אחר?</div>
         <div className="text-[12px] text-slate-400 font-medium mb-3">המשימה תעבור לטיפולו הבלעדי של העובד שתבחרו</div>
         {otherUsers.length ? (
@@ -13387,6 +13618,121 @@ function TasksPage({
           <p className="text-[13px] text-slate-400 font-semibold">אין כרגע עובדים פעילים נוספים להעברה</p>
         )}
         {busy && <div className="mt-3 flex items-center gap-2 text-[12px] text-slate-400 font-semibold"><Loader2 className="h-3.5 w-3.5 animate-spin" />מעביר...</div>}
+      </div>
+    );
+  };
+
+  /* ── "לא רלוונטי" — popup: בחר סיבה ואז סגור את הליד ── */
+  const renderCoachLostPopup = (task: Task) => {
+    const reasons = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'אחר'];
+    const showOtherInput = coachActionPopup?.taskId === task.id && coachActionPopup.type === 'lost' && coachLostOtherReason[task.id] !== undefined;
+    const otherVal = coachLostOtherReason[task.id] || '';
+    return (
+      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+        <button
+          type="button"
+          onClick={() => { setCoachActionPopup(null); setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; }); }}
+          className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+          style={{ width: 24, height: 24 }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+        <div className="text-sm font-extrabold text-slate-800 mb-1">למה הליד לא רלוונטי?</div>
+        <div className="text-[12px] text-slate-400 font-medium mb-3">הליד יסומן כסגור</div>
+        {!showOtherInput ? (
+          <div className="flex flex-col gap-2">
+            {reasons.map((reason) => (
+              <button
+                key={reason}
+                onClick={async () => {
+                  if (reason === 'אחר') {
+                    setCoachLostOtherReason((p) => ({ ...p, [task.id]: '' }));
+                    return;
+                  }
+                  setCoachActionPopup(null);
+                  await updateTaskField(task.id, { status: 'CANCELLED', description: reason });
+                }}
+                className="rounded-xl px-4 py-2 text-sm font-bold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition-colors text-right"
+              >
+                {reason}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <textarea
+              autoFocus
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-300"
+              placeholder="כתוב את הסיבה..."
+              value={otherVal}
+              onChange={(e) => setCoachLostOtherReason((p) => ({ ...p, [task.id]: e.target.value }))}
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; })}
+                className="flex-1 rounded-xl px-4 py-2 text-sm font-bold border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 transition-colors"
+              >
+                חזרה
+              </button>
+              <button
+                disabled={!otherVal.trim()}
+                onClick={async () => {
+                  const reasonText = otherVal.trim();
+                  setCoachActionPopup(null);
+                  setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; });
+                  await updateTaskField(task.id, { status: 'CANCELLED', description: reasonText });
+                }}
+                className="flex-1 rounded-xl px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                אישור
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /* ── reusable action row: 3 universal buttons + 1 stage-specific "advance" button ── */
+  const renderStageActionBar = (
+    t: Task,
+    primary: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean },
+  ) => {
+    const universalActions = [
+      { key: 'transfer' as const, label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" /> },
+      { key: 'snooze' as const, label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" /> },
+      { key: 'lost' as const, label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" /> },
+    ];
+    return (
+      <div className="flex justify-center items-start gap-8 py-1">
+        <div className="relative flex flex-col items-center">
+          <button onClick={primary.onClick} disabled={primary.disabled} className="flex flex-col items-center gap-1.5 cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed">
+            <div className="flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl" style={{ background: primary.circleBg, width: '56px', height: '56px' }}>
+              {primary.icon}
+            </div>
+            <span className="font-extrabold text-center leading-tight text-slate-600" style={{ fontSize: '13px' }}>{primary.label}</span>
+          </button>
+        </div>
+        {universalActions.map((act) => {
+          const isPopupOpen = coachActionPopup?.taskId === t.id && coachActionPopup.type === act.key;
+          const handleClick = () => {
+            setCoachActionPopup((prev) => (prev?.taskId === t.id && prev.type === act.key ? null : { taskId: t.id, type: act.key }));
+          };
+          return (
+            <div key={act.key} className="relative flex flex-col items-center">
+              <button onClick={handleClick} className="flex flex-col items-center gap-1.5 cursor-pointer group">
+                <div className={`flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl ${isPopupOpen ? `${act.activeRing} scale-110 shadow-xl` : ''}`} style={{ background: act.circleBg, width: '56px', height: '56px' }}>
+                  {act.icon}
+                </div>
+                <span className={`font-extrabold text-center leading-tight ${isPopupOpen ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '13px' }}>{act.label}</span>
+              </button>
+              {isPopupOpen && act.key === 'snooze' && renderCoachSnoozePopup(t.id)}
+              {isPopupOpen && act.key === 'transfer' && renderCoachTransferPopup(t)}
+              {isPopupOpen && act.key === 'lost' && renderCoachLostPopup(t)}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -13462,7 +13808,7 @@ function TasksPage({
   /* ── progress steps for arrow ── */
   /* ── Business workflow stages (arrows) ── */
   const progressSteps = [
-    { key: 'customerCard', label: 'כרטיס לקוח', color: '#0ea5e9' },
+    { key: 'customerCard', label: 'פתיחת פנייה', color: '#0ea5e9' },
     { key: 'inquiry',      label: 'התאמת הפתרון',   color: '#3b82f6' },
     { key: 'call',         label: 'שיחת מכירה',   color: '#6366f1' },
     { key: 'followup',     label: 'פולואפ', color: '#f97316' },
@@ -13698,6 +14044,7 @@ function TasksPage({
                       t,
                       t.customerId ? customers.find((c) => c.id === t.customerId) : null
                     );
+                    loadAttachmentsIfNeeded(t.id);
                     /* UI-only: hide the דוח/גבייה/משוב/נסגר stages from the visual progress bar.
                        progressSteps / detectStep / currentStep stay untouched — origIdx preserves
                        the real stage index so colors, "current" highlighting and the smart header
@@ -13706,8 +14053,14 @@ function TasksPage({
                     const visibleProgressSteps = progressSteps
                       .map((step, origIdx) => ({ ...step, origIdx }))
                       .filter((step) => !hiddenStageKeysUI.includes(step.key));
-                    const totalSteps = visibleProgressSteps.length;
-                    const stepsReversed = [...visibleProgressSteps].reverse();
+                    const QUOTE_STEP_IDX = 99; // display-only stage — not in progressSteps/detectStep
+                    const visibleProgressStepsExtended = [
+                      ...visibleProgressSteps.slice(0, 3), // 0=כרטיס לקוח, 1=התאמת הפתרון, 2=שיחת מכירה
+                      { key: 'quotePrep', label: 'הצעת מחיר', color: '#f59e0b', origIdx: QUOTE_STEP_IDX },
+                      ...visibleProgressSteps.slice(3), // 3=פולואפ, 4=תיאום, 5=ביצוע
+                    ];
+                    const totalSteps = visibleProgressStepsExtended.length;
+                    const stepsReversed = [...visibleProgressStepsExtended].reverse();
                     const isPostponeOpen = postponeDropdownId === t.id;
                     /* info fields — only show if value exists */
                     const infoFields = [
@@ -13725,101 +14078,242 @@ function TasksPage({
                       { icon: Hash, color: '#6366f1', bg: '#eef2ff', label: 'סוג לקוח / חברה', value: t.leadCompany },
                     ].filter((f) => f.value && f.value !== '-');
                     /* Hoist to outer scope so bottom bar + all sections can access them */
-                    const stageKey = progressSteps[currentStep]?.key || 'inquiry';
-                    const stageColor = progressSteps[currentStep]?.color || '#3b82f6';
+                    const stageKey = currentStep === QUOTE_STEP_IDX ? 'quotePrep' : (progressSteps[currentStep]?.key || 'inquiry');
+                    const stageColor = currentStep === QUOTE_STEP_IDX ? '#f59e0b' : (progressSteps[currentStep]?.color || '#3b82f6');
                     const linkedLeadForHeader = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
                       <td colSpan={10} className="p-0">
-                        <div className="fixed inset-0 z-[100] flex flex-col" style={{ background: '#f1f5f9' }}>
+                        <div className="fixed inset-0 z-[9999] flex flex-col overflow-hidden" style={{ background: '#f1f5f9' }}>
 
-                          {/* ──── TOP NAV BAR (h-11) ──── */}
-                          <div className="flex-shrink-0 bg-white border-b border-slate-200 flex items-center px-4 gap-2" style={{ height: 44, direction: 'rtl' }}>
-                            <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors flex-shrink-0">
-                              <ArrowRight className="h-3.5 w-3.5" />
-                              חזרה
-                            </button>
-                            <span className="text-slate-200 select-none flex-shrink-0">|</span>
-                            <span className="text-[11px] font-extrabold text-slate-400 uppercase tracking-wider flex-shrink-0">ניהול משימה</span>
-                            <span className="text-slate-200 select-none flex-shrink-0">·</span>
-                            <span className="text-sm font-bold text-slate-800 truncate flex-1 min-w-0">{t.title || 'לא צוין'}</span>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              {t.owner && <span className="hidden md:block text-xs text-slate-500">{t.owner}</span>}
-                              {t.due && <span className="hidden md:block text-xs text-slate-400">{t.due}</span>}
+                          {/* ──── COMPACT NAV HEADER ──── */}
+                          <div className="flex-shrink-0 border-b border-slate-300" style={{ height: 44, direction: 'rtl', display: 'flex', alignItems: 'stretch', background: '#e2e8f0', padding: '0 6px', gap: 2 }}>
+                            {([
+                              { label: 'לקוח',   icon: <UserCircle2 className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNavigate?.('customers'); } },
+                              { label: 'חדש',    icon: <Plus        className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNewCustomer?.(); } },
+                              { label: 'חפש',    icon: <Search      className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => onSearchCustomer?.() },
+                              { label: 'משימות', icon: <CalendarDays className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNavigate?.('tasks'); } },
+                              { label: 'דשבורד', icon: <LayoutDashboard className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNavigate?.('dashboard'); } },
+                            ] as const).map((btn) => (
+                              <button key={btn.label} type="button" onClick={btn.onClick}
+                                className="flex flex-col items-center justify-center gap-0.5 px-2 rounded-sm border border-transparent text-[10px] font-semibold text-slate-700 hover:border-slate-400/40 hover:bg-white/50 transition"
+                                style={{ minWidth: 46 }}>
+                                {btn.icon}
+                                <span>{btn.label}</span>
+                              </button>
+                            ))}
+                            <div className="self-stretch shrink-0" style={{ width: 1, background: '#cbd5e1', margin: '6px 4px' }} />
+                            <div className="flex-1 flex items-center min-w-0 px-2">
+                              <span className="text-[12px] font-semibold text-slate-600 truncate">{t.title || 'לא צוין'}</span>
+                            </div>
+                            <div className="flex items-center gap-2 pr-1">
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
-                              <button className="rounded-full p-1 text-slate-400 hover:bg-slate-100" onClick={() => setExpandedTaskId(null)}>
-                                <X className="h-3.5 w-3.5" />
+                              <button
+                                type="button"
+                                onClick={() => setExpandedTaskId(null)}
+                                className="flex items-center justify-center gap-1 rounded-lg font-bold text-white transition hover:brightness-110 active:scale-95"
+                                style={{ background: '#ef4444', height: 30, minWidth: 58, fontSize: 12, paddingInline: 10 }}
+                              >
+                                <X className="h-4 w-4" />
+                                סגור
                               </button>
                             </div>
                           </div>
 
-                          {/* ──── PROGRESS STRIP (h-9) ──── */}
-                          <div className="flex-shrink-0 bg-white border-b border-slate-200" style={{ height: 36 }}>
-                            <div className="flex h-full" style={{ direction: 'ltr', gap: 0 }}>
-                              {stepsReversed.map((step, vi) => {
-                                const origIdx = step.origIdx;
-                                const isActive = origIdx <= currentStep;
-                                const isCurrent = origIdx === currentStep;
-                                const isLeftmost = vi === 0;
-                                const isRightmost = vi === totalSteps - 1;
-                                const bg = isActive ? step.color : '#e2e8f0';
-                                const textColor = isActive ? '#fff' : '#94a3b8';
-                                const h = 36; const tip = 15;
-                                let pts: string;
-                                if (isRightmost) { pts = `200,0 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
-                                else if (isLeftmost) { pts = `200,0 ${200-tip},${h/2} 200,${h} 0,${h} 0,0`; }
-                                else { pts = `200,0 ${200-tip},${h/2} 200,${h} ${tip},${h} 0,${h/2} ${tip},0`; }
-                                return (
-                                  <div key={step.key} className="flex-1 min-w-0" style={{ position: 'relative', cursor: 'pointer' }} onClick={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }))}>
-                                    <svg viewBox={`0 0 200 ${h}`} preserveAspectRatio="none" className="w-full h-full" style={{ display: 'block' }}>
-                                      <polygon points={pts} fill={bg} style={{ transition: 'fill 0.2s' }} />
-                                    </svg>
-                                    <div className="absolute inset-0 flex items-center justify-center gap-0.5" style={{ pointerEvents: 'none' }}>
-                                      {isCurrent && isActive && <CheckCircle2 className="h-3 w-3 flex-shrink-0" style={{ color: textColor }} />}
-                                      <span style={{ color: textColor, fontWeight: isCurrent ? 700 : 500, fontSize: 11, fontFamily: 'var(--font-sans)' }}>{step.label}</span>
+                          {/* ──── STEPPER (50px) ──── */}
+                          <div className="flex-shrink-0 bg-white border-b border-slate-100" style={{ height: 50, direction: 'rtl', display: 'flex', alignItems: 'center', padding: '0 20px', overflow: 'hidden' }}>
+                            {visibleProgressStepsExtended.map((step, vi) => {
+                              const origIdx = step.origIdx;
+                              const currentStepPos = visibleProgressStepsExtended.findIndex((s) => s.origIdx === currentStep);
+                              const isComplete = currentStepPos >= 0 ? vi < currentStepPos : origIdx < currentStep;
+                              const isCurrent = origIdx === currentStep;
+                              const stepNum = vi + 1;
+                              const isLast = vi === visibleProgressStepsExtended.length - 1;
+                              return (
+                                <React.Fragment key={step.key}>
+                                  <button
+                                    type="button"
+                                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, cursor: 'pointer', flexShrink: 0, background: 'none', border: 'none', padding: '0 4px' }}
+                                    onClick={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }))}
+                                  >
+                                    <div style={{
+                                      width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                                      background: isComplete ? '#3b82f6' : isCurrent ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : '#e9eef5',
+                                      boxShadow: isCurrent ? '0 0 0 3px rgba(59,130,246,0.2), 0 2px 6px rgba(37,99,235,0.25)' : 'none',
+                                      transition: 'all 0.2s',
+                                    }}>
+                                      {isComplete
+                                        ? <CheckCircle2 style={{ width: 13, height: 13, color: '#fff' }} />
+                                        : <span style={{ fontSize: 10, fontWeight: 800, color: isCurrent ? '#fff' : '#94a3b8', fontFamily: 'var(--font-sans)' }}>{stepNum}</span>
+                                      }
                                     </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                    <span style={{ fontSize: 9, fontWeight: isCurrent ? 700 : 500, color: isCurrent ? '#2563eb' : isComplete ? '#3b82f6' : '#94a3b8', whiteSpace: 'nowrap' }}>{step.label}</span>
+                                  </button>
+                                  {!isLast && (
+                                    <div style={{ flex: 1, height: 2, background: isComplete ? 'linear-gradient(90deg, #3b82f6, #60a5fa)' : '#e2e8f0', margin: '0 4px', marginBottom: 14, minWidth: 6, borderRadius: 2, flexShrink: 1 }} />
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
                           </div>
 
-                          {/* ──── MAIN PANEL: sidebar + content ──── */}
+                          {/* ──── HERO BANNER (full-width, flex-shrink-0) ──── */}
+                          {(() => {
+                            const bnContact = t.leadName || t.customerName || 'הלקוח';
+                            const bnCompany = t.leadCompany || t.customerName || '';
+                            const bnProject = t.projectName || '';
+                            const bnTopic = bnProject || taskTypeLabel(t.type || 'GENERAL');
+                            const bnFromCo = bnCompany && bnCompany !== bnContact && !/^(פרטי|לקוח פרטי|לקוחה פרטית)$/i.test(bnCompany) ? ` מ${bnCompany}` : '';
+                            const bnAgent = t.owner || currentUser.name || 'הנציג';
+                            const bnTexts: Record<string, string> = {
+                              customerCard: `פתיחת כרטיס לקוח עבור ${bnContact}${bnFromCo}`,
+                              inquiry: `התאמת השירות הנכון ל${bnContact}${bnFromCo}`,
+                              call: `${bnAgent} — חזרה ל${bnContact}${bnFromCo} ל${bnTopic}`,
+                              quotePrep: `הכנת הצעת מחיר עבור ${bnContact}${bnFromCo}`,
+                              followup: `פולו-אפ ל${bnContact}${bnFromCo} — ווידוא הבנת ההצעה`,
+                              coordination: `תיאום הגעה עם ${bnContact}${bnFromCo}`,
+                              execution: `ביצוע ${bnTopic} עבור ${bnContact}${bnFromCo}`,
+                              report: `שליחת דוח ל${bnContact}${bnFromCo}`,
+                              collection: `גבייה מ${bnContact}${bnFromCo}`,
+                              feedback: `קבלת משוב מ${bnContact}${bnFromCo}`,
+                              closed: `הטיפול ב${bnContact}${bnFromCo} הושלם`,
+                            };
+                            const bnText = bnTexts[stageKey] || t.title;
+                            return (
+                              <div className="flex-shrink-0 flex items-center gap-4 px-5" style={{ height: 68, background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, direction: 'rtl' }}>
+                                <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                                  <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>שלב נוכחי · {currentStep === QUOTE_STEP_IDX ? 'הצעת מחיר' : (progressSteps[currentStep]?.label || '')}</div>
+                                  <div style={{ fontSize: 17, fontWeight: 800, color: '#fff', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bnText}</div>
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', marginTop: 3, borderRadius: 20, padding: '1px 8px', fontSize: 10, fontWeight: 700, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
+                                </div>
+                                {contactPhone && stageKey !== 'closed' && (
+                                  <a href={`tel:${phoneClean(contactPhone)}`} style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 12, padding: '8px 16px', background: '#fff', color: stageColor, fontWeight: 700, fontSize: 12, textDecoration: 'none', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.12)', whiteSpace: 'nowrap' }}>
+                                    <PhoneCall style={{ width: 14, height: 14 }} />
+                                    התקשר עכשיו
+                                  </a>
+                                )}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '4px 10px', flexShrink: 0 }}>
+                                  <UserCircle2 style={{ width: 16, height: 16, color: 'rgba(255,255,255,0.8)' }} />
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{bnAgent}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* ──── 3-COL PANEL: right sidebar + center + left notes ──── */}
                           <div className="flex-1 flex min-h-0 overflow-hidden" style={{ direction: 'rtl' }}>
 
-                            {/* SIDEBAR: תקציר לקוח (right in RTL) */}
-                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 200, direction: 'rtl', padding: '12px' }}>
-                              <div className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest mb-2">תקציר לקוח</div>
-                              <div className="space-y-1.5">
-                                {([
-                                  { label: 'שם', value: t.customerName || t.leadName },
-                                  { label: 'טלפון', value: contactPhone },
-                                  { label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
-                                  { label: 'סטטוס', value: taskStatusLabel(s) },
-                                  { label: 'אחראי', value: t.owner },
-                                  { label: 'תאריך יעד', value: t.due },
-                                  { label: 'הערות', value: t.description },
-                                ] as {label:string;value:string|null|undefined}[]).map((f) => (
-                                  <div key={f.label} className="flex justify-between items-baseline gap-1 min-w-0">
-                                    <span className="text-[10px] font-semibold text-slate-400 flex-shrink-0">{f.label}</span>
-                                    <span className="text-[11px] font-bold text-slate-700 truncate">{f.value || 'לא צוין'}</span>
-                                  </div>
-                                ))}
+                            {/* RIGHT SIDEBAR: פרטי לקוח */}
+                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 196, direction: 'rtl', padding: 12 }}>
+                              <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {(() => {
+                                  type SidebarField = { icon: React.ElementType; label: string; value: string | null | undefined };
+                                  const baseFields: SidebarField[] = [
+                                    { icon: UserCircle2, label: 'שם', value: t.customerName || t.leadName },
+                                    { icon: Phone, label: 'טלפון', value: contactPhone },
+                                    { icon: Mail, label: 'אימייל', value: linkedLeadForHeader?.email || t.leadEmail || '' },
+                                    { icon: Building2, label: 'חברה', value: t.leadCompany || linkedLeadForHeader?.company || '' },
+                                    { icon: MapPin, label: 'עיר', value: linkedLeadForHeader?.city || '' },
+                                    { icon: Home, label: 'כתובת', value: linkedLeadForHeader?.address || '' },
+                                    { icon: ClipboardList, label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
+                                    { icon: CheckCircle2, label: 'סטטוס', value: taskStatusLabel(s) },
+                                    { icon: UserCircle2, label: 'אחראי', value: t.owner },
+                                  ];
+
+                                  /* ── Step-accumulated details: each stage that's been reached adds context for the next ── */
+                                  const progressFields: SidebarField[] = [];
+                                  if (currentStep >= 1 && (t.projectName || t.productName)) {
+                                    progressFields.push({ icon: Target, label: 'צורך / פרויקט', value: t.projectName || t.productName });
+                                  }
+                                  if (currentStep >= 3) {
+                                    const latestQuote = (allQuotes || [])
+                                      .filter((q) => (t.customerId && q.customerId === t.customerId) || (t.leadId && q.leadId === t.leadId))
+                                      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
+                                    if (latestQuote) {
+                                      const amt = latestQuote.totalAmount ?? latestQuote.amount;
+                                      const statusHe: Record<string, string> = { DRAFT: 'טיוטה', SENT: 'נשלחה', APPROVED: 'אושרה', REJECTED: 'נדחתה', EXPIRED: 'פג תוקף' };
+                                      progressFields.push({
+                                        icon: FileText,
+                                        label: 'הצעת מחיר אחרונה',
+                                        value: `${formatCurrencyILS(amt || 0)} · ${statusHe[latestQuote.status] || latestQuote.status}`,
+                                      });
+                                    }
+                                    if (t.dueDate) {
+                                      progressFields.push({
+                                        icon: Calendar,
+                                        label: 'פולואפ הבא',
+                                        value: new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+                                      });
+                                    }
+                                  }
+
+                                  const renderField = (f: SidebarField) => {
+                                    if (!f.value) return null;
+                                    const FIcon = f.icon;
+                                    return (
+                                      <div key={f.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
+                                        <FIcon style={{ width: 13, height: 13, color: '#94a3b8', flexShrink: 0, marginTop: 1 }} />
+                                        <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontSize: 8, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{f.label}</div>
+                                          <div style={{ fontSize: 11, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.value}</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  };
+
+                                  return (
+                                    <>
+                                      {baseFields.map(renderField)}
+                                      {progressFields.some((f) => !!f.value) && (
+                                        <div style={{ marginTop: 4, paddingTop: 8, borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                          {progressFields.map(renderField)}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                               </div>
+                              {(taskAttachments[t.id] || []).length > 0 && (
+                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <Paperclip style={{ width: 11, height: 11 }} />
+                                    מסמכים מצורפים
+                                  </div>
+                                  {(taskAttachments[t.id] || []).map((att) => (
+                                    <button
+                                      key={att.id}
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); downloadTaskAttachment(t.id, att); }}
+                                      disabled={!!attachmentDownloading[att.id]}
+                                      title={att.fileName}
+                                      style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '6px 8px', fontSize: 11, fontWeight: 600, color: '#334155', cursor: 'pointer', textAlign: 'right' }}
+                                    >
+                                      <FileText style={{ width: 12, height: 12, color: '#2563eb', flexShrink: 0 }} />
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{att.fileName}</span>
+                                      {attachmentDownloading[att.id] ? (
+                                        <Loader2 style={{ width: 12, height: 12, flexShrink: 0 }} className="animate-spin" />
+                                      ) : (
+                                        <Download style={{ width: 12, height: 12, color: '#94a3b8', flexShrink: 0 }} />
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               {contactPhone && (
-                                <div className="mt-3 pt-3 border-t border-slate-100 flex flex-col gap-1.5">
-                                  <a href={`tel:${phoneClean(contactPhone)}`} className="flex items-center justify-center gap-1.5 rounded-lg bg-blue-50 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition-colors">
-                                    <PhoneCall className="h-3 w-3" />התקשר
+                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                  <a href={`tel:${phoneClean(contactPhone)}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, background: '#eff6ff', padding: 8, fontSize: 11, fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}>
+                                    <PhoneCall style={{ width: 12, height: 12 }} />התקשר
                                   </a>
-                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 rounded-lg bg-green-50 py-1.5 text-[11px] font-bold text-green-700 hover:bg-green-100 transition-colors">
-                                    <MessageCircle className="h-3 w-3" />WhatsApp
+                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, background: '#f0fdf4', padding: 8, fontSize: 11, fontWeight: 700, color: '#16a34a', textDecoration: 'none' }}>
+                                    <MessageCircle style={{ width: 12, height: 12 }} />WhatsApp
                                   </a>
                                 </div>
                               )}
                             </div>
 
-                            {/* CONTENT AREA (left in RTL) */}
-                            <div className="flex-1 min-w-0 overflow-y-auto flex flex-col gap-2.5 p-3">
+                            {/* ──── CENTER: stage content ──── */}
+                            <div className={`flex-1 min-w-0 flex flex-col gap-3 p-3 ${currentStep === 2 ? 'overflow-hidden' : 'overflow-y-auto'}`} style={{ background: '#f8fafc' }}>
 
                           {/* ──── HERO ACTION CARD ──── */}
                           {(() => {
@@ -13881,7 +14375,7 @@ function TasksPage({
                               const cta = stageCTA[stageKey] || stageCTA.inquiry;
                               const CTAIcon = cta.icon;
                               return (
-                            <div className="rounded-xl flex items-center gap-4" style={{ background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, padding: '14px 18px', direction: 'rtl', flexShrink: 0 }}>
+                            <div style={{ display: 'none' }}>
                               <div className="flex-1 min-w-0">
                                 <div className="text-[9px] font-bold uppercase tracking-wider mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>פעולות להמשך</div>
                                 <div className="font-bold text-white leading-snug" style={{ fontSize: 16, fontFamily: 'var(--font-sans)', marginBottom: 6 }}>{smartSentence}</div>
@@ -13910,9 +14404,15 @@ function TasksPage({
                             const fd = callFormData[t.id] || getCallForm(t.id, linkedLead, t, linkedCustomerForCard);
                             const setF = (field: string, value: string) => updateCallForm(t.id, field, value);
                             const derivedFullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
-                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim());
+                            const ccContacts0 = taskContactsMap[t.id] || [];
+                            const isPrivate0 = (fd.customerType || '') === 'PRIVATE' || (fd.customerType || '') === 'לקוח פרטי';
+                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && (isPrivate0 || ccContacts0.length > 0));
                             const saveCustomerCard = async () => {
                               const saveFullName = derivedFullName;
+                              // Auto-add self-contact for PRIVATE with no explicit contacts
+                              if (isPrivate0 && ccContacts0.length === 0) {
+                                setTaskContactsMap((p) => ({ ...p, [t.id]: [{ id: '__auto_private__', fullName: saveFullName, phone: fd.phone || '', email: fd.email || '', roleTitle: '', isPrimary: true }] }));
+                              }
                               if (t.leadId) {
                                 try {
                                   await apiFetch(apiUrl(`/leads/${t.leadId}`), {
@@ -13927,77 +14427,194 @@ function TasksPage({
                                       email: fd.email,
                                       city: fd.city,
                                       address: fd.address,
+                                      source: fd.leadSource || undefined,
+                                      serviceType: fd.serviceType || undefined,
+                                      notes: fd.notes || fd.internalNotes || undefined,
                                     }),
                                   });
                                   await onReloadLeads?.();
                                 } catch { /* silent */ }
                               }
+                              if (fd.assignedUserId && fd.assignedUserId !== t.ownerId) {
+                                try {
+                                  await apiFetch(apiUrl(`/tasks/${t.id}`), {
+                                    method: 'PATCH',
+                                    authUser: currentUser,
+                                    body: JSON.stringify({ ownerId: fd.assignedUserId }),
+                                  });
+                                } catch { /* silent */ }
+                              }
                               setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
+                              setOpenCategoryId('__none__');
                               await onReloadTasks?.();
                             };
-                            const ccInp = 'w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 pr-12 text-lg font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent placeholder:text-slate-300 placeholder:font-normal';
-                            const ccLbl = 'block text-sm font-semibold text-slate-600 mb-1.5';
+                            // ── classifications & helpers ──
+                            const ccClassifications = (() => {
+                              const src = extCustomerClassifications && extCustomerClassifications.length > 0
+                                ? extCustomerClassifications
+                                : [
+                                    { id: 'preset-company', code: 'COMPANY', labelHe: 'חברה / קבלן', sortOrder: 0 },
+                                    { id: 'preset-public',  code: 'PUBLIC',  labelHe: 'רשות / מוסד',  sortOrder: 1 },
+                                    { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי',    sortOrder: 2 },
+                                  ];
+                              return [...src].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+                            })();
+                            const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'אחר'];
+                            const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
+                            const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100';
+                            const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100';
+                            const ccSel = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100 appearance-none cursor-pointer';
+                            const ccTxt = 'w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 py-3 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100 resize-none';
+                            const ccLbl = 'block text-[13px] font-semibold text-black mb-1.5';
+                            // contacts state helpers (use early-computed values for consistency)
+                            const ccContacts = ccContacts0;
+                            const isPrivate = isPrivate0;
+                            const addContact = () => {
+                              taskContactsCounter.current[t.id] = (taskContactsCounter.current[t.id] || 0) + 1;
+                              const newId = `pending-${t.id}-${taskContactsCounter.current[t.id]}`;
+                              setTaskContactsMap((p) => ({ ...p, [t.id]: [...(p[t.id] || []), { id: newId, fullName: '', phone: '', email: '', roleTitle: '', isPrimary: (p[t.id] || []).length === 0 }] }));
+                            };
+                            const removeContact = (cid: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).filter((c) => c.id !== cid) }));
+                            const updateContact = (cid: string, field: string, val: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).map((c) => c.id === cid ? { ...c, [field]: val } : c) }));
+                            // Auto-show blank contact row for non-private when none exist yet
+                            if (!isPrivate && ccContacts.length === 0 && !taskContactsCounter.current[t.id]) {
+                              taskContactsCounter.current[t.id] = 1;
+                              setTaskContactsMap((p) => (!p[t.id] || p[t.id].length === 0) ? { ...p, [t.id]: [{ id: `pending-${t.id}-1`, fullName: '', phone: '', email: '', roleTitle: '', isPrimary: true }] } : p);
+                            }
                             return (
-                              <div className="px-8 pb-6" style={{ direction: 'rtl' }}>
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-                                  <div className="flex items-center gap-3 mb-1">
-                                    <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#e0f2fe' }}>
-                                      <UserCircle2 className="h-6 w-6 text-sky-600" />
+                              <div className="px-8 pb-6" style={{ direction: 'rtl', background: '#F8FAFC' }}>
+                                {/* ── header ── */}
+                                <div className="flex items-center gap-3.5 py-5">
+                                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: '#1E293B' }}>
+                                    <UserCircle2 className="h-6 w-6 text-slate-400" />
+                                  </div>
+                                  <div>
+                                    <div className="text-[17px] font-bold text-slate-800">{isExistingCustomer ? 'כרטיס לקוח' : 'פתיחת כרטיס לקוח חדש'}</div>
+                                    <div className="text-[12px] text-slate-400 mt-0.5">{isExistingCustomer ? 'עדכון פרטי הלקוח לפני המשך התהליך' : 'כרטיס לקוח מהיר'}</div>
+                                  </div>
+                                </div>
+                                <div className="rounded-3xl overflow-hidden bg-white" style={{ boxShadow: '0 8px 28px rgba(0,0,0,0.1)' }}>
+                                  <div className="px-7 py-5 space-y-4" style={{ background: '#F8FAFC' }}>
+                                    {/* Row 1: שם מלא + ח.פ/ת.ז */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className={ccLbl}>שם מלא *</label>
+                                        <input className={ccInp} placeholder="לדוגמה: ענבל כהן" value={fd.fullName} onChange={(e) => { const v = e.target.value; setF('fullName', v); setF('firstName', v.split(' ')[0] || ''); setF('lastName', v.split(' ').slice(1).join(' ')); }} />
+                                      </div>
+                                      <div>
+                                        <label className={ccLbl}>ח.פ / ת.ז</label>
+                                        <input className={ccInp} placeholder="מספר מזהה" value={fd.companyRegNumber || ''} onChange={(e) => setF('companyRegNumber', e.target.value)} />
+                                      </div>
                                     </div>
+                                    {/* Row 2: נייד + אימייל */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className={ccLbl}>נייד ליצירת קשר *</label>
+                                        <div className="relative">
+                                          <input className={ccInpIcon} placeholder="050-0000000" value={fd.phone} onChange={(e) => setF('phone', e.target.value)} />
+                                          <Phone className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300" />
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className={ccLbl}>כתובת אימייל</label>
+                                        <div className="relative">
+                                          <input className={ccInpIcon} type="email" dir="ltr" style={{ textAlign: 'left' }} placeholder="name@example.com" value={fd.email} onChange={(e) => setF('email', e.target.value)} />
+                                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300" />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Row 3: סיווג + מקור הגעה */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className={ccLbl}>סיווג לקוח</label>
+                                        <select className={ccSel} value={fd.customerType || ''} onChange={(e) => setF('customerType', e.target.value)}>
+                                          <option value="">בחר סיווג...</option>
+                                          {ccClassifications.map((cl: any) => <option key={cl.id} value={cl.code}>{cl.labelHe}</option>)}
+                                        </select>
+                                      </div>
+                                      <div>
+                                        <label className={ccLbl}>מקור הגעה</label>
+                                        <select className={ccSel} value={fd.leadSource || ''} onChange={(e) => setF('leadSource', e.target.value)}>
+                                          <option value="">בחר מקור...</option>
+                                          {CC_LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                      </div>
+                                    </div>
+                                    {/* Row 4: עיר + כתובת */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className={ccLbl}>עיר</label>
+                                        <CitySearchInput
+                                          value={fd.city}
+                                          onChange={(v) => setF('city', v)}
+                                          inputClassName={ccInpIcon}
+                                          cities={CC_ISRAEL_CITIES}
+                                          icon={<MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300 pointer-events-none" />}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className={ccLbl}>כתובת מלאה</label>
+                                        <div className="relative">
+                                          <input className={ccInpIcon} placeholder="רחוב, מספר בית..." value={fd.address} onChange={(e) => setF('address', e.target.value)} />
+                                          <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300" />
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* Row 6: הערות לטיפול */}
                                     <div>
-                                      <div className="text-base font-extrabold text-slate-800">{isExistingCustomer ? 'כרטיס לקוח' : 'פתיחת כרטיס לקוח חדש'}</div>
-                                      <div className="text-[13px] text-slate-400 font-medium">{isExistingCustomer ? 'אלו הפרטים שכבר נקלטו על הלקוח — אפשר לעדכן לפני שממשיכים' : 'מלאו את פרטי הלקוח כדי לפתוח עבורו כרטיס ולהמשיך בתהליך'}</div>
+                                      <label className={ccLbl}>הערות לטיפול</label>
+                                      <textarea className={ccTxt} rows={3} placeholder="פרטים נוספים שחשוב לדעת על הלקוח..." value={fd.notes || ''} onChange={(e) => setF('notes', e.target.value)} />
+                                    </div>
+                                    {/* ── אנשי קשר ── */}
+                                    <div className="pt-2">
+                                      <div className="mb-3">
+                                        <span className="text-[14px] font-bold text-black">אנשי קשר</span>
+                                      </div>
+                                      {/* Auto-contact notice for PRIVATE */}
+                                      {isPrivate && ccContacts.length === 0 && (
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 font-medium mb-3 flex items-center gap-2">
+                                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                          כלקוח פרטי, הפרטים שהוזנו למעלה (שם, טלפון, אימייל) יצורפו אוטומטית כאיש הקשר הראשי.
+                                        </div>
+                                      )}
+                                      {ccContacts.map((pc, idx) => (
+                                        <div key={pc.id} className="rounded-2xl border border-[#E2E8F0] bg-white p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
+                                          <div className="flex items-center justify-between mb-3">
+                                            <span className="text-[13px] font-semibold text-black">
+                                              איש קשר {idx + 1}
+                                              {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-emerald-600">(ראשי)</span>}
+                                            </span>
+                                            <button type="button" onClick={() => removeContact(pc.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 transition-all">
+                                              <X className="h-4 w-4" />
+                                            </button>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                              <label className="block text-[12px] font-semibold text-black mb-1">שם איש קשר</label>
+                                              <input className={ccInp + ' !h-[42px] text-[14px]'} value={pc.fullName} onChange={(e) => updateContact(pc.id, 'fullName', e.target.value)} placeholder="שם מלא" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-[12px] font-semibold text-black mb-1">טלפון</label>
+                                              <input className={ccInp + ' !h-[42px] text-[14px]'} value={pc.phone} onChange={(e) => updateContact(pc.id, 'phone', e.target.value)} placeholder="050-0000000" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-[12px] font-semibold text-black mb-1">אימייל</label>
+                                              <input className={ccInp + ' !h-[42px] text-[14px]'} type="email" dir="ltr" style={{ textAlign: 'left' }} value={pc.email} onChange={(e) => updateContact(pc.id, 'email', e.target.value)} placeholder="name@example.com" />
+                                            </div>
+                                            <div>
+                                              <label className="block text-[12px] font-semibold text-black mb-1">תפקיד</label>
+                                              <input className={ccInp + ' !h-[42px] text-[14px]'} value={pc.roleTitle} onChange={(e) => updateContact(pc.id, 'roleTitle', e.target.value)} placeholder="תפקיד בחברה" />
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
                                     </div>
                                   </div>
-                                  <div className="mt-6 grid grid-cols-2 gap-5">
-                                    <div>
-                                      <label className={ccLbl}>שם מלא</label>
-                                      <div className="relative">
-                                        <UserCircle2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="שם הלקוח" value={fd.fullName} onChange={(e) => { const v = e.target.value; setF('fullName', v); setF('firstName', v.split(' ')[0] || ''); setF('lastName', v.split(' ').slice(1).join(' ')); }} />
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className={ccLbl}>חברה (אם רלוונטי)</label>
-                                      <div className="relative">
-                                        <Building2 className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="שם החברה" value={fd.company} onChange={(e) => setF('company', e.target.value)} />
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className={ccLbl}>טלפון</label>
-                                      <div className="relative">
-                                        <Phone className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="050-0000000" value={fd.phone} onChange={(e) => setF('phone', e.target.value)} />
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className={ccLbl}>אימייל</label>
-                                      <div className="relative">
-                                        <Mail className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="email@example.com" value={fd.email} onChange={(e) => setF('email', e.target.value)} />
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className={ccLbl}>עיר</label>
-                                      <div className="relative">
-                                        <MapPin className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="עיר" value={fd.city} onChange={(e) => setF('city', e.target.value)} />
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <label className={ccLbl}>כתובת</label>
-                                      <div className="relative">
-                                        <MapPin className="absolute right-4 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-300" />
-                                        <input className={ccInp} placeholder="רחוב ומספר" value={fd.address} onChange={(e) => setF('address', e.target.value)} />
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="mt-6 flex items-center justify-between">
-                                    <span className="text-[13px] font-medium text-slate-400">{canSaveCard ? 'הפרטים נראים תקינים — אפשר להמשיך' : 'יש למלא לפחות שם וטלפון כדי להמשיך'}</span>
-                                    <button onClick={saveCustomerCard} disabled={!canSaveCard} className="flex items-center gap-2 rounded-2xl px-7 py-3.5 font-bold text-white text-base transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100" style={{ background: '#0ea5e9' }}>
+                                  {/* ── footer ── */}
+                                  <div className="flex items-center gap-3 px-7 py-4 bg-white" style={{ borderTop: '1px solid #E8EFF6' }}>
+                                    <button onClick={saveCustomerCard} disabled={!canSaveCard} className="flex-1 h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
-                                      שמירה והמשך לשלב הבא
+                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : (!isPrivate && ccContacts.length === 0) ? 'יש להוסיף איש קשר' : 'שמור והמשך לשלב הבא'}
                                     </button>
                                   </div>
                                 </div>
@@ -14038,6 +14655,15 @@ function TasksPage({
                                     </div>
                                   </div>
                                 )}
+                                <div className="mt-5">
+                                  {renderStageActionBar(t, {
+                                    label: 'מעבר להתאמת הפתרון',
+                                    circleBg: '#3b82f6',
+                                    icon: <ArrowUpRight className="h-7 w-7 text-white" />,
+                                    onClick: saveCustomerCard,
+                                    disabled: !canSaveCard,
+                                  })}
+                                </div>
                               </div>
                             );
                           })() : currentStep === 1 ? (() => {
@@ -14077,19 +14703,29 @@ function TasksPage({
                               {/* ═══ BLOCK 0: סוג פנייה וקטגוריה ═══ */}
                               {(() => {
                                 const catMeta: Record<string, { color: string; light: string; Icon: React.ElementType }> = {
-                                  water:     { color: '#3b82f6', light: '#eff6ff', Icon: Waves },
-                                  odor:      { color: '#8b5cf6', light: '#f5f3ff', Icon: Wind },
-                                  soil:      { color: '#16a34a', light: '#f0fdf4', Icon: Shield },
-                                  asbestos:  { color: '#f59e0b', light: '#fffbeb', Icon: AlertTriangle },
-                                  air:       { color: '#06b6d4', light: '#ecfeff', Icon: Sparkles },
-                                  radon:     { color: '#ef4444', light: '#fef2f2', Icon: Radio },
-                                  noise:     { color: '#f97316', light: '#fff7ed', Icon: Volume2 },
-                                  radiation: { color: '#7c3aed', light: '#faf5ff', Icon: Zap },
+                                  water:                { color: '#3b82f6', light: '#eff6ff', Icon: Waves },
+                                  odor:                 { color: '#8b5cf6', light: '#f5f3ff', Icon: Wind },
+                                  soil:                 { color: '#16a34a', light: '#f0fdf4', Icon: Shield },
+                                  asbestos:             { color: '#f59e0b', light: '#fffbeb', Icon: AlertTriangle },
+                                  air:                  { color: '#06b6d4', light: '#ecfeff', Icon: Sparkles },
+                                  radon:                { color: '#ef4444', light: '#fef2f2', Icon: Radio },
+                                  noise:                { color: '#f97316', light: '#fff7ed', Icon: Volume2 },
+                                  radiation:            { color: '#7c3aed', light: '#faf5ff', Icon: Zap },
+                                  'green-building':     { color: '#15803d', light: '#f0fdf4', Icon: Leaf },
+                                  'occupational-health':{ color: '#0284c7', light: '#f0f9ff', Icon: Users },
+                                  'environmental-opinion':{ color: '#0f766e', light: '#f0fdfa', Icon: FileText },
+                                  general:              { color: '#64748b', light: '#f8fafc', Icon: ClipboardList },
+                                  thermal:              { color: '#dc2626', light: '#fef2f2', Icon: Flame },
                                 };
                                 const derivedCatId = t.productName
-                                  ? SERVICE_CATEGORIES.find((c) => c.services.some((s) => s.id === t.productName))?.id ?? null
+                                  ? SERVICE_CATEGORIES.find((c) =>
+                                      c.services.some(
+                                        (s) => s.id === t.productName || s.subServices?.some((sub) => sub.id === t.productName),
+                                      ),
+                                    )?.id ?? null
                                   : null;
-                                const activeCatId = openCategoryId ?? derivedCatId;
+                                // '__none__' = user explicitly clicked back to grid; ignore derivedCatId
+                                const activeCatId = openCategoryId === '__none__' ? null : (openCategoryId ?? derivedCatId);
                                 const activeCat = SERVICE_CATEGORIES.find((c) => c.id === activeCatId);
                                 return (
                                   <div className="px-8 pb-6">
@@ -14098,89 +14734,239 @@ function TasksPage({
                                         /* ── category selected: replace the categories grid with that category's services ── */
                                         const meta = catMeta[activeCat.id] ?? { color: '#3b82f6', light: '#eff6ff', Icon: ClipboardList };
                                         const CatIcon = meta.Icon;
+                                        // openSubServiceId is explicit-only — no derived fallback (avoids back-button breaking)
+                                        const activeSubGroup = activeCat.services.find((s) => s.id === openSubServiceId && !!s.subServices);
+                                        const selectService = (svcId: string, svcName: string) => {
+                                          updateTaskField(t.id, { productName: svcId, status: 'IN_PROGRESS' });
+                                          setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }));
+                                          const custObj = customers.find((c) => c.id === t.customerId);
+                                          const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
+                                          const fixedServiceInfo = getServiceInfoForCategory(activeCat.id);
+                                          const coachCopy = buildSalesCoachCopy(activeCat.id, svcName, custName);
+                                          setAiCoach((prev) => ({ ...prev, [t.id]: { loading: false, objections: coachCopy.objections, closings: coachCopy.closings, serviceInfo: fixedServiceInfo, serviceName: svcName } }));
+                                        };
                                         return (
                                           <>
-                                            <div className="flex items-center gap-3 mb-5">
-                                              <button type="button" onClick={() => setOpenCategoryId(null)} className="flex items-center justify-center rounded-full h-9 w-9 flex-shrink-0 transition hover:bg-slate-100">
-                                                <ArrowRight className="h-5 w-5 text-slate-500" />
+                                            {/* ── Category header bar ── */}
+                                            <div
+                                              className="flex items-center gap-3 mb-4 -mx-6 -mt-6 px-4 py-3 rounded-t-2xl"
+                                              style={{ background: `linear-gradient(135deg, ${meta.color}18 0%, ${meta.color}08 100%)`, borderBottom: `1px solid ${meta.color}22` }}
+                                            >
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  if (activeSubGroup) {
+                                                    setOpenSubServiceId(null); // back to service list within category
+                                                  } else {
+                                                    setOpenCategoryId('__none__'); // back to category grid, suppress derivedCatId
+                                                    setOpenSubServiceId(null);
+                                                  }
+                                                }}
+                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12px] font-semibold transition-all hover:scale-105 active:scale-95"
+                                                style={{ background: `${meta.color}22`, color: meta.color }}
+                                              >
+                                                <ArrowRight className="h-3.5 w-3.5" />
+                                                חזרה
                                               </button>
-                                              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: meta.color }}>
-                                                <CatIcon className="h-5 w-5 text-white" />
+                                              <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm" style={{ background: meta.color }}>
+                                                <CatIcon className="h-4 w-4 text-white" />
                                               </div>
                                               <div>
-                                                <div className="text-sm font-bold text-slate-700">{activeCat.name}</div>
-                                                <div className="text-[12px] text-slate-400 font-medium">בחרו את השירות המתאים</div>
+                                                <div className="text-[13px] font-bold" style={{ color: meta.color }}>
+                                                  {activeSubGroup ? activeSubGroup.name : activeCat.name}
+                                                </div>
+                                                <div className="text-[11px] text-slate-400 font-medium">
+                                                  {activeSubGroup ? activeCat.name : 'בחרו שירות'}
+                                                </div>
                                               </div>
                                             </div>
-                                            <div className="flex flex-col gap-2">
-                                              {activeCat.services.map((svc) => {
-                                                const isSelected = t.productName === svc.id;
-                                                return (
-                                                  <button
-                                                    key={svc.id}
-                                                    type="button"
-                                                    onClick={() => {
-                                                      updateTaskField(t.id, { productName: svc.id, status: 'IN_PROGRESS' });
-                                                      setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }));
-                                                      // Trigger AI sales coach immediately
-                                                      const custObj = customers.find((c) => c.id === t.customerId);
-                                                      const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
-                                                      /* כל תוכן מאמן המכירות הוא קבוע (hard-coded) לפי קטגוריית השירות — עם {firstName}/{serviceName}
-                                                         שמוחלפים בזמן אמת, כך שזה מרגיש אישי בכל פעם, בלי תלות ב-AI ובלי המתנה לטעינה */
-                                                      const fixedServiceInfo = getServiceInfoForCategory(activeCat.id);
-                                                      const coachCopy = buildSalesCoachCopy(activeCat.id, svc.name, custName);
-                                                      setAiCoach((prev) => ({ ...prev, [t.id]: { loading: false, objections: coachCopy.objections, closings: coachCopy.closings, serviceInfo: fixedServiceInfo, serviceName: svc.name } }));
-                                                    }}
-                                                    className="w-full text-right px-4 py-3 rounded-xl text-[13px] flex items-center gap-3 transition-all duration-150 font-medium"
-                                                    style={{
-                                                      background: isSelected ? meta.color : meta.light,
-                                                      color: isSelected ? '#fff' : '#334155',
-                                                      border: `1.5px solid ${isSelected ? meta.color : 'transparent'}`,
-                                                    }}
-                                                  >
-                                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: isSelected ? '#fff' : meta.color }} />
-                                                    {svc.name}
-                                                  </button>
-                                                );
-                                              })}
+                                            <div className="flex flex-col gap-1.5">
+                                              {activeSubGroup ? (
+                                                /* ── Level 3: sub-services of the active group ── */
+                                                activeSubGroup.subServices!.map((sub, idx) => {
+                                                  const isSelected = t.productName === sub.id;
+                                                  return (
+                                                    <button
+                                                      key={sub.id}
+                                                      type="button"
+                                                      onClick={() => selectService(sub.id, sub.name)}
+                                                      className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                      style={{
+                                                        background: isSelected ? `linear-gradient(135deg, ${meta.color} 0%, ${meta.color}dd 100%)` : `${meta.color}10`,
+                                                        color: isSelected ? '#fff' : '#334155',
+                                                        border: `1.5px solid ${isSelected ? meta.color : `${meta.color}28`}`,
+                                                        animationDelay: `${idx * 30}ms`,
+                                                      }}
+                                                    >
+                                                      <span className="flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center" style={{ background: isSelected ? 'rgba(255,255,255,0.25)' : meta.color }}>
+                                                        {isSelected
+                                                          ? <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                                                          : <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                                                        }
+                                                      </span>
+                                                      <span className="flex-1 text-right text-[12px]">{sub.name}</span>
+                                                      {sub.price !== undefined && (
+                                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: isSelected ? 'rgba(255,255,255,0.2)' : `${meta.color}18`, color: isSelected ? '#fff' : meta.color }}>
+                                                          {sub.price === 0 ? 'כלול' : `₪${sub.price.toLocaleString('he-IL')}`}
+                                                          {sub.unit ? ` ${sub.unit}` : ''}
+                                                        </span>
+                                                      )}
+                                                    </button>
+                                                  );
+                                                })
+                                              ) : (
+                                                /* ── Level 2: category services (parent groups + leaf items) ── */
+                                                activeCat.services.map((svc, idx) => {
+                                                  if (svc.subServices) {
+                                                    // Parent group → drill-down button
+                                                    return (
+                                                      <button
+                                                        key={svc.id}
+                                                        type="button"
+                                                        onClick={() => setOpenSubServiceId(svc.id)}
+                                                        className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-semibold hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                        style={{
+                                                          background: `${meta.color}12`,
+                                                          color: '#1e293b',
+                                                          border: `1.5px solid ${meta.color}30`,
+                                                        }}
+                                                      >
+                                                        <span className="flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center" style={{ background: meta.color }}>
+                                                          <FolderKanban className="h-3 w-3 text-white" />
+                                                        </span>
+                                                        <span className="flex-1 text-right">{svc.name}</span>
+                                                        <span className="text-[10px] font-normal opacity-60 flex-shrink-0">{svc.subServices.length} שירותים</span>
+                                                        <ChevronLeft className="h-3.5 w-3.5 flex-shrink-0 transition-transform group-hover:-translate-x-0.5" style={{ color: meta.color }} />
+                                                      </button>
+                                                    );
+                                                  }
+                                                  // Leaf service → select directly
+                                                  const isSelected = t.productName === svc.id;
+                                                  return (
+                                                    <button
+                                                      key={svc.id}
+                                                      type="button"
+                                                      onClick={() => selectService(svc.id, svc.name)}
+                                                      className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                      style={{
+                                                        background: isSelected ? `linear-gradient(135deg, ${meta.color} 0%, ${meta.color}dd 100%)` : `${meta.color}10`,
+                                                        color: isSelected ? '#fff' : '#334155',
+                                                        border: `1.5px solid ${isSelected ? meta.color : `${meta.color}28`}`,
+                                                      }}
+                                                    >
+                                                      <span className="flex-shrink-0 w-5 h-5 rounded-lg flex items-center justify-center" style={{ background: isSelected ? 'rgba(255,255,255,0.25)' : meta.color }}>
+                                                        {isSelected
+                                                          ? <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                                                          : <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                                                        }
+                                                      </span>
+                                                      <span className="flex-1 text-right">{svc.name}</span>
+                                                      {svc.price !== undefined && (
+                                                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: isSelected ? 'rgba(255,255,255,0.2)' : `${meta.color}18`, color: isSelected ? '#fff' : meta.color }}>
+                                                          {svc.price === 0 ? 'כלול' : `₪${svc.price.toLocaleString('he-IL')}`}
+                                                        </span>
+                                                      )}
+                                                    </button>
+                                                  );
+                                                })
+                                              )}
                                             </div>
                                           </>
                                         );
                                       })() : (
-                                        <>
-                                          <div className="text-sm font-bold text-slate-700 mb-5">על איזה שירות מדובר?</div>
-                                          {/* Category circles grid */}
-                                          <div className="grid grid-cols-4 gap-5">
-                                            {SERVICE_CATEGORIES.map((cat) => {
-                                              const meta = catMeta[cat.id] ?? { color: '#64748b', light: '#f8fafc', Icon: ClipboardList };
-                                              const CatIcon = meta.Icon;
-                                              return (
-                                                <button
-                                                  key={cat.id}
-                                                  type="button"
-                                                  onClick={() => setOpenCategoryId(cat.id)}
-                                                  className="flex flex-col items-center gap-2.5 transition-all"
+                                        (() => {
+                                          const EXTRA_CAT_IDS = ['general', 'occupational-health'];
+                                          const mainCats = SERVICE_CATEGORIES.filter((c) => !EXTRA_CAT_IDS.includes(c.id));
+                                          const extraCats = SERVICE_CATEGORIES.filter((c) => EXTRA_CAT_IDS.includes(c.id));
+                                          const catGradients: Record<string, string> = {
+                                            water:                  'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
+                                            odor:                   'linear-gradient(135deg,#8b5cf6 0%,#6d28d9 100%)',
+                                            soil:                   'linear-gradient(135deg,#22c55e 0%,#15803d 100%)',
+                                            asbestos:               'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)',
+                                            air:                    'linear-gradient(135deg,#06b6d4 0%,#0284c7 100%)',
+                                            radon:                  'linear-gradient(135deg,#ef4444 0%,#b91c1c 100%)',
+                                            noise:                  'linear-gradient(135deg,#f97316 0%,#c2410c 100%)',
+                                            radiation:              'linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%)',
+                                            'green-building':       'linear-gradient(135deg,#16a34a 0%,#14532d 100%)',
+                                            thermal:                'linear-gradient(135deg,#dc2626 0%,#f97316 100%)',
+                                            'environmental-opinion':'linear-gradient(135deg,#0f766e 0%,#134e4a 100%)',
+                                            general:                'linear-gradient(135deg,#64748b 0%,#334155 100%)',
+                                            'occupational-health':  'linear-gradient(135deg,#0284c7 0%,#0c4a6e 100%)',
+                                          };
+                                          const renderCatCard = (cat: typeof SERVICE_CATEGORIES[number]) => {
+                                            const meta = catMeta[cat.id] ?? { color: '#64748b', light: '#f8fafc', Icon: ClipboardList };
+                                            const CatIcon = meta.Icon;
+                                            const grad = catGradients[cat.id] ?? `linear-gradient(135deg,${meta.color} 0%,${meta.color} 100%)`;
+                                            return (
+                                              <button
+                                                key={cat.id}
+                                                type="button"
+                                                onClick={() => { setOpenCategoryId(cat.id); setOpenSubServiceId(null); }}
+                                                className="group flex flex-col items-center gap-2 p-3 rounded-2xl transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
+                                                style={{ background: '#fff', border: '1.5px solid #e2e8f0' }}
+                                              >
+                                                <div
+                                                  className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-all duration-200"
+                                                  style={{ background: grad }}
                                                 >
-                                                  <div
-                                                    className="w-16 h-16 rounded-full flex items-center justify-center transition-all duration-200"
-                                                    style={{ background: meta.light, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-                                                  >
-                                                    <CatIcon className="h-7 w-7" style={{ color: meta.color }} />
-                                                  </div>
-                                                  <span className="text-[12px] font-semibold text-center leading-tight" style={{ color: '#64748b' }}>
-                                                    {cat.name}
-                                                  </span>
-                                                </button>
-                                              );
-                                            })}
-                                          </div>
-                                        </>
+                                                  <CatIcon className="h-6 w-6 text-white" />
+                                                </div>
+                                                <span className="text-[11px] font-bold text-center leading-tight text-slate-600 group-hover:text-slate-800 transition-colors">
+                                                  {cat.name}
+                                                </span>
+                                              </button>
+                                            );
+                                          };
+                                          return (
+                                            <>
+                                              <div className="text-sm font-bold text-slate-700 mb-4">על איזה שירות מדובר?</div>
+                                              {/* Main categories grid */}
+                                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                                {mainCats.map(renderCatCard)}
+                                              </div>
+                                              {/* More services section */}
+                                              <button
+                                                type="button"
+                                                onClick={() => setShowMoreCategories((v) => !v)}
+                                                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-[12px] font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-all duration-200 border border-dashed border-slate-200 hover:border-slate-300"
+                                              >
+                                                <span>{showMoreCategories ? 'הסתר שירותים נוספים' : 'עוד שירותים'}</span>
+                                                <ChevronDown
+                                                  className="h-3.5 w-3.5 transition-transform duration-300"
+                                                  style={{ transform: showMoreCategories ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                                                />
+                                              </button>
+                                              {/* Extra categories — animated collapse */}
+                                              <div
+                                                style={{
+                                                  overflow: 'hidden',
+                                                  maxHeight: showMoreCategories ? '200px' : '0px',
+                                                  opacity: showMoreCategories ? 1 : 0,
+                                                  transition: 'max-height 0.3s ease, opacity 0.25s ease',
+                                                }}
+                                              >
+                                                <div className="grid grid-cols-4 gap-3 pt-3">
+                                                  {extraCats.map(renderCatCard)}
+                                                </div>
+                                              </div>
+                                            </>
+                                          );
+                                        })()
                                       )}
                                     </div>
                                   </div>
                                 );
                               })()}
 
+                              <div className="px-8 pb-6 pt-2">
+                                {renderStageActionBar(t, {
+                                  label: 'מעבר לשיחת מכירה',
+                                  circleBg: '#6366f1',
+                                  icon: <ArrowUpRight className="h-7 w-7 text-white" />,
+                                  onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 })),
+                                  disabled: !t.productName,
+                                })}
+                              </div>
                             </>
                             );
                           })() : currentStep === 2 ? (() => {
@@ -14252,23 +15038,10 @@ function TasksPage({
                                 await updateTaskField(t.id, { description: intakeLines });
                               }
                               if (advance) {
-                                setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }));
+                                // Advance to the embedded quote stage (step 99) — no separate tab
+                                setManualStepOverride((prev) => ({ ...prev, [t.id]: QUOTE_STEP_IDX }));
                                 await updateTaskField(t.id, { type: 'QUOTE_PREPARATION' });
                                 await onReloadTasks?.();
-                                // Open quote-new tab with lead data prefilled
-                                onCreateQuote?.(t.customerId || null, t.id, {
-                                  name: fd.company || saveFullName || '',
-                                  phone: fd.phone || undefined,
-                                  email: fd.email || undefined,
-                                  company: fd.company || undefined,
-                                  city: fd.city || undefined,
-                                  address: fd.address || undefined,
-                                  contactName: saveFullName || undefined,
-                                  service: fd.serviceType || undefined,
-                                  notes: fd.needDescription || undefined,
-                                  leadId: t.leadId || undefined,
-                                  customerType: fd.customerType || undefined,
-                                });
                                 return;
                               }
                               await onReloadTasks?.();
@@ -14290,99 +15063,107 @@ function TasksPage({
                             <div className="px-3 flex flex-col" style={{ direction: 'rtl', gap: '4px', paddingBottom: '2px' }}>
 
                               {/* ═══ AI SALES COACH ═══ */}
-                              <div className="px-5 pt-4 pb-2">
-                                <div className="rounded-3xl overflow-hidden border border-slate-200/70 shadow-lg" style={{ direction: 'rtl' }}>
+                              <div className="px-6 pt-4 pb-3">
+                                <div className="rounded-2xl overflow-hidden border border-slate-200/70 shadow-xl" style={{ direction: 'rtl' }}>
                                   {/* Header */}
-                                  <div className="flex items-center gap-4 px-7 py-5" style={{ background: 'linear-gradient(135deg,#6366f1 0%,#4f46e5 55%,#7c3aed 100%)' }}>
-                                    <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 56, height: 56, background: 'rgba(255,255,255,0.18)' }}>
+                                  <div className="flex items-center gap-3 px-7 py-4" style={{ background: 'linear-gradient(135deg,#6366f1 0%,#4f46e5 55%,#7c3aed 100%)' }}>
+                                    <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 52, height: 52, background: 'rgba(255,255,255,0.18)' }}>
                                       <Sparkles className="h-7 w-7 text-white" />
                                     </div>
                                     <div className="flex flex-col leading-tight gap-1">
-                                      <span className="font-extrabold text-white" style={{ fontSize: '24px' }}>מאמן מכירות AI</span>
-                                      <span className="font-semibold text-white/80" style={{ fontSize: '17px' }}>{coach?.serviceName ? `המלצות מותאמות אישית עבור: ${coach.serviceName}` : 'ממתין לבחירת שירות...'}</span>
+                                      <span className="font-extrabold text-white" style={{ fontSize: '19px' }}>מאמן מכירות AI</span>
+                                      <span className="font-semibold text-white/80" style={{ fontSize: '14px' }}>
+                                        {(() => {
+                                          const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader) || coach?.serviceName;
+                                          const svcPrice = formatServicePrice(t.productName);
+                                          return svcName
+                                            ? `המלצות מותאמות אישית עבור: ${svcName}${svcPrice ? ` · מחיר: ${svcPrice}` : ''}`
+                                            : 'ממתין לבחירת שירות...';
+                                        })()}
+                                      </span>
                                     </div>
                                   </div>
 
                                   <div className="grid grid-cols-3 gap-px" style={{ background: '#e6e9f0' }}>
 
                                     {/* ── עמודה 1: מידע על השירות ── */}
-                                    <div className="p-7" style={{ background: 'linear-gradient(180deg,#eff6ff 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-3 mb-5">
-                                        <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#dbeafe' }}>
-                                          <ClipboardList className="h-6 w-6 text-blue-600" />
+                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#eff6ff 0%,#ffffff 50%)' }}>
+                                      <div className="flex items-center gap-2 mb-3">
+                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#dbeafe' }}>
+                                          <ClipboardList className="h-5 w-5 text-blue-600" />
                                         </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '20px' }}>מידע על השירות</span>
+                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>מידע על השירות</span>
                                       </div>
                                       {coach?.serviceInfo?.length ? (
-                                        <ul className="space-y-4">
+                                        <ul className="space-y-2">
                                           {coach.serviceInfo.map((b, i) => (
-                                            <li key={i} className="flex items-start gap-3 text-slate-700 font-semibold" style={{ fontSize: '17px', lineHeight: 1.6 }}>
-                                              <span className="mt-2 flex-shrink-0 rounded-full" style={{ width: 9, height: 9, background: '#3b82f6' }} />
+                                            <li key={i} className="flex items-start gap-2 text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>
+                                              <span className="mt-1.5 flex-shrink-0 rounded-full" style={{ width: 6, height: 6, background: '#3b82f6' }} />
                                               {b}
                                             </li>
                                           ))}
                                         </ul>
                                       ) : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '16px' }}>בחר שירות בשלב התאמת הפתרון כדי לקבל מידע מותאם</p>
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות בשלב התאמת הפתרון כדי לקבל מידע מותאם</p>
                                       )}
                                     </div>
 
                                     {/* ── עמודה 2: התנגדויות ── */}
-                                    <div className="p-7" style={{ background: 'linear-gradient(180deg,#fffbeb 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-3 mb-5">
-                                        <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fef3c7' }}>
-                                          <AlertTriangle className="h-6 w-6 text-amber-600" />
+                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#fffbeb 0%,#ffffff 50%)' }}>
+                                      <div className="flex items-center gap-2 mb-3">
+                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#fef3c7' }}>
+                                          <AlertTriangle className="h-5 w-5 text-amber-600" />
                                         </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '20px' }}>מענה להתנגדויות</span>
+                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>מענה להתנגדויות</span>
                                       </div>
                                       {coach?.objections.length ? (() => {
                                         const isObjExpanded = !!expandedObjections[t.id];
                                         const visibleQs = isObjExpanded ? OBJECTIONS_LIST : OBJECTIONS_LIST.slice(0, 2);
                                         return (
-                                          <div className="space-y-3">
+                                          <div className="space-y-2">
                                             {visibleQs.map((q, i) => (
-                                              <div key={i} className="rounded-2xl border border-amber-200/70 bg-white shadow-sm p-4 transition-shadow hover:shadow-md">
-                                                <span className="inline-block font-extrabold text-amber-700 bg-amber-100 rounded-full px-3 py-1 mb-2" style={{ fontSize: '14px' }}>❝ {q} ❞</span>
-                                                <div className="text-slate-700 font-semibold" style={{ fontSize: '16px', lineHeight: 1.6 }}>{coach.objections[i] || '...'}</div>
+                                              <div key={i} className="rounded-xl border border-amber-200/70 bg-white shadow-sm p-2.5 transition-shadow hover:shadow-md">
+                                                <span className="inline-block font-extrabold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5 mb-1" style={{ fontSize: '11px' }}>❝ {q} ❞</span>
+                                                <div className="text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>{coach.objections[i] || '...'}</div>
                                               </div>
                                             ))}
                                             {OBJECTIONS_LIST.length > 2 && (
                                               <button
                                                 type="button"
                                                 onClick={() => setExpandedObjections((prev) => ({ ...prev, [t.id]: !isObjExpanded }))}
-                                                className="flex items-center gap-2 text-amber-700 font-bold transition hover:text-amber-800"
-                                                style={{ fontSize: '14px' }}
+                                                className="flex items-center gap-1.5 text-amber-700 font-bold transition hover:text-amber-800"
+                                                style={{ fontSize: '11px' }}
                                               >
-                                                {isObjExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                {isObjExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                                                 {isObjExpanded ? 'הצג פחות' : `הצג עוד ${OBJECTIONS_LIST.length - 2} התנגדויות`}
                                               </button>
                                             )}
                                           </div>
                                         );
                                       })() : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '16px' }}>בחר שירות לקבלת תשובות מותאמות אישית</p>
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות לקבלת תשובות מותאמות אישית</p>
                                       )}
                                     </div>
 
                                     {/* ── עמודה 3: משפטי סגירה ── */}
-                                    <div className="p-7" style={{ background: 'linear-gradient(180deg,#ecfdf5 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-3 mb-5">
-                                        <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#d1fae5' }}>
-                                          <Star className="h-6 w-6 text-emerald-600" />
+                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#ecfdf5 0%,#ffffff 50%)' }}>
+                                      <div className="flex items-center gap-2 mb-3">
+                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#d1fae5' }}>
+                                          <Star className="h-5 w-5 text-emerald-600" />
                                         </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '20px' }}>משפטי סגירה</span>
+                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>משפטי סגירה</span>
                                       </div>
                                       {coach?.closings.length ? (
-                                        <div className="space-y-3">
+                                        <div className="space-y-2">
                                           {coach.closings.map((c, i) => (
-                                            <div key={i} className="flex items-start gap-3 rounded-2xl border border-emerald-200/70 bg-white shadow-sm p-4 transition-shadow hover:shadow-md">
-                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 28, height: 28, fontSize: 14, background: 'linear-gradient(135deg,#10b981,#059669)' }}>{i + 1}</span>
-                                              <span className="text-slate-700 font-semibold" style={{ fontSize: '16px', lineHeight: 1.6 }}>{c}</span>
+                                            <div key={i} className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white shadow-sm p-2.5 transition-shadow hover:shadow-md">
+                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 18, height: 18, fontSize: 10, background: 'linear-gradient(135deg,#10b981,#059669)' }}>{i + 1}</span>
+                                              <span className="text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>{c}</span>
                                             </div>
                                           ))}
                                         </div>
                                       ) : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '16px' }}>בחר שירות לקבלת משפטי סגירה מותאמים אישית</p>
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות לקבלת משפטי סגירה מותאמים אישית</p>
                                       )}
                                     </div>
 
@@ -14391,253 +15172,338 @@ function TasksPage({
                               </div>
 
                               {/* ── CIRCULAR ACTION BUTTONS ── */}
-                              <div id={`step2-${t.id}`} className="flex justify-center items-start gap-12 py-1">
+                              <div id={`step2-${t.id}`} className="flex justify-center items-start gap-8 py-1">
                                 {([
-                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#4f46e5', activeRing: 'ring-4 ring-indigo-300', icon: <ArrowUpRight className="h-10 w-10 text-white" />, popup: null as null | 'snooze' | 'transfer' },
-                                  { key: 'העברה למומחה', label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-10 w-10 text-white" />, popup: 'transfer' as null | 'snooze' | 'transfer' },
-                                  { key: 'חזרה מאוחרת', label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-10 w-10 text-white" />, popup: 'snooze' as null | 'snooze' | 'transfer' },
-                                  { key: 'לא רלוונטי', label: 'סגירה של הליד', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-10 w-10 text-white" />, popup: null as null | 'snooze' | 'transfer' },
+                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#4f46e5', activeRing: 'ring-4 ring-indigo-300', icon: <ArrowUpRight className="h-7 w-7 text-white" />, popup: null as null | 'snooze' | 'transfer' | 'lost' },
+                                  { key: 'העברה למומחה', label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" />, popup: 'transfer' as null | 'snooze' | 'transfer' | 'lost' },
+                                  { key: 'חזרה מאוחרת', label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" />, popup: 'snooze' as null | 'snooze' | 'transfer' | 'lost' },
+                                  { key: 'לא רלוונטי', label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" />, popup: 'lost' as null | 'snooze' | 'transfer' | 'lost' },
                                 ] as const).map((act) => {
                                   const isActive = fd.nextAction === act.key;
                                   const isPopupOpen = coachActionPopup?.taskId === t.id && coachActionPopup.type === act.popup;
                                   const handleClick = () => {
                                     setF('nextAction', act.key);
                                     if (act.key === 'שליחת הצעה') {
-                                      // advance to the next arrow — same flow as "שמור ועבור להצעה"
                                       saveCallData(true);
-                                    } else if (act.key === 'לא רלוונטי') {
-                                      // "סגירה של הליד" — permanently delete the task card
-                                      if (window.confirm('לסגור את הליד ולמחוק את התיק לצמיתות?')) {
-                                        void deleteTask(t.id);
-                                      }
                                     } else if (act.popup) {
-                                      setCoachActionPopup((prev) => (prev?.taskId === t.id && prev.type === act.popup ? null : { taskId: t.id, type: act.popup as 'snooze' | 'transfer' }));
+                                      setCoachActionPopup((prev) => (prev?.taskId === t.id && prev.type === act.popup ? null : { taskId: t.id, type: act.popup as 'snooze' | 'transfer' | 'lost' }));
                                     }
                                   };
                                   return (
                                     <div key={act.key} className="relative flex flex-col items-center">
-                                      <button onClick={handleClick} className="flex flex-col items-center gap-2 cursor-pointer group">
-                                        <div className={`flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl ${isActive || isPopupOpen ? `${act.activeRing} scale-110 shadow-xl` : ''}`} style={{ background: act.circleBg, width: '80px', height: '80px' }}>
+                                      <button onClick={handleClick} className="flex flex-col items-center gap-1.5 cursor-pointer group">
+                                        <div className={`flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl ${isActive || isPopupOpen ? `${act.activeRing} scale-110 shadow-xl` : ''}`} style={{ background: act.circleBg, width: '56px', height: '56px' }}>
                                           {act.icon}
                                         </div>
-                                        <span className={`font-extrabold text-center leading-tight ${isActive ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '24px' }}>{act.label}</span>
+                                        <span className={`font-extrabold text-center leading-tight ${isActive ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '13px' }}>{act.label}</span>
                                       </button>
                                       {isPopupOpen && act.popup === 'snooze' && renderCoachSnoozePopup(t.id)}
                                       {isPopupOpen && act.popup === 'transfer' && renderCoachTransferPopup(t)}
+                                      {isPopupOpen && act.popup === 'lost' && renderCoachLostPopup(t)}
                                     </div>
                                   );
                                 })}
                               </div>
 
 
-                              {/* ═══ BOTTOM BUTTONS BAR ═══ */}
-                              <div className="flex flex-wrap gap-3 items-center" style={{ direction: 'rtl' }}>
-                                {/* Main CTA — large green */}
-                                <button
-                                  disabled={!canAdvance}
-                                  onClick={() => saveCallData(true)}
-                                  className={`flex items-center gap-2.5 rounded-2xl px-8 py-3.5 font-bold text-white text-base shadow-lg transition-all duration-200 ${canAdvance ? 'hover:shadow-xl hover:scale-[1.03] cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-                                  style={{ background: canAdvance ? 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)' : '#94a3b8', fontFamily: 'var(--font-sans)' }}
-                                >
-                                  <CheckCircle2 className="h-5 w-5" />
-                                  שמור ועבור להצעה
-                                  <ChevronRight className="h-4 w-4 mr-1" style={{ transform: 'rotate(180deg)' }} />
-                                </button>
-
-                                {/* Secondary buttons */}
-                                <button onClick={() => { saveCallData(false); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
-                                  סגור שיחה
-                                </button>
-                                <button onClick={() => { saveCallData(false); snoozeByMinutes(t.id, 60); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
-                                  <Timer className="h-4 w-4" />
-                                  שמור וחזור תוך שעה
-                                </button>
-                                {!isDone && (
-                                  <div className="relative">
-                                    <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-all">
-                                      <Calendar className="h-4 w-4" />
-                                      קבע חזרה
-                                    </button>
-                                    {isPostponeOpen && renderSnoozePopup(t.id, 'top-12')}
-                                  </div>
-                                )}
-                                {contactPhone && (
-                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border border-green-200 text-green-600 bg-white hover:bg-green-50 transition-all">
-                                    <MessageCircle className="h-4 w-4" />
-                                    WhatsApp
-                                  </a>
-                                )}
-                                {/* Save as potential customer — green outline, far left */}
-                                <button onClick={() => { saveCallData(false); }} className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold border-2 border-emerald-400 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 transition-all mr-auto">
-                                  <CheckCircle2 className="h-4 w-4" />
-                                  שמור ללקוח פוטנציאלי
-                                </button>
-                              </div>
                             </div>
                             );
                           })() : currentStep === 3 ? (() => {
-                            /* ── פולואפ stage — schedule next reminder + share/transfer to a colleague ── */
-                            const fuDays = followupDays[t.id] ?? 3;
-                            const fuAssignee = followupAssignee[t.id] || '';
-                            const fuBusy = !!followupBusy[t.id];
-                            const otherUsers = users.filter((u) => u.id !== t.ownerId && u.status === 'פעיל');
-                            const fuTargetDate = (() => { const d = new Date(); d.setDate(d.getDate() + fuDays); return d; })();
-                            const fuTargetDisplay = fuTargetDate.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                            // Timer: how long customer has been waiting since quote was sent
+                            const waitingSince = t.currentStageChangedAt ? new Date(t.currentStageChangedAt) : null;
+                            const waitingMs = waitingSince ? Date.now() - waitingSince.getTime() : null;
+                            const waitingDays = waitingMs != null ? Math.floor(waitingMs / 86400000) : null;
+                            const waitingHours = waitingMs != null ? Math.floor((waitingMs % 86400000) / 3600000) : null;
+                            const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || '').replace(/[^\d+]/g, '');
+                            const fu3Email = t.leadEmail || linkedLeadForHeader?.email || '';
+                            const waLink3 = fu3Phone ? `https://wa.me/${fu3Phone.replace(/^0/, '972')}` : null;
                             return (
                               <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
-                                {/* תזמון פולואפ הבא */}
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-                                  <div className="flex items-center gap-3 mb-1">
-                                    <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fff7ed' }}>
-                                      <Timer className="h-6 w-6 text-orange-500" />
+                                {/* ── טיימר + פעולות יצירת קשר ── */}
+                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fffbeb' }}>
+                                      <Timer className="h-6 w-6 text-amber-500" />
                                     </div>
                                     <div>
-                                      <div className="text-base font-extrabold text-slate-800">מתי להזכיר לך שוב?</div>
-                                      <div className="text-[13px] text-slate-400 font-medium">המשימה תיפתח מחדש ברשימת המשימות שלך, בעדיפות גבוהה, בתאריך שתבחרו</div>
+                                      <div className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">הלקוח מחכה להצעה</div>
+                                      {waitingDays != null && waitingDays >= 1 ? (
+                                        <div className="flex items-baseline gap-1.5 mt-0.5">
+                                          <span className="text-2xl font-extrabold text-amber-900">{waitingDays}</span>
+                                          <span className="text-[13px] font-semibold text-amber-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
+                                          {waitingHours! > 0 && <>
+                                            <span className="text-lg font-bold text-amber-700">{waitingHours}</span>
+                                            <span className="text-[13px] font-semibold text-amber-700">שעות</span>
+                                          </>}
+                                        </div>
+                                      ) : waitingSince ? (
+                                        <div className="text-sm font-bold text-amber-700 mt-0.5">{`נשלחה ${formatTimeAgo(t.currentStageChangedAt)}`}</div>
+                                      ) : (
+                                        <div className="text-sm font-bold text-amber-700 mt-0.5">נשלחה לאחרונה</div>
+                                      )}
                                     </div>
                                   </div>
-                                  <div className="mt-5 flex flex-wrap items-center gap-4">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-semibold text-slate-600">בעוד</span>
-                                      <input
-                                        type="number"
-                                        min={1}
-                                        max={60}
-                                        className="w-20 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-center text-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-400"
-                                        value={fuDays}
-                                        onChange={(e) => { const v = Math.max(1, Math.min(60, Number(e.target.value) || 1)); setFollowupDays((p) => ({ ...p, [t.id]: v })); }}
-                                      />
-                                      <span className="text-sm font-semibold text-slate-600">ימים</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-[13px] text-slate-400 font-medium">
-                                      <CalendarDays className="h-4 w-4 text-slate-300" />
-                                      יופיע במשימות שלכם ב-{fuTargetDisplay} עם עדיפות <span className="font-bold text-rose-500">גבוהה</span>
-                                    </div>
-                                    <div className="flex-1" />
-                                    <button onClick={() => scheduleFollowup(t.id, fuDays)} disabled={fuBusy} className="flex items-center gap-2 rounded-2xl px-6 py-3 font-bold text-white text-sm transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100" style={{ background: '#f97316' }}>
-                                      {fuBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />}
-                                      קביעת תזכורת
-                                    </button>
+                                  {/* contact buttons */}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    {fu3Phone && (
+                                      <a href={`tel:${fu3Phone}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#22c55e' }}>
+                                        <Phone className="h-3.5 w-3.5" />שיחה
+                                      </a>
+                                    )}
+                                    {waLink3 && (
+                                      <a href={waLink3} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#25d366' }}>
+                                        <MessageCircle className="h-3.5 w-3.5" />וואטסאפ
+                                      </a>
+                                    )}
+                                    {fu3Email && (
+                                      <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#6366f1' }}>
+                                        <Mail className="h-3.5 w-3.5" />מייל
+                                      </a>
+                                    )}
                                   </div>
-                                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    {[1, 3, 7, 14].map((d) => (
-                                      <button key={d} type="button" onClick={() => setFollowupDays((p) => ({ ...p, [t.id]: d }))} className={cn('rounded-full px-4 py-1.5 text-xs font-bold transition-colors', fuDays === d ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200')}>
-                                        {d === 1 ? 'מחר' : `בעוד ${d} ימים`}
+                                </div>
+                                {/* ── משפטי מכירה וסגירה ── */}
+                              {(() => {
+                                const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader) || '';
+                                const isRadiation = svcName.includes('קרינה') || ['9','56','83','002','10064','10034','10082','10081','10096','10097','10098','10036','10041','10006','10165','10166'].includes(t.productName || '');
+                                const isAir = svcName.includes('אוויר') || svcName.includes('עובשים') || ['66','72','10046','10072','69','10066','10073','10126','10078','10047','10127','10159'].includes(t.productName || '');
+                                const isWater = svcName.includes('מים') || ['63','10076','10120','10121','10122','10075','10077'].includes(t.productName || '');
+                                const isAsbestos = svcName.includes('אסבסט') || ['10023','10026','10112'].includes(t.productName || '');
+                                const isGreenBuilding = svcName.includes('בנייה ירוקה') || ['10148','10149','10150'].includes(t.productName || '');
+                                const isOccupational = svcName.includes('גהות') || svcName.includes('רעש תעסוקתי') || ['62','98','10084','10104'].includes(t.productName || '');
+
+                                const generalPhrases = [
+                                  'שלחתי לך הצעת מחיר לפני מספר ימים — הספקת לעיין בה?',
+                                  'יש לך שאלות לגבי ההצעה? אשמח להבהיר הכל',
+                                  'אם תאשר השבוע — נוכל לתאם ביקור בימים הקרובים',
+                                  'רוב הלקוחות שלנו מחליטים אחרי שיחה קצרה — יש לך 5 דקות?',
+                                ];
+
+                                const servicePhrases: { label: string; phrases: string[] } | null =
+                                  isRadiation ? {
+                                    label: 'קרינה',
+                                    phrases: [
+                                      'בדיקת קרינה בבית נותנת שקט נפשי לכל המשפחה — לרוב ההפתעה חיובית',
+                                      'רמות קרינה גבוהות קשורות לקשיי שינה, עייפות ובעיות ריכוז',
+                                      'הדוח שלנו כולל המלצות פרקטיות — לא רק מספרים יבשים',
+                                      'ביצענו מאות בדיקות קרינה — יודעים בדיוק איפה לחפש ומה לחפש',
+                                    ],
+                                  } : isAir ? {
+                                    label: 'איכות אוויר',
+                                    phrases: [
+                                      'עובשים באוויר הם לרוב הגורם לאלרגיות ובעיות נשימה שלא מוצאים להן סיבה',
+                                      'בדיקת אוויר פנים-בנייני — מומלצת לפחות אחת לכמה שנים, בעיקר בבניינים ישנים',
+                                      'תוצאות תוך שבוע + המלצות מפורטות לשיפור איכות האוויר',
+                                      'ילדים ואנשים עם אסטמה רגישים במיוחד — שווה לבדוק לפני שהבעיה מחמירה',
+                                    ],
+                                  } : isWater ? {
+                                    label: 'מים',
+                                    phrases: [
+                                      'מים שנראים נקיים לא בהכרח בטוחים — הבדיקה מגלה מה שאי אפשר לראות',
+                                      'אנחנו בודקים מתכות כבדות, חיידקים וחומרים כימיים — תמונה מלאה',
+                                      'בדיקת מים היא הדרך הבטוחה ביותר להגן על בריאות המשפחה',
+                                      'תוצאות מהמעבדה תוך כשבוע — מהירות ואמינות',
+                                    ],
+                                  } : isAsbestos ? {
+                                    label: 'אסבסט',
+                                    phrases: [
+                                      'לפני כל שיפוץ בבניין ישן — סקר אסבסט הוא חובה חוקית ובריאותית',
+                                      'חשיפה לאסבסט גורמת למחלות ריאה חמורות — לא כדאי לסכן עובדים ודיירים',
+                                      'הסקר שלנו מכסה זיהוי, דיגום ואישור בטיחותי מלא',
+                                      'עובד שנחשף לאסבסט ללא סקר — אתה עלול להיות אחראי משפטית',
+                                    ],
+                                  } : isGreenBuilding ? {
+                                    label: 'בנייה ירוקה',
+                                    phrases: [
+                                      'תעודת בנייה ירוקה מעלה את ערך הנכס — משתלם לתכנן נכון מהיום הראשון',
+                                      'ייעוץ מוקדם חוסך עלויות שינוי גדולות בשלבים מאוחרים של הבנייה',
+                                      'הדרישות הרגולטוריות להתייעלות אנרגטית רק הולכות וגדלות',
+                                    ],
+                                  } : isOccupational ? {
+                                    label: 'גהות / רעש תעסוקתי',
+                                    phrases: [
+                                      'חוק מחייב ניטור רעש תעסוקתי בסביבות עבודה רועשות — עדיף להיות בתאימות',
+                                      'בדיקת גהות מגינה עליך ועל עובדיך מבחינה משפטית ובריאותית',
+                                      'אירועים בריאותיים של עובדים ללא ניטור מוקדם — אחריות מעסיק',
+                                    ],
+                                  } : null;
+
+                                const copyPhrase = (p: string) => {
+                                  void navigator.clipboard.writeText(p);
+                                  setCopiedPhrase(p);
+                                  window.setTimeout(() => setCopiedPhrase((prev) => prev === p ? null : prev), 2000);
+                                };
+
+                                return (
+                                  <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50 shadow-sm p-6">
+                                    <div className="flex items-center gap-3 mb-4">
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#ede9fe' }}>
+                                        <MessagesSquare className="h-6 w-6 text-violet-500" />
+                                      </div>
+                                      <div>
+                                        <div className="text-base font-extrabold text-slate-800">משפטי מכירה וסגירה</div>
+                                        <div className="text-[13px] text-slate-400 font-medium">לחץ על משפט להעתקה מהירה</div>
+                                      </div>
+                                    </div>
+
+                                    <div className={servicePhrases ? 'mb-4' : ''}>
+                                      <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide mb-2">כלליים לפולואו אפ</div>
+                                      <div className="flex flex-col gap-2">
+                                        {generalPhrases.map((p, i) => (
+                                          <button
+                                            key={p}
+                                            onClick={() => copyPhrase(p)}
+                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
+                                            className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
+                                          >
+                                            <span>{p}</span>
+                                            {copiedPhrase === p
+                                              ? <span className="text-[11px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
+                                              : <Copy className="h-3.5 w-3.5 text-slate-300 group-hover:text-indigo-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                            }
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    {servicePhrases && (
+                                      <div>
+                                        <div className="text-[11px] font-bold text-violet-500 uppercase tracking-wide mb-2">מותאם לשירות · {servicePhrases.label}</div>
+                                        <div className="flex flex-col gap-2">
+                                          {servicePhrases.phrases.map((p, i) => (
+                                            <button
+                                              key={p}
+                                              onClick={() => copyPhrase(p)}
+                                              style={{ animation: `fadeSlideIn 0.35s ease-out ${(generalPhrases.length + i) * 0.05}s both` }}
+                                              className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-violet-800 bg-white border border-violet-200 hover:bg-violet-50 hover:border-violet-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
+                                            >
+                                              <span>{p}</span>
+                                              {copiedPhrase === p
+                                                ? <span className="text-[11px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
+                                                : <Copy className="h-3.5 w-3.5 text-violet-300 group-hover:text-violet-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              }
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                              <div>
+                                {renderStageActionBar(t, {
+                                  label: 'מעבר לתיאום',
+                                  circleBg: '#8b5cf6',
+                                  icon: <ArrowUpRight className="h-7 w-7 text-white" />,
+                                  onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 4 })),
+                                })}
+                              </div>
+                            </div>
+                          );
+                          })() : currentStep === QUOTE_STEP_IDX ? (() => {
+                            /* ── הצעת מחיר stage — inline quote creation form ── */
+                            const quotePrefillCust = (t.customerName || t.leadName) ? {
+                              id: t.customerId || undefined,
+                              name: t.customerName || t.leadName || '',
+                              phone: contactPhone || undefined,
+                              email: (t.leadEmail || linkedLeadForHeader?.email) || undefined,
+                              city: linkedLeadForHeader?.city || undefined,
+                            } : null;
+                            const quotePrefillSvc = serviceNameFromProductId(t.productName, linkedLeadForHeader) || null;
+                            const fuAssignee = followupAssignee[t.id] || '';
+                            const fuBusy = !!followupBusy[t.id];
+                            const fuSuccess = followupSuccess[t.id] || null;
+                            const fuManualOpen = !!followupManualOpen[t.id];
+                            const fuManualValue = followupManualValue[t.id] || '';
+                            const otherUsers = users.filter((u) => u.id !== t.ownerId && u.status === 'פעיל');
+                            return (
+                              <div style={{ direction: 'rtl' }}>
+                                {/* ═══ תזמון פולואפ + העברה/שיתוף — compact strip at top ═══ */}
+                                <div className="px-5 py-3 flex flex-wrap items-center gap-x-5 gap-y-2.5" style={{ background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+                                  {/* מתי להזכיר לך שוב */}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <Timer className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                                    <span className="text-[12px] font-bold text-slate-700">תזכורת:</span>
+                                    {REMINDER_QUICK_OPTIONS.map((opt) => (
+                                      <button
+                                        key={opt.key}
+                                        type="button"
+                                        onClick={() => {
+                                          setFollowupManualOpen((p) => ({ ...p, [t.id]: false }));
+                                          void (opt.minutes != null ? scheduleFollowupMinutes(t.id, opt.minutes) : scheduleFollowup(t.id, opt.days || 1));
+                                        }}
+                                        disabled={fuBusy}
+                                        className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors bg-slate-100 text-slate-600 hover:bg-orange-100 hover:text-orange-700 disabled:opacity-40"
+                                      >
+                                        {opt.label}
                                       </button>
                                     ))}
-                                  </div>
-                                </div>
-
-                                {/* שיתוף / העברה לעובד אחר */}
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
-                                  <div className="flex items-center gap-3 mb-1">
-                                    <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#eff6ff' }}>
-                                      <Users className="h-6 w-6 text-blue-500" />
-                                    </div>
-                                    <div>
-                                      <div className="text-base font-extrabold text-slate-800">להעביר או לשתף עם עובד אחר?</div>
-                                      <div className="text-[13px] text-slate-400 font-medium">בחרו עובד מהרשימה — אפשר להעביר אליו את הטיפול לגמרי, או רק לשתף כדי שגם הוא יראה את המשימה (היא תישאר גם אצלכם)</div>
-                                    </div>
-                                  </div>
-                                  <div className="mt-5 flex flex-wrap items-center gap-3">
-                                    <select
-                                      className="flex-1 min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                                      value={fuAssignee}
-                                      onChange={(e) => setFollowupAssignee((p) => ({ ...p, [t.id]: e.target.value }))}
+                                    <button
+                                      type="button"
+                                      onClick={() => setFollowupManualOpen((p) => ({ ...p, [t.id]: !p[t.id] }))}
+                                      className={cn('rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors', fuManualOpen ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
                                     >
-                                      <option value="">בחרו עובד...</option>
-                                      {otherUsers.map((u) => <option key={u.id} value={u.id}>{u.name}{u.role ? ` · ${u.role}` : ''}</option>)}
+                                      ידני
+                                    </button>
+                                    {fuManualOpen && (
+                                      <>
+                                        <input
+                                          type="datetime-local"
+                                          value={fuManualValue}
+                                          onChange={(e) => setFollowupManualValue((p) => ({ ...p, [t.id]: e.target.value }))}
+                                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => { if (!fuManualValue) return; void scheduleFollowupAt(t.id, new Date(fuManualValue)).then(() => setFollowupManualOpen((p) => ({ ...p, [t.id]: false }))); }}
+                                          disabled={fuBusy || !fuManualValue}
+                                          className="flex items-center gap-1 rounded-xl px-3 py-1 text-[11px] font-bold text-white disabled:opacity-40"
+                                          style={{ background: '#f97316' }}
+                                        >
+                                          {fuBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock3 className="h-3.5 w-3.5" />}קבע
+                                        </button>
+                                      </>
+                                    )}
+                                    {fuSuccess === 'schedule' && <span className="text-[11px] font-bold text-green-600">✓ נקבעה</span>}
+                                  </div>
+                                  <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+                                  {/* להעביר/לשתף */}
+                                  <div className="flex items-center gap-2">
+                                    <Users className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                                    <select value={fuAssignee} onChange={(e) => setFollowupAssignee((p) => ({ ...p, [t.id]: e.target.value }))} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-semibold text-slate-700 focus:outline-none">
+                                      <option value="">העבר / שתף...</option>
+                                      {otherUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                                     </select>
-                                    <button onClick={() => fuAssignee && shareTaskWithEmployee(t, fuAssignee)} disabled={!fuAssignee || fuBusy} className="flex items-center gap-2 rounded-2xl px-5 py-3 font-bold text-sm transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100" style={{ background: '#eff6ff', color: '#2563eb' }}>
-                                      <Eye className="h-4 w-4" />
-                                      הצג גם לו
-                                    </button>
-                                    <button onClick={() => fuAssignee && transferTaskToEmployee(t.id, fuAssignee)} disabled={!fuAssignee || fuBusy} className="flex items-center gap-2 rounded-2xl px-5 py-3 font-bold text-white text-sm transition-all duration-200 hover:scale-105 disabled:opacity-40 disabled:hover:scale-100" style={{ background: '#2563eb' }}>
-                                      <ArrowUpRight className="h-4 w-4" />
-                                      העבר אליו לגמרי
-                                    </button>
+                                    {fuAssignee && <>
+                                      <button onClick={() => shareTaskWithEmployee(t, fuAssignee)} disabled={fuBusy} className="rounded-xl px-2.5 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 disabled:opacity-40">הצג</button>
+                                      <button onClick={() => transferTaskToEmployee(t.id, fuAssignee)} disabled={fuBusy} className="rounded-xl px-2.5 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40">העבר</button>
+                                    </>}
+                                    {(fuSuccess === 'share' || fuSuccess === 'transfer') && <span className="text-[11px] font-bold text-green-600">✓</span>}
                                   </div>
                                 </div>
+                                <QuoteNewScreen
+                                  embedded={true}
+                                  prefillCustomer={quotePrefillCust}
+                                  prefillServiceName={quotePrefillSvc}
+                                  taskId={t.id}
+                                  onExit={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }))}
+                                  onQuoteSaved={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }))}
+                                  onAttachmentSaved={() => setTaskAttachments((prev) => { const n = { ...prev }; delete n[t.id]; return n; })}
+                                  existingAttachments={taskAttachments[t.id] ?? []}
+                                  onDownloadAttachment={(att) => downloadTaskAttachment(t.id, att)}
+                                />
                               </div>
                             );
                           })() : (
                           <>
-
-                          {/* הערות compact */}
-                          {(t.description || t.leadCompany) && (
-                            <div className="rounded-xl bg-white border border-slate-200 p-3 shadow-sm flex-shrink-0" style={{ direction: 'rtl' }}>
-                              <div className="flex items-center gap-1.5 mb-1">
-                                <Pencil className="h-3 w-3 text-slate-400" />
-                                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wide">הערות</span>
-                              </div>
-                              <div className="text-xs text-slate-600 leading-relaxed line-clamp-3">{t.description || ''}</div>
-                              {t.leadCompany && <div className="text-xs font-bold text-blue-600 mt-1">{t.leadCompany}</div>}
-                            </div>
-                          )}
                           </>
                           )}
 
-                            </div>{/* end content area */}
-                          </div>{/* end main panel flex row */}
+                            </div>{/* end center col */}
 
-                          {/* ──── BOTTOM ACTION BAR ──── */}
-                          <div className="flex-shrink-0 bg-white border-t border-slate-200 px-4" style={{ height: 52, direction: 'rtl', display: 'flex', alignItems: 'center' }}>
-                            <div className="flex items-center gap-1.5 justify-between w-full">
-                              {/* ── secondary (left in RTL) ── */}
-                              <div className="flex items-center gap-1.5">
-                                <button onClick={() => setExpandedTaskId(null)} className="flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors">
-                                  <ArrowRight className="h-3.5 w-3.5" />
-                                  שמור שלב
-                                </button>
-                                {!isDone && (
-                                  <div className="relative">
-                                    <button onClick={() => setPostponeDropdownId(isPostponeOpen ? null : t.id)} className="flex items-center gap-1 rounded-lg border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-bold text-orange-700 hover:bg-orange-100 transition-colors">
-                                      <RotateCcw className="h-3.5 w-3.5" />
-                                      קבע חזרה ללקוח
-                                    </button>
-                                    {isPostponeOpen && renderSnoozePopup(t.id, 'bottom-12')}
-                                  </div>
-                                )}
-                                {(t.leadId || t.leadName) && onOpenLead && (
-                                  <button onClick={() => { const lead = leads.find((l) => l.id === t.leadId); if (lead) onOpenLead(lead); }} className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors">
-                                    <Flame className="h-3.5 w-3.5" />
-                                    פתח ליד
-                                  </button>
-                                )}
-                              </div>
-                              {/* ── primary (right in RTL) ── */}
-                              <div className="flex items-center gap-1.5">
-                                {(t.customerId || t.customerName) && onOpenCustomer && (
-                                  <button onClick={() => { const cust = customers.find((c) => c.id === t.customerId); if (cust) onOpenCustomer(cust); }} className="flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-bold text-purple-700 hover:bg-purple-100 transition-colors">
-                                    <Building2 className="h-3.5 w-3.5" />
-                                    פתח לקוח
-                                  </button>
-                                )}
-                                <button onClick={() => { if (onCreateQuote) { const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader); onCreateQuote(t.customerId, t.id, svcName ? { name: t.leadName || t.customerName || '', service: svcName } : undefined); } else alert('יצירת הצעת מחיר'); }} className="flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 transition-colors">
-                                  <FileText className="h-3.5 w-3.5" />
-                                  עבור להצעת מחיר
-                                </button>
-                                {contactPhone && (
-                                  <a href={`tel:${phoneClean(contactPhone)}`} className="flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors">
-                                    <PhoneCall className="h-3.5 w-3.5" />
-                                    התקשר
-                                  </a>
-                                )}
-                                {!isDone && (
-                                  <button onClick={() => markDone(t.id)} className="flex items-center gap-1 rounded-lg px-4 py-1.5 text-xs font-bold text-white transition-colors" style={{ background: '#10b981' }}>
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                    דווח השלמה
-                                  </button>
-                                )}
-                                {isDone && (
-                                  <span className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-white" style={{ background: '#6b7280' }}>
-                                    <CheckCircle2 className="h-3.5 w-3.5" />
-                                    הושלם
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+
+                          </div>{/* end 3-col panel */}
+
 
                         </div>
                       </td>
@@ -15210,6 +16076,7 @@ export default function GalitCRMPrototype() {
   const [workspaceQuoteId, setWorkspaceQuoteId] = useState<string | null>(null);
   /** נספר אחרי שמירת הצעה — מרענן את טאב "הצעות מחיר" בכרטיס לקוח */
   const [customerQuotesRefreshKey, setCustomerQuotesRefreshKey] = useState(0);
+  const [customerCardInitialLowerTab, setCustomerCardInitialLowerTab] = useState<'contacts' | 'quotes'>('contacts');
   const [newInteractionContactId, setNewInteractionContactId] = useState<string | null>(null);
   const [customerCardContactName, setCustomerCardContactName] = useState<string | null>(null);
   /** Tracks whichever contact row the user last clicked inside the customer card.
@@ -15668,9 +16535,21 @@ export default function GalitCRMPrototype() {
         status: t.status ?? undefined,
         type: t.type ?? undefined,
         productName: t.productName ?? undefined,
+        currentStage: t.currentStage ?? null,
+        currentStageChangedAt: t.currentStageChangedAt ?? null,
         createdAt: t.createdAt ?? undefined,
       }));
       setTasks(normalized);
+      // Seed parentManualStepOverride from DB — user overrides win over DB values
+      setParentManualStepOverride((prev) => {
+        const next: Record<string, number> = {};
+        for (const t of normalized) {
+          if (t.currentStage != null) next[t.id] = t.currentStage;
+        }
+        // Keep any in-memory overrides the user already set this session
+        for (const [k, v] of Object.entries(prev)) next[k] = v;
+        return next;
+      });
     } catch {
       setTasks([]);
     }
@@ -15920,29 +16799,51 @@ export default function GalitCRMPrototype() {
     });
   };
 
-  /** חדש → לקוח: פתיחת כרטיס לקוח חדש ריק */
-  const handleNewCustomer = (prefillName?: string) => {
-    const emptyCustomer: Customer = {
-      id: '__new__',
-      name: prefillName || '',
-      type: '',
-      contactName: '',
-      phone: '',
-      email: '',
-      city: '',
-      address: '',
-      status: 'active',
-      services: [],
-      notes: '',
-    };
-    setSelectedCustomer(emptyCustomer);
-    setSelectedLead(null);
-    setCustomerFull(null);
-    setIsNewCustomerMode(true);
-    setCurrent('customer-profile');
-    if (typeof window !== 'undefined') {
-      const url = `${window.location.pathname}?view=new-customer`;
-      window.history.pushState({}, '', url);
+  /** חדש → לקוח: פותח משימה חדשה בשלב כרטיס לקוח (שלב 0) */
+  const handleNewCustomer = async (prefillName?: string) => {
+    try {
+      const res = await apiFetch(apiUrl('/tasks'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          title: prefillName ? `כרטיס לקוח — ${prefillName}` : 'כרטיס לקוח חדש',
+          priority: 'MEDIUM',
+          status: 'OPEN',
+          type: 'GENERAL',
+          ownerId: currentUser?.id,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const newTask = await res.json();
+      setParentManualStepOverride((prev) => ({ ...prev, [newTask.id]: 0 }));
+      setPendingExpandTaskId(newTask.id);
+      navigateSafely('tasks');
+      void reloadTasks();
+    } catch {
+      // fallback: open standalone customer form
+      const emptyCustomer: Customer = {
+        id: '__new__',
+        name: prefillName || '',
+        type: '',
+        contactName: '',
+        phone: '',
+        email: '',
+        city: '',
+        address: '',
+        status: 'active',
+        services: [],
+        notes: '',
+      };
+      setSelectedCustomer(emptyCustomer);
+      setSelectedLead(null);
+      setCustomerFull(null);
+      setIsNewCustomerMode(true);
+      setCurrent('customer-profile');
+      // Mark the URL as the "new customer" view so syncFromUrl skips its reset
+      // logic — otherwise it bounces current back to the customers list.
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', `${window.location.pathname}?view=new-customer`);
+      }
     }
   };
 
@@ -16775,7 +17676,7 @@ export default function GalitCRMPrototype() {
               tasks={tasks}
               opportunities={opportunities}
               users={users}
-              onOpenCustomer={openCustomerPage}
+              onOpenCustomer={(c) => { setCustomerCardInitialLowerTab('quotes'); openCustomerPage(c); }}
               onCreateCustomer={(c) => setCustomers((prev) => [...prev, c])}
               onUpdateCustomer={(updated) =>
                 setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
@@ -16897,6 +17798,7 @@ export default function GalitCRMPrototype() {
                   currentUser={currentUser}
                   showCustomerQuotesTab={true}
                   customerQuotesRefreshKey={customerQuotesRefreshKey}
+                  initialLowerTab={customerCardInitialLowerTab}
                   onCustomerUpdated={(next) => {
                     setSelectedCustomer(next as Customer);
                     setCustomers((prev) => prev.map((c) => (c.id === next.id ? { ...c, ...(next as Customer) } : c)));
@@ -17213,6 +18115,10 @@ export default function GalitCRMPrototype() {
               onReloadLeads={reloadLeads}
               pendingExpandTaskId={pendingExpandTaskId}
               onExpandHandled={() => setPendingExpandTaskId(null)}
+              customerClassifications={customerClassifications}
+              onNavigate={navigateSafely}
+              onNewCustomer={handleNewCustomer}
+              onSearchCustomer={() => setCustomerSearchOpen(true)}
             />
           )}
           {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage />}
