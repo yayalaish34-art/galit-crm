@@ -646,10 +646,11 @@ export class DocxMergeService {
       const preFile = zip.file('word/document.xml');
       if (preFile) {
         let pre = preFile.asText();
-        // הסרת עמודת "% הנחה לשורה" כשאין הנחות שורה
-        if (normalized.hasLineDiscount !== true) {
-          pre = removeTableColumnByPlaceholder(pre, '{lineDiscountPercent}');
-        }
+        // אין מחיקת עמודת "% הנחה לשורה": המבנה החדש מכיל שני זוגות טבלאות —
+        // זוג ההנחה ({#hasDiscount}) כבר כולל את עמודת ההנחה, וזוג ללא-הנחה
+        // ({^hasDiscount}) כבר בלעדיה. docxtemplater בוחר את הזוג הנכון לפי
+        // hasDiscount, כך שאין צורך (ואסור) למחוק עמודה דינמית — זה היה מסיר
+        // את העמודה גם מזוג ההנחה ומשאיר אותה לא עקבית.
         // הזרקת שורת הנחה לטבלת הסיכום כשיש הנחה כללית והשורה חסרה בתבנית
         if (normalized.hasDiscount === true) {
           pre = ensureDiscountRowInSummary(pre);
