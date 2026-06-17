@@ -143,12 +143,15 @@ export class QuoteTemplatesController {
           data: { lastMergedDocPath: relPath },
         });
 
-        // Create QuoteDocument record for document history
+        // Create QuoteDocument record for document history.
+        // Store the bytes in the DB so the file survives Railway deploys (ephemeral disk).
         await (this.prisma.quoteDocument.create as any)({
           data: {
             quoteId,
             fileName: savedName,
             filePath: relPath,
+            data: Uint8Array.from(buffer),
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
             documentType: 'MERGED_DOCX',
             documentDescription: `מיזוג הצעה ${body.quoteNumber || 'טיוטה'}`,
           },

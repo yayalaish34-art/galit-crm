@@ -154,21 +154,6 @@ const REMINDER_QUICK_OPTIONS: { key: string; label: string; minutes?: number; da
   { key: '3d', label: '3 ימים', days: 3 },
 ];
 
-function formatTimeAgo(dateStr?: string | null): string {
-  if (!dateStr) return '—';
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'עכשיו';
-  if (mins < 60) return `לפני ${mins} דק'`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `לפני ${hrs} שע'`;
-  const days = Math.floor(hrs / 24);
-  if (days === 1) return 'אתמול';
-  if (days < 7) return `לפני ${days} ימים`;
-  if (days < 30) return `לפני ${Math.floor(days / 7)} שבועות`;
-  return new Date(dateStr).toLocaleDateString('he-IL');
-}
-
 function buildCustomerTypeLabelMap(classifications: CustomerClassificationDto[]): Record<string, string> {
   const m: Record<string, string> = { ...PRESET_CUSTOMER_TYPE_LABELS };
   for (const c of classifications) {
@@ -614,6 +599,7 @@ type Customer = {
   legacyUpdatedAt?: string | null;
   balanceLegacy?: unknown;
   birthdayLegacy?: string | null;
+  createdAt?: string;
 };
 
 type TimelineEvent = {
@@ -1828,17 +1814,27 @@ function taskStatusLabelForTasks(status: string) {
 }
 
 function taskTypeLabelForTasks(type: string) {
+  // type מייצג כעת את שלב הזרימה: step1..step7
   const map: Record<string, string> = {
-    SALES_FOLLOWUP: 'מעקב מכירות',
-    QUOTE_PREPARATION: 'הכנת הצעת מחיר',
+    step1: 'פתיחת פנייה',
+    step2: 'התאמת הפתרון',
+    step3: 'שיחת מכירה',
+    step4: 'פולואפ',
+    step5: 'תיאום',
+    step6: 'ביצוע',
+    step7: 'דוח',
+    stepQuote: 'הצעת מחיר',
+    // תאימות לאחור לערכים ישנים (אם נותרו במטמון/תצוגה)
+    SALES_FOLLOWUP: 'פולואפ',
+    QUOTE_PREPARATION: 'התאמת הפתרון',
     COORDINATION: 'תיאום',
-    FIELD_WORK: 'עבודת שטח',
-    REPORT_WRITING: 'כתיבת דוח',
+    FIELD_WORK: 'ביצוע',
+    REPORT_WRITING: 'דוח',
     REVIEW: 'בקרה',
     COLLECTION: 'גבייה',
-    GENERAL: 'כללי',
+    GENERAL: 'פתיחת פנייה',
   };
-  return map[(type || '').toUpperCase()] || type || '-';
+  return map[(type || '').toLowerCase()] || map[(type || '').toUpperCase()] || type || '-';
 }
 
 function findCustomerByLead(lead: Lead, customers: Customer[]) {
@@ -4130,6 +4126,7 @@ function LeadsPage({
   customers,
   onOpenLead,
   onOpenCustomer,
+  onConvertedToCustomer,
   onOpenProjectById,
   onNavigate,
   loadError,
@@ -4141,6 +4138,7 @@ function LeadsPage({
   customers: Customer[];
   onOpenLead: (lead: Lead) => void;
   onOpenCustomer?: (customer: Customer) => void;
+  onConvertedToCustomer?: (customer: Customer) => void | Promise<void>;
   onOpenProjectById?: (projectId: string) => void;
   onNavigate?: (target: string) => void;
   loadError?: string;
@@ -4337,7 +4335,9 @@ function LeadsPage({
       } catch {
         // keep best-effort behavior
       }
-      if (onOpenCustomer) {
+      if (onConvertedToCustomer) {
+        await onConvertedToCustomer(customer as Customer);
+      } else if (onOpenCustomer) {
         onOpenCustomer(customer as Customer);
       } else {
         onNavigate?.('customers');
@@ -6046,6 +6046,13 @@ function CustomersPage({
   const rangeStart = pagedTotal === 0 ? 0 : (listPage - 1) * CUSTOMER_PAGE_SIZE + 1;
   const rangeEnd = pagedTotal === 0 ? 0 : Math.min(listPage * CUSTOMER_PAGE_SIZE, pagedTotal);
 
+  /* ── 10 הלקוחות האחרונים שנוספו — תמיד מוצג בראש הטאב ── */
+  const recentCustomers = useMemo(() => {
+    return [...customers]
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      .slice(0, 10);
+  }, [customers]);
+
   const customerFormControlClass =
     '!text-lg h-14 rounded-2xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
 
@@ -6077,6 +6084,29 @@ function CustomersPage({
           לקוח חדש
         </Button>
       </div>
+
+      {/* 10 הלקוחות האחרונים שנוספו */}
+      {recentCustomers.length > 0 && (
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <History className="h-4 w-4 text-slate-400" />
+            10 הלקוחות האחרונים
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {recentCustomers.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onOpenCustomer(c)}
+                className="min-w-[160px] flex-shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right transition-colors hover:bg-slate-100"
+              >
+                <div className="truncate text-sm font-semibold text-slate-800">{c.name}</div>
+                <div className="text-xs text-slate-500">{c.city || '-'}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Info row: loading indicator + count */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-600">
@@ -7746,7 +7776,7 @@ function ProjectDetailsPage({
     dueDate: '',
     priority: 'MEDIUM',
     status: 'OPEN',
-    type: 'GENERAL',
+    type: 'step1',
   });
 
   const [draft, setDraft] = useState<{
@@ -7924,7 +7954,7 @@ function ProjectDetailsPage({
       });
       if (res.ok) {
         setNewTaskTitle('');
-        setTaskForm({ title: '', description: '', dueDate: '', priority: 'MEDIUM', status: 'OPEN', type: 'GENERAL' });
+        setTaskForm({ title: '', description: '', dueDate: '', priority: 'MEDIUM', status: 'OPEN', type: 'step1' });
         setTaskModalOpen(false);
         await reloadLinked();
       }
@@ -8279,14 +8309,14 @@ function ProjectDetailsPage({
               value={taskForm.type}
               onChange={(e) => setTaskForm((p) => ({ ...p, type: e.target.value }))}
             >
-              <option value="SALES_FOLLOWUP">{taskTypeLabelForTasks('SALES_FOLLOWUP')}</option>
-              <option value="QUOTE_PREPARATION">{taskTypeLabelForTasks('QUOTE_PREPARATION')}</option>
-              <option value="COORDINATION">{taskTypeLabelForTasks('COORDINATION')}</option>
-              <option value="FIELD_WORK">{taskTypeLabelForTasks('FIELD_WORK')}</option>
-              <option value="REPORT_WRITING">{taskTypeLabelForTasks('REPORT_WRITING')}</option>
-              <option value="REVIEW">{taskTypeLabelForTasks('REVIEW')}</option>
-              <option value="COLLECTION">{taskTypeLabelForTasks('COLLECTION')}</option>
-              <option value="GENERAL">{taskTypeLabelForTasks('GENERAL')}</option>
+              <option value="step1">{taskTypeLabelForTasks('step1')}</option>
+              <option value="step2">{taskTypeLabelForTasks('step2')}</option>
+              <option value="step3">{taskTypeLabelForTasks('step3')}</option>
+              <option value="stepQuote">{taskTypeLabelForTasks('stepQuote')}</option>
+              <option value="step4">{taskTypeLabelForTasks('step4')}</option>
+              <option value="step5">{taskTypeLabelForTasks('step5')}</option>
+              <option value="step6">{taskTypeLabelForTasks('step6')}</option>
+              <option value="step7">{taskTypeLabelForTasks('step7')}</option>
             </select>
           </div>
           <div className="md:col-span-2">
@@ -10198,6 +10228,24 @@ function SettingsPage({
   const [smtpTestMsg, setSmtpTestMsg] = useState('');
   const [smtpTestBusy, setSmtpTestBusy] = useState(false);
 
+  // ── Outlook (Microsoft Graph) connection for the edited employee ──
+  const [msStatus, setMsStatus] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
+  const [msBusy, setMsBusy] = useState(false);
+  const refreshMsStatus = async () => {
+    try {
+      const r = await apiFetch(apiUrl('/auth/microsoft/status'), { authUser: currentUser });
+      if (r.ok) setMsStatus(await r.json());
+    } catch { /* ignore */ }
+  };
+  // Re-check status when the OAuth popup signals completion.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e?.data?.type === 'ms-auth') refreshMsStatus();
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
   const [transferFromId, setTransferFromId] = useState('');
   const [transferToId, setTransferToId] = useState('');
   const [transferOpts, setTransferOpts] = useState({
@@ -10533,6 +10581,8 @@ function SettingsPage({
     if (!canManageUsersEffective) return;
     setEmpEditing(u);
     setSmtpTestMsg('');
+    setMsStatus({ connected: false, email: null });
+    refreshMsStatus();
     setEmpForm({
       name: u.name || '',
       email: u.email || '',
@@ -12101,9 +12151,63 @@ function SettingsPage({
             <div className="mt-3 text-xs text-slate-500">לידים יוכלו להתאים אוטומטית לפי שירות/מחלקה עתידית.</div>
           </div>
 
+          {empEditing && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-sky-800">
+                <Mail className="h-4 w-4" /> חיבור Outlook (מומלץ)
+              </div>
+              <div className="mb-3 text-xs text-slate-600">
+                חבר את חשבון ה-Outlook <strong>שלך</strong> ({currentUser?.email}) — הצעות מחיר יישלחו ישירות מתיבת הדואר שלך (במקום פתיחת חלון מייל ידני).
+              </div>
+              {msStatus.connected ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+                    ✓ מחובר{msStatus.email ? ` — ${msStatus.email}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={msBusy}
+                    className="rounded-xl border border-red-200 bg-white px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    onClick={async () => {
+                      setMsBusy(true);
+                      try {
+                        await apiFetch(apiUrl('/auth/microsoft/disconnect'), {
+                          method: 'POST',
+                          authUser: currentUser,
+                        });
+                        setMsStatus({ connected: false, email: null });
+                      } catch { /* ignore */ } finally { setMsBusy(false); }
+                    }}
+                  >
+                    נתק חשבון
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={msBusy}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                  onClick={async () => {
+                    setMsBusy(true);
+                    try {
+                      const r = await apiFetch(apiUrl('/auth/microsoft/login'), {
+                        authUser: currentUser,
+                      });
+                      if (!r.ok) { setMsBusy(false); return; }
+                      const { url } = await r.json();
+                      window.open(url, 'ms-oauth', 'width=520,height=680');
+                    } catch { /* ignore */ } finally { setMsBusy(false); }
+                  }}
+                >
+                  <Mail className="h-4 w-4" /> התחבר ל-Outlook
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="rounded-2xl border bg-slate-50 p-4">
-            <div className="mb-2 text-sm font-semibold">הגדרות מייל (SMTP)</div>
-            <div className="mb-3 text-xs text-slate-500">הגדרות אישיות לשליחת הצעות מחיר במייל מהמערכת.</div>
+            <div className="mb-2 text-sm font-semibold">הגדרות מייל (SMTP) — חלופי</div>
+            <div className="mb-3 text-xs text-slate-500">חלופה לחיבור Outlook. הגדרות אישיות לשליחת הצעות מחיר במייל מהמערכת.</div>
             <div className="space-y-2">
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -12544,11 +12648,13 @@ function TasksPage({
   setParentManualStepOverride: extSetManualStepOverride,
   onReloadLeads,
   pendingExpandTaskId,
+  pendingPrefillName,
   onExpandHandled,
   customerClassifications: extCustomerClassifications,
   onNavigate,
   onNewCustomer,
   onSearchCustomer,
+  onCustomerCreated,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
@@ -12568,11 +12674,14 @@ function TasksPage({
   setParentManualStepOverride?: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   onReloadLeads?: () => void | Promise<void>;
   pendingExpandTaskId?: string | null;
+  pendingPrefillName?: string | null;
   onExpandHandled?: () => void;
   customerClassifications?: CustomerClassificationDto[];
   onNavigate?: (target: string) => void;
   onNewCustomer?: () => void;
   onSearchCustomer?: () => void;
+  /** Called after `saveCustomerCard` creates a new Customer record (כרטיס לקוח → לקוח אמיתי) */
+  onCustomerCreated?: (customer: Customer) => void;
 }) {
   /* ── state ── */
   const [open, setOpen] = useState(false);
@@ -12786,7 +12895,8 @@ function TasksPage({
         apiFetch(apiUrl(`/tasks/${taskId}`), {
           method: 'PATCH',
           authUser: currentUser,
-          body: JSON.stringify({ currentStage: step, currentStageChangedAt: new Date().toISOString() }),
+          // מסנכרן את שדה type לשלב הזרימה: step1..step7, ושלב הצעת המחיר (99) -> stepQuote
+          body: JSON.stringify({ currentStage: step, currentStageChangedAt: new Date().toISOString(), type: step === 99 ? 'stepQuote' : `step${Math.min(Math.max(step + 1, 1), 7)}` }),
         }).catch(() => {});
       }
     }
@@ -12898,7 +13008,7 @@ function TasksPage({
     dueTime: '',
     priority: 'MEDIUM',
     status: 'OPEN',
-    type: 'GENERAL',
+    type: 'step1',
   });
 
   useEffect(() => {
@@ -12909,6 +13019,20 @@ function TasksPage({
   useEffect(() => {
     if (pendingExpandTaskId) {
       setExpandedTaskId(pendingExpandTaskId);
+      if (pendingPrefillName?.trim()) {
+        const trimmed = pendingPrefillName.trim();
+        const nameParts = trimmed.split(' ');
+        const task = tasks.find((t) => t.id === pendingExpandTaskId);
+        setCallFormData((prev) => ({
+          ...prev,
+          [pendingExpandTaskId]: {
+            ...getCallForm(pendingExpandTaskId, null, task || {}, undefined),
+            fullName: trimmed,
+            firstName: nameParts[0] || '',
+            lastName: nameParts.slice(1).join(' ') || '',
+          },
+        }));
+      }
       onExpandHandled?.();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -13049,10 +13173,7 @@ function TasksPage({
     const map: Record<string, string> = { OPEN: 'bg-blue-500 text-white', IN_PROGRESS: 'bg-amber-500 text-white', DONE: 'bg-green-600 text-white', CANCELLED: 'bg-slate-400 text-white' };
     return map[(s || '').toUpperCase()] || 'bg-slate-400 text-white';
   };
-  const taskTypeLabel = (type: string) => {
-    const map: Record<string, string> = { SALES_FOLLOWUP: 'מעקב מכירות', QUOTE_PREPARATION: 'הכנת הצעת מחיר', COORDINATION: 'תיאום', FIELD_WORK: 'עבודת שטח', REPORT_WRITING: 'כתיבת דוח', REVIEW: 'בקרה', COLLECTION: 'גבייה', GENERAL: 'כללי' };
-    return map[(type || '').toUpperCase()] || type || '-';
-  };
+  const taskTypeLabel = (type: string) => taskTypeLabelForTasks(type);
 
   /* ── KPI computations ── */
   const today = new Date(); today.setHours(0,0,0,0);
@@ -13065,6 +13186,16 @@ function TasksPage({
   const kpiWeek = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
   const kpiDoneToday = effectiveTasks.filter((t) => { return t.status === 'DONE'; }).length;
   const kpiQuoteFollowup = effectiveTasks.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION' && t.status !== 'DONE' && t.status !== 'CANCELLED').length;
+
+  /* ── ids of the 10 most-recently-created customers ── */
+  const recentCustomerIds = useMemo(() => {
+    return new Set(
+      [...customers]
+        .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+        .slice(0, 10)
+        .map((c) => c.id)
+    );
+  }, [customers]);
 
   /* ── filtering ── */
   const filtered = useMemo(() => {
@@ -13098,11 +13229,13 @@ function TasksPage({
       list = list.filter((t) => t.leadId || t.leadName);
     } else if (quickFilter === 'customers') {
       list = list.filter((t) => t.customerId || t.customerName);
+    } else if (quickFilter === 'recentCustomers') {
+      list = list.filter((t) => t.customerId && recentCustomerIds.has(t.customerId));
     } else if (quickFilter === 'quotes') {
       list = list.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION');
     }
     return list;
-  }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr]);
+  }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
 
   /* ── מאמן המכירות: "מידע על השירות" — תוכן קבוע (hard-coded) לפי קטגוריית השירות, ──
      לא נשלף מ-AI כדי להבטיח דיוק עובדתי ועקביות. רק "התנגדויות" ו"משפטי סגירה" נשלפים מה-AI. */
@@ -13538,8 +13671,102 @@ function TasksPage({
     </div>
   );
 
+  /* ── Persist the task's customer (mirrors saveCustomerCard's create path) ──
+   * Safe to call from any coach action: silently no-ops when there's nothing to
+   * save. Used so that clicking דחייה/העברה while still on שלב כרטיס לקוח still
+   * creates the real Customer record (→ shows up under "10 לקוחות אחרונים"). */
+  const saveCustomerForTask = async (task: Task): Promise<string | null> => {
+    if (!task) return null;
+    if (task.customerId) return task.customerId; // already a real customer
+    const fd = callFormData[task.id];
+    if (!fd) return null; // form never opened → nothing entered to save
+    const fullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
+    const phone = (fd.phone || '').trim();
+    if (!fullName && !phone) return null; // not enough to make a meaningful customer
+    const rawType = (fd.customerType || '').trim();
+    const isPrivate = rawType === 'PRIVATE' || rawType === 'לקוח פרטי';
+    const presetCodes = ['PRIVATE', 'COMPANY', 'PUBLIC'];
+    const classificationCodes = (extCustomerClassifications || []).map((cl) => cl.code);
+    const customerType = isPrivate
+      ? 'PRIVATE'
+      : (presetCodes.includes(rawType) || classificationCodes.includes(rawType) ? rawType : 'COMPANY');
+    const custName = (!isPrivate && fd.company?.trim()) ? fd.company.trim() : (fullName || 'לקוח חדש');
+    try {
+      const customerRes = await apiFetch(apiUrl('/customers'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          name: custName,
+          type: customerType,
+          contactName: fullName || custName,
+          phone: phone || '',
+          email: fd.email || '',
+          city: fd.city || '',
+          address: fd.address || null,
+          companyRegNumber: fd.companyRegNumber || null,
+          status: 'ACTIVE',
+          services: fd.serviceType ? [fd.serviceType] : [],
+          notes: fd.notes || null,
+        }),
+      });
+      if (!customerRes.ok) return null;
+      const createdCustomer = await customerRes.json();
+      if (!isPrivate) {
+        for (const c of (taskContactsMap[task.id] || [])) {
+          if (!c.fullName?.trim() && !c.phone?.trim() && !c.email?.trim()) continue;
+          await apiFetch(apiUrl(`/customers/${createdCustomer.id}/contacts`), {
+            method: 'POST',
+            authUser: currentUser,
+            body: JSON.stringify({ fullName: c.fullName, phone: c.phone, email: c.email, roleTitle: c.roleTitle, isPrimary: c.isPrimary }),
+          }).catch(() => {});
+        }
+      }
+      if (task.leadId) {
+        await apiFetch(apiUrl(`/leads/${task.leadId}`), {
+          method: 'PATCH',
+          authUser: currentUser,
+          body: JSON.stringify({ customerId: createdCustomer.id }),
+        }).catch(() => {});
+      }
+      await apiFetch(apiUrl(`/tasks/${task.id}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ customerId: createdCustomer.id }),
+      }).catch(() => {});
+      onCustomerCreated?.(createdCustomer);
+      return createdCustomer.id;
+    } catch {
+      return null;
+    }
+  };
+
+  /* ── Close the expanded task workspace and return to the tasks list screen ──
+   * (instead of auto-advancing to the next task). Shared by all 3 coach actions. */
+  const returnToTasksScreen = () => {
+    setCoachActionPopup(null);
+    setExpandedTaskId(null);
+    onNavigate?.('tasks');
+  };
+
+  /* ── Coach "דחייה למאוחר יותר": set future dueDate, persist customer, return to list ── */
+  const coachSnooze = async (task: Task, minutes: number) => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + minutes);
+    await saveCustomerForTask(task);
+    try {
+      await apiFetch(apiUrl(`/tasks/${task.id}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ dueDate: d.toISOString() }),
+      });
+    } catch { /* silent */ }
+    await onReloadTasks?.();
+    returnToTasksScreen();
+  };
+
   /* ── "חזרה מאוחרת יותר" — popup מהמאמן: מחזיר את המשימה לעדיפות גבוהה בעוד X זמן ── */
-  const renderCoachSnoozePopup = (taskId: string) => {
+  const renderCoachSnoozePopup = (task: Task) => {
+    const taskId = task.id;
     const customVal = coachSnoozeCustom[taskId] || '';
     return (
       <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
@@ -13557,7 +13784,7 @@ function TasksPage({
           ].map((opt) => (
             <button
               key={opt.min}
-              onClick={() => { snoozeByMinutes(taskId, opt.min); setCoachActionPopup(null); setExpandedTaskId(null); onNavigate?.('tasks'); }}
+              onClick={() => { void coachSnooze(task, opt.min); }}
               className="rounded-xl px-4 py-2 text-sm font-bold border border-amber-200 text-amber-700 bg-amber-50 hover:bg-amber-100 transition-colors text-right"
             >
               {opt.label}
@@ -13575,7 +13802,7 @@ function TasksPage({
             />
             <button
               disabled={!customVal || Number(customVal) < 1}
-              onClick={() => { if (customVal && Number(customVal) >= 1) { snoozeByMinutes(taskId, Number(customVal)); setCoachActionPopup(null); setExpandedTaskId(null); onNavigate?.('tasks'); } }}
+              onClick={() => { if (customVal && Number(customVal) >= 1) { void coachSnooze(task, Number(customVal)); } }}
               className="rounded-xl px-3 py-2 text-sm font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               אישור
@@ -13603,7 +13830,7 @@ function TasksPage({
               <button
                 key={u.id}
                 disabled={busy}
-                onClick={() => { void transferTaskToEmployee(task.id, u.id); setCoachActionPopup(null); }}
+                onClick={async () => { await saveCustomerForTask(task); await transferTaskToEmployee(task.id, u.id); returnToTasksScreen(); }}
                 className="w-full text-right px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 border border-slate-100 bg-slate-50 hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors disabled:opacity-40 flex items-center gap-2.5"
               >
                 <span className="flex items-center justify-center rounded-full bg-white border border-slate-200 flex-shrink-0" style={{ width: 28, height: 28, fontSize: 12, fontWeight: 800 }}>{(u.name || '?').trim().charAt(0)}</span>
@@ -13649,8 +13876,9 @@ function TasksPage({
                     setCoachLostOtherReason((p) => ({ ...p, [task.id]: '' }));
                     return;
                   }
-                  setCoachActionPopup(null);
+                  await saveCustomerForTask(task);
                   await updateTaskField(task.id, { status: 'CANCELLED', description: reason });
+                  returnToTasksScreen();
                 }}
                 className="rounded-xl px-4 py-2 text-sm font-bold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition-colors text-right"
               >
@@ -13679,9 +13907,10 @@ function TasksPage({
                 disabled={!otherVal.trim()}
                 onClick={async () => {
                   const reasonText = otherVal.trim();
-                  setCoachActionPopup(null);
                   setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; });
+                  await saveCustomerForTask(task);
                   await updateTaskField(task.id, { status: 'CANCELLED', description: reasonText });
+                  returnToTasksScreen();
                 }}
                 className="flex-1 rounded-xl px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -13697,23 +13926,25 @@ function TasksPage({
   /* ── reusable action row: 3 universal buttons + 1 stage-specific "advance" button ── */
   const renderStageActionBar = (
     t: Task,
-    primary: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean },
+    primary?: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean } | null,
   ) => {
     const universalActions = [
       { key: 'transfer' as const, label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" /> },
-      { key: 'snooze' as const, label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" /> },
+      { key: 'snooze' as const, label: 'דחייה למאוחר יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" /> },
       { key: 'lost' as const, label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" /> },
     ];
     return (
       <div className="flex justify-center items-start gap-8 py-1">
-        <div className="relative flex flex-col items-center">
-          <button onClick={primary.onClick} disabled={primary.disabled} className="flex flex-col items-center gap-1.5 cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed">
-            <div className="flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl" style={{ background: primary.circleBg, width: '56px', height: '56px' }}>
-              {primary.icon}
-            </div>
-            <span className="font-extrabold text-center leading-tight text-slate-600" style={{ fontSize: '13px' }}>{primary.label}</span>
-          </button>
-        </div>
+        {primary && (
+          <div className="relative flex flex-col items-center">
+            <button onClick={primary.onClick} disabled={primary.disabled} className="flex flex-col items-center gap-1.5 cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed">
+              <div className="flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl" style={{ background: primary.circleBg, width: '56px', height: '56px' }}>
+                {primary.icon}
+              </div>
+              <span className="font-extrabold text-center leading-tight text-slate-600" style={{ fontSize: '13px' }}>{primary.label}</span>
+            </button>
+          </div>
+        )}
         {universalActions.map((act) => {
           const isPopupOpen = coachActionPopup?.taskId === t.id && coachActionPopup.type === act.key;
           const handleClick = () => {
@@ -13727,7 +13958,7 @@ function TasksPage({
                 </div>
                 <span className={`font-extrabold text-center leading-tight ${isPopupOpen ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '13px' }}>{act.label}</span>
               </button>
-              {isPopupOpen && act.key === 'snooze' && renderCoachSnoozePopup(t.id)}
+              {isPopupOpen && act.key === 'snooze' && renderCoachSnoozePopup(t)}
               {isPopupOpen && act.key === 'transfer' && renderCoachTransferPopup(t)}
               {isPopupOpen && act.key === 'lost' && renderCoachLostPopup(t)}
             </div>
@@ -13802,6 +14033,7 @@ function TasksPage({
     { key: 'done', label: 'הושלמו', icon: CheckCircle2 },
     { key: 'leads', label: 'לידים', icon: Flame },
     { key: 'customers', label: 'לקוחות', icon: Users },
+    { key: 'recentCustomers', label: '10 לקוחות אחרונים', icon: History },
     { key: 'quotes', label: 'הצעות מחיר', icon: FileText },
   ];
 
@@ -14081,6 +14313,16 @@ function TasksPage({
                     const stageKey = currentStep === QUOTE_STEP_IDX ? 'quotePrep' : (progressSteps[currentStep]?.key || 'inquiry');
                     const stageColor = currentStep === QUOTE_STEP_IDX ? '#f59e0b' : (progressSteps[currentStep]?.color || '#3b82f6');
                     const linkedLeadForHeader = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
+                    /* ── validation gate: can this task leave "כרטיס לקוח" (stage 0) without a saved contact? ──
+                       Mirrors canSaveCard inside the stage-0 block below, computed here so the
+                       step-bar buttons can also respect it instead of bypassing the contact-details check. */
+                    const linkedCustomerForGate = t.customerId ? customers.find((c) => c.id === t.customerId) : null;
+                    const fdGate = callFormData[t.id] || getCallForm(t.id, linkedLeadForHeader, t, linkedCustomerForGate);
+                    const derivedFullNameGate = [fdGate.firstName, fdGate.lastName].filter(Boolean).join(' ').trim() || fdGate.fullName || '';
+                    const isPrivateGate = (fdGate.customerType || '') === 'PRIVATE' || (fdGate.customerType || '') === 'לקוח פרטי';
+                    const ccContactsGate = taskContactsMap[t.id] || [];
+                    const hasValidContactGate = ccContactsGate.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
+                    const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && (isPrivateGate || hasValidContactGate));
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
                       <td colSpan={10} className="p-0">
@@ -14129,12 +14371,17 @@ function TasksPage({
                               const isCurrent = origIdx === currentStep;
                               const stepNum = vi + 1;
                               const isLast = vi === visibleProgressStepsExtended.length - 1;
+                              /* אסור לדלג קדימה משלב "כרטיס לקוח" דרך פס ההתקדמות אם עדיין חסרים שדות חובה / איש קשר */
+                              const isBlockedStep = currentStep === 0 && origIdx !== 0 && !canLeaveCustomerCard;
                               return (
                                 <React.Fragment key={step.key}>
                                   <button
                                     type="button"
-                                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, cursor: 'pointer', flexShrink: 0, background: 'none', border: 'none', padding: '0 4px' }}
-                                    onClick={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }))}
+                                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, cursor: isBlockedStep ? 'not-allowed' : 'pointer', opacity: isBlockedStep ? 0.45 : 1, flexShrink: 0, background: 'none', border: 'none', padding: '0 4px' }}
+                                    onClick={() => {
+                                      if (isBlockedStep) return;
+                                      setManualStepOverride((prev) => ({ ...prev, [t.id]: origIdx }));
+                                    }}
                                   >
                                     <div style={{
                                       width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -14406,8 +14653,13 @@ function TasksPage({
                             const derivedFullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
                             const ccContacts0 = taskContactsMap[t.id] || [];
                             const isPrivate0 = (fd.customerType || '') === 'PRIVATE' || (fd.customerType || '') === 'לקוח פרטי';
-                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && (isPrivate0 || ccContacts0.length > 0));
+                            const hasValidContact0 = ccContacts0.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
+                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && (isPrivate0 || hasValidContact0));
                             const saveCustomerCard = async () => {
+                              if (!isPrivate0 && !hasValidContact0) {
+                                alert('חובה להוסיף לפחות איש קשר אחד עבור סיווג לקוח זה');
+                                return;
+                              }
                               const saveFullName = derivedFullName;
                               // Auto-add self-contact for PRIVATE with no explicit contacts
                               if (isPrivate0 && ccContacts0.length === 0) {
@@ -14444,6 +14696,64 @@ function TasksPage({
                                   });
                                 } catch { /* silent */ }
                               }
+                              /* ── Create a real Customer record so this task has a customerId ──
+                               * Without it, QuoteNewScreen's autosave (gated on customerId) never
+                               * persists the draft, so the quote opened from שלב "הצעת מחיר"
+                               * loses its link to this task and disappears on refresh. */
+                              if (!t.customerId) {
+                                try {
+                                  const presetCodes = ['PRIVATE', 'COMPANY', 'PUBLIC'];
+                                  const classificationCodes = ccClassifications.map((cl: any) => cl.code);
+                                  const rawType = (fd.customerType || '').trim();
+                                  const customerType = isPrivate0
+                                    ? 'PRIVATE'
+                                    : (presetCodes.includes(rawType) || classificationCodes.includes(rawType) ? rawType : 'COMPANY');
+                                  const custName = (!isPrivate0 && fd.company?.trim()) ? fd.company.trim() : (saveFullName || 'לקוח חדש');
+                                  const customerRes = await apiFetch(apiUrl('/customers'), {
+                                    method: 'POST',
+                                    authUser: currentUser,
+                                    body: JSON.stringify({
+                                      name: custName,
+                                      type: customerType,
+                                      contactName: saveFullName || custName,
+                                      phone: fd.phone || '',
+                                      email: fd.email || '',
+                                      city: fd.city || '',
+                                      address: fd.address || null,
+                                      companyRegNumber: fd.companyRegNumber || null,
+                                      status: 'ACTIVE',
+                                      services: fd.serviceType ? [fd.serviceType] : [],
+                                      notes: fd.notes || null,
+                                    }),
+                                  });
+                                  if (customerRes.ok) {
+                                    const createdCustomer = await customerRes.json();
+                                    if (!isPrivate0) {
+                                      for (const c of ccContacts0) {
+                                        if (!c.fullName?.trim() && !c.phone?.trim() && !c.email?.trim()) continue;
+                                        await apiFetch(apiUrl(`/customers/${createdCustomer.id}/contacts`), {
+                                          method: 'POST',
+                                          authUser: currentUser,
+                                          body: JSON.stringify({ fullName: c.fullName, phone: c.phone, email: c.email, roleTitle: c.roleTitle, isPrimary: c.isPrimary }),
+                                        }).catch(() => {});
+                                      }
+                                    }
+                                    if (t.leadId) {
+                                      await apiFetch(apiUrl(`/leads/${t.leadId}`), {
+                                        method: 'PATCH',
+                                        authUser: currentUser,
+                                        body: JSON.stringify({ customerId: createdCustomer.id }),
+                                      }).catch(() => {});
+                                    }
+                                    await apiFetch(apiUrl(`/tasks/${t.id}`), {
+                                      method: 'PATCH',
+                                      authUser: currentUser,
+                                      body: JSON.stringify({ customerId: createdCustomer.id }),
+                                    }).catch(() => {});
+                                    onCustomerCreated?.(createdCustomer);
+                                  }
+                                } catch { /* silent */ }
+                              }
                               setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
                               setOpenCategoryId('__none__');
                               await onReloadTasks?.();
@@ -14476,10 +14786,18 @@ function TasksPage({
                             };
                             const removeContact = (cid: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).filter((c) => c.id !== cid) }));
                             const updateContact = (cid: string, field: string, val: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).map((c) => c.id === cid ? { ...c, [field]: val } : c) }));
-                            // Auto-show blank contact row for non-private when none exist yet
+                            // Auto-show contact row for non-private when none exist yet — prefill from the linked customer's contact details if available
                             if (!isPrivate && ccContacts.length === 0 && !taskContactsCounter.current[t.id]) {
                               taskContactsCounter.current[t.id] = 1;
-                              setTaskContactsMap((p) => (!p[t.id] || p[t.id].length === 0) ? { ...p, [t.id]: [{ id: `pending-${t.id}-1`, fullName: '', phone: '', email: '', roleTitle: '', isPrimary: true }] } : p);
+                              const prefillContact = {
+                                id: `pending-${t.id}-1`,
+                                fullName: linkedCustomerForCard?.contactName || '',
+                                phone: linkedCustomerForCard?.phone || '',
+                                email: linkedCustomerForCard?.email || '',
+                                roleTitle: '',
+                                isPrimary: true,
+                              };
+                              setTaskContactsMap((p) => (!p[t.id] || p[t.id].length === 0) ? { ...p, [t.id]: [prefillContact] } : p);
                             }
                             return (
                               <div className="px-8 pb-6" style={{ direction: 'rtl', background: '#F8FAFC' }}>
@@ -14560,9 +14878,9 @@ function TasksPage({
                                         </div>
                                       </div>
                                     </div>
-                                    {/* Row 6: הערות לטיפול */}
+                                    {/* Row 6: מהות הפנייה */}
                                     <div>
-                                      <label className={ccLbl}>הערות לטיפול</label>
+                                      <label className={ccLbl}>מהות הפנייה</label>
                                       <textarea className={ccTxt} rows={3} placeholder="פרטים נוספים שחשוב לדעת על הלקוח..." value={fd.notes || ''} onChange={(e) => setF('notes', e.target.value)} />
                                     </div>
                                     {/* ── אנשי קשר ── */}
@@ -14570,11 +14888,30 @@ function TasksPage({
                                       <div className="mb-3">
                                         <span className="text-[14px] font-bold text-black">אנשי קשר</span>
                                       </div>
-                                      {/* Auto-contact notice for PRIVATE */}
-                                      {isPrivate && ccContacts.length === 0 && (
-                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 font-medium mb-3 flex items-center gap-2">
-                                          <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                                          כלקוח פרטי, הפרטים שהוזנו למעלה (שם, טלפון, אימייל) יצורפו אוטומטית כאיש הקשר הראשי.
+                                      {/* Auto-contact for PRIVATE — מוצג ומולא אוטומטית מהפרטים שהוזנו למעלה */}
+                                      {isPrivate && (
+                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
+                                          <div className="flex items-center justify-between mb-3">
+                                            <span className="text-[13px] font-semibold text-emerald-700 flex items-center gap-2">
+                                              <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                              איש קשר 1
+                                              <span className="mr-1 text-[11px] font-medium text-emerald-600">(ראשי · מולא אוטומטית מהפרטים שלמעלה)</span>
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">שם איש קשר</div>
+                                              <div className="text-[14px] text-emerald-900">{derivedFullName || '—'}</div>
+                                            </div>
+                                            <div>
+                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">טלפון</div>
+                                              <div className="text-[14px] text-emerald-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.phone || '—'}</div>
+                                            </div>
+                                            <div className="col-span-2">
+                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">אימייל</div>
+                                              <div className="text-[14px] text-emerald-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.email || '—'}</div>
+                                            </div>
+                                          </div>
                                         </div>
                                       )}
                                       {ccContacts.map((pc, idx) => (
@@ -14618,6 +14955,9 @@ function TasksPage({
                                     </button>
                                   </div>
                                 </div>
+                                <div className="mt-5">
+                                  {renderStageActionBar(t)}
+                                </div>
                                 {linkedLead && (
                                   <div className="mt-5 rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
                                     <div className="flex items-center gap-3 mb-5">
@@ -14655,15 +14995,6 @@ function TasksPage({
                                     </div>
                                   </div>
                                 )}
-                                <div className="mt-5">
-                                  {renderStageActionBar(t, {
-                                    label: 'מעבר להתאמת הפתרון',
-                                    circleBg: '#3b82f6',
-                                    icon: <ArrowUpRight className="h-7 w-7 text-white" />,
-                                    onClick: saveCustomerCard,
-                                    disabled: !canSaveCard,
-                                  })}
-                                </div>
                               </div>
                             );
                           })() : currentStep === 1 ? (() => {
@@ -15076,9 +15407,15 @@ function TasksPage({
                                         {(() => {
                                           const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader) || coach?.serviceName;
                                           const svcPrice = formatServicePrice(t.productName);
-                                          return svcName
-                                            ? `המלצות מותאמות אישית עבור: ${svcName}${svcPrice ? ` · מחיר: ${svcPrice}` : ''}`
-                                            : 'ממתין לבחירת שירות...';
+                                          if (!svcName) return 'ממתין לבחירת שירות...';
+                                          return (
+                                            <>
+                                              {`המלצות מותאמות אישית עבור: ${svcName}`}
+                                              {svcPrice && (
+                                                <span className="font-extrabold text-white" style={{ fontSize: '18px' }}> · מחיר: {svcPrice}</span>
+                                              )}
+                                            </>
+                                          );
                                         })()}
                                       </span>
                                     </div>
@@ -15197,7 +15534,7 @@ function TasksPage({
                                         </div>
                                         <span className={`font-extrabold text-center leading-tight ${isActive ? 'text-slate-900' : 'text-slate-600'}`} style={{ fontSize: '13px' }}>{act.label}</span>
                                       </button>
-                                      {isPopupOpen && act.popup === 'snooze' && renderCoachSnoozePopup(t.id)}
+                                      {isPopupOpen && act.popup === 'snooze' && renderCoachSnoozePopup(t)}
                                       {isPopupOpen && act.popup === 'transfer' && renderCoachTransferPopup(t)}
                                       {isPopupOpen && act.popup === 'lost' && renderCoachLostPopup(t)}
                                     </div>
@@ -15214,119 +15551,129 @@ function TasksPage({
                             const waitingMs = waitingSince ? Date.now() - waitingSince.getTime() : null;
                             const waitingDays = waitingMs != null ? Math.floor(waitingMs / 86400000) : null;
                             const waitingHours = waitingMs != null ? Math.floor((waitingMs % 86400000) / 3600000) : null;
+                            // Recommended follow-up window: 3 days total from when the quote was sent
+                            const FOLLOWUP_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+                            const remainingMs = waitingMs != null ? FOLLOWUP_WINDOW_MS - waitingMs : null;
+                            const remainingDays = remainingMs != null ? Math.floor(Math.max(0, remainingMs) / 86400000) : null;
+                            const remainingHours = remainingMs != null ? Math.floor((Math.max(0, remainingMs) % 86400000) / 3600000) : null;
+                            const remainingText = remainingDays != null && remainingHours != null
+                              ? (remainingDays >= 1
+                                  ? `${remainingDays} ${remainingDays === 1 ? 'יום' : 'ימים'}${remainingHours > 0 ? ` ו-${remainingHours} שעות` : ''}`
+                                  : remainingHours >= 1 ? `${remainingHours} שעות` : 'פחות משעה')
+                              : null;
+                            const followupCustomerName = contactName || t.customerName || t.leadName || 'הלקוח';
                             const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || '').replace(/[^\d+]/g, '');
                             const fu3Email = t.leadEmail || linkedLeadForHeader?.email || '';
                             const waLink3 = fu3Phone ? `https://wa.me/${fu3Phone.replace(/^0/, '972')}` : null;
                             return (
                               <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
-                                {/* ── טיימר + פעולות יצירת קשר ── */}
-                                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 flex flex-wrap items-center justify-between gap-4">
-                                  <div className="flex items-center gap-3">
-                                    <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fffbeb' }}>
-                                      <Timer className="h-6 w-6 text-amber-500" />
-                                    </div>
-                                    <div>
-                                      <div className="text-[11px] font-semibold text-amber-700 uppercase tracking-wide">הלקוח מחכה להצעה</div>
-                                      {waitingDays != null && waitingDays >= 1 ? (
-                                        <div className="flex items-baseline gap-1.5 mt-0.5">
-                                          <span className="text-2xl font-extrabold text-amber-900">{waitingDays}</span>
-                                          <span className="text-[13px] font-semibold text-amber-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
-                                          {waitingHours! > 0 && <>
-                                            <span className="text-lg font-bold text-amber-700">{waitingHours}</span>
-                                            <span className="text-[13px] font-semibold text-amber-700">שעות</span>
-                                          </>}
+                                {/* ── כותרת פולואפ + טיימר + פעולות יצירת קשר ── */}
+                                <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 px-6 py-5 shadow-sm">
+                                  <div className="flex flex-wrap items-start justify-between gap-4">
+                                    <div className="flex items-start gap-4">
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#fffbeb' }}>
+                                        <Timer className="h-7 w-7 text-amber-500" />
+                                      </div>
+                                      <div>
+                                        <div className="text-xl md:text-2xl font-extrabold text-amber-900 leading-snug">
+                                          {followupCustomerName} מחכה להצעה שלו כבר{waitingSince ? ':' : ''}
                                         </div>
-                                      ) : waitingSince ? (
-                                        <div className="text-sm font-bold text-amber-700 mt-0.5">{`נשלחה ${formatTimeAgo(t.currentStageChangedAt)}`}</div>
-                                      ) : (
-                                        <div className="text-sm font-bold text-amber-700 mt-0.5">נשלחה לאחרונה</div>
+                                        {waitingSince ? (
+                                          <div className="flex items-baseline gap-1.5 mt-1.5 flex-wrap">
+                                            {waitingDays! >= 1 && (
+                                              <>
+                                                <span className="text-3xl font-extrabold text-amber-600">{waitingDays}</span>
+                                                <span className="text-sm font-bold text-amber-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
+                                              </>
+                                            )}
+                                            {waitingHours! > 0 && (
+                                              <>
+                                                <span className="text-2xl font-extrabold text-amber-600">{waitingHours}</span>
+                                                <span className="text-sm font-bold text-amber-700">שעות</span>
+                                              </>
+                                            )}
+                                            {waitingDays === 0 && waitingHours === 0 && (
+                                              <span className="text-sm font-bold text-amber-700">פחות משעה</span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="text-sm font-bold text-amber-700 mt-1.5">נשלחה לאחרונה</div>
+                                        )}
+                                        {/* recommendation: time left out of the 3-day follow-up window */}
+                                        {remainingMs != null && (
+                                          <div
+                                            className="mt-2.5 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold"
+                                            style={{ background: remainingMs > 0 ? '#fff7ed' : '#fef2f2', color: remainingMs > 0 ? '#c2410c' : '#dc2626' }}
+                                          >
+                                            <Sparkles className="h-3.5 w-3.5" />
+                                            {remainingMs > 0
+                                              ? `מומלץ לבצע פולואפ עוד ${remainingText}`
+                                              : 'מומלץ לבצע פולואפ כבר עכשיו — חלון 3 הימים חלף'}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {/* contact buttons */}
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {fu3Phone && (
+                                        <a href={`tel:${fu3Phone}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#22c55e' }}>
+                                          <Phone className="h-3.5 w-3.5" />שיחה
+                                        </a>
+                                      )}
+                                      {waLink3 && (
+                                        <a href={waLink3} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#25d366' }}>
+                                          <MessageCircle className="h-3.5 w-3.5" />וואטסאפ
+                                        </a>
+                                      )}
+                                      {fu3Email && (
+                                        <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#6366f1' }}>
+                                          <Mail className="h-3.5 w-3.5" />מייל
+                                        </a>
                                       )}
                                     </div>
                                   </div>
-                                  {/* contact buttons */}
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    {fu3Phone && (
-                                      <a href={`tel:${fu3Phone}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#22c55e' }}>
-                                        <Phone className="h-3.5 w-3.5" />שיחה
-                                      </a>
-                                    )}
-                                    {waLink3 && (
-                                      <a href={waLink3} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#25d366' }}>
-                                        <MessageCircle className="h-3.5 w-3.5" />וואטסאפ
-                                      </a>
-                                    )}
-                                    {fu3Email && (
-                                      <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#6366f1' }}>
-                                        <Mail className="h-3.5 w-3.5" />מייל
-                                      </a>
-                                    )}
-                                  </div>
                                 </div>
-                                {/* ── משפטי מכירה וסגירה ── */}
+                                {/* ── מענה להתנגדויות ומשפטי סגירה ── */}
                               {(() => {
-                                const svcName = serviceNameFromProductId(t.productName, linkedLeadForHeader) || '';
-                                const isRadiation = svcName.includes('קרינה') || ['9','56','83','002','10064','10034','10082','10081','10096','10097','10098','10036','10041','10006','10165','10166'].includes(t.productName || '');
-                                const isAir = svcName.includes('אוויר') || svcName.includes('עובשים') || ['66','72','10046','10072','69','10066','10073','10126','10078','10047','10127','10159'].includes(t.productName || '');
-                                const isWater = svcName.includes('מים') || ['63','10076','10120','10121','10122','10075','10077'].includes(t.productName || '');
-                                const isAsbestos = svcName.includes('אסבסט') || ['10023','10026','10112'].includes(t.productName || '');
-                                const isGreenBuilding = svcName.includes('בנייה ירוקה') || ['10148','10149','10150'].includes(t.productName || '');
-                                const isOccupational = svcName.includes('גהות') || svcName.includes('רעש תעסוקתי') || ['62','98','10084','10104'].includes(t.productName || '');
-
-                                const generalPhrases = [
-                                  'שלחתי לך הצעת מחיר לפני מספר ימים — הספקת לעיין בה?',
-                                  'יש לך שאלות לגבי ההצעה? אשמח להבהיר הכל',
-                                  'אם תאשר השבוע — נוכל לתאם ביקור בימים הקרובים',
-                                  'רוב הלקוחות שלנו מחליטים אחרי שיחה קצרה — יש לך 5 דקות?',
+                                /* ── מענה להתנגדויות נפוצות + משפטי סגירה ── */
+                                const objectionPhrases: { objection: string; response: string }[] = [
+                                  {
+                                    objection: '"המחיר קצת גבוה לי"',
+                                    response: 'אני שומע אותך — בוא נראה אם יש דרך להתאים את ההצעה לתקציב שלך, יש לנו גם אפשרות לפריסת תשלומים נוחה',
+                                  },
+                                  {
+                                    objection: '"אני צריך לחשוב על זה"',
+                                    response: 'ברור, זו החלטה חשובה. מה בדיוק כדאי שאבהיר לך עכשיו כדי שתוכל להחליט בראש שקט?',
+                                  },
+                                  {
+                                    objection: '"אני צריך להתייעץ עם השותף/ה"',
+                                    response: 'מצוין — אשלח סיכום קצר שיעזור בהחלטה המשותפת, ונקבע זמן קבוע לחזור ולסגור',
+                                  },
+                                  {
+                                    objection: '"לא דחוף לנו כרגע"',
+                                    response: 'אני מבין, אבל ככל שמתעכבים — כך גם העלות/הסיכון עולה. בוא נקבע תאריך נוח גם אם הוא לא השבוע',
+                                  },
+                                  {
+                                    objection: '"קיבלנו הצעה זולה יותר במקום אחר"',
+                                    response: 'תודה שאתה משתף — אשמח להבין מה כלול בהצעה השנייה, כדי שנשווה אותה נכון להצעה שלנו',
+                                  },
+                                  {
+                                    objection: '"לא ראיתי את ההצעה / לא הגיע המייל"',
+                                    response: 'אין בעיה, אני שולח לך אותה עכשיו גם בוואטסאפ — אפשר להעיף מבט ולדבר עוד כמה דקות?',
+                                  },
+                                  {
+                                    objection: '"תחזרו אליי בעוד כמה ימים"',
+                                    response: 'בשמחה — מתי בדיוק נוח לך שאחזור? אני אקבע תזכורת כדי שלא נפספס',
+                                  },
                                 ];
 
-                                const servicePhrases: { label: string; phrases: string[] } | null =
-                                  isRadiation ? {
-                                    label: 'קרינה',
-                                    phrases: [
-                                      'בדיקת קרינה בבית נותנת שקט נפשי לכל המשפחה — לרוב ההפתעה חיובית',
-                                      'רמות קרינה גבוהות קשורות לקשיי שינה, עייפות ובעיות ריכוז',
-                                      'הדוח שלנו כולל המלצות פרקטיות — לא רק מספרים יבשים',
-                                      'ביצענו מאות בדיקות קרינה — יודעים בדיוק איפה לחפש ומה לחפש',
-                                    ],
-                                  } : isAir ? {
-                                    label: 'איכות אוויר',
-                                    phrases: [
-                                      'עובשים באוויר הם לרוב הגורם לאלרגיות ובעיות נשימה שלא מוצאים להן סיבה',
-                                      'בדיקת אוויר פנים-בנייני — מומלצת לפחות אחת לכמה שנים, בעיקר בבניינים ישנים',
-                                      'תוצאות תוך שבוע + המלצות מפורטות לשיפור איכות האוויר',
-                                      'ילדים ואנשים עם אסטמה רגישים במיוחד — שווה לבדוק לפני שהבעיה מחמירה',
-                                    ],
-                                  } : isWater ? {
-                                    label: 'מים',
-                                    phrases: [
-                                      'מים שנראים נקיים לא בהכרח בטוחים — הבדיקה מגלה מה שאי אפשר לראות',
-                                      'אנחנו בודקים מתכות כבדות, חיידקים וחומרים כימיים — תמונה מלאה',
-                                      'בדיקת מים היא הדרך הבטוחה ביותר להגן על בריאות המשפחה',
-                                      'תוצאות מהמעבדה תוך כשבוע — מהירות ואמינות',
-                                    ],
-                                  } : isAsbestos ? {
-                                    label: 'אסבסט',
-                                    phrases: [
-                                      'לפני כל שיפוץ בבניין ישן — סקר אסבסט הוא חובה חוקית ובריאותית',
-                                      'חשיפה לאסבסט גורמת למחלות ריאה חמורות — לא כדאי לסכן עובדים ודיירים',
-                                      'הסקר שלנו מכסה זיהוי, דיגום ואישור בטיחותי מלא',
-                                      'עובד שנחשף לאסבסט ללא סקר — אתה עלול להיות אחראי משפטית',
-                                    ],
-                                  } : isGreenBuilding ? {
-                                    label: 'בנייה ירוקה',
-                                    phrases: [
-                                      'תעודת בנייה ירוקה מעלה את ערך הנכס — משתלם לתכנן נכון מהיום הראשון',
-                                      'ייעוץ מוקדם חוסך עלויות שינוי גדולות בשלבים מאוחרים של הבנייה',
-                                      'הדרישות הרגולטוריות להתייעלות אנרגטית רק הולכות וגדלות',
-                                    ],
-                                  } : isOccupational ? {
-                                    label: 'גהות / רעש תעסוקתי',
-                                    phrases: [
-                                      'חוק מחייב ניטור רעש תעסוקתי בסביבות עבודה רועשות — עדיף להיות בתאימות',
-                                      'בדיקת גהות מגינה עליך ועל עובדיך מבחינה משפטית ובריאותית',
-                                      'אירועים בריאותיים של עובדים ללא ניטור מוקדם — אחריות מעסיק',
-                                    ],
-                                  } : null;
+                                const closingPhrases: string[] = [
+                                  'אם נסגור היום — אני שומר לך את המחיר מההצעה ומתאם תאריך מהיר לביצוע',
+                                  'מה דעתך שנקבע כבר עכשיו תאריך לתחילת העבודה?',
+                                  'יש עוד נקודה שלא ברורה ומונעת ממך לתת אישור היום?',
+                                  'אז אני רושם אותך למועד הקרוב — מסכים?',
+                                  'אני שולח לך אישור הזמנה עכשיו, ונדאג שתהיו בין הראשונים בתור',
+                                ];
 
                                 const copyPhrase = (p: string) => {
                                   void navigator.clipboard.writeText(p);
@@ -15335,58 +15682,64 @@ function TasksPage({
                                 };
 
                                 return (
-                                  <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-indigo-50 shadow-sm p-6">
+                                  <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-emerald-50 shadow-sm p-6">
                                     <div className="flex items-center gap-3 mb-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#ede9fe' }}>
-                                        <MessagesSquare className="h-6 w-6 text-violet-500" />
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#ffe4e6' }}>
+                                        <HelpCircle className="h-6 w-6 text-rose-500" />
                                       </div>
                                       <div>
-                                        <div className="text-base font-extrabold text-slate-800">משפטי מכירה וסגירה</div>
-                                        <div className="text-[13px] text-slate-400 font-medium">לחץ על משפט להעתקה מהירה</div>
+                                        <div className="text-base font-extrabold text-slate-800">מענה להתנגדויות ומשפטי סגירה</div>
+                                        <div className="text-[13px] text-slate-400 font-medium">לחץ על התגובה / המשפט להעתקה מהירה</div>
                                       </div>
                                     </div>
 
-                                    <div className={servicePhrases ? 'mb-4' : ''}>
-                                      <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide mb-2">כלליים לפולואו אפ</div>
+                                    <div className="mb-5">
+                                      <div className="text-[11px] font-bold text-rose-400 uppercase tracking-wide mb-2">אם הלקוח אומר...</div>
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        {objectionPhrases.map((item, i) => (
+                                          <div
+                                            key={item.objection}
+                                            className="rounded-xl border border-rose-100 bg-white p-3"
+                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
+                                          >
+                                            <div className="flex items-start gap-2 mb-2">
+                                              <HelpCircle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
+                                              <div className="text-[12px] font-bold text-rose-500 leading-snug">{item.objection}</div>
+                                            </div>
+                                            <button
+                                              onClick={() => copyPhrase(item.response)}
+                                              className="w-full text-right rounded-lg px-3 py-2 text-[13px] font-semibold text-slate-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 hover:border-emerald-300 hover:shadow-sm active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-2 group"
+                                            >
+                                              <span>{item.response}</span>
+                                              {copiedPhrase === item.response
+                                                ? <span className="text-[10px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
+                                                : <Copy className="h-3.5 w-3.5 text-emerald-300 group-hover:text-emerald-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              }
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div className="text-[11px] font-bold text-emerald-500 uppercase tracking-wide mb-2">משפטי סגירה</div>
                                       <div className="flex flex-col gap-2">
-                                        {generalPhrases.map((p, i) => (
+                                        {closingPhrases.map((p, i) => (
                                           <button
                                             key={p}
                                             onClick={() => copyPhrase(p)}
-                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
-                                            className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
+                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${(objectionPhrases.length + i) * 0.05}s both` }}
+                                            className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-emerald-800 bg-white border border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
                                           >
                                             <span>{p}</span>
                                             {copiedPhrase === p
                                               ? <span className="text-[11px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
-                                              : <Copy className="h-3.5 w-3.5 text-slate-300 group-hover:text-indigo-400 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              : <Copy className="h-3.5 w-3.5 text-emerald-300 group-hover:text-emerald-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                                             }
                                           </button>
                                         ))}
                                       </div>
                                     </div>
-
-                                    {servicePhrases && (
-                                      <div>
-                                        <div className="text-[11px] font-bold text-violet-500 uppercase tracking-wide mb-2">מותאם לשירות · {servicePhrases.label}</div>
-                                        <div className="flex flex-col gap-2">
-                                          {servicePhrases.phrases.map((p, i) => (
-                                            <button
-                                              key={p}
-                                              onClick={() => copyPhrase(p)}
-                                              style={{ animation: `fadeSlideIn 0.35s ease-out ${(generalPhrases.length + i) * 0.05}s both` }}
-                                              className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-violet-800 bg-white border border-violet-200 hover:bg-violet-50 hover:border-violet-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
-                                            >
-                                              <span>{p}</span>
-                                              {copiedPhrase === p
-                                                ? <span className="text-[11px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
-                                                : <Copy className="h-3.5 w-3.5 text-violet-300 group-hover:text-violet-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                              }
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
                                   </div>
                                 );
                               })()}
@@ -15402,12 +15755,26 @@ function TasksPage({
                           );
                           })() : currentStep === QUOTE_STEP_IDX ? (() => {
                             /* ── הצעת מחיר stage — inline quote creation form ── */
-                            const quotePrefillCust = (t.customerName || t.leadName) ? {
+                            // Pull the full Customer record (created in שלב כרטיס לקוח) so all its
+                            // fields auto-fill "פרטי הלקוח" in the new quote form.
+                            const linkedCustomerForQuote = t.customerId ? customers.find((c) => c.id === t.customerId) : undefined;
+                            // אימייל איש הקשר מהשלב הראשון ("פתיחת פנייה"): ישירות מטופס השיחה ומאנשי הקשר של המשימה
+                            const stage0Contacts = taskContactsMap[t.id] || [];
+                            const stage0ContactEmail =
+                              (callFormData[t.id]?.email || '').trim() ||
+                              (stage0Contacts.find((c) => c.isPrimary && c.email?.trim())?.email || '').trim() ||
+                              (stage0Contacts.find((c) => c.email?.trim())?.email || '').trim();
+                            const quotePrefillCust = (linkedCustomerForQuote || t.customerName || t.leadName) ? {
                               id: t.customerId || undefined,
-                              name: t.customerName || t.leadName || '',
-                              phone: contactPhone || undefined,
-                              email: (t.leadEmail || linkedLeadForHeader?.email) || undefined,
-                              city: linkedLeadForHeader?.city || undefined,
+                              name: linkedCustomerForQuote?.name || t.customerName || t.leadName || '',
+                              phone: linkedCustomerForQuote?.phone || contactPhone || undefined,
+                              email: linkedCustomerForQuote?.email || stage0ContactEmail || t.leadEmail || linkedLeadForHeader?.email || undefined,
+                              city: linkedCustomerForQuote?.city || linkedLeadForHeader?.city || undefined,
+                              address: linkedCustomerForQuote?.address || linkedLeadForHeader?.address || undefined,
+                              contactName: linkedCustomerForQuote?.contactName || undefined,
+                              companyRegNumber: linkedCustomerForQuote?.companyRegNumber || undefined,
+                              fax: linkedCustomerForQuote?.fax || undefined,
+                              customerType: linkedCustomerForQuote?.type || undefined,
                             } : null;
                             const quotePrefillSvc = serviceNameFromProductId(t.productName, linkedLeadForHeader) || null;
                             const fuAssignee = followupAssignee[t.id] || '';
@@ -15423,7 +15790,7 @@ function TasksPage({
                                   {/* מתי להזכיר לך שוב */}
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <Timer className="h-4 w-4 text-orange-500 flex-shrink-0" />
-                                    <span className="text-[12px] font-bold text-slate-700">תזכורת:</span>
+                                    <span className="text-[12px] font-bold text-slate-700">מעקב:</span>
                                     {REMINDER_QUICK_OPTIONS.map((opt) => (
                                       <button
                                         key={opt.key}
@@ -15486,7 +15853,7 @@ function TasksPage({
                                   prefillCustomer={quotePrefillCust}
                                   prefillServiceName={quotePrefillSvc}
                                   taskId={t.id}
-                                  onExit={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }))}
+                                  onExit={() => setExpandedTaskId(null)}
                                   onQuoteSaved={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }))}
                                   onAttachmentSaved={() => setTaskAttachments((prev) => { const n = { ...prev }; delete n[t.id]; return n; })}
                                   existingAttachments={taskAttachments[t.id] ?? []}
@@ -15533,14 +15900,14 @@ function TasksPage({
           <div>
             <FormField label="סוג משימה">
               <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.type} onChange={(e) => setForm((p: any) => ({ ...p, type: e.target.value }))}>
-                <option value="SALES_FOLLOWUP">{taskTypeLabel('SALES_FOLLOWUP')}</option>
-                <option value="QUOTE_PREPARATION">{taskTypeLabel('QUOTE_PREPARATION')}</option>
-                <option value="COORDINATION">{taskTypeLabel('COORDINATION')}</option>
-                <option value="FIELD_WORK">{taskTypeLabel('FIELD_WORK')}</option>
-                <option value="REPORT_WRITING">{taskTypeLabel('REPORT_WRITING')}</option>
-                <option value="REVIEW">{taskTypeLabel('REVIEW')}</option>
-                <option value="COLLECTION">{taskTypeLabel('COLLECTION')}</option>
-                <option value="GENERAL">{taskTypeLabel('GENERAL')}</option>
+                <option value="step1">{taskTypeLabel('step1')}</option>
+                <option value="step2">{taskTypeLabel('step2')}</option>
+                <option value="step3">{taskTypeLabel('step3')}</option>
+                <option value="stepQuote">{taskTypeLabel('stepQuote')}</option>
+                <option value="step4">{taskTypeLabel('step4')}</option>
+                <option value="step5">{taskTypeLabel('step5')}</option>
+                <option value="step6">{taskTypeLabel('step6')}</option>
+                <option value="step7">{taskTypeLabel('step7')}</option>
               </select>
             </FormField>
           </div>
@@ -16135,6 +16502,7 @@ export default function GalitCRMPrototype() {
   /** true when we opened the customer card in "new customer" creation mode */
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
+  const [pendingPrefillName, setPendingPrefillName] = useState<string | null>(null);
   const [newlyCreatedTaskId, setNewlyCreatedTaskId] = useState<string | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
@@ -16816,6 +17184,7 @@ export default function GalitCRMPrototype() {
       if (!res.ok) throw new Error();
       const newTask = await res.json();
       setParentManualStepOverride((prev) => ({ ...prev, [newTask.id]: 0 }));
+      if (prefillName?.trim()) setPendingPrefillName(prefillName.trim());
       setPendingExpandTaskId(newTask.id);
       navigateSafely('tasks');
       void reloadTasks();
@@ -16844,6 +17213,32 @@ export default function GalitCRMPrototype() {
       if (typeof window !== 'undefined') {
         window.history.pushState({}, '', `${window.location.pathname}?view=new-customer`);
       }
+    }
+  };
+
+  /** ליד שהומר ללקוח: פותח משימה חדשה מקושרת ללקוח בשלב כרטיס לקוח (שלב 0), במקום כרטיס הלקוח הישן */
+  const openCustomerInTaskWorkspace = async (customer: Customer) => {
+    try {
+      const res = await apiFetch(apiUrl('/tasks'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          title: `כרטיס לקוח — ${customer.name}`,
+          priority: 'MEDIUM',
+          status: 'OPEN',
+          type: 'GENERAL',
+          ownerId: currentUser?.id,
+          customerId: customer.id,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      const newTask = await res.json();
+      setParentManualStepOverride((prev) => ({ ...prev, [newTask.id]: 0 }));
+      setPendingExpandTaskId(newTask.id);
+      navigateSafely('tasks');
+      void reloadTasks();
+    } catch {
+      openCustomerPage(customer);
     }
   };
 
@@ -17651,6 +18046,7 @@ export default function GalitCRMPrototype() {
               users={users}
               onOpenLead={openLeadPage}
               onOpenCustomer={openCustomerPage}
+              onConvertedToCustomer={openCustomerInTaskWorkspace}
               onOpenProjectById={(id) => {
                 const project = projects.find((p) => p.id === id);
                 if (project) {
@@ -18076,6 +18472,7 @@ export default function GalitCRMPrototype() {
               currentUser={currentUser}
               projects={projects}
               customers={customers}
+              onCustomerCreated={(c) => setCustomers((prev) => [...prev, c])}
               leads={effectiveLeads}
               users={users}
               quotes={quotes}
@@ -18114,7 +18511,8 @@ export default function GalitCRMPrototype() {
               setParentManualStepOverride={setParentManualStepOverride}
               onReloadLeads={reloadLeads}
               pendingExpandTaskId={pendingExpandTaskId}
-              onExpandHandled={() => setPendingExpandTaskId(null)}
+              pendingPrefillName={pendingPrefillName}
+              onExpandHandled={() => { setPendingExpandTaskId(null); setPendingPrefillName(null); }}
               customerClassifications={customerClassifications}
               onNavigate={navigateSafely}
               onNewCustomer={handleNewCustomer}

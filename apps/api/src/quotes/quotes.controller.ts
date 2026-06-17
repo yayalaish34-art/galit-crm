@@ -23,8 +23,9 @@ export class QuotesController {
     @Query('opportunityId') opportunityId?: string,
     @Query('customerId') customerId?: string,
     @Query('leadId') leadId?: string,
+    @Query('linkedEntityId') linkedEntityId?: string,
   ) {
-    return this.quotesService.findAll({ projectId, opportunityId, customerId, leadId, user: req.user });
+    return this.quotesService.findAll({ projectId, opportunityId, customerId, leadId, linkedEntityId, user: req.user });
   }
 
   @Get('next-reference')
@@ -65,18 +66,30 @@ export class QuotesController {
 
   @Get(':id/merged-doc')
   async getMergedDoc(@Param('id') id: string, @Res() res: Response) {
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    // Prefer the DB-stored bytes (survive deploys); fall back to disk for legacy rows.
+    const doc = await this.quotesService.getLatestMergedDocument(id);
+    if (doc?.data) {
+      res.setHeader('Content-Type', doc.mimeType || DOCX_MIME);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.fileName || 'quote.docx')}"`);
+      res.send(Buffer.from(doc.data));
+      return;
+    }
+
     const quote: any = await this.quotesService.findOne(id);
-    if (!quote || !quote.lastMergedDocPath) {
+    const relPath = doc?.filePath || quote?.lastMergedDocPath;
+    if (!relPath) {
       res.status(404).send('Merged document not found');
       return;
     }
-    const absolute = path.join(process.cwd(), quote.lastMergedDocPath);
+    const absolute = path.join(process.cwd(), relPath);
     if (!fs.existsSync(absolute)) {
       res.status(404).send('Merged document file missing on disk');
       return;
     }
-    const filename = path.basename(quote.lastMergedDocPath);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    const filename = path.basename(relPath);
+    res.setHeader('Content-Type', DOCX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     res.sendFile(absolute);
   }
@@ -86,8 +99,22 @@ export class QuotesController {
    * שליחת המסמך האחרון של ההצעה כקובץ מצורף במייל
    */
   @Post(':id/send-email')
-  sendEmail(@Param('id') id: string, @Body() body: { email: string }) {
-    return this.quoteMailService.sendQuoteEmail(id, body.email);
+  sendEmail(
+    @Param('id') id: string,
+    @Body() body: { email: string; attachmentId?: string; docUrl?: string; customerName?: string },
+    @Req() req: any,
+  ) {
+    return this.quoteMailService.sendQuoteEmail(id, body.email, {
+      attachmentId: body.attachmentId,
+      docUrl: body.docUrl,
+      customerName: body.customerName,
+      userId: req.user?.id,
+    });
+  }
+
+  @Post(':id/save-merged-doc')
+  saveMergedDoc(@Param('id') id: string, @Body() body: { base64Data: string; fileName: string }) {
+    return this.quotesService.saveMergedDoc(id, body.base64Data, body.fileName);
   }
 
   @Patch(':id')

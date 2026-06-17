@@ -21,9 +21,11 @@ import { FollowupImportModule } from './followup-import/followup-import.module';
 import { AuthModule } from './auth/auth.module';
 import { PaymentTermsModule } from './payment-terms/payment-terms.module';
 import { DevAgentModule } from './dev-agent/dev-agent.module';
+import { PublicModule } from './public/public.module';
+import { MicrosoftModule } from './microsoft/microsoft.module';
 
 @Module({
-  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule],
+  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule],
   controllers: [AppController],
   providers: [AppService],
 })

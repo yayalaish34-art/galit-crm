@@ -71,5 +71,31 @@ export class TasksService {
     }
     return this.prisma.task.delete({ where: { id } });
   }
+
+  /** רשימת קבצים מצורפים למשימה (ללא תוכן הקובץ עצמו) */
+  listAttachments(taskId: string) {
+    return this.prisma.taskAttachment.findMany({
+      where: { taskId },
+      select: { id: true, fileName: true, mimeType: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async addAttachment(taskId: string, fileName: string, mimeType: string, data: Buffer) {
+    const task = await this.prisma.task.findUnique({ where: { id: taskId }, select: { id: true } });
+    if (!task) throw new ForbiddenException('Task not found');
+    return this.prisma.taskAttachment.create({
+      data: { taskId, fileName, mimeType, data: Uint8Array.from(data) },
+      select: { id: true, fileName: true, mimeType: true, createdAt: true },
+    });
+  }
+
+  getAttachment(attachmentId: string) {
+    return this.prisma.taskAttachment.findUnique({ where: { id: attachmentId } });
+  }
+
+  async removeAttachment(attachmentId: string) {
+    return this.prisma.taskAttachment.delete({ where: { id: attachmentId } });
+  }
 }
 

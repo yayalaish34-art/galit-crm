@@ -416,10 +416,17 @@ const TEMPLATE_CATEGORY_KEYWORDS: { keyword: string; category: string }[] = [
   { keyword: 'אנרגטי', category: 'thermal' },
   { keyword: 'איכות אוויר', category: 'air' },
   { keyword: 'עובש', category: 'air' },
+  { keyword: 'אוויר', category: 'air' },
   { keyword: 'מים', category: 'water' },
+  { keyword: 'מי שתייה', category: 'water' },
   { keyword: 'בנייה ירוקה', category: 'green-building' },
   { keyword: 'גהות', category: 'occupational-health' },
+  { keyword: 'תעסוקתי', category: 'occupational-health' },
   { keyword: 'חוות דעת סביבתית', category: 'environmental-opinion' },
+  { keyword: 'הידרולוג', category: 'soil' },
+  // תבניות גנריות/כלליות → קטגוריית 'general' (יוצגו רק כשיש פריט מקטגוריה כללית)
+  { keyword: 'ייעוץ סביבתי', category: 'general' },
+  { keyword: 'בדיקות סביבתיות', category: 'general' },
 ];
 
 /** Find the service category id matching a quote template's name, by keyword */
@@ -727,6 +734,8 @@ export function QuoteNewScreen({
   const [mergedHtml, setMergedHtml] = useState('');
   const [wordDocHtml, setWordDocHtml] = useState('');
   const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string }[]>([]);
+  const [lastMergedPublicUrl, setLastMergedPublicUrl] = useState('');
+  const [lastMergedAttachmentId, setLastMergedAttachmentId] = useState('');
   const [orderSource, setOrderSource] = useState('');
   const [employeeNumber, setEmployeeNumber] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1362,7 +1371,7 @@ export function QuoteNewScreen({
   ]);
 
   /* ── Save (POST new / PATCH existing) — returns saved id or null on failure ── */
-  async function doSave(): Promise<string | null> {
+  async function doSave(opts?: { advanceStage?: boolean }): Promise<string | null> {
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
     if (customerContactId.trim() && !quoteContactRows.some((r) => r.id === customerContactId)) {
       alert('איש הקשר שנבחר אינו שייך ללקוח הנוכחי — נא לבחור איש קשר מחדש.');
@@ -1427,7 +1436,7 @@ export function QuoteNewScreen({
         }
       }
       setStatusMsg('');
-      if (savedId && onQuoteSaved) onQuoteSaved(savedId);
+      if (savedId && (opts?.advanceStage ?? true) && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
     } catch {
       setStatusMsg('שגיאה בשמירה');
@@ -1666,38 +1675,7 @@ export function QuoteNewScreen({
       alert('אין משתמש מחובר');
       return;
     }
-    const selectedTemplateId = (quoteTemplateId || '').trim();
-    if (selectedTemplateId) {
-      try {
-        const res = await apiFetch(apiUrl(`/quote-templates/${selectedTemplateId}`), { authUser: user });
-        if (res.ok) {
-          const t = await res.json() as {
-            id?: string; name?: string; serviceType?: string;
-            docxTemplatePath?: string | null;
-            introHtml?: string | null; bodyHtml?: string | null;
-            closingHtml?: string | null; termsHtml?: string | null;
-          };
-          const hasContent =
-            !!(t.docxTemplatePath && String(t.docxTemplatePath).trim()) ||
-            [t.introHtml, t.bodyHtml, t.closingHtml, t.termsHtml].some(
-              (x) => typeof x === 'string' && x.trim().length > 0,
-            );
-          if (hasContent) {
-            await handleTemplateSelected({
-              id: String(t.id ?? selectedTemplateId),
-              label: t.name ?? selectedTemplateId,
-              subLabel: t.serviceType || undefined,
-            });
-            return;
-          }
-          alert(
-            `לתבנית המשויכת להצעה אין תוכן למיזוג (לא DOCX ולא HTML): ${t.name || selectedTemplateId}. בחר תבנית אחרת ושמור את ההצעה.`,
-          );
-        }
-      } catch {
-        /* fallback to picker below */
-      }
-    }
+    // תמיד פותחים את בורר התבניות — לא ממזגים אוטומטית את התבנית האחרונה שנבחרה
     setMergeTemplateLoading(true);
     setMergeTemplateRows([]);
     try {
@@ -1721,16 +1699,20 @@ export function QuoteNewScreen({
           subLabel: t.serviceType || undefined,
         }));
 
-      // Filter templates to match the categories of current line items
-      // Templates with no category mapping (e.g. the generic "הצעת מחיר") always show
+      // הצגת תבניות רק לפי התאמת קטגוריה לפריטי ההצעה.
+      // אין הצגה של תבניות "כלליות"/ללא קטגוריה כברירת מחדל — כל תבנית חייבת
+      // קטגוריה מזוהה, וההצעה הגנרית (general) מוצגת רק כשיש פריט מקטגוריה כללית.
       const lineItemCats = new Set(
         lineItems.map((li) => getSkuCategory(li.sku)).filter((c): c is string => c !== null)
       );
+      // אין פריט מקוטלג → לא להציג אף תבנית (אי אפשר לדעת קטגוריה)
       const filteredRows = lineItemCats.size === 0
-        ? rows.filter((r) => !getTemplateCategory(r.label)) // no categorized items → show only uncategorized/generic
+        ? []
         : rows.filter((r) => {
             const tplCat = getTemplateCategory(r.label);
-            return !tplCat || lineItemCats.has(tplCat); // uncategorized or matching
+            // רק התאמה מדויקת לקטגוריה; תבניות 'general'/כללי לא מוצגות אוטומטית
+            // (פריטי תוספת נפוצים כמו הוצאות הגעה/משלוח שייכים ל-general והיו גוררים תבניות כלליות בכל מיזוג)
+            return tplCat !== null && tplCat !== 'general' && lineItemCats.has(tplCat);
           });
       setMergeTemplateRows(filteredRows);
     } catch {
@@ -1953,7 +1935,8 @@ export function QuoteNewScreen({
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const safeName = (customer || 'quote').replace(/[^\u0590-\u05FFa-zA-Z0-9 _-]/g, '').trim() || 'quote';
-      const fileName = `הצעת_מחיר_${safeName}_${reference || quoteNo || 'חדש'}.docx`;
+      void safeName;
+      const fileName = `הצעת מחיר${customer ? ' - ' + customer.trim() : ''}.docx`;
       a.href = url;
       a.download = fileName;
       document.body.appendChild(a);
@@ -1968,7 +1951,7 @@ export function QuoteNewScreen({
         try {
           const dataBase64 = await blobToBase64(blob);
           if (taskId) {
-            await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
+            const attRes = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
               authUser: user,
               method: 'POST',
               body: JSON.stringify({
@@ -1977,6 +1960,11 @@ export function QuoteNewScreen({
                 dataBase64,
               }),
             });
+            // קישור ציבורי להורדת הקובץ — לשימוש בגוף המייל (mailto)
+            try {
+              const created = attRes.ok ? await attRes.json() : null;
+              if (created?.id) { setLastMergedAttachmentId(created.id); setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`)); }
+            } catch { /* ignore */ }
             onAttachmentSaved?.();
           }
           if (currentQuoteId) {
@@ -1993,6 +1981,47 @@ export function QuoteNewScreen({
     } catch (err) {
       console.error('DOCX merge error:', err);
       alert('שגיאה בהורדת קובץ Word');
+    }
+  }
+
+  // הוספת קובץ ידנית לרשימת "קבצים שנוצרו" (למשל גרסה שנערכה ידנית של הצעת המחיר)
+  async function handleAddGeneratedFile(file: File) {
+    if (!file) return;
+    const user = getSessionUser();
+    const url = URL.createObjectURL(file);
+    const fileName = file.name;
+    setMergedFiles((prev) => [...prev, { name: fileName, url }]);
+    setTimeout(() => URL.revokeObjectURL(url), 300000);
+    const currentQuoteId = quoteIdRef.current;
+    if (user && (taskId || currentQuoteId)) {
+      try {
+        const dataBase64 = await blobToBase64(file);
+        if (taskId) {
+          const attRes = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
+            authUser: user,
+            method: 'POST',
+            body: JSON.stringify({
+              fileName,
+              mimeType: file.type || 'application/octet-stream',
+              dataBase64,
+            }),
+          });
+          try {
+            const created = attRes.ok ? await attRes.json() : null;
+            if (created?.id) { setLastMergedAttachmentId(created.id); setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`)); }
+          } catch { /* ignore */ }
+          onAttachmentSaved?.();
+        }
+        if (currentQuoteId) {
+          await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
+            authUser: user,
+            method: 'POST',
+            body: JSON.stringify({ base64Data: dataBase64, fileName }),
+          });
+        }
+      } catch (e) {
+        console.error('Failed to attach uploaded file:', e);
+      }
     }
   }
 
@@ -2113,37 +2142,60 @@ export function QuoteNewScreen({
           )}
         </div>
         <div className="flex items-center gap-3">
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave({ advanceStage: false })}>
+            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
+            <span className="text-[10px] text-gray-500">שמור</span>
+          </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!canMerge} title={!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined} onClick={() => handleMergeClick()}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
           </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave()}>
-            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Save size={18} /></span>
-            <span className="text-[10px] text-gray-500">שמור</span>
-          </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => {
-            const id = await doSave();
-            if (!id) return;
+            const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
             if (!customerEmail?.trim()) { setStatusMsg('אין כתובת מייל לאיש הקשר'); return; }
-            try {
-              setStatusMsg('שולח מייל…');
-              const user = getSessionUser();
-              const r = await apiFetch(apiUrl(`/quotes/${id}/send-email`), {
-                method: 'POST',
-                body: JSON.stringify({ email: customerEmail.trim() }),
-                authUser: user,
-              });
-              if (!r.ok) {
-                const err = await r.json().catch(() => null);
-                setStatusMsg(err?.message || 'שגיאה בשליחת מייל');
-                return;
-              }
-              setStatusMsg(`מייל נשלח ל-${customerEmail.trim()}`);
-              if (onQuoteSent && id) onQuoteSent(id);
-              setTimeout(() => setStatusMsg(''), 3000);
-            } catch (_e) {
-              setStatusMsg('שגיאה בשליחת מייל');
+            const to = customerEmail.trim();
+            const ref = (reference || quoteNo || '').trim();
+            // מזהה הקובץ הממוזג: מהמיזוג האחרון, אחרת הקובץ האחרון של המשימה
+            let attId = lastMergedAttachmentId;
+            if (!attId && taskId) {
+              try {
+                const r = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), { authUser: getSessionUser() });
+                if (r.ok) { const list = await r.json(); if (Array.isArray(list) && list.length) attId = list[0].id; }
+              } catch { /* ignore */ }
             }
+            const docLink = attId ? apiUrl(`/public/attachments/${attId}/price-quote.docx`) : '';
+            // ── ניסיון 1: שליחה מהשרת (Outlook/Graph עם הקובץ מצורף) ──
+            // נקרא לשרת גם בלי attId — השרת ימצא את המסמך הממוזג האחרון מה-DB.
+            let serverSent = false;
+            let serverErr = '';
+            if (id) {
+              try {
+                const r = await apiFetch(apiUrl(`/quotes/${id}/send-email`), {
+                  method: 'POST',
+                  authUser: getSessionUser(),
+                  body: JSON.stringify({ email: to, attachmentId: attId || undefined, docUrl: docLink, customerName: customer || '' }),
+                });
+                if (r.ok) serverSent = true;
+                else { try { const e = await r.json(); serverErr = e?.message || ''; } catch { /* ignore */ } }
+              } catch { /* נופלים ל-mailto */ }
+            }
+            if (serverSent) {
+              setStatusMsg(`מייל נשלח ל-${to}`);
+            } else {
+              // ── נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web עם הגוף + הקישור (ללא צורך ב-SMTP) ──
+              const subject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
+              const body = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.${docLink ? '\n\nלהורדת הצעת המחיר (קישור ישיר):\n' + docLink : ''}\n\nבברכה,\n${salesRep || 'גלית – החברה לאיכות הסביבה'}`;
+              const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+              const win = window.open(owaUrl, '_blank');
+              if (!win) {
+                // חסימת חלונות קופצים — נפילה ל-mailto
+                const a = document.createElement('a');
+                a.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              }
+              setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
+            }
+            setTimeout(() => setStatusMsg(''), 6000);
           }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Mail size={18} /></span>
             <span className="text-[10px] text-gray-500">שלח במייל</span>
@@ -2319,14 +2371,14 @@ export function QuoteNewScreen({
             </section>
 
             {/* ── קבצים שנוצרו ── */}
-            {(mergedFiles.length > 0 || (existingAttachments && existingAttachments.length > 0) || (!taskId && !!quoteId && !!lastMergedDocPath)) && (
+            {(mergedFiles.length > 0 || (existingAttachments && existingAttachments.length > 0) || (!!quoteId && !!lastMergedDocPath) || !!quoteId || !!taskId) && (
               <section className="rounded-2xl bg-white border border-emerald-100 shadow-sm p-4" dir="rtl">
                 <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500">
                     <FileText size={12} />
                   </span>
                   קבצים שנוצרו
-                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.length ?? 0) + (!taskId && quoteId && lastMergedDocPath ? 1 : 0)})</span>
+                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.length ?? 0) + (quoteId && lastMergedDocPath ? 1 : 0)})</span>
                 </h3>
                 <div className="space-y-2">
                   {mergedFiles.map((f, i) => (
@@ -2343,13 +2395,23 @@ export function QuoteNewScreen({
                       <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')}</span>
                     </button>
                   ))}
-                  {!taskId && mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
+                  {mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
                     <button type="button" onClick={handleDownloadMergedDoc} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
                       <FileText size={15} className="text-slate-500 flex-shrink-0" />
                       <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
                       <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>
                     </button>
                   )}
+                  {/* הוספת קובץ ידנית (גרסה שנערכה) לרשימת הקבצים שנוצרו */}
+                  <label className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-white px-4 py-2.5 hover:bg-emerald-50 transition-colors cursor-pointer text-sm font-bold text-emerald-700">
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleAddGeneratedFile(f); e.currentTarget.value = ''; }}
+                    />
+                    <Plus size={15} className="flex-shrink-0" />
+                    הוסף קובץ (גרסה שנערכה)
+                  </label>
                 </div>
               </section>
             )}

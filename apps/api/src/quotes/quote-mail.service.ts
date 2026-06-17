@@ -3,12 +3,18 @@ import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
+import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
+import { GraphMailService } from '../microsoft/graph-mail.service';
 
 @Injectable()
 export class QuoteMailService {
   private transporter: nodemailer.Transporter;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly msAuth: MicrosoftAuthService,
+    private readonly graphMail: GraphMailService,
+  ) {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
     const user = process.env.SMTP_USER;
@@ -32,71 +38,115 @@ export class QuoteMailService {
    * Send the latest merged document for a quote as an email attachment.
    * Resolves the document path: latest QuoteDocument → fallback lastMergedDocPath.
    */
-  async sendQuoteEmail(quoteId: string, recipientEmail: string): Promise<{ success: true; sentTo: string; fileName: string }> {
-    if (!this.transporter) {
-      throw new BadRequestException('שליחת מייל לא מוגדרת — יש להגדיר SMTP_HOST, SMTP_USER, SMTP_PASS בקובץ .env');
+  async sendQuoteEmail(
+    quoteId: string,
+    recipientEmail: string,
+    opts?: { attachmentId?: string; docUrl?: string; customerName?: string; userId?: string },
+  ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
+    // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
+    const graphReady = opts?.userId
+      ? (await this.msAuth.getStatus(opts.userId)).connected
+      : false;
+
+    if (!graphReady && !this.transporter) {
+      throw new BadRequestException(
+        'שליחת מייל לא מוגדרת — חבר חשבון Outlook (מומלץ) או הגדר SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS',
+      );
     }
 
     if (!recipientEmail || !recipientEmail.includes('@')) {
       throw new BadRequestException('כתובת מייל לא תקינה');
     }
 
-    // ── Find quote with latest document ──
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
-      include: {
-        quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
-      },
+      include: { quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 } },
     });
-
     if (!quote) {
       throw new BadRequestException('הצעת מחיר לא נמצאה');
     }
 
-    // ── Resolve document path: QuoteDocument first, then fallback ──
-    let relPath: string | null = null;
+    // ── Resolve the document: prefer the DB task-attachment (persistent), then disk fallback ──
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     let fileName: string | null = null;
+    let attachmentContent: Buffer | null = null;
+    let attachmentPath: string | null = null;
 
-    if (quote.quoteDocuments?.length > 0) {
-      relPath = quote.quoteDocuments[0].filePath;
+    if (opts?.attachmentId) {
+      const att = await this.prisma.taskAttachment.findUnique({ where: { id: opts.attachmentId } });
+      if (att) {
+        attachmentContent = Buffer.from(att.data);
+        fileName = att.fileName;
+      }
+    }
+    // Prefer DB-stored bytes from the latest QuoteDocument (survives deploys).
+    if (!attachmentContent && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
+      attachmentContent = Buffer.from(quote.quoteDocuments[0].data);
       fileName = quote.quoteDocuments[0].fileName;
-    } else if (quote.lastMergedDocPath) {
-      relPath = quote.lastMergedDocPath;
-      fileName = path.basename(quote.lastMergedDocPath);
+    }
+    if (!attachmentContent) {
+      let relPath: string | null = null;
+      if (quote.quoteDocuments?.length > 0) {
+        relPath = quote.quoteDocuments[0].filePath;
+        fileName = quote.quoteDocuments[0].fileName;
+      } else if (quote.lastMergedDocPath) {
+        relPath = quote.lastMergedDocPath;
+        fileName = path.basename(quote.lastMergedDocPath);
+      }
+      if (!relPath) {
+        throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
+      }
+      const absolutePath = path.resolve(process.cwd(), relPath);
+      if (!fs.existsSync(absolutePath)) {
+        throw new BadRequestException(`קובץ המסמך לא נמצא בשרת: ${fileName}`);
+      }
+      attachmentPath = absolutePath;
+      // Graph needs the bytes in-memory; load once so both paths can use it.
+      attachmentContent = fs.readFileSync(absolutePath);
     }
 
-    if (!relPath) {
-      throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
-    }
-
-    const absolutePath = path.resolve(process.cwd(), relPath);
-    if (!fs.existsSync(absolutePath)) {
-      throw new BadRequestException(`קובץ המסמך לא נמצא בשרת: ${fileName}`);
-    }
-
-    // ── Send email ──
+    // ── Build the email (HTML עם לחצן/קישור מתויג + הקובץ מצורף) ──
     const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER!;
     const quoteNumber = quote.quoteNumber || quote.importLegacyId || 'טיוטה';
-    const subject = `הצעת מחיר ${quoteNumber}`;
-    const html = `<div dir="rtl" style="font-family:Arial,sans-serif;">
-<p>שלום,</p>
-<p>מצורפת הצעת מחיר מספר <strong>${quoteNumber}</strong>.</p>
-<p>בברכה</p>
+    const custName = (opts?.customerName || '').trim();
+    const subject = `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
+    const linkBlock = opts?.docUrl
+      ? `<p style="margin:18px 0;"><a href="${opts.docUrl}" style="display:inline-block;background:#0ea5e9;color:#ffffff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">📄 צפייה / הורדה — הצעת מחיר${custName ? ' ' + custName : ''}</a></p>` +
+        `<p style="font-size:12px;color:#777777;">אם הכפתור אינו פעיל, קישור ישיר:<br><a href="${opts.docUrl}">${opts.docUrl}</a></p>`
+      : '';
+    const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111111;line-height:1.6;">
+<p>שלום${custName ? ' ' + custName : ''},</p>
+<p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''}.</p>
+${linkBlock}
+<p>בברכה,<br>גלית – החברה לאיכות הסביבה</p>
 </div>`;
 
-    await this.transporter.sendMail({
-      from: fromAddress,
-      to: recipientEmail,
-      subject,
-      html,
-      attachments: [
-        {
-          filename: fileName!,
-          path: absolutePath,
-          contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        },
-      ],
-    });
+    const finalFileName = fileName || 'הצעת מחיר.docx';
+
+    // ── Send: Graph (user's Outlook) preferred, SMTP fallback ──
+    let via: 'graph' | 'smtp';
+    if (graphReady && opts?.userId) {
+      await this.graphMail.sendMailAsUser(opts.userId, {
+        to: recipientEmail,
+        subject,
+        html,
+        attachments: [
+          { name: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
+        ],
+      });
+      via = 'graph';
+    } else {
+      await this.transporter.sendMail({
+        from: fromAddress,
+        to: recipientEmail,
+        subject,
+        html,
+        attachments: [
+          { filename: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
+        ],
+      });
+      via = 'smtp';
+    }
 
     // ── Update quote with email tracking ──
     try {
@@ -111,6 +161,6 @@ export class QuoteMailService {
       // Fields may not exist in DB yet — don't fail the send
     }
 
-    return { success: true, sentTo: recipientEmail, fileName: fileName! };
+    return { success: true, sentTo: recipientEmail, fileName: finalFileName, via };
   }
 }

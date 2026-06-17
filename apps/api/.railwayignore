@@ -9,4 +9,10 @@ templates/*.bak
 templates/*.doc
 templates/example_*
 templates/ref_x
+templates/~$*
+templates/example.docx
+templates/_mapping-check.docx
+templates/kol-holem-acoustic-SAMPLE-OUTPUT.docx
+templates/kol-holem-acoustic-tagged-before-user-merge.docx
+templates/kol-holem-acoustic-source.docx
 *.tmp

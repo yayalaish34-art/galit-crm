@@ -65,6 +65,7 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   // performerName         — plain String from same migration, omitted from payload too
   'customerContactId',
   'lastMergedDocPath',
+  'linkedEntityId',
 ]);
 
 @Injectable()
@@ -102,12 +103,14 @@ export class QuotesService {
     opportunityId,
     customerId,
     leadId,
+    linkedEntityId,
     user,
   }: {
     projectId?: string;
     opportunityId?: string;
     customerId?: string;
     leadId?: string;
+    linkedEntityId?: string;
     user?: { id?: string; role?: string };
   } = {}) {
     const role = (user?.role || '').toUpperCase();
@@ -138,6 +141,7 @@ export class QuotesService {
           ...(opportunityId ? { opportunityId } : {}),
           ...(customerId ? { customerId } : {}),
           ...(leadId ? { leadId } : {}),
+          ...(linkedEntityId ? { linkedEntityId } : {}),
         },
         orderBy: [{ createdAt: 'desc' }],
         include: {
@@ -475,5 +479,49 @@ export class QuotesService {
     });
 
     return updated;
+  }
+
+  /** Latest merged document for a quote (prefers DB-stored bytes). */
+  async getLatestMergedDocument(
+    quoteId: string,
+  ): Promise<{ data: Uint8Array | null; mimeType: string | null; fileName: string | null; filePath: string | null } | null> {
+    const doc: any = await (this.prisma.quoteDocument as any).findFirst({
+      where: { quoteId },
+      orderBy: { createdAt: 'desc' },
+      select: { data: true, mimeType: true, fileName: true, filePath: true },
+    });
+    return doc ?? null;
+  }
+
+  async saveMergedDoc(id: string, base64Data: string, fileName: string) {
+    const quote = await this.prisma.quote.findUnique({ where: { id } });
+    if (!quote) throw new NotFoundException('Quote not found');
+
+    const quotesDir = path.join(process.cwd(), 'storage', 'quotes');
+    if (!fs.existsSync(quotesDir)) fs.mkdirSync(quotesDir, { recursive: true });
+
+    const safeName = fileName.replace(/[^א-תa-zA-Z0-9._\-]/g, '_').slice(0, 200);
+    const diskName = `${id}-${safeName}`;
+    const buffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(path.join(quotesDir, diskName), buffer);
+    const relPath = `storage/quotes/${diskName}`;
+
+    // Persist the bytes in the DB so the file survives Railway deploys (ephemeral disk).
+    await (this.prisma.quoteDocument.create as any)({
+      data: {
+        quoteId: id,
+        fileName: safeName,
+        filePath: relPath,
+        data: Uint8Array.from(buffer),
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        documentType: 'MERGED_DOCX',
+        documentDescription: 'מסמך ממוזג',
+      },
+    });
+
+    return this.prisma.quote.update({
+      where: { id },
+      data: { lastMergedDocPath: relPath },
+    });
   }
 }

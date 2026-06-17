@@ -2,27 +2,12 @@ import { BadRequestException, ForbiddenException, Injectable, UnauthorizedExcept
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, User, UserRole, UserStatus, WorkMode, WorkStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
-import * as crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
+import { encryptSecret, decryptSecret } from '../common/crypto.util';
 
-// ── AES-256-CBC encryption helpers for SMTP password ──
-const SMTP_ENC_ALGO = 'aes-256-cbc';
-function getEncKey(): Buffer {
-  const secret = process.env.JWT_SECRET || 'change-me-now';
-  return crypto.createHash('sha256').update(secret).digest();
-}
-function encryptSmtpPassword(plain: string): string {
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(SMTP_ENC_ALGO, getEncKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
-  return iv.toString('hex') + ':' + encrypted.toString('hex');
-}
-export function decryptSmtpPassword(encoded: string): string {
-  const [ivHex, encHex] = encoded.split(':');
-  if (!ivHex || !encHex) return '';
-  const decipher = crypto.createDecipheriv(SMTP_ENC_ALGO, getEncKey(), Buffer.from(ivHex, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString('utf8');
-}
+// ── AES-256-CBC encryption helpers for SMTP password (shared util) ──
+const encryptSmtpPassword = encryptSecret;
+export const decryptSmtpPassword = decryptSecret;
 
 /** Fields that must never be sent to the frontend */
 const OMIT_SENSITIVE = { password: true as const, smtpPassword: true as const };

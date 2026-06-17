@@ -61,6 +61,14 @@ model User {
   smtpPassword          String?
   smtpFrom              String?
   smtpSecure            Boolean   @default(false)
+
+  // ── Microsoft Graph (Outlook) — שליחת מייל בשם המשתמש ──
+  /// כתובת המייל של תיבת ה-Outlook המחוברת (לתצוגה)
+  msEmail               String?
+  /// refresh token מוצפן ב-AES-256 — לא מוחזר ל-frontend
+  msRefreshToken        String?
+  /// מתי המשתמש חיבר את חשבון ה-Outlook
+  msConnectedAt         DateTime?
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
   followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")
@@ -701,7 +709,8 @@ model Task {
   dueDate     DateTime?
   priority    TaskPriority  @default(MEDIUM)
   status      TaskStatus    @default(OPEN)
-  type        TaskType      @default(GENERAL)
+  /// שלב בצינור הזרימה: step1..step7 (פתיחת פנייה → דוח). מסונכרן עם currentStage.
+  type        String        @default("step1")
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -717,7 +726,24 @@ model Task {
   projectId   String?
   project     Project?      @relation(fields: [projectId], references: [id])
 
-  productName String?
+  productName          String?
+  currentStage         Int?
+  currentStageChangedAt DateTime?
+
+  attachments TaskAttachment[]
+}
+
+/// קבצים מצורפים למשימה (למשל: מסמך הצעת מחיר ממוזג) — נשמרים ישירות ב-DB כך שיישארו זמינים תמיד
+model TaskAttachment {
+  id        String   @id @default(uuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  fileName  String
+  mimeType  String
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@index([taskId])
 }
 
 model Report {
@@ -881,6 +907,9 @@ model QuoteDocument {
   documentType        String?
   fileName            String?
   filePath            String?
+  /// תוכן הקובץ נשמר ישירות ב-DB כך שישרוד deploys (דיסק Railway זמני). אופציונלי — רשומות ישנות עם filePath בלבד.
+  data                Bytes?
+  mimeType            String?
   documentDate        DateTime?
   uploadedBy          String?
   createdAt           DateTime  @default(now())
@@ -1025,17 +1054,6 @@ enum TaskStatus {
   IN_PROGRESS
   DONE
   CANCELLED
-}
-
-enum TaskType {
-  SALES_FOLLOWUP
-  QUOTE_PREPARATION
-  COORDINATION
-  FIELD_WORK
-  REPORT_WRITING
-  REVIEW
-  COLLECTION
-  GENERAL
 }
 
 enum ProjectStatus {
