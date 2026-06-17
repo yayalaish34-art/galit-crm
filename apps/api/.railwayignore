@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.*
+storage
+test
+*.md
+templates/*.bak
+templates/*.doc
+templates/example_*
+templates/ref_x
+*.tmp
