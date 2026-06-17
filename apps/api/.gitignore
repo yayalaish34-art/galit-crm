@@ -46,6 +46,10 @@ lerna-debug.log*
 .temp
 .tmp
 
+# Template rollout backups + scratch
+templates/*.bak
+_converted_list.txt
+
 # Followup import uploads (local)
 /data/imports
 

@@ -57,6 +57,10 @@ export type DocxMergeData = {
   paymentTerms: string;
   subtotal: string;
   discountPercent: string;
+  /** true אם discountPercent > 0 — מאפשר להסתיר את שורת ההנחה בתבנית עם {#hasDiscount}…{/hasDiscount} */
+  hasDiscount?: boolean;
+  /** true אם לפחות פריט אחד עם הנחת שורה > 0 — מסיר את עמודת "% הנחה לשורה" כשאין הנחות שורה */
+  hasLineDiscount?: boolean;
   subtotalAfterDiscount: string;
   vatAmount: string;
   totalAmount: string;
@@ -89,6 +93,12 @@ function pickStr(r: Record<string, unknown>, keys: string[]): string {
     if (s.length > 0) return s;
   }
   return '';
+}
+
+function toNumber(s: string): number {
+  const cleaned = (s || '').replace(/[^0-9.\-]/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
 }
 
 function asRecord(x: unknown): Record<string, unknown> | null {
@@ -246,6 +256,105 @@ function patchRtlOnlyRunsDavid14(documentXml: string): string {
   return documentXml.replace(RTL_ONLY_RPR, RTL_ONLY_RPR_REPLACEMENT);
 }
 
+/** סכום רוחב העמודות (gridCol) של טבלה ב-OOXML, או null אם אין tblGrid */
+function tableGridWidth(tbl: string): number | null {
+  const grid = tbl.match(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/);
+  if (!grid) return null;
+  const cols: string[] = grid[0].match(/<w:gridCol[^>]*\/>/g) || [];
+  if (!cols.length) return null;
+  return cols.reduce((sum: number, c: string) => {
+    const m = c.match(/w:w="(\d+)"/);
+    return sum + (m ? parseInt(m[1], 10) : 0);
+  }, 0);
+}
+
+/** מקבע <w:jc w:val="right"/> ב-tblPr של טבלה (מוסיף אם חסר, מחליף אם שונה) */
+function forceTableRightAlign(tbl: string): string {
+  if (/<w:tblPr>[\s\S]*?<w:jc\b[^>]*\/>/.test(tbl)) {
+    return tbl.replace(/(<w:tblPr>[\s\S]*?)<w:jc\b[^>]*\/>/, '$1<w:jc w:val="right"/>');
+  }
+  // אין jc — מזריקים מיד אחרי פתיחת tblPr (או יוצרים tblPr אם חסר)
+  if (/<w:tblPr>/.test(tbl)) {
+    return tbl.replace(/<w:tblPr>/, '<w:tblPr><w:jc w:val="right"/>');
+  }
+  return tbl.replace(/<w:tbl>/, '<w:tbl><w:tblPr><w:jc w:val="right"/></w:tblPr>');
+}
+
+/**
+ * יישור שתי טבלאות המחיר (פריטים + סיכום) לקו ימני סימטרי במסמך RTL.
+ * 1. מקבע jc=right בשתי הטבלאות → שתיהן צמודות לקצה הימני של העמוד.
+ * 2. מרחיב את הטבלה הצרה יותר (בד"כ טבלת הסיכום) כך שרוחבה הכולל
+ *    יהיה זהה לטבלה הרחבה — ע"י הוספת ההפרש לעמודה השמאלית-ביותר
+ *    (ב-RTL זו העמודה הראשונה ב-gridCol, הקצה השמאלי הפיזי).
+ *    כך הקצה הימני של שתי הטבלאות מיושר וגם הקצה השמאלי סימטרי.
+ */
+export function alignPriceTablesRight(documentXml: string): string {
+  const tblRe = /<w:tbl>[\s\S]*?<\/w:tbl>/g;
+  const tables: Array<{ start: number; end: number; text: string }> = [];
+  let m: RegExpExecArray | null;
+  while ((m = tblRe.exec(documentXml)) !== null) {
+    tables.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  }
+
+  // זיהוי הטבלאות הרלוונטיות לפי placeholders שמופיעים בהן.
+  // הזיהוי רץ גם אחרי render (אז ייתכן שאין placeholders) — לכן בודקים
+  // גם תוויות עבריות וגם placeholders, ונופלים חזרה לרוחב.
+  const isItemsTable = (t: string) =>
+    /\{(?:lineTotal|rowNum|lineNumber)\}/.test(t) || /fldDiscount|מק"ט|תיאור/.test(t);
+  const isSummaryTable = (t: string) =>
+    /\{(?:subtotalAfterDiscount|totalAmount|total|vat)\}/.test(t) ||
+    /fldTotalAfterMaaM|fldTotalAfterDiscount|fldMAAM/.test(t);
+
+  const itemsIdx = tables.findIndex((t) => isItemsTable(t.text));
+  let summaryIdx = -1;
+  for (let i = 0; i < tables.length; i++) {
+    if (i !== itemsIdx && isSummaryTable(tables[i].text)) {
+      summaryIdx = i;
+      break;
+    }
+  }
+  if (itemsIdx === -1 || summaryIdx === -1) return documentXml;
+
+  const itemsWidth = tableGridWidth(tables[itemsIdx].text);
+  const summaryWidth = tableGridWidth(tables[summaryIdx].text);
+
+  // קביעת יישור ימני לשתי הטבלאות
+  let itemsText = forceTableRightAlign(tables[itemsIdx].text);
+  let summaryText = forceTableRightAlign(tables[summaryIdx].text);
+
+  // הרחבת הטבלה הצרה לרוחב הטבלה הרחבה (הוספת ההפרש לעמודה הראשונה ב-gridCol)
+  if (itemsWidth != null && summaryWidth != null && itemsWidth !== summaryWidth) {
+    const wide = itemsWidth > summaryWidth ? itemsWidth : summaryWidth;
+    const narrow = itemsWidth > summaryWidth ? summaryWidth : itemsWidth;
+    const diff = wide - narrow;
+    const narrowIsSummary = summaryWidth < itemsWidth;
+    const apply = (t: string) =>
+      t.replace(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/, (grid) => {
+        let first = true;
+        return grid.replace(/<w:gridCol[^>]*\/>/g, (g) => {
+          if (!first) return g;
+          first = false;
+          const wm = g.match(/w:w="(\d+)"/);
+          const cur = wm ? parseInt(wm[1], 10) : 0;
+          return g.replace(/w:w="\d+"/, `w:w="${cur + diff}"`);
+        });
+      });
+    if (narrowIsSummary) summaryText = apply(summaryText);
+    else itemsText = apply(itemsText);
+  }
+
+  // הרכבה מחדש — מהאינדקס הגבוה לנמוך כדי לא לשבש היסטים
+  const edits = [
+    { start: tables[itemsIdx].start, end: tables[itemsIdx].end, text: itemsText },
+    { start: tables[summaryIdx].start, end: tables[summaryIdx].end, text: summaryText },
+  ].sort((a, b) => b.start - a.start);
+  let out = documentXml;
+  for (const e of edits) {
+    out = out.slice(0, e.start) + e.text + out.slice(e.end);
+  }
+  return out;
+}
+
 function injectRecipientBlockOoxml(documentXml: string, blockOoxml: string): string {
   const markerList = [DOCX_RECIPIENT_BLOCK_MARKER, DOCX_RECIPIENT_BLOCK_MARKER_ALT];
   let markerIndex = -1;
@@ -275,6 +384,165 @@ function injectRecipientBlockOoxml(documentXml: string, blockOoxml: string): str
 }
 
 /**
+ * מסיר עמודה שלמה מטבלה ב-OOXML לפי placeholder שמופיע באחד מתאיה.
+ * מסיר את ה-<w:gridCol> המתאים ואת ה-<w:tc> באותו אינדקס מכל שורות הטבלה.
+ * מניח תאים שטוחים (ללא טבלאות מקוננות) — כפי שקיים בתבניות הצעות המחיר.
+ */
+export function removeTableColumnByPlaceholder(documentXml: string, placeholder: string): string {
+  const idx = documentXml.indexOf(placeholder);
+  if (idx === -1) return documentXml;
+
+  const tblStart = documentXml.lastIndexOf('<w:tbl>', idx);
+  const tblEndMarker = documentXml.indexOf('</w:tbl>', idx);
+  if (tblStart === -1 || tblEndMarker === -1) return documentXml;
+  const tblEnd = tblEndMarker + '</w:tbl>'.length;
+  let tbl = documentXml.slice(tblStart, tblEnd);
+
+  // איתור שורת הלולאה שמכילה את ה-placeholder
+  const relIdx = tbl.indexOf(placeholder);
+  const trRe = /<w:tr[ >][\s\S]*?<\/w:tr>/g;
+  let mr: RegExpExecArray | null;
+  let targetTr: string | null = null;
+  while ((mr = trRe.exec(tbl)) !== null) {
+    if (relIdx >= mr.index && relIdx < mr.index + mr[0].length) {
+      targetTr = mr[0];
+      break;
+    }
+  }
+  if (targetTr == null) return documentXml;
+
+  // אינדקס העמודה (תא) שמכיל את ה-placeholder
+  const tcRe = /<w:tc>[\s\S]*?<\/w:tc>/g;
+  let mc: RegExpExecArray | null;
+  let colIndex = -1;
+  let ci = 0;
+  while ((mc = tcRe.exec(targetTr)) !== null) {
+    if (mc[0].indexOf(placeholder) !== -1) {
+      colIndex = ci;
+      break;
+    }
+    ci++;
+  }
+  if (colIndex === -1) return documentXml;
+
+  // הסרת ה-gridCol המתאים — תוך חלוקה מחדש של רוחבו ליתר העמודות,
+  // כדי שהרוחב הכולל של הטבלה יישמר (אחרת הטבלה מצטמצמת והקצה הימני זז).
+  tbl = tbl.replace(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/, (grid) => {
+    const widths = (grid.match(/<w:gridCol[^>]*\/>/g) || []).map((g) => {
+      const m = g.match(/w:w="(\d+)"/);
+      return m ? parseInt(m[1], 10) : 0;
+    });
+    const removedWidth = widths[colIndex] ?? 0;
+    const remaining = widths.filter((_, i) => i !== colIndex);
+    const remainingSum = remaining.reduce((a, b) => a + b, 0);
+    // פיזור רוחב העמודה שנמחקה יחסית לרוחב הקיים של שאר העמודות
+    let distributed = 0;
+    const newWidths = remaining.map((w, i) => {
+      if (remainingSum <= 0) return w;
+      // העמודה האחרונה בולעת את שארית העיגול כדי לשמור על סכום מדויק
+      if (i === remaining.length - 1) return w + (removedWidth - distributed);
+      const add = Math.round((removedWidth * w) / remainingSum);
+      distributed += add;
+      return w + add;
+    });
+    let gi = 0;
+    return grid.replace(/<w:gridCol[^>]*\/>/g, (g) => {
+      if (gi === colIndex) {
+        gi++;
+        return '';
+      }
+      const widthIdx = gi < colIndex ? gi : gi - 1;
+      gi++;
+      const nw = newWidths[widthIdx];
+      return nw != null ? g.replace(/w:w="\d+"/, `w:w="${nw}"`) : g;
+    });
+  });
+
+  // הסרת התא באותו אינדקס מכל שורה
+  tbl = tbl.replace(/<w:tr[ >][\s\S]*?<\/w:tr>/g, (tr) => {
+    let k = 0;
+    return tr.replace(/<w:tc>[\s\S]*?<\/w:tc>/g, (tc) => (k++ === colIndex ? '' : tc));
+  });
+
+  return documentXml.slice(0, tblStart) + tbl + documentXml.slice(tblEnd);
+}
+
+/**
+ * הזרקת שורת "הנחה {discountPercent}" לטבלת הסיכום כשהיא חסרה.
+ * חלק מהתבניות (10 מתוך 63) בנו טבלת סיכום בלי שורת הנחה — רק
+ * "לאחר הנחה" / "מע״מ" / "סה״כ לתשלום" — כך שגם כשיש הנחה היא לא הוצגה.
+ * הפונקציה רצה לפני render: מזהה את שורת {subtotalAfterDiscount},
+ * משכפלת אותה, מחליפה תווית→"הנחה" ו-placeholder→{discountPercent},
+ * ומכניסה אותה מעל. אם כבר קיים {discountPercent} בטבלה — לא נוגעת.
+ *
+ * נקראת רק כש-hasDiscount=true, כדי שלא להוסיף שורה כשאין הנחה.
+ */
+export function ensureDiscountRowInSummary(documentXml: string): string {
+  const afterPh = '{subtotalAfterDiscount}';
+  const discPh = '{discountPercent}';
+  const i = documentXml.indexOf(afterPh);
+  if (i === -1) return documentXml;
+
+  const tblStart = documentXml.lastIndexOf('<w:tbl>', i);
+  const tblEndMarker = documentXml.indexOf('</w:tbl>', i);
+  if (tblStart === -1 || tblEndMarker === -1) return documentXml;
+  const tblEnd = tblEndMarker + '</w:tbl>'.length;
+  const tbl = documentXml.slice(tblStart, tblEnd);
+
+  // אם כבר יש שורת הנחה בטבלה — לא מוסיפים
+  if (tbl.indexOf(discPh) !== -1) return documentXml;
+
+  // איתור שורת {subtotalAfterDiscount} בתוך הטבלה
+  const relIdx = tbl.indexOf(afterPh);
+  const trRe = /<w:tr[ >][\s\S]*?<\/w:tr>/g;
+  let mr: RegExpExecArray | null;
+  let afterRow: string | null = null;
+  let afterRowStart = -1;
+  while ((mr = trRe.exec(tbl)) !== null) {
+    if (relIdx >= mr.index && relIdx < mr.index + mr[0].length) {
+      afterRow = mr[0];
+      afterRowStart = mr.index;
+      break;
+    }
+  }
+  if (afterRow == null) return documentXml;
+
+  // בניית שורת ההנחה: שכפול שורת "לאחר הנחה", החלפת ה-placeholder
+  // והחלפת תווית הטקסט בתא התווית ל"הנחה".
+  let discountRow = afterRow.replace(discPhAll(afterPh), discPh);
+  // החלפת טקסט התווית (התא הראשון) ל"הנחה" — מחליפים את תוכן ה-<w:t> הראשון
+  // שאינו ה-placeholder. ה-placeholder יושב בתא הערך, התווית בתא הנפרד.
+  discountRow = replaceFirstLabelText(discountRow, 'הנחה ');
+
+  const newTbl =
+    tbl.slice(0, afterRowStart) + discountRow + tbl.slice(afterRowStart);
+  return documentXml.slice(0, tblStart) + newTbl + documentXml.slice(tblEnd);
+}
+
+/** RegExp בטוח להחלפת מחרוזת placeholder ליטרלית */
+function discPhAll(s: string): RegExp {
+  return new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+}
+
+/**
+ * מחליף את הטקסט בתוך ה-<w:t> הראשון בשורה (תא התווית) בתווית חדשה.
+ * שומר על עיצוב הריצה הקיים.
+ */
+function replaceFirstLabelText(rowXml: string, newLabel: string): string {
+  const esc = newLabel
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  let replaced = false;
+  return rowXml.replace(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/, (m, open, _txt, close) => {
+    if (replaced) return m;
+    replaced = true;
+    const openTag = open.includes('xml:space') ? open : open.replace('>', ' xml:space="preserve">');
+    return `${openTag}${esc}${close}`;
+  });
+}
+
+/**
  * נרמול payload מיזוג — מיפוי שמות שדות ישנים לקנוניים
  */
 export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<string, unknown> {
@@ -287,6 +555,9 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   if (!r.totalAmount && r.total) r.totalAmount = r.total;
   if (!r.validUntil && r.validityDate) r.validUntil = r.validityDate;
   if (!r.contractSurveyNumber) r.contractSurveyNumber = '';
+
+  // דגל להצגה/הסתרה של שורת ההנחה בתבנית ({#hasDiscount}…{/hasDiscount})
+  r.hasDiscount = toNumber(pickStr(r, ['discountPercent'])) > 0;
 
   // Normalize items array
   const items = Array.isArray(r.items) ? r.items : [];
@@ -309,6 +580,11 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
     };
   });
 
+  // דגל להסרת עמודת "% הנחה לשורה" כשאף פריט לא כולל הנחת שורה
+  r.hasLineDiscount = (r.items as Array<Record<string, unknown>>).some(
+    (it) => toNumber(pickStr(it, ['lineDiscountPercent', 'discountPct', 'discount'])) > 0,
+  );
+
   // Recipient block canonical lines
   const customerName = pickStr(r, ['customerName']).trim();
   const contactName = pickStr(r, ['contactName']).trim();
@@ -318,11 +594,17 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   );
   const contactPhone = pickStr(r, ['contactPhone', 'customerPhone', 'phone']).trim();
   const contactEmail = pickStr(r, ['contactEmail', 'customerEmail', 'email']).trim();
+  // נפילה-חזרה לפלייסהולדרים הישירים {contactPhone}/{contactEmail}: אם לא נבחר איש קשר,
+  // מלא אותם מטלפון/מייל הלקוח — אחרת הם נשארים ריקים ולא מוצגים בכלל.
+  r.contactPhone = contactPhone;
+  r.contactEmail = contactEmail;
   const recipientLine3 = customerName ? customerName : '';
   r.recipientLine1 = 'לכבוד';
   r.recipientLine2 = contactName;
   r.recipientLine3 = recipientLine3;
   r.recipientLine4 = cityOnly;
+  // נפילה-חזרה ל-{customerCity}: אם שדה העיר ריק אך חולצה עיר מהכתובת — מלא גם את ה-placeholder הישיר
+  if (!pickStr(r, ['customerCity']).trim() && cityOnly) r.customerCity = cityOnly;
   r.recipientLine5 = `טלפון נייד: ${contactPhone}`;
   r.recipientLine6 = `מייל: ${contactEmail}`;
   const quoteDateStr = pickStr(r, ['quoteDate']).trim();
@@ -359,6 +641,23 @@ export class DocxMergeService {
     const templateContent = fs.readFileSync(fullPath, 'binary');
     const zip = new PizZip(templateContent);
 
+    // עיבוד מקדים של document.xml לפני render (פעם אחת על תבנית הלולאה/הטבלאות)
+    {
+      const preFile = zip.file('word/document.xml');
+      if (preFile) {
+        let pre = preFile.asText();
+        // הסרת עמודת "% הנחה לשורה" כשאין הנחות שורה
+        if (normalized.hasLineDiscount !== true) {
+          pre = removeTableColumnByPlaceholder(pre, '{lineDiscountPercent}');
+        }
+        // הזרקת שורת הנחה לטבלת הסיכום כשיש הנחה כללית והשורה חסרה בתבנית
+        if (normalized.hasDiscount === true) {
+          pre = ensureDiscountRowInSummary(pre);
+        }
+        zip.file('word/document.xml', pre);
+      }
+    }
+
     const doc = new Docxtemplater(zip, {
       paragraphLoop: true,
       linebreaks: true,
@@ -374,6 +673,9 @@ export class DocxMergeService {
       const xml = docXml.asText();
       let replaced = injectRecipientBlockOoxml(xml, buildRecipientBlockOoxml(recData));
       replaced = patchRtlOnlyRunsDavid14(replaced);
+      // אין נגיעה ברוחב/ביישור של טבלאות המחיר — הן מרונדרות בדיוק כפי
+      // שהוגדרו בתבנית. (בעבר alignPriceTablesRight מתח את רוחב עמודות
+      // טבלת הסיכום/הנחה כדי להשוות לרוחב טבלת הפריטים — הוסר ביודעין.)
       outZip.file('word/document.xml', replaced);
     }
 
