@@ -2853,7 +2853,7 @@ export function QuoteNewScreen({
                     ) : (
                       <div className="group mb-4 cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('subject')} title="לחץ לעריכה">
                         <div className="text-[11px] font-semibold uppercase text-gray-400">נושא</div>
-                        <div className="text-lg font-bold text-gray-900">{emailForm.subject || <span className="text-gray-300">— ללא נושא —</span>}
+                        <div className="text-xl font-extrabold text-gray-900">{emailForm.subject || <span className="text-gray-300">— ללא נושא —</span>}
                           <span className="ms-2 align-middle text-xs text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span>
                         </div>
                       </div>
@@ -2869,14 +2869,26 @@ export function QuoteNewScreen({
                     ) : (
                       <div className="group cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('body')} title="לחץ לעריכה">
                         <div className="mb-1 text-[11px] font-semibold uppercase text-gray-400">תוכן ההודעה <span className="text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span></div>
-                        <div className="whitespace-pre-wrap text-base leading-relaxed text-gray-800">{emailForm.body || <span className="text-gray-300">— ריק —</span>}</div>
+                        <div className="text-base leading-relaxed text-gray-800">
+                          {emailForm.body
+                            ? emailForm.body.split('\n').map((line, i) => {
+                                const t = line.trimStart();
+                                const isKey = ['סה"כ', 'סה״כ', 'תנאי תשלום', 'תוקף ההצעה', 'משך ביצוע', 'מספר הצעה'].some((k) => t.startsWith(k));
+                                return (
+                                  <div key={i} className={isKey ? 'font-bold text-gray-900' : ''}>
+                                    {line || ' '}
+                                  </div>
+                                );
+                              })
+                            : <span className="text-gray-300">— ריק —</span>}
+                        </div>
                       </div>
                     )}
 
-                    {/* חתימת תמונה (תצוגה) */}
+                    {/* חתימת תמונה (תצוגה גדולה) */}
                     {emailForm.includeSignature && emailSigImage && (
-                      <div className="mt-4 border-t border-gray-100 pt-3">
-                        <img src={emailSigImage} alt="חתימה" className="max-h-24 max-w-[260px]" />
+                      <div className="mt-4 border-t border-gray-100 pt-4">
+                        <img src={emailSigImage} alt="חתימה" className="max-h-44 max-w-[440px]" />
                       </div>
                     )}
 

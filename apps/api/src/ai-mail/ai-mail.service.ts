@@ -43,7 +43,7 @@ export class AiMailService {
 המשימה: לנסח מייל מקצועי המלווה הצעת מחיר, בדיוק במבנה ובסגנון של הדוגמאות שתקבל.
 
 מבנה הגוף (לפי הסדר):
-1. פנייה: "שלום [שם איש הקשר]," (אם אין שם — "שלום רב,").
+1. פנייה: "שלום [שם פרטי]," — השתמש בשם הפרטי בלבד שנמסר לך (לא שם משפחה!). אם אין שם — "שלום רב,".
 2. משפט פתיחה: "מצורפת הצעת מחיר מס' [מספר] עבור [תיאור קצר של העבודה במיקום]."
 3. 1-2 משפטים המתארים מה כוללת העבודה (לפי הפרטים שנמסרו — מיקום, סוג הבדיקה/העבודה, תוצרים כמו דוח יישום/הגשה לרשויות).
 4. שורות הנתונים (יוזרקו על ידי המערכת — אל תכתוב אותן בעצמך! המערכת מוסיפה: סה"כ לתשלום, תנאי תשלום, תוקף ההצעה). אתה יכול לכתוב את "משך ביצוע משוער" אם נמסר לך.
@@ -87,9 +87,12 @@ export class AiMailService {
     // ── שליפת נתונים אמיתיים מההצעה (סכום / תנאי תשלום / מספר) ──
     const facts = await this.resolveFacts(ctx);
 
+    // הפנייה במייל היא בשם הפרטי בלבד — לוקחים את המילה הראשונה מהשם המלא.
+    const firstName = this.firstNameOf(ctx.contactName);
+
     const contextLines = [
       ctx.customerName ? `לקוח: ${ctx.customerName}` : '',
-      ctx.contactName ? `איש קשר: ${ctx.contactName}` : '',
+      firstName ? `שם פרטי לפנייה (השתמש בזה בלבד בפנייה "שלום [שם]"): ${firstName}` : '',
       ctx.serviceName ? `שירות: ${ctx.serviceName}` : '',
       facts.quoteNumber ? `מספר הצעה: ${facts.quoteNumber}` : '',
       ctx.location ? `מיקום: ${ctx.location}` : '',
@@ -176,6 +179,21 @@ export class AiMailService {
     // תוקף = חודש מהיום (מחושב בשרת — לא תלוי בדפדפן)
     facts.validTo = this.oneMonthFromNow();
     return facts;
+  }
+
+  /**
+   * מחלץ שם פרטי משם מלא — המילה הראשונה.
+   * "יורם גבאי" → "יורם" ; "ד"ר דנה לוי" → "ד"ר" יטופל ע"י דילוג על תארים נפוצים.
+   */
+  private firstNameOf(fullName?: string): string {
+    const name = (fullName || '').trim();
+    if (!name) return '';
+    const titles = new Set(['מר', 'גב\'', 'גברת', 'ד"ר', 'דר', 'פרופ\'', 'פרופסור', 'עו"ד', 'מהנדס', 'אדריכל']);
+    const parts = name.split(/\s+/).filter(Boolean);
+    // דלג על תואר פתיחה אם קיים, וקח את המילה הבאה.
+    let idx = 0;
+    if (parts.length > 1 && titles.has(parts[0])) idx = 1;
+    return parts[idx] || parts[0];
   }
 
   /** מחזיר תאריך של חודש מהיום בפורמט DD/MM/YYYY. */

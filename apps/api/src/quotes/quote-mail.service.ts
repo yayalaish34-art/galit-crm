@@ -124,9 +124,8 @@ export class QuoteMailService {
       opts?.subject?.trim() ||
       `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
 
-    const linkBlock = opts?.docUrl
-      ? `<p style="margin:18px 0;"><a href="${opts.docUrl}" style="display:inline-block;background:#0ea5e9;color:#ffffff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">📄 צפייה / הורדה — הצעת מחיר${custName ? ' ' + custName : ''}</a></p>`
-      : '';
+    // הקובץ מצורף ישירות למייל — אין צורך בכפתור הורדה/קישור (הוסר למניעת כפילות).
+    const linkBlock = '';
 
     // Resolve the per-user signature (text + optional image, if requested).
     // The image is sent as an INLINE attachment (CID) because Outlook blocks
@@ -150,7 +149,7 @@ export class QuoteMailService {
           contentId: cid,
         };
         parts.push(
-          `<div style="margin-top:8px;"><img src="cid:${cid}" alt="חתימה" style="max-width:280px;max-height:120px;" /></div>`,
+          `<div style="margin-top:10px;"><img src="cid:${cid}" alt="חתימה" style="max-width:460px;max-height:220px;width:auto;height:auto;" /></div>`,
         );
       }
       if (parts.length) {
@@ -239,12 +238,26 @@ ${signatureHtml}
     return { success: true, sentTo: recipientEmail, fileName: finalFileName, via };
   }
 
-  /** Convert plain user text to safe HTML (escape + newlines → <br>). */
+  /**
+   * Convert plain user text to safe HTML.
+   * Escapes, then bolds key data lines (total / payment terms / validity / duration / quote no.)
+   * so they stand out in the email.
+   */
   private toHtml(text: string): string {
-    return text
+    const escaped = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>');
+      .replace(/>/g, '&gt;');
+
+    // מילות מפתח שמתחילות שורת נתונים חשובה — נדגיש את כל השורה.
+    const keyPrefixes = ['סה"כ', 'סה״כ', 'תנאי תשלום', 'תוקף ההצעה', 'משך ביצוע', 'מספר הצעה'];
+    const lines = escaped.split('\n').map((line) => {
+      const trimmed = line.trimStart();
+      if (keyPrefixes.some((k) => trimmed.startsWith(k))) {
+        return `<strong>${line}</strong>`;
+      }
+      return line;
+    });
+    return lines.join('<br>');
   }
 }

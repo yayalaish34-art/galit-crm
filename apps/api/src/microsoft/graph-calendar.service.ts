@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { MicrosoftAuthService } from './microsoft-auth.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 export interface GraphEventAttendee {
   email: string;
@@ -18,7 +19,10 @@ export interface GraphCalendarEvent {
   /** IANA timezone; ברירת מחדל Asia/Jerusalem */
   timeZone?: string;
   location?: string;
+  /** משתתפים מפורשים (למשל הלקוח) — נשלחים עם כתובת מייל ישירה */
   attendees?: GraphEventAttendee[];
+  /** מזהי עובדים מהמסד — הכתובת נפתרת בשרת ל-msEmail (התיבה המחוברת) ובהיעדרה ל-email */
+  employeeUserIds?: string[];
   /** יצירת פגישת Teams מקוונת */
   isOnlineMeeting?: boolean;
 }
@@ -42,7 +46,10 @@ export interface GraphCalendarEventResult {
 export class GraphCalendarService {
   private readonly logger = new Logger(GraphCalendarService.name);
 
-  constructor(private readonly auth: MicrosoftAuthService) {}
+  constructor(
+    private readonly auth: MicrosoftAuthService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async createEventAsUser(userId: string, ev: GraphCalendarEvent): Promise<GraphCalendarEventResult> {
     if (!ev?.subject?.trim()) {
@@ -58,7 +65,10 @@ export class GraphCalendarService {
     const accessToken = await this.auth.getAccessToken(userId);
     const timeZone = ev.timeZone || 'Asia/Jerusalem';
 
-    const attendees = (ev.attendees || [])
+    // משתתפים מפורשים (לקוח/כתובת חיצונית) + עובדים שנפתרים מהמסד לפי msEmail || email
+    const explicit = ev.attendees || [];
+    const resolvedEmployees = await this.resolveEmployeeAttendees(ev.employeeUserIds);
+    const attendees = [...resolvedEmployees, ...explicit]
       .filter((a) => a.email && a.email.includes('@'))
       // הסרת כפילויות לפי כתובת מייל (case-insensitive)
       .filter((a, i, arr) => arr.findIndex((b) => b.email.toLowerCase() === a.email.toLowerCase()) === i);
@@ -119,5 +129,28 @@ export class GraphCalendarService {
       joinUrl: data.onlineMeeting?.joinUrl ?? null,
       invited: attendees.map((a) => a.email),
     };
+  }
+
+  /**
+   * ממיר מזהי עובדים לכתובות משתתפים. מעדיף את תיבת ה-Outlook המחוברת (msEmail)
+   * ונופל חזרה לכתובת ה-CRM (email) כשהעובד לא חיבר Outlook.
+   */
+  private async resolveEmployeeAttendees(employeeUserIds?: string[]): Promise<GraphEventAttendee[]> {
+    if (!employeeUserIds?.length) return [];
+    const ids = [...new Set(employeeUserIds.filter(Boolean))];
+    if (!ids.length) return [];
+
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, email: true, msEmail: true },
+    });
+
+    return users
+      .map((u) => ({
+        email: (u.msEmail || u.email || '').trim(),
+        name: u.name,
+        type: 'required' as const,
+      }))
+      .filter((a) => a.email.includes('@'));
   }
 }

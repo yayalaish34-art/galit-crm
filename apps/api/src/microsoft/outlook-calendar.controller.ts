@@ -9,6 +9,7 @@ interface CreateOutlookEventBody {
   timeZone?: string;
   location?: string;
   attendees?: GraphEventAttendee[];
+  employeeUserIds?: string[];
   isOnlineMeeting?: boolean;
 }
 

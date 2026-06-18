@@ -15992,11 +15992,9 @@ function TasksPage({
                               const endD = new Date(startMs + durationMin * 60000);
                               const endLocal = `${endD.getFullYear()}-${pad2(endD.getMonth() + 1)}-${pad2(endD.getDate())}T${pad2(endD.getHours())}:${pad2(endD.getMinutes())}:00`;
 
+                              // משתתפים: העובדים נשלחים כ-userId ונפתרים בשרת ל-msEmail||email מהמסד;
+                              // הלקוח נשלח כ-attendee מפורש עם כתובת המייל שלו.
                               const attendees: { email: string; name?: string; type?: 'required' | 'optional' }[] = [];
-                              for (const id of employeeIds) {
-                                const u = users.find((x) => x.id === id);
-                                if (u?.email) attendees.push({ email: u.email, name: u.name, type: 'required' });
-                              }
                               if (inviteCustomer && customerEmail) {
                                 attendees.push({ email: customerEmail, name: customerLabel, type: 'required' });
                               }
@@ -16014,6 +16012,7 @@ function TasksPage({
                                     timeZone: 'Asia/Jerusalem',
                                     location,
                                     attendees,
+                                    employeeUserIds: employeeIds,
                                     isOnlineMeeting: isOnline,
                                   }),
                                 });
