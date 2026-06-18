@@ -2727,24 +2727,24 @@ export function QuoteNewScreen({
       )}
 
       {emailModalOpen && (
-        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/40 p-4" onClick={() => !emailSending && setEmailModalOpen(false)}>
-          <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-center gap-2 text-base font-bold text-gray-800">
-              <Mail size={18} className="text-sky-500" /> שליחת הצעת מחיר במייל
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => !emailSending && setEmailModalOpen(false)}>
+          <div className="w-full max-w-3xl rounded-3xl border border-gray-200 bg-white p-8 shadow-2xl max-h-[92vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-6 flex items-center gap-3 border-b border-gray-100 pb-4 text-2xl font-bold text-gray-800">
+              <Mail size={26} className="text-sky-500" /> שליחת הצעת מחיר במייל
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-5">
               {/* נמען ראשי + נמענים נוספים כ-chips */}
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">אל (Enter כדי להוסיף עוד נמען)</label>
-                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 px-2 py-1.5 focus-within:border-sky-400">
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">אל <span className="font-normal text-gray-400">(Enter כדי להוסיף עוד נמען)</span></label>
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
                   {emailForm.toList.map((em) => (
-                    <span key={em} className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs text-sky-800" dir="ltr">
+                    <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1.5 text-sm text-sky-800" dir="ltr">
                       {em}
-                      <button type="button" className="text-sky-500 hover:text-sky-700" onClick={() => removeRecipient(em, 'toList')}>×</button>
+                      <button type="button" className="text-base text-sky-500 hover:text-sky-700" onClick={() => removeRecipient(em, 'toList')}>×</button>
                     </span>
                   ))}
-                  <input dir="ltr" className="min-w-[140px] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none text-right"
+                  <input dir="ltr" className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
                     value={emailForm.toInput}
                     onChange={(e) => setEmailForm((p) => ({ ...p, toInput: e.target.value }))}
                     onKeyDown={(e) => {
@@ -2757,15 +2757,15 @@ export function QuoteNewScreen({
               </div>
               {/* CC כ-chips */}
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">עותק (CC)</label>
-                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 px-2 py-1.5 focus-within:border-sky-400">
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">עותק (CC)</label>
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
                   {emailForm.ccList.map((em) => (
-                    <span key={em} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700" dir="ltr">
+                    <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
                       {em}
-                      <button type="button" className="text-gray-400 hover:text-gray-600" onClick={() => removeRecipient(em, 'ccList')}>×</button>
+                      <button type="button" className="text-base text-gray-400 hover:text-gray-600" onClick={() => removeRecipient(em, 'ccList')}>×</button>
                     </span>
                   ))}
-                  <input dir="ltr" className="min-w-[140px] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none text-right"
+                  <input dir="ltr" className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
                     value={emailForm.ccInput}
                     onChange={(e) => setEmailForm((p) => ({ ...p, ccInput: e.target.value }))}
                     onKeyDown={(e) => {
@@ -2778,67 +2778,81 @@ export function QuoteNewScreen({
               </div>
 
               {/* AI — ניסוח נושא ותוכן לפי פרטי המקרה */}
-              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
-                <div className="mb-2 text-xs font-semibold text-violet-800">✨ ניסוח חכם (AI) — מלא פרטים והמערכת תנסח נושא ותוכן</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <input className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
-                    value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
-                    placeholder="מיקום מדויק (למשל: מבנה משרדים, נתיבות)" />
-                  <input className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
-                    value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
-                    placeholder="משך ביצוע (למשל: עד 5 ימי עסקים)" />
+              <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/60 p-5">
+                <div className="mb-3 text-base font-bold text-violet-800">✨ ניסוח חכם (AI)</div>
+                <div className="mb-3 text-sm text-violet-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-violet-700">מיקום מדויק</label>
+                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                      value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
+                      placeholder="מבנה משרדים, נתיבות" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-violet-700">משך ביצוע משוער</label>
+                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                      value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
+                      placeholder="עד 5 ימי עסקים" />
+                  </div>
                 </div>
-                <input className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
-                  value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
-                  placeholder="אופן/סוג העבודה (למשל: מיגון קרינה לקירות ולתקרה + דוח יישום)" />
-                <textarea rows={2} className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400 resize-y"
-                  value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
-                  placeholder="הערות נוספות (אופציונלי) — כל פרט שיעזור לנסח…" />
-                <div className="mt-2 flex items-center gap-2">
-                  <button type="button" disabled={aiBusy} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                <div className="mt-3">
+                  <label className="mb-1 block text-sm font-medium text-violet-700">אופן / סוג העבודה</label>
+                  <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
+                    placeholder="מיגון קרינה לקירות ולתקרה + דוח יישום" />
+                </div>
+                <div className="mt-3">
+                  <label className="mb-1 block text-sm font-medium text-violet-700">הערות נוספות <span className="font-normal text-violet-400">(אופציונלי)</span></label>
+                  <textarea rows={2} className="w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-y"
+                    value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
+                    placeholder="כל פרט שיעזור לנסח…" />
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <button type="button" disabled={aiBusy} className="rounded-xl bg-violet-600 px-6 py-3 text-base font-bold text-white hover:bg-violet-700 disabled:opacity-50"
                     onClick={() => generateAiDraft()}>
                     {aiBusy ? 'מנסח…' : (emailForm.body.trim() ? '🔄 נסח מחדש' : '✨ נסח לי מייל')}
                   </button>
-                  <span className="text-[11px] text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</span>
+                  <span className="text-sm text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</span>
                 </div>
-                {aiFactsNote && <div className="mt-2 rounded-lg bg-green-50 px-2.5 py-1.5 text-[11px] text-green-700">{aiFactsNote}</div>}
+                {aiFactsNote && <div className="mt-3 rounded-xl bg-green-50 px-3 py-2.5 text-sm font-medium text-green-700">{aiFactsNote}</div>}
                 {/* בקשת שינוי על ניסוח קיים */}
                 {emailForm.body.trim() && (
-                  <div className="mt-2 border-t border-violet-100 pt-2">
-                    <input className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
+                  <div className="mt-3 border-t border-violet-200 pt-3">
+                    <label className="mb-1 block text-sm font-medium text-violet-700">רוצה לשנות משהו?</label>
+                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
                       value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
-                      placeholder="בקש שינוי: 'יותר קצר', 'תוסיף שזמינים השבוע'…"
+                      placeholder="'יותר קצר', 'תוסיף שזמינים השבוע'… (Enter לעדכון)"
                       onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim()) generateAiDraft(); }} />
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">נושא</label>
-                <input className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400"
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">נושא</label>
+                <input className="h-12 w-full rounded-xl border border-gray-300 px-4 text-base outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
                   value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))} placeholder="נושא ההודעה" />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">תוכן ההודעה</label>
-                <textarea rows={6} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-sky-400 resize-y"
+                <label className="mb-1.5 block text-sm font-semibold text-gray-700">תוכן ההודעה</label>
+                <textarea rows={10} className="w-full rounded-xl border border-gray-300 px-4 py-3 text-base leading-relaxed outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-y"
                   value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))} placeholder="גוף ההודעה..." />
               </div>
               {emailHasSignature ? (
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
+                <label className="flex items-center gap-2.5 text-base text-gray-700 cursor-pointer">
+                  <input type="checkbox" className="h-5 w-5 accent-sky-500" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
                   הוסף את החתימה האישית שלי
                 </label>
               ) : (
-                <div className="text-xs text-gray-400">אין לך חתימה שמורה — ניתן להגדיר חתימה בפרופיל (משתמשים → עריכה).</div>
+                <div className="text-sm text-gray-400">אין לך חתימה שמורה — ניתן להגדיר חתימה בפרופיל (משתמשים → עריכה).</div>
               )}
-              <div className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">📎 הצעת המחיר (DOCX) תצורף אוטומטית למייל.</div>
+              <div className="rounded-xl bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700">📎 הצעת המחיר (DOCX) תצורף אוטומטית למייל.</div>
             </div>
 
-            {statusMsg && <div className="mt-3 text-sm font-medium text-gray-600">{statusMsg}</div>}
+            {statusMsg && <div className="mt-4 text-base font-medium text-gray-600">{statusMsg}</div>}
 
-            <div className="mt-5 flex justify-end gap-3">
-              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
-              <button type="button" disabled={emailSending || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
+            <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-5">
+              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
+              <button type="button" disabled={emailSending || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-10 py-3 text-base font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
                 {emailSending ? 'שולח…' : 'שלח'}
               </button>
             </div>
