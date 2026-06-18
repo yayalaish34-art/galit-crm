@@ -1100,14 +1100,60 @@ export function QuoteNewScreen({
     setNewPaymentTermLabel('');
   }
 
+  // יצירת/שיפור נושא ותוכן עם AI (OpenAI דרך השרת)
+  async function generateAiDraft() {
+    setAiBusy(true);
+    const prevSubject = emailForm.subject;
+    const prevBody = emailForm.body;
+    try {
+      const r = await apiFetch(apiUrl('/ai-mail/quote-draft'), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({
+          customerName: customer || '',
+          contactName: contact || '',
+          serviceName: emailForm.serviceName || reference || '',
+          quoteNumber: (reference || quoteNo || '').trim(),
+          instruction: aiInstruction.trim() || undefined,
+          // כולל את הגרסה הקודמת לשיפור איטרטיבי
+          previousSubject: (prevSubject || '').trim() || undefined,
+          previousBody: (prevBody || '').trim() || undefined,
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setEmailForm((p) => ({
+          ...p,
+          subject: d.subject || p.subject,
+          body: d.body || p.body,
+        }));
+        setAiInstruction('');
+        setAiPanelOpen(false);
+      } else {
+        const e = await r.json().catch(() => null);
+        setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
+        setTimeout(() => setStatusMsg(''), 4000);
+      }
+    } catch {
+      setStatusMsg('שגיאה בפנייה ל-AI');
+      setTimeout(() => setStatusMsg(''), 4000);
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   // שליחת המייל מתוך חלון העריכה — Outlook/Graph עם נמענים, חתימה וקובץ מצורף
   async function sendQuoteEmail() {
     const f = emailForm;
-    const to = f.to.trim();
+    // אם נשאר טקסט בשדה ההקלדה שלא הומר ל-chip — נכלול אותו
+    const allTo = [...f.toList, ...(f.toInput.includes('@') ? [f.toInput.trim()] : [])];
+    const allCc = [...f.ccList, ...(f.ccInput.includes('@') ? [f.ccInput.trim()] : [])];
+    const to = allTo[0]?.trim() || '';
     if (!to) { setStatusMsg('חסר נמען'); return; }
     setEmailSending(true);
     setStatusMsg('שולח…');
-    const ccList = f.cc.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
+    const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
     let serverSent = false;
     let serverErr = '';
     try {
@@ -1169,16 +1215,37 @@ export function QuoteNewScreen({
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
   const [emailForm, setEmailForm] = useState({
-    to: '',
-    cc: '',
+    toList: [] as string[],
+    toInput: '',
+    ccList: [] as string[],
+    ccInput: '',
     subject: '',
     body: '',
     includeSignature: true,
     quoteId: '',
     attId: '',
     docLink: '',
+    serviceName: '',
   });
   const [emailHasSignature, setEmailHasSignature] = useState(false);
+  // AI ניסוח
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+
+  // הוספת נמען לרשימה (chip) — מ-Enter/פסיק. מפצל גם הדבקה מרובה.
+  const addRecipients = (raw: string, field: 'toList' | 'ccList') => {
+    const parts = raw.split(/[,;\s]+/).map((s) => s.trim()).filter((s) => s.includes('@'));
+    if (!parts.length) return;
+    setEmailForm((p) => {
+      const existing = new Set(p[field]);
+      parts.forEach((e) => existing.add(e));
+      return { ...p, [field]: Array.from(existing), [field === 'toList' ? 'toInput' : 'ccInput']: '' };
+    });
+  };
+  const removeRecipient = (email: string, field: 'toList' | 'ccList') => {
+    setEmailForm((p) => ({ ...p, [field]: p[field].filter((e) => e !== email) }));
+  };
 
   /* ── אנשי קשר לפי לקוח נבחר: רענון מ-/customers/:id/contacts, בחירה מחדש אם צריך ── */
   useEffect(() => {
@@ -2237,7 +2304,21 @@ export function QuoteNewScreen({
             const defSubject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
             const defBody = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
             setEmailHasSignature(hasSig);
-            setEmailForm({ to, cc: '', subject: defSubject, body: defBody, includeSignature: hasSig, quoteId: id, attId: attId || '', docLink });
+            setAiInstruction('');
+            setAiPanelOpen(false);
+            setEmailForm({
+              toList: to ? [to] : [],
+              toInput: '',
+              ccList: [],
+              ccInput: '',
+              subject: defSubject,
+              body: defBody,
+              includeSignature: hasSig,
+              quoteId: id,
+              attId: attId || '',
+              docLink,
+              serviceName: (reference || '').trim(),
+            });
             setEmailModalOpen(true);
           }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Mail size={18} /></span>
@@ -2631,16 +2712,77 @@ export function QuoteNewScreen({
             </div>
 
             <div className="space-y-3">
+              {/* נמען ראשי + נמענים נוספים כ-chips */}
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">אל</label>
-                <input dir="ltr" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400 text-right"
-                  value={emailForm.to} onChange={(e) => setEmailForm((p) => ({ ...p, to: e.target.value }))} placeholder="customer@example.com" />
+                <label className="mb-1 block text-xs font-semibold text-gray-600">אל (Enter כדי להוסיף עוד נמען)</label>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 px-2 py-1.5 focus-within:border-sky-400">
+                  {emailForm.toList.map((em) => (
+                    <span key={em} className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs text-sky-800" dir="ltr">
+                      {em}
+                      <button type="button" className="text-sky-500 hover:text-sky-700" onClick={() => removeRecipient(em, 'toList')}>×</button>
+                    </span>
+                  ))}
+                  <input dir="ltr" className="min-w-[140px] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none text-right"
+                    value={emailForm.toInput}
+                    onChange={(e) => setEmailForm((p) => ({ ...p, toInput: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRecipients(emailForm.toInput, 'toList'); }
+                      else if (e.key === 'Backspace' && !emailForm.toInput && emailForm.toList.length) { removeRecipient(emailForm.toList[emailForm.toList.length - 1], 'toList'); }
+                    }}
+                    onBlur={() => emailForm.toInput.includes('@') && addRecipients(emailForm.toInput, 'toList')}
+                    placeholder={emailForm.toList.length ? 'נמען נוסף…' : 'customer@example.com'} />
+                </div>
               </div>
+              {/* CC כ-chips */}
               <div>
-                <label className="mb-1 block text-xs font-semibold text-gray-600">עותק (CC) — אפשר כמה, מופרדים בפסיק</label>
-                <input dir="ltr" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400 text-right"
-                  value={emailForm.cc} onChange={(e) => setEmailForm((p) => ({ ...p, cc: e.target.value }))} placeholder="a@x.com, b@y.com" />
+                <label className="mb-1 block text-xs font-semibold text-gray-600">עותק (CC)</label>
+                <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-gray-200 px-2 py-1.5 focus-within:border-sky-400">
+                  {emailForm.ccList.map((em) => (
+                    <span key={em} className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700" dir="ltr">
+                      {em}
+                      <button type="button" className="text-gray-400 hover:text-gray-600" onClick={() => removeRecipient(em, 'ccList')}>×</button>
+                    </span>
+                  ))}
+                  <input dir="ltr" className="min-w-[140px] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none text-right"
+                    value={emailForm.ccInput}
+                    onChange={(e) => setEmailForm((p) => ({ ...p, ccInput: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRecipients(emailForm.ccInput, 'ccList'); }
+                      else if (e.key === 'Backspace' && !emailForm.ccInput && emailForm.ccList.length) { removeRecipient(emailForm.ccList[emailForm.ccList.length - 1], 'ccList'); }
+                    }}
+                    onBlur={() => emailForm.ccInput.includes('@') && addRecipients(emailForm.ccInput, 'ccList')}
+                    placeholder="הוסף עותק…" />
+                </div>
               </div>
+
+              {/* AI — יצירת/שיפור נושא ותוכן */}
+              <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-violet-800">✨ ניסוח חכם (AI)</span>
+                  <div className="flex gap-2">
+                    <button type="button" disabled={aiBusy} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                      onClick={() => generateAiDraft()}>
+                      {aiBusy ? 'מנסח…' : (emailForm.body.trim() ? 'נסח מחדש' : 'נסח לי מייל')}
+                    </button>
+                    <button type="button" disabled={aiBusy} className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50"
+                      onClick={() => setAiPanelOpen((v) => !v)}>
+                      {aiPanelOpen ? 'סגור' : 'בקש שינוי'}
+                    </button>
+                  </div>
+                </div>
+                {aiPanelOpen && (
+                  <div className="mt-2">
+                    <textarea rows={2} className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400 resize-y"
+                      value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
+                      placeholder="מה לשנות? למשל: 'תוסיף שאנחנו זמינים השבוע', 'יותר רשמי', 'קצר יותר'…" />
+                    <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="mt-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                      onClick={() => generateAiDraft()}>
+                      {aiBusy ? 'מעדכן…' : 'עדכן לפי הבקשה'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="mb-1 block text-xs font-semibold text-gray-600">נושא</label>
                 <input className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400"
@@ -2666,7 +2808,7 @@ export function QuoteNewScreen({
 
             <div className="mt-5 flex justify-end gap-3">
               <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
-              <button type="button" disabled={emailSending || !emailForm.to.trim()} className="rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
+              <button type="button" disabled={emailSending || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
                 {emailSending ? 'שולח…' : 'שלח'}
               </button>
             </div>
