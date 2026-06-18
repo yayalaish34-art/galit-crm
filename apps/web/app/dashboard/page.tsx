@@ -15924,8 +15924,12 @@ function TasksPage({
                                   prefillCustomer={quotePrefillCust}
                                   prefillServiceName={quotePrefillSvc}
                                   taskId={t.id}
-                                  onExit={() => setExpandedTaskId(null)}
-                                  onQuoteSaved={() => setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }))}
+                                  onExit={() => {
+                                    // בסגירת מסך ההצעה — מעבירים את המשימה לשלב "פולואפ" (step4 / index 3).
+                                    setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }));
+                                    setExpandedTaskId(null);
+                                  }}
+                                  /* שמירה/"מעקב" משאירה את המשתמש במסך ההצעה — לא מקדמת שלב */
                                   onAttachmentSaved={() => setTaskAttachments((prev) => { const n = { ...prev }; delete n[t.id]; return n; })}
                                   existingAttachments={taskAttachments[t.id] ?? []}
                                   onDownloadAttachment={(att) => downloadTaskAttachment(t.id, att)}
