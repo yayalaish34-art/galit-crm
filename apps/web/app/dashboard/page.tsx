@@ -1681,15 +1681,15 @@ function statusBadge(status: string) {
     REJECTED: 'bg-red-100 text-red-700',
     SIGNED: 'bg-green-100 text-green-700',
     EXPIRED: 'bg-red-100 text-red-700',
-    REPORT_IN_PROGRESS: 'bg-purple-100 text-purple-700',
-    VISIT_SCHEDULED: 'bg-cyan-100 text-cyan-700',
-    WAITING_QUOTE: 'bg-cyan-100 text-cyan-700',
-    WAITING_APPROVAL: 'bg-cyan-100 text-cyan-700',
-    SCHEDULED: 'bg-cyan-100 text-cyan-700',
+    REPORT_IN_PROGRESS: 'bg-blue-100 text-blue-700',
+    VISIT_SCHEDULED: 'bg-blue-100 text-blue-700',
+    WAITING_QUOTE: 'bg-blue-100 text-blue-700',
+    WAITING_APPROVAL: 'bg-blue-100 text-blue-700',
+    SCHEDULED: 'bg-blue-100 text-blue-700',
     ON_THE_WAY: 'bg-orange-100 text-orange-700',
     FIELD_WORK_DONE: 'bg-emerald-100 text-emerald-800',
     WAITING_DATA: 'bg-slate-100 text-slate-700',
-    REPORT_WRITING: 'bg-purple-100 text-purple-700',
+    REPORT_WRITING: 'bg-blue-100 text-blue-700',
     SENT_TO_CLIENT: 'bg-blue-100 text-blue-700',
     CLOSED: 'bg-emerald-100 text-emerald-800',
     POSTPONED: 'bg-amber-100 text-amber-700',
@@ -1865,10 +1865,10 @@ function roleLabel(role: AppUserRole) {
 function roleBadge(role: AppUserRole) {
   const map: Record<AppUserRole, string> = {
     admin: 'bg-red-100 text-red-700',
-    technician: 'bg-cyan-100 text-cyan-700',
+    technician: 'bg-blue-100 text-blue-700',
     sales: 'bg-amber-100 text-amber-700',
     manager: 'bg-green-100 text-green-700',
-    expert: 'bg-indigo-100 text-indigo-700',
+    expert: 'bg-blue-100 text-blue-700',
     billing: 'bg-slate-100 text-slate-700',
   };
   return map[role];
@@ -2330,7 +2330,7 @@ function LeadProfile({
                   <div className="mt-1 text-xs">
                     <a
                       href={phoneToWhatsAppHref(lead.phone) || undefined}
-                      className="text-sky-700 hover:underline"
+                      className="text-blue-700 hover:underline"
                       target="_blank"
                       rel="noreferrer"
                       onClick={(e) => e.stopPropagation()}
@@ -3113,7 +3113,7 @@ function LeadDetailPage({
         </div>
 
         {radonPool && (
-          <div className="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          <div className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
             ליד זמין להקצאה
           </div>
         )}
@@ -4822,8 +4822,8 @@ function LeadsPage({
               <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiFollowToday}</div>
               <div className="text-[11px] text-slate-400 mt-1.5">הצעות פתוחות: {leads.filter((l) => (l.leadStatus || l.status || '') === 'QUOTE_SENT').length}</div>
             </div>
-            <div className="rounded-full bg-purple-100 p-3.5 shrink-0">
-              <Target className="h-6 w-6 text-purple-600" />
+            <div className="rounded-full bg-blue-100 p-3.5 shrink-0">
+              <Target className="h-6 w-6 text-blue-600" />
             </div>
           </div>
         </div>
@@ -4848,14 +4848,14 @@ function LeadsPage({
 
           {/* Quick filter chips */}
           {[
-            { key: 'mine', label: 'רק שלי', color: 'bg-indigo-600', hoverBg: 'hover:bg-indigo-50', borderColor: 'border-indigo-200', textColor: 'text-indigo-700', isMine: true },
+            { key: 'mine', label: 'רק שלי', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700', isMine: true },
             { key: 'new', label: 'חדשים Today', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'untouched15', label: 'לא טופל 15 דק\'', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700' },
             { key: 'src_facebook', label: 'פייסבוק', color: 'bg-blue-700', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-800' },
-            { key: 'src_google', label: 'גוגל', color: 'bg-sky-600', hoverBg: 'hover:bg-sky-50', borderColor: 'border-sky-200', textColor: 'text-sky-700' },
+            { key: 'src_google', label: 'גוגל', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'src_site', label: 'אתר', color: 'bg-teal-600', hoverBg: 'hover:bg-teal-50', borderColor: 'border-teal-200', textColor: 'text-teal-700' },
             { key: 'svc_radiation', label: 'קרינה', color: 'bg-amber-600', hoverBg: 'hover:bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700' },
-            { key: 'svc_radon', label: 'ראדון', color: 'bg-violet-600', hoverBg: 'hover:bg-violet-50', borderColor: 'border-violet-200', textColor: 'text-violet-700' },
+            { key: 'svc_radon', label: 'ראדון', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'hot', label: 'חם', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700', icon: 'flame' },
           ].map((chip) => {
             const isActive = chip.isMine ? onlyMine : quickFilter === chip.key;
@@ -4991,8 +4991,8 @@ function LeadsPage({
                           {lead.phone && <a title="התקשר" href={phoneToTelHref(lead.phone) || undefined} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-100 transition"><Phone className="h-3.5 w-3.5" /></a>}
                           {lead.phone && <a title="WhatsApp" href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-green-600 hover:bg-green-100 transition"><MessageCircle className="h-3.5 w-3.5" /></a>}
                           {lead.email && <a title="מייל" href={`mailto:${lead.email}`} className="rounded-md p-1.5 text-orange-500 hover:bg-orange-100 transition"><Mail className="h-3.5 w-3.5" /></a>}
-                          <button title="צור הצעה" onClick={() => createQuoteFromLead(lead)} className="rounded-md p-1.5 text-purple-600 hover:bg-purple-100 transition"><FileText className="h-3.5 w-3.5" /></button>
-                          <button title="פולואפ" onClick={() => updateNextFollowUp(lead)} className="rounded-md p-1.5 text-cyan-600 hover:bg-cyan-100 transition"><Calendar className="h-3.5 w-3.5" /></button>
+                          <button title="צור הצעה" onClick={() => createQuoteFromLead(lead)} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-100 transition"><FileText className="h-3.5 w-3.5" /></button>
+                          <button title="פולואפ" onClick={() => updateNextFollowUp(lead)} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-100 transition"><Calendar className="h-3.5 w-3.5" /></button>
                           <button title="מחק" onClick={() => deleteLead(lead)} className="rounded-md p-1.5 text-red-400 hover:bg-red-100 hover:text-red-600 transition"><X className="h-3.5 w-3.5" /></button>
                         </div>
                       </td>
@@ -5011,8 +5011,8 @@ function LeadsPage({
                                 {/* ── Header: Name + Status ── */}
                                 <div className="flex items-start justify-between mb-5">
                                   <div className="flex items-center gap-3">
-                                    <div className="rounded-full p-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #e0e7ff, #c7d2fe)' }}>
-                                      <UserCircle2 className="h-7 w-7 text-indigo-600" />
+                                    <div className="rounded-full p-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #dbeafe, #bfdbfe)' }}>
+                                      <UserCircle2 className="h-7 w-7 text-blue-600" />
                                     </div>
                                     <div>
                                       <div className="text-xl font-extrabold text-slate-900">{lead.fullName || lead.name}</div>
@@ -5044,7 +5044,7 @@ function LeadsPage({
                                     )}
                                     {lead.source && (
                                       <div className="flex items-center gap-2">
-                                        <div className="rounded-full bg-purple-100 p-1.5"><Zap className="h-3 w-3 text-purple-600" /></div>
+                                        <div className="rounded-full bg-blue-100 p-1.5"><Zap className="h-3 w-3 text-blue-600" /></div>
                                         <span className="text-slate-400">מקור:</span>
                                         <span className="font-bold text-slate-800">{lead.source}</span>
                                       </div>
@@ -5070,7 +5070,7 @@ function LeadsPage({
                                     )}
                                     {(lead.updatedAt || lead.createdAt) && (
                                       <div className="flex items-center gap-2">
-                                        <div className="rounded-full bg-cyan-100 p-1.5"><Clock3 className="h-3 w-3 text-cyan-600" /></div>
+                                        <div className="rounded-full bg-blue-100 p-1.5"><Clock3 className="h-3 w-3 text-blue-600" /></div>
                                         <span className="text-slate-400">קשר אחרון:</span>
                                         <span className="font-bold text-slate-800">{timeAgo(lead.updatedAt || lead.createdAt)}</span>
                                       </div>
@@ -5086,20 +5086,20 @@ function LeadsPage({
                                 </div>
 
                                 {/* ── Followup section (prominent) ── */}
-                                <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 p-4 mb-4">
+                                <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4 mb-4">
                                   <div className="flex items-center justify-between flex-wrap gap-3">
                                     <div className="flex items-center gap-2">
-                                      <CalendarDays className="h-5 w-5 text-cyan-600" />
-                                      <span className="text-sm font-bold text-cyan-800">פולואפ הבא:</span>
+                                      <CalendarDays className="h-5 w-5 text-blue-600" />
+                                      <span className="text-sm font-bold text-blue-800">פולואפ הבא:</span>
                                       {lead.nextFollowUpDate ? (
-                                        <span className="text-lg font-extrabold text-cyan-900">{new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')}</span>
+                                        <span className="text-lg font-extrabold text-blue-900">{new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')}</span>
                                       ) : (
                                         <span className="text-sm text-slate-400">לא נקבע</span>
                                       )}
                                     </div>
                                     <div className="flex gap-2 flex-wrap">
-                                      <button onClick={() => setFollowUp(lead, 1)} className="rounded-lg bg-cyan-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-cyan-700 transition shadow-sm">+2 ימים</button>
-                                      <button onClick={() => setFollowUp(lead, 2)} className="rounded-lg bg-sky-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-sky-700 transition shadow-sm">+7 ימים</button>
+                                      <button onClick={() => setFollowUp(lead, 1)} className="rounded-lg bg-blue-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-blue-700 transition shadow-sm">+2 ימים</button>
+                                      <button onClick={() => setFollowUp(lead, 2)} className="rounded-lg bg-blue-600 text-white px-3 py-1.5 text-[11px] font-bold hover:bg-blue-700 transition shadow-sm">+7 ימים</button>
                                       <button onClick={() => updateNextFollowUp(lead)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 transition">תאריך מותאם</button>
                                     </div>
                                   </div>
@@ -5242,7 +5242,7 @@ function LeadsPage({
                 {lead.phone && <a href={phoneToTelHref(lead.phone) || undefined} className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-600"><Phone className="h-3.5 w-3.5" /></a>}
                 {lead.phone && <a href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer" className="rounded-lg border border-green-200 bg-green-50 p-2 text-green-600"><MessageCircle className="h-3.5 w-3.5" /></a>}
                 {lead.email && <a href={`mailto:${lead.email}`} className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-orange-500"><Mail className="h-3.5 w-3.5" /></a>}
-                <button onClick={() => createQuoteFromLead(lead)} className="rounded-lg border border-purple-200 bg-purple-50 p-2 text-purple-600"><FileText className="h-3.5 w-3.5" /></button>
+                <button onClick={() => createQuoteFromLead(lead)} className="rounded-lg border border-blue-200 bg-blue-50 p-2 text-blue-600"><FileText className="h-3.5 w-3.5" /></button>
               </div>
             </div>
           );
@@ -11259,7 +11259,7 @@ function SettingsPage({
                             <div className="text-xs">
                               <a
                                 href={phoneToWhatsAppHref(u.phone) || undefined}
-                                className="text-sky-700 hover:underline"
+                                className="text-blue-700 hover:underline"
                                 target="_blank"
                                 rel="noreferrer"
                               >
@@ -12173,8 +12173,8 @@ function SettingsPage({
           </div>
 
           {empEditing && (
-            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
-              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-sky-800">
+            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-blue-800">
                 <Mail className="h-4 w-4" /> חיבור Outlook (מומלץ)
               </div>
               <div className="mb-3 text-xs text-slate-600">
@@ -12207,7 +12207,7 @@ function SettingsPage({
                 <button
                   type="button"
                   disabled={msBusy}
-                  className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                   onClick={async () => {
                     setMsBusy(true);
                     try {
@@ -12226,20 +12226,20 @@ function SettingsPage({
             </div>
           )}
 
-          <div className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
-            <div className="mb-1 text-sm font-semibold text-indigo-800">חתימת מייל אישית</div>
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+            <div className="mb-1 text-sm font-semibold text-blue-800">חתימת מייל אישית</div>
             <div className="mb-2 text-xs text-slate-500">תתווסף אוטומטית לתחתית הצעות מחיר שנשלחות במייל (אם תסומן בחלון השליחה).</div>
             <textarea
               rows={4}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 resize-y"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 resize-y"
               value={empForm.mailSignature}
               onChange={(e) => setEmpForm((p) => ({ ...p, mailSignature: e.target.value }))}
               placeholder={'בברכה,\nשם מלא\nתפקיד | גלית – החברה לאיכות הסביבה\nטלפון: 0XX-XXXXXXX'}
             />
 
             {/* תמונת חתימה (לוגו / חתימה סרוקה) */}
-            <div className="mt-3 border-t border-indigo-100 pt-3">
-              <div className="mb-1.5 text-xs font-semibold text-indigo-800">תמונת חתימה (לוגו / חתימה סרוקה)</div>
+            <div className="mt-3 border-t border-blue-100 pt-3">
+              <div className="mb-1.5 text-xs font-semibold text-blue-800">תמונת חתימה (לוגו / חתימה סרוקה)</div>
               {empEditing ? (
                 <>
                   {sigImagePreview && (
@@ -12248,7 +12248,7 @@ function SettingsPage({
                     </div>
                   )}
                   <div className="flex items-center gap-2">
-                    <label className="cursor-pointer rounded-xl border border-indigo-200 bg-white px-4 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
+                    <label className="cursor-pointer rounded-xl border border-blue-200 bg-white px-4 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50">
                       {sigImagePreview ? 'החלף תמונה' : 'העלה תמונה'}
                       <input
                         type="file"
@@ -12381,7 +12381,7 @@ const FIELD_SCHEDULE_STATUS_LABELS: Record<string, string> = {
 
 function fieldScheduleRowStyle(status: string): string {
   const map: Record<string, string> = {
-    SCHEDULED: 'bg-sky-50 border-r-4 border-sky-400',
+    SCHEDULED: 'bg-blue-50 border-r-4 border-blue-400',
     ON_THE_WAY: 'bg-amber-50 border-r-4 border-amber-400',
     FIELD_WORK_DONE: 'bg-green-50 border-r-4 border-green-500',
     POSTPONED: 'bg-slate-100 border-r-4 border-slate-400',
@@ -13735,7 +13735,7 @@ function TasksPage({
             {Array.from({ length: 12 }, (_, i) => <option key={i * 5} value={String(i * 5).padStart(2, '0')}>{String(i * 5).padStart(2, '0')}</option>)}
           </select>
         </div>
-        <button disabled={!(snoozeCustomTaskId === taskId && snoozeCustomDate)} className="w-full rounded-lg px-3 py-2 text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: snoozeCustomTaskId === taskId && snoozeCustomDate ? '#3b82f6' : '#94a3b8' }} onClick={() => snoozeCustomSubmit(taskId)}>
+        <button disabled={!(snoozeCustomTaskId === taskId && snoozeCustomDate)} className="w-full rounded-lg px-3 py-2 text-sm font-bold text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed" style={{ background: snoozeCustomTaskId === taskId && snoozeCustomDate ? '#2563eb' : '#94a3b8' }} onClick={() => snoozeCustomSubmit(taskId)}>
           אישור
         </button>
       </div>
@@ -14111,15 +14111,15 @@ function TasksPage({
   /* ── progress steps for arrow ── */
   /* ── Business workflow stages (arrows) ── */
   const progressSteps = [
-    { key: 'customerCard', label: 'פתיחת פנייה', color: '#0ea5e9' },
-    { key: 'inquiry',      label: 'התאמת הפתרון',   color: '#3b82f6' },
-    { key: 'call',         label: 'שיחת מכירה',   color: '#6366f1' },
+    { key: 'customerCard', label: 'פתיחת פנייה', color: '#3b82f6' },
+    { key: 'inquiry',      label: 'התאמת הפתרון',   color: '#2563eb' },
+    { key: 'call',         label: 'שיחת מכירה',   color: '#3b82f6' },
     { key: 'followup',     label: 'פולואפ', color: '#f97316' },
-    { key: 'coordination', label: 'תיאום',  color: '#8b5cf6' },
-    { key: 'execution',    label: 'ביצוע',  color: '#06b6d4' },
-    { key: 'report',       label: 'דוח',    color: '#0ea5e9' },
+    { key: 'coordination', label: 'תיאום',  color: '#3b82f6' },
+    { key: 'execution',    label: 'ביצוע',  color: '#2563eb' },
+    { key: 'report',       label: 'דוח',    color: '#3b82f6' },
     { key: 'collection',   label: 'גבייה',  color: '#ec4899' },
-    { key: 'feedback',     label: 'משוב',   color: '#14b8a6' },
+    { key: 'feedback',     label: 'משוב',   color: '#2563eb' },
     { key: 'closed',       label: 'נסגר',   color: '#22c55e' },
   ];
   /** Map task type + status → workflow stage index */
@@ -14129,11 +14129,14 @@ function TasksPage({
     if (s === 'DONE' || s === 'CANCELLED') return 9;       // נסגר
     if (tp === 'REVIEW')                   return 8;       // משוב
     if (tp === 'COLLECTION')               return 7;       // גבייה
-    if (tp === 'REPORT_WRITING')           return 6;       // דוח
-    if (tp === 'FIELD_WORK')               return 5;       // ביצוע
-    if (tp === 'COORDINATION')             return 4;       // תיאום
-    if (tp === 'SALES_FOLLOWUP' || tp === 'QUOTE_PREPARATION') return 3; // פולואפ
-    if (s === 'IN_PROGRESS')               return 2;       // שיחת מכירה
+    if (tp === 'REPORT_WRITING' || tp === 'STEP7') return 6; // דוח
+    if (tp === 'FIELD_WORK' || tp === 'STEP6')     return 5; // ביצוע
+    if (tp === 'COORDINATION' || tp === 'STEP5')   return 4; // תיאום
+    if (tp === 'SALES_FOLLOWUP' || tp === 'STEP4') return 3; // פולואפ
+    // שלב הצעת מחיר (display-only) — נשמר ב-type כ-stepQuote/QUOTE_PREPARATION.
+    if (tp === 'STEPQUOTE' || tp === 'QUOTE_PREPARATION') return 99;
+    if (s === 'IN_PROGRESS' || tp === 'STEP3')     return 2; // שיחת מכירה
+    if (tp === 'STEP2')                    return 1;       // התאמת הפתרון
     /* כרטיס לקוח כבר נפתח (יש customerId) → דלג ישר להתאמת הפתרון; אחרת (הגיע מליד בלבד) → פתח את כרטיס הלקוח */
     if (task.customerId)                   return 1;       // התאמת הפתרון
     return 0;                                              // כרטיס לקוח
@@ -14165,9 +14168,9 @@ function TasksPage({
       {/* ═══ KPI CARDS ═══ */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {[
-          { title: 'להיום', value: kpiToday, icon: Calendar, color: '#3b82f6', sub: `${todayStr.split('-').reverse().join('/')}` },
+          { title: 'להיום', value: kpiToday, icon: Calendar, color: '#2563eb', sub: `${todayStr.split('-').reverse().join('/')}` },
           { title: 'באיחור', value: kpiOverdue, icon: AlertCircle, color: '#ef4444', sub: 'דורשות טיפול' },
-          { title: 'השבוע', value: kpiWeek, icon: CalendarDays, color: '#8b5cf6', sub: '7 ימים קרובים' },
+          { title: 'השבוע', value: kpiWeek, icon: CalendarDays, color: '#3b82f6', sub: '7 ימים קרובים' },
           { title: 'הושלמו', value: kpiDoneToday, icon: CheckCircle2, color: '#22c55e', sub: 'סה"כ שהושלמו' },
           { title: 'פולואפ הצעות', value: kpiQuoteFollowup, icon: FileText, color: '#f59e0b', sub: 'ממתינות למעקב' },
         ].map((kpi) => {
@@ -14367,22 +14370,22 @@ function TasksPage({
                     const isPostponeOpen = postponeDropdownId === t.id;
                     /* info fields — only show if value exists */
                     const infoFields = [
-                      { icon: Phone, color: '#06b6d4', bg: '#ecfeff', label: 'טלפון', value: contactPhone },
-                      { icon: Mail, color: '#a855f7', bg: '#faf5ff', label: 'אימייל', value: t.leadEmail },
+                      { icon: Phone, color: '#2563eb', bg: '#eff6ff', label: 'טלפון', value: contactPhone },
+                      { icon: Mail, color: '#3b82f6', bg: '#eff6ff', label: 'אימייל', value: t.leadEmail },
                       { icon: Building2, color: '#f59e0b', bg: '#fffbeb', label: 'לקוח', value: t.customerName },
                       { icon: Flame, color: '#ef4444', bg: '#fef2f2', label: 'איש קשר / ליד', value: t.leadName },
                       { icon: FolderKanban, color: '#22c55e', bg: '#f0fdf4', label: 'פרויקט', value: t.projectName },
                       { icon: ClipboardList, color: '#64748b', bg: '#f8fafc', label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
-                      { icon: UserCircle2, color: '#8b5cf6', bg: '#faf5ff', label: 'נציג מטפל', value: t.owner },
+                      { icon: UserCircle2, color: '#3b82f6', bg: '#eff6ff', label: 'נציג מטפל', value: t.owner },
                       { icon: AlertTriangle, color: '#f97316', bg: '#fff7ed', label: 'עדיפות', value: priorityLabel(p) },
-                      { icon: Calendar, color: '#3b82f6', bg: '#eff6ff', label: 'תאריך יעד', value: t.due },
-                      { icon: Clock3, color: '#06b6d4', bg: '#ecfeff', label: 'שעה', value: t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : null },
-                      { icon: BarChart3, color: '#10b981', bg: '#ecfdf5', label: 'סטטוס', value: taskStatusLabel(s) },
-                      { icon: Hash, color: '#6366f1', bg: '#eef2ff', label: 'סוג לקוח / חברה', value: t.leadCompany },
+                      { icon: Calendar, color: '#2563eb', bg: '#eff6ff', label: 'תאריך יעד', value: t.due },
+                      { icon: Clock3, color: '#2563eb', bg: '#eff6ff', label: 'שעה', value: t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : null },
+                      { icon: BarChart3, color: '#22c55e', bg: '#ecfdf5', label: 'סטטוס', value: taskStatusLabel(s) },
+                      { icon: Hash, color: '#3b82f6', bg: '#eff6ff', label: 'סוג לקוח / חברה', value: t.leadCompany },
                     ].filter((f) => f.value && f.value !== '-');
                     /* Hoist to outer scope so bottom bar + all sections can access them */
                     const stageKey = currentStep === QUOTE_STEP_IDX ? 'quotePrep' : (progressSteps[currentStep]?.key || 'inquiry');
-                    const stageColor = currentStep === QUOTE_STEP_IDX ? '#f59e0b' : (progressSteps[currentStep]?.color || '#3b82f6');
+                    const stageColor = currentStep === QUOTE_STEP_IDX ? '#f59e0b' : (progressSteps[currentStep]?.color || '#2563eb');
                     const linkedLeadForHeader = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
                     /* ── validation gate: can this task leave "כרטיס לקוח" (stage 0) without a saved contact? ──
                        Mirrors canSaveCard inside the stage-0 block below, computed here so the
@@ -14456,7 +14459,7 @@ function TasksPage({
                                   >
                                     <div style={{
                                       width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                                      background: isComplete ? '#3b82f6' : isCurrent ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : '#e9eef5',
+                                      background: isComplete ? '#2563eb' : isCurrent ? 'linear-gradient(135deg, #2563eb, #2563eb)' : '#e9eef5',
                                       boxShadow: isCurrent ? '0 0 0 3px rgba(59,130,246,0.2), 0 2px 6px rgba(37,99,235,0.25)' : 'none',
                                       transition: 'all 0.2s',
                                     }}>
@@ -14465,10 +14468,10 @@ function TasksPage({
                                         : <span style={{ fontSize: 10, fontWeight: 800, color: isCurrent ? '#fff' : '#94a3b8', fontFamily: 'var(--font-sans)' }}>{stepNum}</span>
                                       }
                                     </div>
-                                    <span style={{ fontSize: 9, fontWeight: isCurrent ? 700 : 500, color: isCurrent ? '#2563eb' : isComplete ? '#3b82f6' : '#94a3b8', whiteSpace: 'nowrap' }}>{step.label}</span>
+                                    <span style={{ fontSize: 9, fontWeight: isCurrent ? 700 : 500, color: isCurrent ? '#2563eb' : isComplete ? '#2563eb' : '#94a3b8', whiteSpace: 'nowrap' }}>{step.label}</span>
                                   </button>
                                   {!isLast && (
-                                    <div style={{ flex: 1, height: 2, background: isComplete ? 'linear-gradient(90deg, #3b82f6, #60a5fa)' : '#e2e8f0', margin: '0 4px', marginBottom: 14, minWidth: 6, borderRadius: 2, flexShrink: 1 }} />
+                                    <div style={{ flex: 1, height: 2, background: isComplete ? 'linear-gradient(90deg, #2563eb, #60a5fa)' : '#e2e8f0', margin: '0 4px', marginBottom: 14, minWidth: 6, borderRadius: 2, flexShrink: 1 }} />
                                   )}
                                 </React.Fragment>
                               );
@@ -14842,10 +14845,10 @@ function TasksPage({
                             })();
                             const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'אחר'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
-                            const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100';
-                            const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100';
-                            const ccSel = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100 appearance-none cursor-pointer';
-                            const ccTxt = 'w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 py-3 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-sky-400 focus:ring-[3px] focus:ring-sky-100 resize-none';
+                            const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
+                            const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
+                            const ccSel = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 appearance-none cursor-pointer';
+                            const ccTxt = 'w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 py-3 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 resize-none';
                             const ccLbl = 'block text-[13px] font-semibold text-black mb-1.5';
                             // contacts state helpers (use early-computed values for consistency)
                             const ccContacts = ccContacts0;
@@ -15092,11 +15095,11 @@ function TasksPage({
                             })();
                             /* urgency */
                             const urgencyBadge = (() => {
-                              if (!createdDate) return { label: 'חדש', color: '#3b82f6', bg: '#eff6ff' };
+                              if (!createdDate) return { label: 'חדש', color: '#2563eb', bg: '#eff6ff' };
                               const hrs = (Date.now() - new Date(createdDate).getTime()) / 3600000;
                               if (hrs < 1) return { label: 'ליד חם 🔥', color: '#ef4444', bg: '#fef2f2' };
                               if (hrs < 4) return { label: 'דחוף', color: '#f97316', bg: '#fff7ed' };
-                              if (hrs < 24) return { label: 'חדש', color: '#3b82f6', bg: '#eff6ff' };
+                              if (hrs < 24) return { label: 'חדש', color: '#2563eb', bg: '#eff6ff' };
                               return { label: 'ממתין לטיפול', color: '#64748b', bg: '#f8fafc' };
                             })();
                             const customerType = linkedLead?.company ? 'עסקי' : 'פרטי';
@@ -15105,16 +15108,16 @@ function TasksPage({
                               {/* ═══ BLOCK 0: סוג פנייה וקטגוריה ═══ */}
                               {(() => {
                                 const catMeta: Record<string, { color: string; light: string; Icon: React.ElementType }> = {
-                                  water:                { color: '#3b82f6', light: '#eff6ff', Icon: Waves },
-                                  odor:                 { color: '#8b5cf6', light: '#f5f3ff', Icon: Wind },
+                                  water:                { color: '#2563eb', light: '#eff6ff', Icon: Waves },
+                                  odor:                 { color: '#3b82f6', light: '#eff6ff', Icon: Wind },
                                   soil:                 { color: '#16a34a', light: '#f0fdf4', Icon: Shield },
                                   asbestos:             { color: '#f59e0b', light: '#fffbeb', Icon: AlertTriangle },
-                                  air:                  { color: '#06b6d4', light: '#ecfeff', Icon: Sparkles },
+                                  air:                  { color: '#2563eb', light: '#eff6ff', Icon: Sparkles },
                                   radon:                { color: '#ef4444', light: '#fef2f2', Icon: Radio },
                                   noise:                { color: '#f97316', light: '#fff7ed', Icon: Volume2 },
-                                  radiation:            { color: '#7c3aed', light: '#faf5ff', Icon: Zap },
+                                  radiation:            { color: '#2563eb', light: '#eff6ff', Icon: Zap },
                                   'green-building':     { color: '#15803d', light: '#f0fdf4', Icon: Leaf },
-                                  'occupational-health':{ color: '#0284c7', light: '#f0f9ff', Icon: Users },
+                                  'occupational-health':{ color: '#2563eb', light: '#eff6ff', Icon: Users },
                                   'environmental-opinion':{ color: '#0f766e', light: '#f0fdfa', Icon: FileText },
                                   general:              { color: '#64748b', light: '#f8fafc', Icon: ClipboardList },
                                   thermal:              { color: '#dc2626', light: '#fef2f2', Icon: Flame },
@@ -15134,7 +15137,7 @@ function TasksPage({
                                     <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6" style={{ direction: 'rtl' }}>
                                       {activeCat ? (() => {
                                         /* ── category selected: replace the categories grid with that category's services ── */
-                                        const meta = catMeta[activeCat.id] ?? { color: '#3b82f6', light: '#eff6ff', Icon: ClipboardList };
+                                        const meta = catMeta[activeCat.id] ?? { color: '#2563eb', light: '#eff6ff', Icon: ClipboardList };
                                         const CatIcon = meta.Icon;
                                         // openSubServiceId is explicit-only — no derived fallback (avoids back-button breaking)
                                         const activeSubGroup = activeCat.services.find((s) => s.id === openSubServiceId && !!s.subServices);
@@ -15281,19 +15284,19 @@ function TasksPage({
                                           const mainCats = SERVICE_CATEGORIES.filter((c) => !EXTRA_CAT_IDS.includes(c.id));
                                           const extraCats = SERVICE_CATEGORIES.filter((c) => EXTRA_CAT_IDS.includes(c.id));
                                           const catGradients: Record<string, string> = {
-                                            water:                  'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
-                                            odor:                   'linear-gradient(135deg,#8b5cf6 0%,#6d28d9 100%)',
+                                            water:                  'linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)',
+                                            odor:                   'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
                                             soil:                   'linear-gradient(135deg,#22c55e 0%,#15803d 100%)',
                                             asbestos:               'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)',
-                                            air:                    'linear-gradient(135deg,#06b6d4 0%,#0284c7 100%)',
+                                            air:                    'linear-gradient(135deg,#2563eb 0%,#2563eb 100%)',
                                             radon:                  'linear-gradient(135deg,#ef4444 0%,#b91c1c 100%)',
                                             noise:                  'linear-gradient(135deg,#f97316 0%,#c2410c 100%)',
-                                            radiation:              'linear-gradient(135deg,#7c3aed 0%,#4c1d95 100%)',
+                                            radiation:              'linear-gradient(135deg,#2563eb 0%,#4c1d95 100%)',
                                             'green-building':       'linear-gradient(135deg,#16a34a 0%,#14532d 100%)',
                                             thermal:                'linear-gradient(135deg,#dc2626 0%,#f97316 100%)',
                                             'environmental-opinion':'linear-gradient(135deg,#0f766e 0%,#134e4a 100%)',
                                             general:                'linear-gradient(135deg,#64748b 0%,#334155 100%)',
-                                            'occupational-health':  'linear-gradient(135deg,#0284c7 0%,#0c4a6e 100%)',
+                                            'occupational-health':  'linear-gradient(135deg,#2563eb 0%,#0c4a6e 100%)',
                                           };
                                           const renderCatCard = (cat: typeof SERVICE_CATEGORIES[number]) => {
                                             const meta = catMeta[cat.id] ?? { color: '#64748b', light: '#f8fafc', Icon: ClipboardList };
@@ -15363,7 +15366,7 @@ function TasksPage({
                               <div className="px-8 pb-6 pt-2">
                                 {renderStageActionBar(t, {
                                   label: 'מעבר לשיחת מכירה',
-                                  circleBg: '#6366f1',
+                                  circleBg: '#3b82f6',
                                   icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                   onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 })),
                                   disabled: !t.productName,
@@ -15468,7 +15471,7 @@ function TasksPage({
                               <div className="px-6 pt-4 pb-3">
                                 <div className="rounded-2xl overflow-hidden border border-slate-200/70 shadow-xl" style={{ direction: 'rtl' }}>
                                   {/* Header */}
-                                  <div className="flex items-center gap-3 px-7 py-4" style={{ background: 'linear-gradient(135deg,#6366f1 0%,#4f46e5 55%,#7c3aed 100%)' }}>
+                                  <div className="flex items-center gap-3 px-7 py-4" style={{ background: 'linear-gradient(135deg,#3b82f6 0%,#2563eb 55%,#2563eb 100%)' }}>
                                     <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 52, height: 52, background: 'rgba(255,255,255,0.18)' }}>
                                       <Sparkles className="h-7 w-7 text-white" />
                                     </div>
@@ -15506,7 +15509,7 @@ function TasksPage({
                                         <ul className="space-y-2">
                                           {coach.serviceInfo.map((b, i) => (
                                             <li key={i} className="flex items-start gap-2 text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>
-                                              <span className="mt-1.5 flex-shrink-0 rounded-full" style={{ width: 6, height: 6, background: '#3b82f6' }} />
+                                              <span className="mt-1.5 flex-shrink-0 rounded-full" style={{ width: 6, height: 6, background: '#2563eb' }} />
                                               {b}
                                             </li>
                                           ))}
@@ -15565,7 +15568,7 @@ function TasksPage({
                                         <div className="space-y-2">
                                           {coach.closings.map((c, i) => (
                                             <div key={i} className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white shadow-sm p-2.5 transition-shadow hover:shadow-md">
-                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 18, height: 18, fontSize: 10, background: 'linear-gradient(135deg,#10b981,#059669)' }}>{i + 1}</span>
+                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 18, height: 18, fontSize: 10, background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>{i + 1}</span>
                                               <span className="text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>{c}</span>
                                             </div>
                                           ))}
@@ -15582,7 +15585,7 @@ function TasksPage({
                               {/* ── CIRCULAR ACTION BUTTONS ── */}
                               <div id={`step2-${t.id}`} className="flex justify-center items-start gap-8 py-1">
                                 {([
-                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#4f46e5', activeRing: 'ring-4 ring-indigo-300', icon: <ArrowUpRight className="h-7 w-7 text-white" />, popup: null as null | 'snooze' | 'transfer' | 'lost' },
+                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#2563eb', activeRing: 'ring-4 ring-blue-300', icon: <ArrowUpRight className="h-7 w-7 text-white" />, popup: null as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'העברה למומחה', label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" />, popup: 'transfer' as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'חזרה מאוחרת', label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" />, popup: 'snooze' as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'לא רלוונטי', label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" />, popup: 'lost' as null | 'snooze' | 'transfer' | 'lost' },
@@ -15697,7 +15700,7 @@ function TasksPage({
                                         </a>
                                       )}
                                       {fu3Email && (
-                                        <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#6366f1' }}>
+                                        <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#3b82f6' }}>
                                           <Mail className="h-3.5 w-3.5" />מייל
                                         </a>
                                       )}
@@ -15817,7 +15820,7 @@ function TasksPage({
                               <div>
                                 {renderStageActionBar(t, {
                                   label: 'מעבר לתיאום',
-                                  circleBg: '#8b5cf6',
+                                  circleBg: '#3b82f6',
                                   icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                   onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 4 })),
                                 })}
@@ -16035,23 +16038,23 @@ function TasksPage({
                               }
                             };
 
-                            const fieldBox = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-violet-400 focus:outline-none';
+                            const fieldBox = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none';
                             const labelCls = 'text-[11px] font-bold text-slate-500 mb-1 block';
 
                             return (
                               <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
                                 {/* ── כותרת + סטטוס חיבור Outlook ── */}
-                                <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-purple-50 to-violet-50 px-6 py-5 shadow-sm">
+                                <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-blue-50 to-blue-50 px-6 py-5 shadow-sm">
                                   <div className="flex flex-wrap items-start justify-between gap-4">
                                     <div className="flex items-start gap-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#f5f3ff' }}>
-                                        <CalendarPlus className="h-7 w-7" style={{ color: '#8b5cf6' }} />
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
+                                        <CalendarPlus className="h-7 w-7" style={{ color: '#3b82f6' }} />
                                       </div>
                                       <div>
-                                        <div className="text-xl md:text-2xl font-extrabold text-violet-900 leading-snug">
+                                        <div className="text-xl md:text-2xl font-extrabold text-blue-900 leading-snug">
                                           תיאום פגישה עם {customerLabel}
                                         </div>
-                                        <div className="text-sm font-bold text-violet-700 mt-1">
+                                        <div className="text-sm font-bold text-blue-700 mt-1">
                                           קביעת פגישה ביומן Outlook — אפשר לצרף עובדים נוספים והלקוח לתיאום משותף
                                         </div>
                                       </div>
@@ -16137,8 +16140,8 @@ function TasksPage({
                                   </div>
 
                                   <label className="flex items-center gap-2 cursor-pointer select-none">
-                                    <input type="checkbox" className="h-4 w-4 accent-violet-600" checked={isOnline} onChange={(e) => updateCoordForm(t.id, { isOnline: e.target.checked })} />
-                                    <Video className="h-4 w-4 text-violet-500" />
+                                    <input type="checkbox" className="h-4 w-4 accent-blue-600" checked={isOnline} onChange={(e) => updateCoordForm(t.id, { isOnline: e.target.checked })} />
+                                    <Video className="h-4 w-4 text-blue-500" />
                                     <span className="text-[13px] font-bold text-slate-700">פגישת Teams מקוונת (יצורף קישור הצטרפות)</span>
                                   </label>
                                 </div>
@@ -16146,7 +16149,7 @@ function TasksPage({
                                 {/* ── בורר משתתפים: שאר העובדים + הלקוח ── */}
                                 <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
                                   <div className="flex items-center gap-2 mb-3">
-                                    <Users className="h-5 w-5 text-violet-500" />
+                                    <Users className="h-5 w-5 text-blue-500" />
                                     <div className="text-base font-extrabold text-slate-800">מי מוזמן לפגישה?</div>
                                   </div>
                                   <div className="text-[12px] text-slate-400 font-semibold mb-3">
@@ -16154,9 +16157,9 @@ function TasksPage({
                                   </div>
 
                                   {/* הזמנת הלקוח */}
-                                  <label className={`flex items-center gap-2 rounded-xl border p-3 mb-3 ${customerEmail ? 'cursor-pointer hover:border-violet-300' : 'opacity-50'} ${inviteCustomer ? 'border-violet-300 bg-violet-50' : 'border-slate-200'}`}>
-                                    <input type="checkbox" className="h-4 w-4 accent-violet-600" disabled={!customerEmail} checked={inviteCustomer && !!customerEmail} onChange={(e) => updateCoordForm(t.id, { inviteCustomer: e.target.checked })} />
-                                    <UserCircle2 className="h-5 w-5 text-violet-500" />
+                                  <label className={`flex items-center gap-2 rounded-xl border p-3 mb-3 ${customerEmail ? 'cursor-pointer hover:border-blue-300' : 'opacity-50'} ${inviteCustomer ? 'border-blue-300 bg-blue-50' : 'border-slate-200'}`}>
+                                    <input type="checkbox" className="h-4 w-4 accent-blue-600" disabled={!customerEmail} checked={inviteCustomer && !!customerEmail} onChange={(e) => updateCoordForm(t.id, { inviteCustomer: e.target.checked })} />
+                                    <UserCircle2 className="h-5 w-5 text-blue-500" />
                                     <div className="flex-1 min-w-0">
                                       <div className="text-[13px] font-bold text-slate-700">הזמן את הלקוח — {customerLabel}</div>
                                       <div className="text-[11px] text-slate-400 font-medium truncate">{customerEmail || 'אין כתובת מייל ללקוח — לא ניתן להזמין'}</div>
@@ -16172,8 +16175,8 @@ function TasksPage({
                                       {otherEmployees.map((u) => {
                                         const checked = employeeIds.includes(u.id);
                                         return (
-                                          <label key={u.id} className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer transition-colors ${checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 hover:border-violet-200'}`}>
-                                            <input type="checkbox" className="h-4 w-4 accent-violet-600" checked={checked} onChange={() => toggleCoordEmployee(t.id, u.id, employeeIds)} />
+                                          <label key={u.id} className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer transition-colors ${checked ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:border-blue-200'}`}>
+                                            <input type="checkbox" className="h-4 w-4 accent-blue-600" checked={checked} onChange={() => toggleCoordEmployee(t.id, u.id, employeeIds)} />
                                             <div className="flex-1 min-w-0">
                                               <div className="text-[13px] font-bold text-slate-700 truncate">{u.name}</div>
                                               <div className="text-[11px] text-slate-400 font-medium truncate">{u.email}</div>
@@ -16194,7 +16197,7 @@ function TasksPage({
                                   onClick={createMeeting}
                                   disabled={busy || !coordOutlook.connected}
                                   className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
-                                  style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }}
+                                  style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
                                 >
                                   {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <CalendarPlus className="h-5 w-5" />}
                                   {busy ? 'יוצר פגישה...' : 'צור פגישה ב-Outlook'}
@@ -16204,7 +16207,7 @@ function TasksPage({
                                 <div>
                                   {renderStageActionBar(t, {
                                     label: 'מעבר לביצוע',
-                                    circleBg: '#06b6d4',
+                                    circleBg: '#2563eb',
                                     icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                     onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 5 })),
                                   })}
@@ -18489,8 +18492,8 @@ export default function GalitCRMPrototype() {
               {!isNewCustomerMode && !newlyCreatedTaskId && workspaceTab === 'card' && (
                 <div className="mb-3 flex items-center justify-between rounded-2xl px-5 py-3 shadow-sm border border-slate-200 bg-white" style={{ direction: 'rtl' }}>
                   <div className="flex items-center gap-2.5">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: '#e0f2fe' }}>
-                      <PlayCircle className="h-5 w-5 text-sky-600" />
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: '#dbeafe' }}>
+                      <PlayCircle className="h-5 w-5 text-blue-600" />
                     </div>
                     <div>
                       <div className="text-sm font-bold text-slate-800">מוכנים להתחיל תהליך מול {selectedCustomer.name}?</div>
@@ -18501,7 +18504,7 @@ export default function GalitCRMPrototype() {
                     type="button"
                     onClick={() => startCustomerProcess(selectedCustomer)}
                     className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition-all hover:scale-105"
-                    style={{ background: '#0ea5e9' }}
+                    style={{ background: '#3b82f6' }}
                   >
                     <PlayCircle className="h-4 w-4" />
                     התחל תהליך
