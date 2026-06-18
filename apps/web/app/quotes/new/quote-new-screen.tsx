@@ -1110,10 +1110,16 @@ export function QuoteNewScreen({
         method: 'POST',
         authUser: getSessionUser(),
         body: JSON.stringify({
+          quoteId: emailForm.quoteId || undefined, // לשליפת סכום/תנאי תשלום/מספר אוטומטית
           customerName: customer || '',
           contactName: contact || '',
           serviceName: emailForm.serviceName || reference || '',
           quoteNumber: (reference || quoteNo || '').trim(),
+          // שאלון פרטי המקרה
+          location: aiForm.location.trim() || undefined,
+          inspectionType: aiForm.inspectionType.trim() || undefined,
+          duration: aiForm.duration.trim() || undefined,
+          extraDetails: aiForm.extraDetails.trim() || undefined,
           instruction: aiInstruction.trim() || undefined,
           // כולל את הגרסה הקודמת לשיפור איטרטיבי
           previousSubject: (prevSubject || '').trim() || undefined,
@@ -1127,6 +1133,17 @@ export function QuoteNewScreen({
           subject: d.subject || p.subject,
           body: d.body || p.body,
         }));
+        // הצגת הנתונים שהשרת שיבץ אוטומטית
+        if (d.facts) {
+          const f = d.facts;
+          const noteParts = [
+            f.quoteNumber ? `מס' ${f.quoteNumber}` : '',
+            f.total ? `סה"כ ${f.total}` : '',
+            f.paymentTerms ? `תשלום: ${f.paymentTerms}` : '',
+            f.validTo ? `תוקף עד ${f.validTo}` : '',
+          ].filter(Boolean);
+          setAiFactsNote(noteParts.length ? '✓ שובץ אוטומטית: ' + noteParts.join(' · ') : '');
+        }
         setAiInstruction('');
         setAiPanelOpen(false);
       } else {
@@ -1232,6 +1249,9 @@ export function QuoteNewScreen({
   const [aiBusy, setAiBusy] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  // שאלון פרטי המקרה ל-AI
+  const [aiForm, setAiForm] = useState({ location: '', inspectionType: '', duration: '', extraDetails: '' });
+  const [aiFactsNote, setAiFactsNote] = useState(''); // הצגת הנתונים שהשרת שיבץ
 
   // הוספת נמען לרשימה (chip) — מ-Enter/פסיק. מפצל גם הדבקה מרובה.
   const addRecipients = (raw: string, field: 'toList' | 'ccList') => {
@@ -2306,6 +2326,8 @@ export function QuoteNewScreen({
             setEmailHasSignature(hasSig);
             setAiInstruction('');
             setAiPanelOpen(false);
+            setAiForm({ location: '', inspectionType: '', duration: '', extraDetails: '' });
+            setAiFactsNote('');
             setEmailForm({
               toList: to ? [to] : [],
               toInput: '',
@@ -2755,30 +2777,38 @@ export function QuoteNewScreen({
                 </div>
               </div>
 
-              {/* AI — יצירת/שיפור נושא ותוכן */}
+              {/* AI — ניסוח נושא ותוכן לפי פרטי המקרה */}
               <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-violet-800">✨ ניסוח חכם (AI)</span>
-                  <div className="flex gap-2">
-                    <button type="button" disabled={aiBusy} className="rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                      onClick={() => generateAiDraft()}>
-                      {aiBusy ? 'מנסח…' : (emailForm.body.trim() ? 'נסח מחדש' : 'נסח לי מייל')}
-                    </button>
-                    <button type="button" disabled={aiBusy} className="rounded-lg border border-violet-300 bg-white px-3 py-1.5 text-xs font-medium text-violet-700 hover:bg-violet-50"
-                      onClick={() => setAiPanelOpen((v) => !v)}>
-                      {aiPanelOpen ? 'סגור' : 'בקש שינוי'}
-                    </button>
-                  </div>
+                <div className="mb-2 text-xs font-semibold text-violet-800">✨ ניסוח חכם (AI) — מלא פרטים והמערכת תנסח נושא ותוכן</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
+                    value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
+                    placeholder="מיקום מדויק (למשל: מבנה משרדים, נתיבות)" />
+                  <input className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
+                    value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
+                    placeholder="משך ביצוע (למשל: עד 5 ימי עסקים)" />
                 </div>
-                {aiPanelOpen && (
-                  <div className="mt-2">
-                    <textarea rows={2} className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400 resize-y"
+                <input className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
+                  value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
+                  placeholder="אופן/סוג העבודה (למשל: מיגון קרינה לקירות ולתקרה + דוח יישום)" />
+                <textarea rows={2} className="mt-2 w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400 resize-y"
+                  value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
+                  placeholder="הערות נוספות (אופציונלי) — כל פרט שיעזור לנסח…" />
+                <div className="mt-2 flex items-center gap-2">
+                  <button type="button" disabled={aiBusy} className="rounded-lg bg-violet-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                    onClick={() => generateAiDraft()}>
+                    {aiBusy ? 'מנסח…' : (emailForm.body.trim() ? '🔄 נסח מחדש' : '✨ נסח לי מייל')}
+                  </button>
+                  <span className="text-[11px] text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</span>
+                </div>
+                {aiFactsNote && <div className="mt-2 rounded-lg bg-green-50 px-2.5 py-1.5 text-[11px] text-green-700">{aiFactsNote}</div>}
+                {/* בקשת שינוי על ניסוח קיים */}
+                {emailForm.body.trim() && (
+                  <div className="mt-2 border-t border-violet-100 pt-2">
+                    <input className="w-full rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-sm outline-none focus:border-violet-400"
                       value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
-                      placeholder="מה לשנות? למשל: 'תוסיף שאנחנו זמינים השבוע', 'יותר רשמי', 'קצר יותר'…" />
-                    <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="mt-1.5 rounded-lg bg-violet-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-violet-700 disabled:opacity-50"
-                      onClick={() => generateAiDraft()}>
-                      {aiBusy ? 'מעדכן…' : 'עדכן לפי הבקשה'}
-                    </button>
+                      placeholder="בקש שינוי: 'יותר קצר', 'תוסיף שזמינים השבוע'…"
+                      onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim()) generateAiDraft(); }} />
                   </div>
                 )}
               </div>
