@@ -12,8 +12,9 @@ import { encryptSecret, decryptSecret } from '../common/crypto.util';
 export class MicrosoftAuthService {
   private readonly logger = new Logger(MicrosoftAuthService.name);
 
-  // offline_access → refresh tokens; Mail.Send → send; User.Read → resolve the mailbox address
-  static readonly SCOPES = 'offline_access Mail.Send User.Read';
+  // offline_access → refresh tokens; Mail.Send → send; User.Read → resolve the mailbox address;
+  // Calendars.ReadWrite → create calendar events / send meeting invites (שלב "תיאום").
+  static readonly SCOPES = 'offline_access Mail.Send User.Read Calendars.ReadWrite';
 
   constructor(private readonly prisma: PrismaService) {}
 

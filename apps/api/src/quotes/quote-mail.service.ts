@@ -125,12 +125,14 @@ export class QuoteMailService {
       `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
 
     const linkBlock = opts?.docUrl
-      ? `<p style="margin:18px 0;"><a href="${opts.docUrl}" style="display:inline-block;background:#0ea5e9;color:#ffffff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">📄 צפייה / הורדה — הצעת מחיר${custName ? ' ' + custName : ''}</a></p>` +
-        `<p style="font-size:12px;color:#777777;">אם הכפתור אינו פעיל, קישור ישיר:<br><a href="${opts.docUrl}">${opts.docUrl}</a></p>`
+      ? `<p style="margin:18px 0;"><a href="${opts.docUrl}" style="display:inline-block;background:#0ea5e9;color:#ffffff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">📄 צפייה / הורדה — הצעת מחיר${custName ? ' ' + custName : ''}</a></p>`
       : '';
 
     // Resolve the per-user signature (text + optional image, if requested).
+    // The image is sent as an INLINE attachment (CID) because Outlook blocks
+    // data:base64 <img>. We collect it here and attach it below.
     let signatureHtml = '';
+    let signatureImage: { content: Buffer; contentType: string; contentId: string } | null = null;
     if (opts?.includeSignature && opts.userId) {
       const sender = await this.prisma.user.findUnique({
         where: { id: opts.userId },
@@ -141,10 +143,14 @@ export class QuoteMailService {
         parts.push(`<div style="color:#444;">${this.toHtml(sender.mailSignature)}</div>`);
       }
       if (sender?.mailSignatureImage) {
-        const b64 = Buffer.from(sender.mailSignatureImage).toString('base64');
-        const mime = sender.mailSignatureImageType || 'image/png';
+        const cid = 'signature-image';
+        signatureImage = {
+          content: Buffer.from(sender.mailSignatureImage),
+          contentType: sender.mailSignatureImageType || 'image/png',
+          contentId: cid,
+        };
         parts.push(
-          `<div style="margin-top:8px;"><img src="data:${mime};base64,${b64}" alt="חתימה" style="max-width:280px;max-height:120px;" /></div>`,
+          `<div style="margin-top:8px;"><img src="cid:${cid}" alt="חתימה" style="max-width:280px;max-height:120px;" /></div>`,
         );
       }
       if (parts.length) {
@@ -175,26 +181,44 @@ ${signatureHtml}
     // ── Send: Graph (user's Outlook) preferred, SMTP fallback ──
     let via: 'graph' | 'smtp';
     if (graphReady && opts?.userId) {
+      const graphAttachments = [
+        { name: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
+      ];
+      if (signatureImage) {
+        graphAttachments.push({
+          name: 'signature' + (signatureImage.contentType === 'image/jpeg' ? '.jpg' : '.png'),
+          contentType: signatureImage.contentType,
+          content: signatureImage.content,
+          contentId: signatureImage.contentId,
+        } as any);
+      }
       await this.graphMail.sendMailAsUser(opts.userId, {
         to: recipientEmail,
         cc,
         subject,
         html,
-        attachments: [
-          { name: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
-        ],
+        attachments: graphAttachments,
       });
       via = 'graph';
     } else {
+      const smtpAttachments: any[] = [
+        { filename: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
+      ];
+      if (signatureImage) {
+        smtpAttachments.push({
+          filename: 'signature' + (signatureImage.contentType === 'image/jpeg' ? '.jpg' : '.png'),
+          content: signatureImage.content,
+          contentType: signatureImage.contentType,
+          cid: signatureImage.contentId, // referenced via cid: in the HTML
+        });
+      }
       await this.transporter.sendMail({
         from: fromAddress,
         to: recipientEmail,
         cc: cc.length ? cc : undefined,
         subject,
         html,
-        attachments: [
-          { filename: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
-        ],
+        attachments: smtpAttachments,
       });
       via = 'smtp';
     }

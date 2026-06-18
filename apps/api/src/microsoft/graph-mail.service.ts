@@ -6,6 +6,8 @@ export interface GraphMailAttachment {
   contentType: string;
   /** raw file bytes */
   content: Buffer;
+  /** if set, the attachment is inline (referenced from HTML via cid:<contentId>) */
+  contentId?: string;
 }
 
 export interface GraphMailMessage {
@@ -45,12 +47,21 @@ export class GraphMailService {
     }
 
     if (msg.attachments?.length) {
-      message.attachments = msg.attachments.map((a) => ({
-        '@odata.type': '#microsoft.graph.fileAttachment',
-        name: a.name,
-        contentType: a.contentType,
-        contentBytes: a.content.toString('base64'),
-      }));
+      message.attachments = msg.attachments.map((a) => {
+        const att: any = {
+          '@odata.type': '#microsoft.graph.fileAttachment',
+          name: a.name,
+          contentType: a.contentType,
+          contentBytes: a.content.toString('base64'),
+        };
+        // Inline images (signature/logo) — referenced from HTML via cid:<contentId>.
+        // Outlook blocks data:base64 <img>, so embedded images must use CID.
+        if (a.contentId) {
+          att.contentId = a.contentId;
+          att.isInline = true;
+        }
+        return att;
+      });
     }
 
     const res = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {

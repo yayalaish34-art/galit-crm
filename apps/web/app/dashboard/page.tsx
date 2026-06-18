@@ -92,6 +92,9 @@ import {
   Leaf,
   Sniff,
   HelpCircle,
+  CalendarPlus,
+  Video,
+  ExternalLink,
 } from 'lucide-react';
 
 import { DataImportWizard } from '../data-import-wizard';
@@ -12301,86 +12304,6 @@ function SettingsPage({
             </div>
           </div>
 
-          <div className="rounded-2xl border bg-slate-50 p-4">
-            <div className="mb-2 text-sm font-semibold">הגדרות מייל (SMTP) — חלופי</div>
-            <div className="mb-3 text-xs text-slate-500">חלופה לחיבור Outlook. הגדרות אישיות לשליחת הצעות מחיר במייל מהמערכת.</div>
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שם תצוגה</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" value={empForm.mailDisplayName} onChange={(e) => setEmpForm((p) => ({ ...p, mailDisplayName: e.target.value }))} placeholder="שם השולח" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">כתובת שולח (From)</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpFrom} onChange={(e) => setEmpForm((p) => ({ ...p, smtpFrom: e.target.value }))} placeholder="sender@example.com" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שרת SMTP</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpHost} onChange={(e) => setEmpForm((p) => ({ ...p, smtpHost: e.target.value }))} placeholder="smtp.gmail.com" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">פורט</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" type="number" value={empForm.smtpPort} onChange={(e) => setEmpForm((p) => ({ ...p, smtpPort: e.target.value }))} placeholder="587" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">שם משתמש SMTP</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" value={empForm.smtpUser} onChange={(e) => setEmpForm((p) => ({ ...p, smtpUser: e.target.value }))} placeholder="user@example.com" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-0.5">סיסמת SMTP</label>
-                  <input className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" dir="ltr" type="password" value={empForm.smtpPassword} onChange={(e) => setEmpForm((p) => ({ ...p, smtpPassword: e.target.value }))} placeholder={empEditing ? '••••• (לא ישתנה אם ריק)' : 'סיסמה'} />
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" checked={!!empForm.smtpSecure} onChange={(e) => setEmpForm((p) => ({ ...p, smtpSecure: e.target.checked }))} />
-                <span className="text-sm">SSL/TLS (סמן עבור פורט 465)</span>
-              </div>
-              {empEditing && (
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={smtpTestBusy}
-                    className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                    onClick={async () => {
-                      setSmtpTestMsg('בודק חיבור…');
-                      setSmtpTestBusy(true);
-                      try {
-                        const body: any = {};
-                        if (empForm.smtpHost.trim()) body.smtpHost = empForm.smtpHost.trim();
-                        if (empForm.smtpUser.trim()) body.smtpUser = empForm.smtpUser.trim();
-                        if (empForm.smtpPassword.trim()) body.smtpPassword = empForm.smtpPassword.trim();
-                        if (empForm.smtpPort) body.smtpPort = parseInt(empForm.smtpPort) || 587;
-                        body.smtpSecure = !!empForm.smtpSecure;
-                        const r = await apiFetch(apiUrl(`/users/${empEditing.id}/test-smtp`), {
-                          method: 'POST',
-                          body: JSON.stringify(body),
-                          authUser: currentUser,
-                        });
-                        if (!r.ok) {
-                          const err = await r.json().catch(() => null);
-                          setSmtpTestMsg(err?.message || 'בדיקה נכשלה');
-                        } else {
-                          setSmtpTestMsg('✓ חיבור SMTP תקין');
-                        }
-                      } catch {
-                        setSmtpTestMsg('שגיאה בבדיקת חיבור');
-                      } finally {
-                        setSmtpTestBusy(false);
-                      }
-                    }}
-                  >
-                    בדוק חיבור
-                  </button>
-                  {smtpTestMsg && <span className={`text-xs font-medium ${smtpTestMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{smtpTestMsg}</span>}
-                </div>
-              )}
-            </div>
-          </div>
-
           <Button style={{ background: galit.primary }} onClick={saveEmp}>שמור</Button>
         </div>
       </Modal>
@@ -12812,6 +12735,58 @@ function TasksPage({
       _setLocalManualStep(v);
     }
   }, [extSetManualStepOverride]);
+
+  /* ══════ שלב "תיאום" — אינטגרציית יומן Outlook (Microsoft Graph) ══════ */
+  // סטטוס חיבור ה-Outlook של המשתמש המחובר (לכפתור החיבור בשלב התיאום)
+  const [coordOutlook, setCoordOutlook] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
+  const [coordOutlookBusy, setCoordOutlookBusy] = useState(false);
+  const refreshCoordOutlook = useCallback(async () => {
+    try {
+      const r = await apiFetch(apiUrl('/auth/microsoft/status'), { authUser: currentUser });
+      if (r.ok) setCoordOutlook(await r.json());
+    } catch { /* ignore */ }
+  }, [currentUser]);
+  useEffect(() => { void refreshCoordOutlook(); }, [refreshCoordOutlook]);
+  // רענון הסטטוס כשחלון ה-OAuth מסמן שהחיבור הושלם
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => { if (e?.data?.type === 'ms-auth') void refreshCoordOutlook(); };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [refreshCoordOutlook]);
+  const connectCoordOutlook = useCallback(async () => {
+    setCoordOutlookBusy(true);
+    try {
+      const r = await apiFetch(apiUrl('/auth/microsoft/login'), { authUser: currentUser });
+      if (r.ok) {
+        const { url } = await r.json();
+        window.open(url, 'ms-oauth', 'width=520,height=680');
+      }
+    } catch { /* ignore */ } finally { setCoordOutlookBusy(false); }
+  }, [currentUser]);
+
+  // טופס פגישה לכל משימה (נשמר לפי taskId; ערכי ברירת מחדל מחושבים בזמן הרינדור)
+  type CoordMeetingForm = {
+    subject: string;
+    date: string;        // yyyy-mm-dd
+    time: string;        // HH:mm
+    durationMin: number;
+    location: string;
+    notes: string;
+    isOnline: boolean;
+    inviteCustomer: boolean;
+    employeeIds: string[]; // עובדים נוספים שיוזמנו כמשתתפים
+  };
+  const [coordForms, setCoordForms] = useState<Record<string, Partial<CoordMeetingForm>>>({});
+  const [coordBusy, setCoordBusy] = useState<Record<string, boolean>>({});
+  const [coordError, setCoordError] = useState<Record<string, string>>({});
+  const [coordResult, setCoordResult] = useState<Record<string, { webLink: string | null; joinUrl: string | null; invited: string[] }>>({});
+  const updateCoordForm = useCallback((taskId: string, patch: Partial<CoordMeetingForm>) => {
+    setCoordForms((prev) => ({ ...prev, [taskId]: { ...prev[taskId], ...patch } }));
+  }, []);
+  const toggleCoordEmployee = useCallback((taskId: string, empId: string, current: string[]) => {
+    const next = current.includes(empId) ? current.filter((id) => id !== empId) : [...current, empId];
+    setCoordForms((prev) => ({ ...prev, [taskId]: { ...prev[taskId], employeeIds: next } }));
+  }, []);
 
   /* Scroll expanded row to the top of the viewport (just under the sticky header) — fires on mount,
      on every expansion change, and again when arriving here with a pending expand (so it re-positions
@@ -15955,6 +15930,282 @@ function TasksPage({
                                   existingAttachments={taskAttachments[t.id] ?? []}
                                   onDownloadAttachment={(att) => downloadTaskAttachment(t.id, att)}
                                 />
+                              </div>
+                            );
+                          })() : currentStep === 4 ? (() => {
+                            /* ── תיאום stage — יצירת פגישה ביומן Outlook + הזמנת עובדים/לקוח ── */
+                            const lead = linkedLeadForHeader;
+                            const customerLabel = contactName || t.customerName || t.leadName || 'הלקוח';
+                            const ccContactsCoord = taskContactsMap[t.id] || [];
+                            const customerEmail = (
+                              t.leadEmail || lead?.email ||
+                              ccContactsCoord.find((c) => c.isPrimary && c.email?.trim())?.email ||
+                              ccContactsCoord.find((c) => c.email?.trim())?.email || ''
+                            ).trim();
+
+                            const form = coordForms[t.id] || {};
+                            const today = new Date();
+                            const pad2 = (n: number) => String(n).padStart(2, '0');
+                            const todayStr = `${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`;
+                            const defaultLocation = lead?.address
+                              ? `${lead.address}${lead?.city ? ', ' + lead.city : ''}`
+                              : (lead?.city || '');
+                            const subject = form.subject ?? `תיאום הגעה — ${customerLabel}`;
+                            const date = form.date ?? todayStr;
+                            const time = form.time ?? '10:00';
+                            const durationMin = form.durationMin ?? 60;
+                            const location = form.location ?? defaultLocation;
+                            const notes = form.notes ?? '';
+                            const isOnline = form.isOnline ?? false;
+                            const inviteCustomer = form.inviteCustomer ?? false;
+                            const employeeIds = form.employeeIds ?? [];
+
+                            const otherEmployees = users.filter((u) => u.id !== currentUser.id && u.email && u.status !== 'לא פעיל');
+                            const busy = !!coordBusy[t.id];
+                            const err = coordError[t.id];
+                            const result = coordResult[t.id];
+
+                            const durationOptions = [
+                              { v: 30, label: 'חצי שעה' },
+                              { v: 60, label: 'שעה' },
+                              { v: 90, label: 'שעה וחצי' },
+                              { v: 120, label: 'שעתיים' },
+                              { v: 180, label: '3 שעות' },
+                            ];
+
+                            const createMeeting = async () => {
+                              setCoordError((p) => ({ ...p, [t.id]: '' }));
+                              if (!coordOutlook.connected) {
+                                setCoordError((p) => ({ ...p, [t.id]: 'יש לחבר את חשבון ה-Outlook לפני יצירת פגישה' }));
+                                return;
+                              }
+                              if (!date || !time) {
+                                setCoordError((p) => ({ ...p, [t.id]: 'יש לבחור תאריך ושעה' }));
+                                return;
+                              }
+                              const startLocal = `${date}T${time}:00`;
+                              const startMs = new Date(startLocal).getTime();
+                              if (Number.isNaN(startMs)) {
+                                setCoordError((p) => ({ ...p, [t.id]: 'תאריך/שעה לא תקינים' }));
+                                return;
+                              }
+                              const endD = new Date(startMs + durationMin * 60000);
+                              const endLocal = `${endD.getFullYear()}-${pad2(endD.getMonth() + 1)}-${pad2(endD.getDate())}T${pad2(endD.getHours())}:${pad2(endD.getMinutes())}:00`;
+
+                              const attendees: { email: string; name?: string; type?: 'required' | 'optional' }[] = [];
+                              for (const id of employeeIds) {
+                                const u = users.find((x) => x.id === id);
+                                if (u?.email) attendees.push({ email: u.email, name: u.name, type: 'required' });
+                              }
+                              if (inviteCustomer && customerEmail) {
+                                attendees.push({ email: customerEmail, name: customerLabel, type: 'required' });
+                              }
+
+                              setCoordBusy((p) => ({ ...p, [t.id]: true }));
+                              try {
+                                const r = await apiFetch(apiUrl('/outlook/calendar/events'), {
+                                  method: 'POST',
+                                  authUser: currentUser,
+                                  body: JSON.stringify({
+                                    subject,
+                                    body: notes,
+                                    start: startLocal,
+                                    end: endLocal,
+                                    timeZone: 'Asia/Jerusalem',
+                                    location,
+                                    attendees,
+                                    isOnlineMeeting: isOnline,
+                                  }),
+                                });
+                                if (!r.ok) {
+                                  let msg = 'יצירת הפגישה נכשלה';
+                                  try { const e = await r.json(); msg = Array.isArray(e?.message) ? e.message.join(', ') : (e?.message || msg); } catch { /* ignore */ }
+                                  setCoordError((p) => ({ ...p, [t.id]: msg }));
+                                  return;
+                                }
+                                const data = await r.json();
+                                setCoordResult((p) => ({ ...p, [t.id]: data }));
+                              } catch {
+                                setCoordError((p) => ({ ...p, [t.id]: 'שגיאת רשת — נסו שוב' }));
+                              } finally {
+                                setCoordBusy((p) => ({ ...p, [t.id]: false }));
+                              }
+                            };
+
+                            const fieldBox = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-violet-400 focus:outline-none';
+                            const labelCls = 'text-[11px] font-bold text-slate-500 mb-1 block';
+
+                            return (
+                              <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
+                                {/* ── כותרת + סטטוס חיבור Outlook ── */}
+                                <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 via-purple-50 to-violet-50 px-6 py-5 shadow-sm">
+                                  <div className="flex flex-wrap items-start justify-between gap-4">
+                                    <div className="flex items-start gap-4">
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#f5f3ff' }}>
+                                        <CalendarPlus className="h-7 w-7" style={{ color: '#8b5cf6' }} />
+                                      </div>
+                                      <div>
+                                        <div className="text-xl md:text-2xl font-extrabold text-violet-900 leading-snug">
+                                          תיאום פגישה עם {customerLabel}
+                                        </div>
+                                        <div className="text-sm font-bold text-violet-700 mt-1">
+                                          קביעת פגישה ביומן Outlook — אפשר לצרף עובדים נוספים והלקוח לתיאום משותף
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {/* סטטוס חיבור Outlook */}
+                                    {coordOutlook.connected ? (
+                                      <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-bold" style={{ background: '#ecfdf5', color: '#047857' }}>
+                                        <CheckCircle2 className="h-4 w-4" />
+                                        <span>Outlook מחובר{coordOutlook.email ? ` · ${coordOutlook.email}` : ''}</span>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={connectCoordOutlook}
+                                        disabled={coordOutlookBusy}
+                                        className="flex items-center gap-2 rounded-xl px-4 py-2 text-[13px] font-bold text-white transition-all hover:scale-105 disabled:opacity-60"
+                                        style={{ background: '#0078d4' }}
+                                      >
+                                        {coordOutlookBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
+                                        חבר את Outlook
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* ── תוצאה: פגישה נוצרה ── */}
+                                {result && (
+                                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-4 shadow-sm">
+                                    <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-base mb-1">
+                                      <CheckCircle2 className="h-5 w-5" /> הפגישה נוצרה ביומן Outlook
+                                    </div>
+                                    {result.invited?.length > 0 && (
+                                      <div className="text-[13px] text-emerald-700 font-semibold">
+                                        נשלחו הזמנות ל: {result.invited.join(', ')}
+                                      </div>
+                                    )}
+                                    <div className="flex flex-wrap gap-2 mt-2">
+                                      {result.webLink && (
+                                        <a href={result.webLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold text-white" style={{ background: '#0078d4' }}>
+                                          <ExternalLink className="h-3.5 w-3.5" /> פתח ביומן
+                                        </a>
+                                      )}
+                                      {result.joinUrl && (
+                                        <a href={result.joinUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold text-white" style={{ background: '#6264a7' }}>
+                                          <Video className="h-3.5 w-3.5" /> קישור Teams
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* ── טופס הפגישה ── */}
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 space-y-4">
+                                  <div>
+                                    <label className={labelCls}>כותרת הפגישה</label>
+                                    <input className={fieldBox} value={subject} onChange={(e) => updateCoordForm(t.id, { subject: e.target.value })} />
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div>
+                                      <label className={labelCls}>תאריך</label>
+                                      <input type="date" className={fieldBox} value={date} min={todayStr} onChange={(e) => updateCoordForm(t.id, { date: e.target.value })} />
+                                    </div>
+                                    <div>
+                                      <label className={labelCls}>שעת התחלה</label>
+                                      <input type="time" className={fieldBox} value={time} onChange={(e) => updateCoordForm(t.id, { time: e.target.value })} />
+                                    </div>
+                                    <div>
+                                      <label className={labelCls}>משך</label>
+                                      <select className={fieldBox} value={durationMin} onChange={(e) => updateCoordForm(t.id, { durationMin: Number(e.target.value) })}>
+                                        {durationOptions.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                                      </select>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <label className={labelCls}><MapPin className="inline h-3.5 w-3.5 -mt-0.5 ml-1" />מיקום</label>
+                                    <input className={fieldBox} value={location} placeholder="כתובת האתר / משרד / טלפון" onChange={(e) => updateCoordForm(t.id, { location: e.target.value })} />
+                                  </div>
+
+                                  <div>
+                                    <label className={labelCls}>הערות לפגישה</label>
+                                    <textarea className={`${fieldBox} resize-none`} rows={3} value={notes} placeholder="פרטים נוספים שיופיעו בגוף ההזמנה" onChange={(e) => updateCoordForm(t.id, { notes: e.target.value })} />
+                                  </div>
+
+                                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                                    <input type="checkbox" className="h-4 w-4 accent-violet-600" checked={isOnline} onChange={(e) => updateCoordForm(t.id, { isOnline: e.target.checked })} />
+                                    <Video className="h-4 w-4 text-violet-500" />
+                                    <span className="text-[13px] font-bold text-slate-700">פגישת Teams מקוונת (יצורף קישור הצטרפות)</span>
+                                  </label>
+                                </div>
+
+                                {/* ── בורר משתתפים: שאר העובדים + הלקוח ── */}
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <Users className="h-5 w-5 text-violet-500" />
+                                    <div className="text-base font-extrabold text-slate-800">מי מוזמן לפגישה?</div>
+                                  </div>
+                                  <div className="text-[12px] text-slate-400 font-semibold mb-3">
+                                    כל מי שמסומן יקבל הזמנה ל-Outlook, והפגישה תופיע ביומן שלו.
+                                  </div>
+
+                                  {/* הזמנת הלקוח */}
+                                  <label className={`flex items-center gap-2 rounded-xl border p-3 mb-3 ${customerEmail ? 'cursor-pointer hover:border-violet-300' : 'opacity-50'} ${inviteCustomer ? 'border-violet-300 bg-violet-50' : 'border-slate-200'}`}>
+                                    <input type="checkbox" className="h-4 w-4 accent-violet-600" disabled={!customerEmail} checked={inviteCustomer && !!customerEmail} onChange={(e) => updateCoordForm(t.id, { inviteCustomer: e.target.checked })} />
+                                    <UserCircle2 className="h-5 w-5 text-violet-500" />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-[13px] font-bold text-slate-700">הזמן את הלקוח — {customerLabel}</div>
+                                      <div className="text-[11px] text-slate-400 font-medium truncate">{customerEmail || 'אין כתובת מייל ללקוח — לא ניתן להזמין'}</div>
+                                    </div>
+                                  </label>
+
+                                  {/* שאר העובדים */}
+                                  <div className="text-[11px] font-bold text-slate-500 mb-2">עובדים נוספים</div>
+                                  {otherEmployees.length === 0 ? (
+                                    <div className="text-[12px] text-slate-400">אין עובדים נוספים זמינים.</div>
+                                  ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      {otherEmployees.map((u) => {
+                                        const checked = employeeIds.includes(u.id);
+                                        return (
+                                          <label key={u.id} className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer transition-colors ${checked ? 'border-violet-300 bg-violet-50' : 'border-slate-200 hover:border-violet-200'}`}>
+                                            <input type="checkbox" className="h-4 w-4 accent-violet-600" checked={checked} onChange={() => toggleCoordEmployee(t.id, u.id, employeeIds)} />
+                                            <div className="flex-1 min-w-0">
+                                              <div className="text-[13px] font-bold text-slate-700 truncate">{u.name}</div>
+                                              <div className="text-[11px] text-slate-400 font-medium truncate">{u.email}</div>
+                                            </div>
+                                          </label>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {err && (
+                                  <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-[13px] font-semibold text-red-700">{err}</div>
+                                )}
+
+                                {/* ── כפתור יצירה ── */}
+                                <button
+                                  onClick={createMeeting}
+                                  disabled={busy || !coordOutlook.connected}
+                                  className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
+                                  style={{ background: 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' }}
+                                >
+                                  {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <CalendarPlus className="h-5 w-5" />}
+                                  {busy ? 'יוצר פגישה...' : 'צור פגישה ב-Outlook'}
+                                </button>
+
+                                {/* ── מעבר לשלב הבא ── */}
+                                <div>
+                                  {renderStageActionBar(t, {
+                                    label: 'מעבר לביצוע',
+                                    circleBg: '#06b6d4',
+                                    icon: <ArrowUpRight className="h-7 w-7 text-white" />,
+                                    onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 5 })),
+                                  })}
+                                </div>
                               </div>
                             );
                           })() : (
