@@ -69,6 +69,8 @@ model User {
   msRefreshToken        String?
   /// מתי המשתמש חיבר את חשבון ה-Outlook
   msConnectedAt         DateTime?
+  /// חתימת מייל אישית — מתווספת אוטומטית לגוף הצעות מחיר שנשלחות
+  mailSignature         String?
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
   followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")

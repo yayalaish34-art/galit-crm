@@ -10224,6 +10224,7 @@ function SettingsPage({
     smtpPassword: '',
     smtpFrom: '',
     smtpSecure: false,
+    mailSignature: '',
   });
   const [smtpTestMsg, setSmtpTestMsg] = useState('');
   const [smtpTestBusy, setSmtpTestBusy] = useState(false);
@@ -10574,6 +10575,7 @@ function SettingsPage({
       smtpPassword: '',
       smtpFrom: '',
       smtpSecure: false,
+      mailSignature: '',
     });
     setEmpModalOpen(true);
   };
@@ -10605,6 +10607,7 @@ function SettingsPage({
       smtpPassword: '', // never returned from server
       smtpFrom: u.smtpFrom || '',
       smtpSecure: !!u.smtpSecure,
+      mailSignature: u.mailSignature || '',
     });
     setEmpModalOpen(true);
   };
@@ -10654,6 +10657,7 @@ function SettingsPage({
         smtpUser: empForm.smtpUser.trim() || null,
         smtpFrom: empForm.smtpFrom.trim() || null,
         smtpSecure: !!empForm.smtpSecure,
+        mailSignature: empForm.mailSignature.trim() || null,
       };
       // Only send smtpPassword if user typed a new one
       if (empForm.smtpPassword.trim()) {
@@ -12204,6 +12208,18 @@ function SettingsPage({
               )}
             </div>
           )}
+
+          <div className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4">
+            <div className="mb-1 text-sm font-semibold text-indigo-800">חתימת מייל אישית</div>
+            <div className="mb-2 text-xs text-slate-500">תתווסף אוטומטית לתחתית הצעות מחיר שנשלחות במייל (אם תסומן בחלון השליחה).</div>
+            <textarea
+              rows={4}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 resize-y"
+              value={empForm.mailSignature}
+              onChange={(e) => setEmpForm((p) => ({ ...p, mailSignature: e.target.value }))}
+              placeholder={'בברכה,\nשם מלא\nתפקיד | גלית – החברה לאיכות הסביבה\nטלפון: 0XX-XXXXXXX'}
+            />
+          </div>
 
           <div className="rounded-2xl border bg-slate-50 p-4">
             <div className="mb-2 text-sm font-semibold">הגדרות מייל (SMTP) — חלופי</div>

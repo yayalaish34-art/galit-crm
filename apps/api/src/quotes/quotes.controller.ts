@@ -101,7 +101,17 @@ export class QuotesController {
   @Post(':id/send-email')
   sendEmail(
     @Param('id') id: string,
-    @Body() body: { email: string; attachmentId?: string; docUrl?: string; customerName?: string },
+    @Body()
+    body: {
+      email: string;
+      attachmentId?: string;
+      docUrl?: string;
+      customerName?: string;
+      subject?: string;
+      messageBody?: string;
+      cc?: string[];
+      includeSignature?: boolean;
+    },
     @Req() req: any,
   ) {
     return this.quoteMailService.sendQuoteEmail(id, body.email, {
@@ -109,6 +119,10 @@ export class QuotesController {
       docUrl: body.docUrl,
       customerName: body.customerName,
       userId: req.user?.id,
+      subject: body.subject,
+      body: body.messageBody,
+      cc: body.cc,
+      includeSignature: body.includeSignature,
     });
   }
 

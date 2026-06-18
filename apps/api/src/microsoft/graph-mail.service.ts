@@ -10,6 +10,7 @@ export interface GraphMailAttachment {
 
 export interface GraphMailMessage {
   to: string;
+  cc?: string[];
   subject: string;
   /** HTML body */
   html: string;
@@ -38,6 +39,10 @@ export class GraphMailService {
       body: { contentType: 'HTML', content: msg.html },
       toRecipients: [{ emailAddress: { address: msg.to } }],
     };
+
+    if (msg.cc?.length) {
+      message.ccRecipients = msg.cc.map((address) => ({ emailAddress: { address } }));
+    }
 
     if (msg.attachments?.length) {
       message.attachments = msg.attachments.map((a) => ({

@@ -1100,6 +1100,52 @@ export function QuoteNewScreen({
     setNewPaymentTermLabel('');
   }
 
+  // שליחת המייל מתוך חלון העריכה — Outlook/Graph עם נמענים, חתימה וקובץ מצורף
+  async function sendQuoteEmail() {
+    const f = emailForm;
+    const to = f.to.trim();
+    if (!to) { setStatusMsg('חסר נמען'); return; }
+    setEmailSending(true);
+    setStatusMsg('שולח…');
+    const ccList = f.cc.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    let serverSent = false;
+    let serverErr = '';
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${f.quoteId}/send-email`), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({
+          email: to,
+          cc: ccList,
+          subject: f.subject,
+          messageBody: f.body,
+          includeSignature: f.includeSignature,
+          attachmentId: f.attId || undefined,
+          docUrl: f.docLink,
+          customerName: customer || '',
+        }),
+      });
+      if (r.ok) serverSent = true;
+      else { try { const e = await r.json(); serverErr = e?.message || ''; } catch { /* ignore */ } }
+    } catch { /* fall through */ }
+    setEmailSending(false);
+    if (serverSent) {
+      setEmailModalOpen(false);
+      setStatusMsg(`מייל נשלח ל-${to}`);
+      setTimeout(() => setStatusMsg(''), 5000);
+    } else {
+      // נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web (כשהשרת לא הצליח)
+      const subject = f.subject;
+      const body = `${f.body}${f.docLink ? '\n\nקישור להורדה:\n' + f.docLink : ''}`;
+      const ccParam = ccList.length ? `&cc=${encodeURIComponent(ccList.join(','))}` : '';
+      const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(owaUrl, '_blank');
+      setEmailModalOpen(false);
+      setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
+      setTimeout(() => setStatusMsg(''), 7000);
+    }
+  }
+
   // תחזית
   const [fFunctional, setFFunctional] = useState('');
   const [fClosePercent, setFClosePercent] = useState('0.00');
@@ -1118,6 +1164,21 @@ export function QuoteNewScreen({
   const [customerContactId, setCustomerContactId] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+
+  // ── חלון עריכת מייל לפני שליחה ──
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailForm, setEmailForm] = useState({
+    to: '',
+    cc: '',
+    subject: '',
+    body: '',
+    includeSignature: true,
+    quoteId: '',
+    attId: '',
+    docLink: '',
+  });
+  const [emailHasSignature, setEmailHasSignature] = useState(false);
 
   /* ── אנשי קשר לפי לקוח נבחר: רענון מ-/customers/:id/contacts, בחירה מחדש אם צריך ── */
   useEffect(() => {
@@ -2152,6 +2213,7 @@ export function QuoteNewScreen({
           </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => {
             const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
+            if (!id) { setStatusMsg('שמירת ההצעה נכשלה'); return; }
             if (!customerEmail?.trim()) { setStatusMsg('אין כתובת מייל לאיש הקשר'); return; }
             const to = customerEmail.trim();
             const ref = (reference || quoteNo || '').trim();
@@ -2164,38 +2226,19 @@ export function QuoteNewScreen({
               } catch { /* ignore */ }
             }
             const docLink = attId ? apiUrl(`/public/attachments/${attId}/price-quote.docx`) : '';
-            // ── ניסיון 1: שליחה מהשרת (Outlook/Graph עם הקובץ מצורף) ──
-            // נקרא לשרת גם בלי attId — השרת ימצא את המסמך הממוזג האחרון מה-DB.
-            let serverSent = false;
-            let serverErr = '';
-            if (id) {
-              try {
-                const r = await apiFetch(apiUrl(`/quotes/${id}/send-email`), {
-                  method: 'POST',
-                  authUser: getSessionUser(),
-                  body: JSON.stringify({ email: to, attachmentId: attId || undefined, docUrl: docLink, customerName: customer || '' }),
-                });
-                if (r.ok) serverSent = true;
-                else { try { const e = await r.json(); serverErr = e?.message || ''; } catch { /* ignore */ } }
-              } catch { /* נופלים ל-mailto */ }
-            }
-            if (serverSent) {
-              setStatusMsg(`מייל נשלח ל-${to}`);
-            } else {
-              // ── נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web עם הגוף + הקישור (ללא צורך ב-SMTP) ──
-              const subject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
-              const body = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.${docLink ? '\n\nלהורדת הצעת המחיר (קישור ישיר):\n' + docLink : ''}\n\nבברכה,\n${salesRep || 'גלית – החברה לאיכות הסביבה'}`;
-              const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-              const win = window.open(owaUrl, '_blank');
-              if (!win) {
-                // חסימת חלונות קופצים — נפילה ל-mailto
-                const a = document.createElement('a');
-                a.href = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-                document.body.appendChild(a); a.click(); document.body.removeChild(a);
-              }
-              setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
-            }
-            setTimeout(() => setStatusMsg(''), 6000);
+            // בדיקה אם למשתמש יש חתימה שמורה (להצגת אפשרות החתימה)
+            let hasSig = false;
+            try {
+              const su = getSessionUser();
+              const r = await apiFetch(apiUrl(`/users/${su?.id}`), { authUser: su });
+              if (r.ok) { const u = await r.json(); hasSig = !!(u?.mailSignature && String(u.mailSignature).trim()); }
+            } catch { /* ignore */ }
+            // ערכי ברירת מחדל לחלון העריכה
+            const defSubject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
+            const defBody = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
+            setEmailHasSignature(hasSig);
+            setEmailForm({ to, cc: '', subject: defSubject, body: defBody, includeSignature: hasSig, quoteId: id, attId: attId || '', docLink });
+            setEmailModalOpen(true);
           }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Mail size={18} /></span>
             <span className="text-[10px] text-gray-500">שלח במייל</span>
@@ -2575,6 +2618,57 @@ export function QuoteNewScreen({
             <div className="flex justify-end gap-3">
               <button type="button" className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors" onClick={() => setAddPaymentTermOpen(false)}>ביטול</button>
               <button type="button" className="rounded-xl bg-blue-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600 transition-colors" onClick={submitNewPaymentTerm}>שמור</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {emailModalOpen && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/40 p-4" onClick={() => !emailSending && setEmailModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center gap-2 text-base font-bold text-gray-800">
+              <Mail size={18} className="text-sky-500" /> שליחת הצעת מחיר במייל
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-600">אל</label>
+                <input dir="ltr" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400 text-right"
+                  value={emailForm.to} onChange={(e) => setEmailForm((p) => ({ ...p, to: e.target.value }))} placeholder="customer@example.com" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-600">עותק (CC) — אפשר כמה, מופרדים בפסיק</label>
+                <input dir="ltr" className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400 text-right"
+                  value={emailForm.cc} onChange={(e) => setEmailForm((p) => ({ ...p, cc: e.target.value }))} placeholder="a@x.com, b@y.com" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-600">נושא</label>
+                <input className="h-10 w-full rounded-xl border border-gray-200 px-3 text-sm outline-none focus:border-sky-400"
+                  value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))} placeholder="נושא ההודעה" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-600">תוכן ההודעה</label>
+                <textarea rows={6} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-sky-400 resize-y"
+                  value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))} placeholder="גוף ההודעה..." />
+              </div>
+              {emailHasSignature ? (
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
+                  הוסף את החתימה האישית שלי
+                </label>
+              ) : (
+                <div className="text-xs text-gray-400">אין לך חתימה שמורה — ניתן להגדיר חתימה בפרופיל (משתמשים → עריכה).</div>
+              )}
+              <div className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-700">📎 הצעת המחיר (DOCX) תצורף אוטומטית למייל.</div>
+            </div>
+
+            {statusMsg && <div className="mt-3 text-sm font-medium text-gray-600">{statusMsg}</div>}
+
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
+              <button type="button" disabled={emailSending || !emailForm.to.trim()} className="rounded-xl bg-sky-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
+                {emailSending ? 'שולח…' : 'שלח'}
+              </button>
             </div>
           </div>
         </div>

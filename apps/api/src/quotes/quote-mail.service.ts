@@ -41,7 +41,16 @@ export class QuoteMailService {
   async sendQuoteEmail(
     quoteId: string,
     recipientEmail: string,
-    opts?: { attachmentId?: string; docUrl?: string; customerName?: string; userId?: string },
+    opts?: {
+      attachmentId?: string;
+      docUrl?: string;
+      customerName?: string;
+      userId?: string;
+      subject?: string;
+      body?: string;
+      cc?: string[];
+      includeSignature?: boolean;
+    },
   ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
     // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
     const graphReady = opts?.userId
@@ -109,25 +118,55 @@ export class QuoteMailService {
     const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER!;
     const quoteNumber = quote.quoteNumber || quote.importLegacyId || 'טיוטה';
     const custName = (opts?.customerName || '').trim();
-    const subject = `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
+
+    // Subject: custom if provided, else default.
+    const subject =
+      opts?.subject?.trim() ||
+      `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
+
     const linkBlock = opts?.docUrl
       ? `<p style="margin:18px 0;"><a href="${opts.docUrl}" style="display:inline-block;background:#0ea5e9;color:#ffffff;padding:11px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">📄 צפייה / הורדה — הצעת מחיר${custName ? ' ' + custName : ''}</a></p>` +
         `<p style="font-size:12px;color:#777777;">אם הכפתור אינו פעיל, קישור ישיר:<br><a href="${opts.docUrl}">${opts.docUrl}</a></p>`
       : '';
-    const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111111;line-height:1.6;">
-<p>שלום${custName ? ' ' + custName : ''},</p>
+
+    // Resolve the per-user signature (if requested).
+    let signatureHtml = '';
+    if (opts?.includeSignature && opts.userId) {
+      const sender = await this.prisma.user.findUnique({
+        where: { id: opts.userId },
+        select: { mailSignature: true },
+      });
+      if (sender?.mailSignature?.trim()) {
+        signatureHtml = `<div style="margin-top:18px;color:#444;">${this.toHtml(sender.mailSignature)}</div>`;
+      }
+    }
+
+    // Body: custom text (converted to HTML) if provided, else the default template.
+    const bodyHtml = opts?.body?.trim()
+      ? `<div>${this.toHtml(opts.body)}</div>${linkBlock}`
+      : `<p>שלום${custName ? ' ' + custName : ''},</p>
 <p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''}.</p>
 ${linkBlock}
-<p>בברכה,<br>גלית – החברה לאיכות הסביבה</p>
+<p>בברכה,<br>גלית – החברה לאיכות הסביבה</p>`;
+
+    const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111111;line-height:1.6;">
+${bodyHtml}
+${signatureHtml}
 </div>`;
 
     const finalFileName = fileName || 'הצעת מחיר.docx';
+
+    // Normalize CC: dedupe, trim, keep only valid-looking addresses.
+    const cc = Array.from(
+      new Set((opts?.cc || []).map((e) => e.trim()).filter((e) => e.includes('@'))),
+    );
 
     // ── Send: Graph (user's Outlook) preferred, SMTP fallback ──
     let via: 'graph' | 'smtp';
     if (graphReady && opts?.userId) {
       await this.graphMail.sendMailAsUser(opts.userId, {
         to: recipientEmail,
+        cc,
         subject,
         html,
         attachments: [
@@ -139,6 +178,7 @@ ${linkBlock}
       await this.transporter.sendMail({
         from: fromAddress,
         to: recipientEmail,
+        cc: cc.length ? cc : undefined,
         subject,
         html,
         attachments: [
@@ -162,5 +202,14 @@ ${linkBlock}
     }
 
     return { success: true, sentTo: recipientEmail, fileName: finalFileName, via };
+  }
+
+  /** Convert plain user text to safe HTML (escape + newlines → <br>). */
+  private toHtml(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
   }
 }
