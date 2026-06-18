@@ -71,6 +71,9 @@ model User {
   msConnectedAt         DateTime?
   /// חתימת מייל אישית — מתווספת אוטומטית לגוף הצעות מחיר שנשלחות
   mailSignature         String?
+  /// תמונת חתימה (לוגו/חתימה סרוקה) — מוטמעת בגוף המייל מתחת לטקסט
+  mailSignatureImage    Bytes?
+  mailSignatureImageType String?
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
   followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")

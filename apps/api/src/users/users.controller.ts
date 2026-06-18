@@ -81,6 +81,28 @@ export class UsersController {
     return this.usersService.testSmtpConnection(id, body);
   }
 
+  /** העלאת תמונת חתימה (base64). body: { dataBase64, mimeType } */
+  @Post(':id/signature-image')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  uploadSignatureImage(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.usersService.setSignatureImage(id, body?.dataBase64, body?.mimeType, req.user);
+  }
+
+  /** מחיקת תמונת חתימה */
+  @Delete(':id/signature-image')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  deleteSignatureImage(@Param('id') id: string, @Req() req: any) {
+    return this.usersService.setSignatureImage(id, null, null, req.user);
+  }
+
+  /** תצוגה מקדימה של תמונת החתימה (ציבורי לקריאה — מזהה UUID) */
+  @Get(':id/signature-image')
+  async getSignatureImage(@Param('id') id: string, @Req() req: any) {
+    return this.usersService.getSignatureImage(id);
+  }
+
   @Patch(':id/presence')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')

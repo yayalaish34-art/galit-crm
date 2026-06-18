@@ -10232,6 +10232,19 @@ function SettingsPage({
   // ── Outlook (Microsoft Graph) connection for the edited employee ──
   const [msStatus, setMsStatus] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
   const [msBusy, setMsBusy] = useState(false);
+  // תמונת חתימה (data-URL לתצוגה מקדימה; null = אין)
+  const [sigImagePreview, setSigImagePreview] = useState<string | null>(null);
+  const [sigImageBusy, setSigImageBusy] = useState(false);
+  const loadSignatureImage = async (userId: string) => {
+    setSigImagePreview(null);
+    try {
+      const r = await apiFetch(apiUrl(`/users/${userId}/signature-image`), { authUser: currentUser });
+      if (r.ok) {
+        const d = await r.json();
+        if (d?.dataBase64) setSigImagePreview(`data:${d.mimeType || 'image/png'};base64,${d.dataBase64}`);
+      }
+    } catch { /* ignore */ }
+  };
   const refreshMsStatus = async () => {
     try {
       const r = await apiFetch(apiUrl('/auth/microsoft/status'), { authUser: currentUser });
@@ -10585,6 +10598,7 @@ function SettingsPage({
     setSmtpTestMsg('');
     setMsStatus({ connected: false, email: null });
     refreshMsStatus();
+    loadSignatureImage(u.id);
     setEmpForm({
       name: u.name || '',
       email: u.email || '',
@@ -12219,6 +12233,72 @@ function SettingsPage({
               onChange={(e) => setEmpForm((p) => ({ ...p, mailSignature: e.target.value }))}
               placeholder={'בברכה,\nשם מלא\nתפקיד | גלית – החברה לאיכות הסביבה\nטלפון: 0XX-XXXXXXX'}
             />
+
+            {/* תמונת חתימה (לוגו / חתימה סרוקה) */}
+            <div className="mt-3 border-t border-indigo-100 pt-3">
+              <div className="mb-1.5 text-xs font-semibold text-indigo-800">תמונת חתימה (לוגו / חתימה סרוקה)</div>
+              {empEditing ? (
+                <>
+                  {sigImagePreview && (
+                    <div className="mb-2 rounded-lg border border-slate-200 bg-white p-2 inline-block">
+                      <img src={sigImagePreview} alt="חתימה" className="max-h-24 max-w-[260px]" />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer rounded-xl border border-indigo-200 bg-white px-4 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-50">
+                      {sigImagePreview ? 'החלף תמונה' : 'העלה תמונה'}
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg"
+                        className="hidden"
+                        disabled={sigImageBusy}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          if (file.size > 2 * 1024 * 1024) { alert('התמונה גדולה מדי (מקסימום 2MB)'); return; }
+                          setSigImageBusy(true);
+                          try {
+                            const dataUrl: string = await new Promise((res, rej) => {
+                              const fr = new FileReader();
+                              fr.onload = () => res(String(fr.result));
+                              fr.onerror = rej;
+                              fr.readAsDataURL(file);
+                            });
+                            const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signature-image`), {
+                              method: 'POST',
+                              authUser: currentUser,
+                              body: JSON.stringify({ dataBase64: dataUrl, mimeType: file.type }),
+                            });
+                            if (r.ok) setSigImagePreview(dataUrl);
+                            else alert('העלאת התמונה נכשלה');
+                          } catch { alert('שגיאה בהעלאת התמונה'); }
+                          finally { setSigImageBusy(false); e.target.value = ''; }
+                        }}
+                      />
+                    </label>
+                    {sigImagePreview && (
+                      <button
+                        type="button"
+                        disabled={sigImageBusy}
+                        className="rounded-xl border border-red-200 bg-white px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        onClick={async () => {
+                          setSigImageBusy(true);
+                          try {
+                            const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signature-image`), { method: 'DELETE', authUser: currentUser });
+                            if (r.ok) setSigImagePreview(null);
+                          } catch { /* ignore */ } finally { setSigImageBusy(false); }
+                        }}
+                      >
+                        הסר תמונה
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400">PNG/JPG עד 2MB. מומלץ רקע שקוף (PNG).</div>
+                </>
+              ) : (
+                <div className="text-[11px] text-slate-400">ניתן להעלות תמונת חתימה לאחר שמירת המשתמש.</div>
+              )}
+            </div>
           </div>
 
           <div className="rounded-2xl border bg-slate-50 p-4">

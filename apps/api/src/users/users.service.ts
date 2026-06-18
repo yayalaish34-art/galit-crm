@@ -9,8 +9,12 @@ import { encryptSecret, decryptSecret } from '../common/crypto.util';
 const encryptSmtpPassword = encryptSecret;
 export const decryptSmtpPassword = decryptSecret;
 
-/** Fields that must never be sent to the frontend */
-const OMIT_SENSITIVE = { password: true as const, smtpPassword: true as const };
+/** Fields that must never be sent to the frontend (heavy or secret) */
+const OMIT_SENSITIVE = {
+  password: true as const,
+  smtpPassword: true as const,
+  mailSignatureImage: true as const,
+};
 
 @Injectable()
 export class UsersService {
@@ -158,6 +162,9 @@ export class UsersService {
     await this.assertCanManageUsers(actor);
 
     const normalized: any = { ...(data || {}) };
+    // Image fields are handled via dedicated endpoints — never via generic update.
+    delete normalized.mailSignatureImage;
+    delete normalized.mailSignatureImageType;
     if ('password' in normalized) {
       const p = normalized.password;
       if (p === undefined || p === null || String(p).trim() === '') {
@@ -183,6 +190,53 @@ export class UsersService {
       if (!('department' in normalized)) normalized.department = normalized.serviceDepartments[0] ?? null;
     }
     return this.prisma.user.update({ where: { id }, data: normalized, omit: OMIT_SENSITIVE });
+  }
+
+  /** Set or clear the user's signature image (base64 in, stored as bytes). */
+  async setSignatureImage(
+    id: string,
+    dataBase64: string | null,
+    mimeType: string | null,
+    _actor?: { id?: string; role?: string },
+  ) {
+    // A user may edit their own; managers may edit anyone.
+    if (_actor?.id !== id) {
+      await this.assertCanManageUsers(_actor);
+    }
+    if (!dataBase64) {
+      await this.prisma.user.update({
+        where: { id },
+        data: { mailSignatureImage: null, mailSignatureImageType: null },
+      });
+      return { success: true, cleared: true };
+    }
+    // Strip a data-URL prefix if present.
+    const clean = dataBase64.replace(/^data:[^;]+;base64,/, '');
+    const buf = Buffer.from(clean, 'base64');
+    if (buf.length > 2 * 1024 * 1024) {
+      throw new BadRequestException('תמונת החתימה גדולה מדי (מקסימום 2MB)');
+    }
+    await this.prisma.user.update({
+      where: { id },
+      data: {
+        mailSignatureImage: Uint8Array.from(buf),
+        mailSignatureImageType: mimeType || 'image/png',
+      },
+    });
+    return { success: true };
+  }
+
+  /** Return the signature image as base64 for preview. */
+  async getSignatureImage(id: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id },
+      select: { mailSignatureImage: true, mailSignatureImageType: true },
+    });
+    if (!u?.mailSignatureImage) return { dataBase64: null, mimeType: null };
+    return {
+      dataBase64: Buffer.from(u.mailSignatureImage).toString('base64'),
+      mimeType: u.mailSignatureImageType || 'image/png',
+    };
   }
 
   async remove(id: string, actor?: { id?: string; role?: string }) {

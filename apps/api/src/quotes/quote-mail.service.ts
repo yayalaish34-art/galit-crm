@@ -129,15 +129,26 @@ export class QuoteMailService {
         `<p style="font-size:12px;color:#777777;">אם הכפתור אינו פעיל, קישור ישיר:<br><a href="${opts.docUrl}">${opts.docUrl}</a></p>`
       : '';
 
-    // Resolve the per-user signature (if requested).
+    // Resolve the per-user signature (text + optional image, if requested).
     let signatureHtml = '';
     if (opts?.includeSignature && opts.userId) {
       const sender = await this.prisma.user.findUnique({
         where: { id: opts.userId },
-        select: { mailSignature: true },
+        select: { mailSignature: true, mailSignatureImage: true, mailSignatureImageType: true },
       });
+      const parts: string[] = [];
       if (sender?.mailSignature?.trim()) {
-        signatureHtml = `<div style="margin-top:18px;color:#444;">${this.toHtml(sender.mailSignature)}</div>`;
+        parts.push(`<div style="color:#444;">${this.toHtml(sender.mailSignature)}</div>`);
+      }
+      if (sender?.mailSignatureImage) {
+        const b64 = Buffer.from(sender.mailSignatureImage).toString('base64');
+        const mime = sender.mailSignatureImageType || 'image/png';
+        parts.push(
+          `<div style="margin-top:8px;"><img src="data:${mime};base64,${b64}" alt="חתימה" style="max-width:280px;max-height:120px;" /></div>`,
+        );
+      }
+      if (parts.length) {
+        signatureHtml = `<div style="margin-top:18px;">${parts.join('')}</div>`;
       }
     }
 
