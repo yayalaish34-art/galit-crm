@@ -238,10 +238,9 @@ function downloadWordDoc(html: string, customerName: string, quoteNo: string) {
  *  The API call in useEffect will override this with the true sequential number
  *  if the server is reachable; otherwise this value stays. */
 function genLocalRef(): string {
-  const d = new Date();
-  const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
-  const seq = String((d.getMinutes() * 60 + d.getSeconds()) % 10000).padStart(4, '0');
-  return `Q-${ym}-${seq}`;
+  // Fallback only — the real number comes from /quotes/next-reference.
+  // Show a placeholder until the server responds.
+  return '…';
 }
 
 /** תאריך תוקף מחושב: תאריך ההצעה (אם קיים) אחרת היום, + מספר ימים — YYYY-MM-DD */

@@ -168,18 +168,31 @@ export class QuotesService {
     });
   }
 
-  /** Next display reference for new quotes (UI סימוכין) — counts quotes created this calendar month. */
+  /** מספר ההצעה הראשון בפורמט החדש (פורמלי, מספר טהור). */
+  private static readonly QUOTE_NUMBER_START = 13763;
+
+  /**
+   * Next display reference for new quotes — a plain sequential number (e.g. 13763, 13764).
+   * Continues from the highest existing plain-numeric quote number, or from QUOTE_NUMBER_START.
+   * Legacy "Q-YYYYMM-NNNN" numbers are ignored when computing the max.
+   */
   async getNextReference(): Promise<{ reference: string }> {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const prefix = `Q-${year}${month}-`;
-    const startOfMonth = new Date(year, now.getMonth(), 1);
-    const count = await this.prisma.quote.count({
-      where: { createdAt: { gte: startOfMonth } },
+    // The displayed quote number is stored in orderReferenceNumber (quoteNumber is legacy/null).
+    // Keep only pure-numeric values (the new format) and continue from the highest.
+    const rows = await this.prisma.quote.findMany({
+      select: { orderReferenceNumber: true, quoteNumber: true },
     });
-    const next = String(count + 1).padStart(4, '0');
-    return { reference: `${prefix}${next}` };
+    let maxNum = QuotesService.QUOTE_NUMBER_START - 1;
+    for (const r of rows) {
+      for (const raw of [r.orderReferenceNumber, r.quoteNumber]) {
+        const v = (raw || '').trim();
+        if (/^\d{4,6}$/.test(v)) {
+          const n = parseInt(v, 10);
+          if (n > maxNum) maxNum = n;
+        }
+      }
+    }
+    return { reference: String(maxNum + 1) };
   }
 
   create(data: any, user?: { id?: string; role?: string }) {
