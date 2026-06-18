@@ -1146,6 +1146,7 @@ export function QuoteNewScreen({
         }
         setAiInstruction('');
         setAiPanelOpen(false);
+        setEmailHasDraft(true); // יש ניסוח — הצג preview
       } else {
         const e = await r.json().catch(() => null);
         setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
@@ -1245,6 +1246,9 @@ export function QuoteNewScreen({
     serviceName: '',
   });
   const [emailHasSignature, setEmailHasSignature] = useState(false);
+  const [emailSigImage, setEmailSigImage] = useState<string | null>(null); // data-URL לתצוגת חתימה ב-preview
+  const [emailHasDraft, setEmailHasDraft] = useState(false); // האם כבר נוצר/קיים ניסוח להצגה ב-preview
+  const [editingField, setEditingField] = useState<null | 'subject' | 'body'>(null); // עריכה inline
   // AI ניסוח
   const [aiBusy, setAiBusy] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
@@ -2313,17 +2317,25 @@ export function QuoteNewScreen({
               } catch { /* ignore */ }
             }
             const docLink = attId ? apiUrl(`/public/attachments/${attId}/price-quote.docx`) : '';
-            // בדיקה אם למשתמש יש חתימה שמורה (להצגת אפשרות החתימה)
+            // בדיקה אם למשתמש יש חתימה (טקסט + תמונה) — להצגה ב-preview
             let hasSig = false;
+            let sigImg: string | null = null;
+            const su = getSessionUser();
             try {
-              const su = getSessionUser();
               const r = await apiFetch(apiUrl(`/users/${su?.id}`), { authUser: su });
               if (r.ok) { const u = await r.json(); hasSig = !!(u?.mailSignature && String(u.mailSignature).trim()); }
             } catch { /* ignore */ }
-            // ערכי ברירת מחדל לחלון העריכה
+            try {
+              const ri = await apiFetch(apiUrl(`/users/${su?.id}/signature-image`), { authUser: su });
+              if (ri.ok) { const d = await ri.json(); if (d?.dataBase64) { sigImg = `data:${d.mimeType || 'image/png'};base64,${d.dataBase64}`; hasSig = true; } }
+            } catch { /* ignore */ }
+            // ערכי ברירת מחדל
             const defSubject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
             const defBody = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
             setEmailHasSignature(hasSig);
+            setEmailSigImage(sigImg);
+            setEmailHasDraft(false); // מתחילים מהשאלון, ה-preview יופיע אחרי generate
+            setEditingField(null);
             setAiInstruction('');
             setAiPanelOpen(false);
             setAiForm({ location: '', inspectionType: '', duration: '', extraDetails: '' });
@@ -2777,83 +2789,150 @@ export function QuoteNewScreen({
                 </div>
               </div>
 
-              {/* AI — ניסוח נושא ותוכן לפי פרטי המקרה */}
-              <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/60 p-5">
-                <div className="mb-3 text-base font-bold text-violet-800">✨ ניסוח חכם (AI)</div>
-                <div className="mb-3 text-sm text-violet-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-violet-700">מיקום מדויק</label>
-                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                      value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
-                      placeholder="מבנה משרדים, נתיבות" />
+              {/* ── שלב 1: שאלון AI (מוצג עד שיש ניסוח) ── */}
+              {!emailHasDraft && (
+                <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/60 p-5">
+                  <div className="mb-1 text-base font-bold text-violet-800">✨ ניסוח חכם (AI)</div>
+                  <div className="mb-4 text-sm text-violet-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-violet-700">מיקום מדויק</label>
+                      <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                        value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
+                        placeholder="מבנה משרדים, נתיבות" />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-violet-700">משך ביצוע משוער</label>
+                      <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                        value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
+                        placeholder="עד 5 ימי עסקים" />
+                    </div>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-violet-700">משך ביצוע משוער</label>
+                  <div className="mt-3">
+                    <label className="mb-1 block text-sm font-medium text-violet-700">אופן / סוג העבודה</label>
                     <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                      value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
-                      placeholder="עד 5 ימי עסקים" />
+                      value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
+                      placeholder="מיגון קרינה לקירות ולתקרה + דוח יישום" />
                   </div>
-                </div>
-                <div className="mt-3">
-                  <label className="mb-1 block text-sm font-medium text-violet-700">אופן / סוג העבודה</label>
-                  <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                    value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
-                    placeholder="מיגון קרינה לקירות ולתקרה + דוח יישום" />
-                </div>
-                <div className="mt-3">
-                  <label className="mb-1 block text-sm font-medium text-violet-700">הערות נוספות <span className="font-normal text-violet-400">(אופציונלי)</span></label>
-                  <textarea rows={2} className="w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-y"
-                    value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
-                    placeholder="כל פרט שיעזור לנסח…" />
-                </div>
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <button type="button" disabled={aiBusy} className="rounded-xl bg-violet-600 px-6 py-3 text-base font-bold text-white hover:bg-violet-700 disabled:opacity-50"
-                    onClick={() => generateAiDraft()}>
-                    {aiBusy ? 'מנסח…' : (emailForm.body.trim() ? '🔄 נסח מחדש' : '✨ נסח לי מייל')}
-                  </button>
-                  <span className="text-sm text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</span>
-                </div>
-                {aiFactsNote && <div className="mt-3 rounded-xl bg-green-50 px-3 py-2.5 text-sm font-medium text-green-700">{aiFactsNote}</div>}
-                {/* בקשת שינוי על ניסוח קיים */}
-                {emailForm.body.trim() && (
-                  <div className="mt-3 border-t border-violet-200 pt-3">
-                    <label className="mb-1 block text-sm font-medium text-violet-700">רוצה לשנות משהו?</label>
-                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
-                      value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
-                      placeholder="'יותר קצר', 'תוסיף שזמינים השבוע'… (Enter לעדכון)"
-                      onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim()) generateAiDraft(); }} />
+                  <div className="mt-3">
+                    <label className="mb-1 block text-sm font-medium text-violet-700">הערות נוספות <span className="font-normal text-violet-400">(אופציונלי)</span></label>
+                    <textarea rows={2} className="w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-y"
+                      value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
+                      placeholder="כל פרט שיעזור לנסח…" />
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-sm font-semibold text-gray-700">נושא</label>
-                <input className="h-12 w-full rounded-xl border border-gray-300 px-4 text-base outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-                  value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))} placeholder="נושא ההודעה" />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-sm font-semibold text-gray-700">תוכן ההודעה</label>
-                <textarea rows={10} className="w-full rounded-xl border border-gray-300 px-4 py-3 text-base leading-relaxed outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100 resize-y"
-                  value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))} placeholder="גוף ההודעה..." />
-              </div>
-              {emailHasSignature ? (
-                <label className="flex items-center gap-2.5 text-base text-gray-700 cursor-pointer">
-                  <input type="checkbox" className="h-5 w-5 accent-sky-500" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
-                  הוסף את החתימה האישית שלי
-                </label>
-              ) : (
-                <div className="text-sm text-gray-400">אין לך חתימה שמורה — ניתן להגדיר חתימה בפרופיל (משתמשים → עריכה).</div>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <button type="button" disabled={aiBusy} className="rounded-xl bg-violet-600 px-7 py-3 text-base font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                      onClick={() => generateAiDraft()}>
+                      {aiBusy ? '✨ מנסח…' : '✨ נסח לי מייל'}
+                    </button>
+                    <button type="button" disabled={aiBusy} className="text-sm text-gray-500 underline hover:text-gray-700"
+                      onClick={() => { setEmailHasDraft(true); }}>
+                      דלג — כתוב ידנית
+                    </button>
+                  </div>
+                  <div className="mt-2 text-sm text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</div>
+                </div>
               )}
-              <div className="rounded-xl bg-sky-50 px-4 py-3 text-sm font-medium text-sky-700">📎 הצעת המחיר (DOCX) תצורף אוטומטית למייל.</div>
+
+              {/* ── שלב 2: PREVIEW מושקע של המייל (אחרי ניסוח) ── */}
+              {emailHasDraft && (
+                <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
+                  {/* כותרת ה-preview */}
+                  <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-l from-sky-50 to-white px-5 py-3">
+                    <span className="text-sm font-bold text-gray-700">👁️ תצוגה מקדימה של המייל</span>
+                    {aiBusy && <span className="text-sm text-violet-600">✨ מעדכן…</span>}
+                  </div>
+
+                  {/* גוף ה-preview — נראה כמו מייל אמיתי */}
+                  <div className="bg-white px-6 py-5" dir="rtl">
+                    {/* נושא — לחיצה לעריכה */}
+                    {editingField === 'subject' ? (
+                      <input autoFocus className="mb-4 w-full rounded-lg border-2 border-sky-300 px-3 py-2 text-lg font-bold outline-none"
+                        value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))}
+                        onBlur={() => setEditingField(null)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') setEditingField(null); }} />
+                    ) : (
+                      <div className="group mb-4 cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('subject')} title="לחץ לעריכה">
+                        <div className="text-[11px] font-semibold uppercase text-gray-400">נושא</div>
+                        <div className="text-lg font-bold text-gray-900">{emailForm.subject || <span className="text-gray-300">— ללא נושא —</span>}
+                          <span className="ms-2 align-middle text-xs text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="my-3 border-t border-dashed border-gray-200" />
+
+                    {/* תוכן — לחיצה לעריכה */}
+                    {editingField === 'body' ? (
+                      <textarea autoFocus rows={12} className="w-full rounded-lg border-2 border-sky-300 px-3 py-2 text-base leading-relaxed outline-none resize-y"
+                        value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))}
+                        onBlur={() => setEditingField(null)} />
+                    ) : (
+                      <div className="group cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('body')} title="לחץ לעריכה">
+                        <div className="mb-1 text-[11px] font-semibold uppercase text-gray-400">תוכן ההודעה <span className="text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span></div>
+                        <div className="whitespace-pre-wrap text-base leading-relaxed text-gray-800">{emailForm.body || <span className="text-gray-300">— ריק —</span>}</div>
+                      </div>
+                    )}
+
+                    {/* חתימת תמונה (תצוגה) */}
+                    {emailForm.includeSignature && emailSigImage && (
+                      <div className="mt-4 border-t border-gray-100 pt-3">
+                        <img src={emailSigImage} alt="חתימה" className="max-h-24 max-w-[260px]" />
+                      </div>
+                    )}
+
+                    {/* קבצים מצורפים */}
+                    <div className="mt-5 flex flex-wrap gap-2 border-t border-gray-100 pt-4">
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                        📄 הצעת מחיר (DOCX)
+                      </span>
+                      {emailForm.includeSignature && emailSigImage && (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                          🖼️ חתימה (תמונה)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* סרגל פעולות תחת ה-preview */}
+                  <div className="space-y-3 border-t border-gray-100 bg-gray-50 px-5 py-4">
+                    {aiFactsNote && <div className="rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">{aiFactsNote}</div>}
+                    {emailHasSignature && (
+                      <label className="flex items-center gap-2.5 text-sm text-gray-700 cursor-pointer">
+                        <input type="checkbox" className="h-5 w-5 accent-sky-500" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
+                        כלול חתימה אישית {emailSigImage ? '(טקסט + תמונה)' : ''}
+                      </label>
+                    )}
+                    {/* בקשת שינוי מ-AI */}
+                    <div>
+                      <label className="mb-1 block text-sm font-semibold text-violet-700">✨ בקש מ-AI לשנות</label>
+                      <div className="flex gap-2">
+                        <input className="h-11 flex-1 rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                          value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
+                          placeholder="'יותר קצר', 'תוסיף שזמינים השבוע'…"
+                          onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim() && !aiBusy) generateAiDraft(); }} />
+                        <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                          onClick={() => generateAiDraft()}>
+                          {aiBusy ? 'מעדכן…' : 'עדכן'}
+                        </button>
+                      </div>
+                    </div>
+                    <button type="button" disabled={aiBusy} className="text-sm text-gray-500 underline hover:text-gray-700"
+                      onClick={() => { setEmailHasDraft(false); setEditingField(null); }}>
+                      ↻ חזרה לשאלון
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {statusMsg && <div className="mt-4 text-base font-medium text-gray-600">{statusMsg}</div>}
 
-            <div className="mt-6 flex justify-end gap-3 border-t border-gray-100 pt-5">
+            <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
+              {!emailHasDraft && <span className="me-auto text-sm text-gray-400">נסח או דלג לכתיבה ידנית כדי לשלוח</span>}
               <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
-              <button type="button" disabled={emailSending || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-10 py-3 text-base font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
-                {emailSending ? 'שולח…' : 'שלח'}
+              <button type="button" disabled={emailSending || !emailHasDraft || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-10 py-3 text-base font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
+                {emailSending ? 'שולח…' : '✉️ שלח'}
               </button>
             </div>
           </div>
