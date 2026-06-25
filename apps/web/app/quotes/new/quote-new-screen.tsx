@@ -121,22 +121,22 @@ function buildQuoteWordHtml(opts: {
 <style>
   @page { size: A4; margin: 2cm 2.5cm; }
   body { direction: rtl; text-align: right; font-family: Arial, 'Noto Sans Hebrew', sans-serif; font-size: 11pt; color: #111; }
-  h1 { font-size: 18pt; color: #1a4f8a; text-align: center; border: 2px solid #1a4f8a; padding: 6px; margin: 10px 0 16px; }
-  .co-name { font-size: 20pt; font-weight: bold; color: #1a4f8a; margin-bottom: 2px; }
+  h1 { font-size: 18pt; color: #1e40af; text-align: center; border: 2px solid #1e40af; padding: 6px; margin: 10px 0 16px; }
+  .co-name { font-size: 20pt; font-weight: bold; color: #1e40af; margin-bottom: 2px; }
   .co-sub { font-size: 9pt; color: #666; margin-bottom: 12px; }
   table.header-tbl { border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9; width: 100%; margin-bottom: 12px; }
   table.header-tbl td { font-size: 10pt; vertical-align: top; }
   table.items-tbl { width: 100%; border-collapse: collapse; font-size: 10pt; margin: 12px 0; }
-  table.items-tbl th { background: #1a4f8a; color: #fff; padding: 5px 8px; border: 1px solid #1a4f8a; text-align: center; }
+  table.items-tbl th { background: #1e40af; color: #fff; padding: 5px 8px; border: 1px solid #1e40af; text-align: center; }
   table.items-tbl tr:nth-child(even) { background: #f3f7fd; }
   .totals-box { border: 1px solid #ccc; border-radius: 4px; display: inline-block; min-width: 280px; margin: 8px 0; }
   .totals-box .trow { padding: 4px 14px; border-bottom: 1px solid #e5e5e5; font-size: 10pt; }
   .totals-box .trow:last-child { border-bottom: none; }
-  .totals-box .total-row { background: #1a4f8a; color: #fff; font-weight: bold; font-size: 12pt; }
+  .totals-box .total-row { background: #1e40af; color: #fff; font-weight: bold; font-size: 12pt; }
   .section-box { border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; margin: 8px 0; background: #f9f9f9; font-size: 10pt; }
-  .section-box h4 { font-size: 10.5pt; font-weight: bold; color: #1a4f8a; margin: 0 0 4px; border-bottom: 1px solid #ddd; padding-bottom: 3px; }
+  .section-box h4 { font-size: 10.5pt; font-weight: bold; color: #1e40af; margin: 0 0 4px; border-bottom: 1px solid #ddd; padding-bottom: 3px; }
   .sig-line { border-top: 1px solid #888; padding-top: 4px; text-align: center; font-size: 9pt; color: #555; margin-top: 30px; }
-  .footer-line { margin-top: 20px; padding-top: 6px; border-top: 2px solid #1a4f8a; font-size: 8pt; color: #777; text-align: center; }
+  .footer-line { margin-top: 20px; padding-top: 6px; border-top: 2px solid #1e40af; font-size: 8pt; color: #777; text-align: center; }
   .merged-content { margin: 16px 0; padding: 10px; border: 1px solid #e0e0e0; background: #fafafa; }
 </style>
 </head>
@@ -460,10 +460,10 @@ function getSkuCategory(sku: string): string | null {
 
 /* ── Category color map for tree picker ── */
 const CAT_COLOR: Record<string, string> = {
-  water: '#3b82f6', odor: '#8b5cf6', soil: '#16a34a', asbestos: '#f59e0b',
-  air: '#06b6d4', radon: '#ef4444', noise: '#f97316', radiation: '#7c3aed',
-  'green-building': '#15803d', thermal: '#dc2626', 'environmental-opinion': '#0f766e',
-  general: '#64748b', 'occupational-health': '#0284c7',
+  water: '#2563eb', odor: '#3b82f6', soil: '#16a34a', asbestos: '#f59e0b',
+  air: '#2563eb', radon: '#ef4444', noise: '#f97316', radiation: '#2563eb',
+  'green-building': '#15803d', thermal: '#dc2626', 'environmental-opinion': '#1d4ed8',
+  general: '#64748b', 'occupational-health': '#2563eb',
 };
 
 /* ── ServiceTreePicker — hierarchical service selector for quote line items ── */
@@ -675,7 +675,8 @@ export function QuoteNewScreen({
   initialQuoteId?: string | null;
   /** When set, the merged quote DOCX is also stored as a permanent attachment on this task */
   taskId?: string | null;
-  onExit?: () => void;
+  /** info.advanceToFollowUp=true → המשימה צריכה לעבור לשלב "פולואפ" (נקבע מעקב) */
+  onExit?: (info?: { advanceToFollowUp?: boolean }) => void;
   /** Called after a successful save (POST or PATCH) — does not replace `onExit` for navigation/back. */
   onQuoteSaved?: (quoteId: string) => void;
   /** Called after a quote is successfully sent via email */
@@ -945,7 +946,7 @@ export function QuoteNewScreen({
       .then((r) => (r.ok ? r.json() : null))
       .then((q: Record<string, unknown> | null) => {
         if (!q || cancelled) return;
-        if (q.id) setQuoteId(String(q.id));
+        if (q.id) { setQuoteId(String(q.id)); setSavedOnce(true); }
         if (q.quoteNumber != null) setQuoteNo(String(q.quoteNumber));
         if (q.customerId) setCustomerId(String(q.customerId));
         const cust = q.customer as { name?: string } | undefined;
@@ -1159,6 +1160,43 @@ export function QuoteNewScreen({
     }
   }
 
+  // ניסוח הודעת וואטסאפ קצרה (channel: 'whatsapp') — בלי נושא, רק תוכן
+  async function generateWaDraft(prevBody?: string) {
+    setWaBusy(true);
+    try {
+      const r = await apiFetch(apiUrl('/ai-mail/quote-draft'), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({
+          channel: 'whatsapp',
+          quoteId: emailForm.quoteId || undefined,
+          customerName: customer || '',
+          contactName: contact || '',
+          serviceName: emailForm.serviceName || reference || '',
+          quoteNumber: (reference || quoteNo || '').trim(),
+          location: aiForm.location.trim() || undefined,
+          inspectionType: aiForm.inspectionType.trim() || undefined,
+          instruction: waInstruction.trim() || undefined,
+          previousBody: (prevBody || '').trim() || undefined,
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        setWaMsg(d.body || '');
+        setWaInstruction('');
+      } else {
+        const e = await r.json().catch(() => null);
+        setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
+        setTimeout(() => setStatusMsg(''), 4000);
+      }
+    } catch {
+      setStatusMsg('שגיאה בפנייה ל-AI');
+      setTimeout(() => setStatusMsg(''), 4000);
+    } finally {
+      setWaBusy(false);
+    }
+  }
+
   // שליחת המייל מתוך חלון העריכה — Outlook/Graph עם נמענים, חתימה וקובץ מצורף
   async function sendQuoteEmail() {
     const f = emailForm;
@@ -1183,7 +1221,10 @@ export function QuoteNewScreen({
           subject: f.subject,
           messageBody: f.body,
           includeSignature: f.includeSignature,
+          signatureId: f.signatureId || undefined,
           attachmentId: f.attId || undefined,
+          // כל הקבצים שיצורפו (הראשי + הנוספים) — כל DOCX יומר ל-PDF בצד השרת בזמן השליחה.
+          attachmentIds: [f.attId, ...emailExtraAttIds].filter(Boolean),
           docUrl: f.docLink,
           customerName: customer || '',
         }),
@@ -1227,6 +1268,10 @@ export function QuoteNewScreen({
   const [customerContactId, setCustomerContactId] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
+  // True once the quote has been saved (or loaded as an existing saved quote) —
+  // enables (and greens) the "מיזוג" and "שלח במייל" buttons; before the first
+  // save they stay disabled, so a quote can't be merged/emailed until it's saved.
+  const [savedOnce, setSavedOnce] = useState(false);
 
   // ── חלון עריכת מייל לפני שליחה ──
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -1239,6 +1284,7 @@ export function QuoteNewScreen({
     subject: '',
     body: '',
     includeSignature: true,
+    signatureId: '',
     quoteId: '',
     attId: '',
     docLink: '',
@@ -1246,6 +1292,13 @@ export function QuoteNewScreen({
   });
   const [emailHasSignature, setEmailHasSignature] = useState(false);
   const [emailSigImage, setEmailSigImage] = useState<string | null>(null); // data-URL לתצוגת חתימה ב-preview
+  // רשימת חתימות העובד (תמונה + כותרת) — לבחירה בעת השליחה
+  const [emailSignatures, setEmailSignatures] = useState<{ id: string; title: string; dataBase64: string; imageType?: string }[]>([]);
+  // רשימת קבצי ההצעה (DOCX) הזמינים לצירוף — לבחירה/החלפה בחלון השליחה
+  const [emailAttachments, setEmailAttachments] = useState<{ id: string; fileName: string; createdAt?: string }[]>([]);
+  // קבצים *נוספים* לצירוף למייל (מעבר לקובץ הראשי) — כל DOCX יומר ל-PDF בצד השרת בזמן השליחה
+  const [emailExtraAttIds, setEmailExtraAttIds] = useState<string[]>([]);
+  const [emailAttBusy, setEmailAttBusy] = useState(false);
   const [emailHasDraft, setEmailHasDraft] = useState(false); // האם כבר נוצר/קיים ניסוח להצגה ב-preview
   const [editingField, setEditingField] = useState<null | 'subject' | 'body'>(null); // עריכה inline
   // AI ניסוח
@@ -1255,6 +1308,12 @@ export function QuoteNewScreen({
   // שאלון פרטי המקרה ל-AI
   const [aiForm, setAiForm] = useState({ location: '', inspectionType: '', duration: '', extraDetails: '' });
   const [aiFactsNote, setAiFactsNote] = useState(''); // הצגת הנתונים שהשרת שיבץ
+
+  // ── וואטסאפ: ניסוח AI קצר (בלי נושא) → שליחה ב-wa.me למספר הלקוח ──
+  const [waOpen, setWaOpen] = useState(false);
+  const [waMsg, setWaMsg] = useState('');
+  const [waBusy, setWaBusy] = useState(false);
+  const [waInstruction, setWaInstruction] = useState('');
 
   // הוספת נמען לרשימה (chip) — מ-Enter/פסיק. מפצל גם הדבקה מרובה.
   const addRecipients = (raw: string, field: 'toList' | 'ccList') => {
@@ -1587,6 +1646,7 @@ export function QuoteNewScreen({
         }
       }
       setStatusMsg('');
+      if (savedId) setSavedOnce(true);
       if (savedId && (opts?.advanceStage ?? true) && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
     } catch {
@@ -1656,13 +1716,13 @@ export function QuoteNewScreen({
     .page { max-width: 210mm; margin: 0 auto; padding: 14mm 18mm; }
 
     /* ── Company header ── */
-    .co-name  { font-size: 20pt; font-weight: bold; color: #1a4f8a; }
+    .co-name  { font-size: 20pt; font-weight: bold; color: #1e40af; }
     .co-sub   { font-size: 9.5pt; color: #555; margin-bottom: 10px; }
 
     /* ── Document title ── */
     .doc-title {
       font-size: 15pt; font-weight: bold; text-align: center;
-      border: 2px solid #1a4f8a; color: #1a4f8a;
+      border: 2px solid #1e40af; color: #1e40af;
       padding: 5px; margin: 8px 0 12px; letter-spacing: 1px;
     }
 
@@ -1679,9 +1739,9 @@ export function QuoteNewScreen({
     /* ── Line items table ── */
     table { width: 100%; border-collapse: collapse; direction: rtl; font-size: 10pt; margin: 10px 0; }
     thead th {
-      background: #1a4f8a; color: #fff; font-weight: bold;
+      background: #1e40af; color: #fff; font-weight: bold;
       padding: 6px 7px; text-align: center;
-      border: 1px solid #1a4f8a;
+      border: 1px solid #1e40af;
     }
     tbody tr:nth-child(even) { background: #f3f7fd; }
     tbody tr:nth-child(odd)  { background: #fff; }
@@ -1698,12 +1758,12 @@ export function QuoteNewScreen({
       font-size: 10.5pt; gap: 20px;
     }
     .trow:last-child { border-bottom: none; }
-    .trow.total-row  { background: #1a4f8a; color: #fff; font-weight: bold; font-size: 12pt; }
+    .trow.total-row  { background: #1e40af; color: #fff; font-weight: bold; font-size: 12pt; }
     .amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
     /* ── Section boxes ── */
     .sbox { border: 1px solid #ddd; border-radius: 4px; padding: 7px 12px; margin: 8px 0; background: #f9f9f9; font-size: 10pt; }
-    .sbox h4 { font-size: 10.5pt; font-weight: bold; color: #1a4f8a; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
+    .sbox h4 { font-size: 10.5pt; font-weight: bold; color: #1e40af; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
     .sbox .srow { margin-top: 3px; }
 
     /* ── Signature lines ── */
@@ -1711,7 +1771,7 @@ export function QuoteNewScreen({
     .sig-box { border-top: 1px solid #888; padding-top: 4px; text-align: center; font-size: 9.5pt; color: #555; }
 
     /* ── Footer ── */
-    .doc-footer { margin-top: 18px; padding-top: 6px; border-top: 2px solid #1a4f8a; font-size: 8.5pt; color: #777; text-align: center; }
+    .doc-footer { margin-top: 18px; padding-top: 6px; border-top: 2px solid #1e40af; font-size: 8.5pt; color: #777; text-align: center; }
 
     /* ── Print rules ── */
     @media print {
@@ -2129,6 +2189,11 @@ export function QuoteNewScreen({
           console.error('Failed to attach merged DOCX:', e);
         }
       }
+
+      // ההמרה ל-PDF אינה מתבצעת כאן יותר — הקובץ נשמר כ-DOCX, וההמרה ל-PDF מתבצעת בצד השרת
+      // בזמן השליחה בלבד ("שלח"). כך עורכים DOCX בקלות, וכל מה שנשלח ללקוח הוא PDF.
+      setStatusMsg('המסמך נוצר ונשמר');
+      setTimeout(() => setStatusMsg(''), 4000);
     } catch (err) {
       console.error('DOCX merge error:', err);
       alert('שגיאה בהורדת קובץ Word');
@@ -2174,6 +2239,95 @@ export function QuoteNewScreen({
         console.error('Failed to attach uploaded file:', e);
       }
     }
+  }
+
+  // העלאת "גרסה ערוכה" ישירות מחלון השליחה — מצרפת אותה ומסמנת כקובץ שיישלח
+  async function uploadEditedQuoteFile(file: File) {
+    if (!file) return;
+    const user = getSessionUser();
+    setEmailAttBusy(true);
+    try {
+      const dataBase64 = await blobToBase64(file);
+      const fileName = file.name;
+      let newId = '';
+      if (taskId) {
+        const attRes = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
+          authUser: user,
+          method: 'POST',
+          body: JSON.stringify({
+            fileName,
+            mimeType: file.type || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            dataBase64,
+          }),
+        });
+        const created = attRes.ok ? await attRes.json() : null;
+        if (created?.id) newId = created.id;
+        onAttachmentSaved?.();
+      }
+      const currentQuoteId = quoteIdRef.current || emailForm.quoteId;
+      if (currentQuoteId) {
+        await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
+          authUser: user,
+          method: 'POST',
+          body: JSON.stringify({ base64Data: dataBase64, fileName }),
+        });
+      }
+      if (newId) {
+        setLastMergedAttachmentId(newId);
+        setEmailAttachments((prev) => [{ id: newId, fileName, createdAt: new Date().toISOString() }, ...prev.filter((a) => a.id !== newId)]);
+        setEmailForm((p) => ({ ...p, attId: newId }));
+        setStatusMsg('הגרסה הערוכה צורפה — היא זו שתישלח');
+        setTimeout(() => setStatusMsg(''), 4000);
+      } else {
+        setStatusMsg('צירוף הקובץ נכשל');
+      }
+    } catch (e) {
+      console.error('Failed to upload edited quote file:', e);
+      setStatusMsg('שגיאה בצירוף הקובץ');
+    } finally {
+      setEmailAttBusy(false);
+    }
+  }
+
+  // הוספת קובץ *נוסף* לצירוף למייל (לא מחליף את הקובץ הראשי). כל DOCX יומר ל-PDF בצד השרת בזמן השליחה.
+  async function addEmailAttachmentFile(file: File) {
+    if (!file) return;
+    const user = getSessionUser();
+    if (!taskId) { setStatusMsg('לא ניתן לצרף קובץ נוסף ללא משימה משויכת'); return; }
+    setEmailAttBusy(true);
+    try {
+      const dataBase64 = await blobToBase64(file);
+      const fileName = file.name;
+      const attRes = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), {
+        authUser: user,
+        method: 'POST',
+        body: JSON.stringify({
+          fileName,
+          mimeType: file.type || 'application/octet-stream',
+          dataBase64,
+        }),
+      });
+      const created = attRes.ok ? await attRes.json() : null;
+      if (created?.id) {
+        onAttachmentSaved?.();
+        setEmailAttachments((prev) => [...prev, { id: created.id, fileName, createdAt: new Date().toISOString() }]);
+        setEmailExtraAttIds((prev) => [...prev, created.id]);
+        setStatusMsg(`הקובץ "${fileName}" צורף — יישלח כ-PDF`);
+        setTimeout(() => setStatusMsg(''), 4000);
+      } else {
+        setStatusMsg('צירוף הקובץ נכשל');
+      }
+    } catch (e) {
+      console.error('Failed to add email attachment:', e);
+      setStatusMsg('שגיאה בצירוף הקובץ');
+    } finally {
+      setEmailAttBusy(false);
+    }
+  }
+
+  // הסרת קובץ נוסף מרשימת הצירופים (לא מוחק את ה-attachment עצמו — רק מוציא מהשליחה)
+  function removeExtraEmailAttachment(idToRemove: string) {
+    setEmailExtraAttIds((prev) => prev.filter((x) => x !== idToRemove));
   }
 
   function openQuoteLookup(kind: 'contact' | 'salesRep' | 'performer') {
@@ -2278,7 +2432,7 @@ export function QuoteNewScreen({
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-full bg-emerald-500 flex items-center justify-center text-white font-bold text-sm shadow-md">G</div>
+          <div className="h-9 w-9 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-sm shadow-md">G</div>
           <div>
             <h1 className="text-base font-bold text-gray-800 leading-tight">הצעת מחיר {initialQuoteId ? '' : 'חדשה'}</h1>
             <p className="text-[10px] text-gray-400 leading-tight">גלית CRM</p>
@@ -2297,37 +2451,56 @@ export function QuoteNewScreen({
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
             <span className="text-[10px] text-gray-500">שמור</span>
           </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!canMerge} title={!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined} onClick={() => handleMergeClick()}>
-            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><FileText size={18} /></span>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!savedOnce || !canMerge} title={!savedOnce ? 'יש לשמור את ההצעה לפני המיזוג' : (!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined)} onClick={() => handleMergeClick()}>
+            <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
           </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => {
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={!savedOnce || isBusy} title={!savedOnce ? 'יש לשמור את ההצעה לפני שליחה במייל' : undefined} onClick={async () => {
             const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
             if (!id) { setStatusMsg('שמירת ההצעה נכשלה'); return; }
             if (!customerEmail?.trim()) { setStatusMsg('אין כתובת מייל לאיש הקשר'); return; }
             const to = customerEmail.trim();
             const ref = (reference || quoteNo || '').trim();
-            // מזהה הקובץ הממוזג: מהמיזוג האחרון, אחרת הקובץ האחרון של המשימה
+            // רשימת קבצי ההצעה של המשימה (לבחירה/החלפה בחלון השליחה) — חדש→ישן
             let attId = lastMergedAttachmentId;
-            if (!attId && taskId) {
+            let attList: { id: string; fileName: string; createdAt?: string }[] = [];
+            if (taskId) {
               try {
                 const r = await apiFetch(apiUrl(`/tasks/${taskId}/attachments`), { authUser: getSessionUser() });
-                if (r.ok) { const list = await r.json(); if (Array.isArray(list) && list.length) attId = list[0].id; }
+                if (r.ok) {
+                  const list = await r.json();
+                  if (Array.isArray(list)) {
+                    attList = list
+                      .map((a: any) => ({ id: a.id, fileName: a.fileName, createdAt: a.createdAt }))
+                      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+                  }
+                }
               } catch { /* ignore */ }
             }
+            // ברירת מחדל: הקובץ מהמיזוג/העלאה האחרונים; אחרת החדש ביותר ברשימה
+            if (!attId || !attList.some((a) => a.id === attId)) attId = attList[0]?.id || attId;
+            setEmailAttachments(attList);
             const docLink = attId ? apiUrl(`/public/attachments/${attId}/price-quote.docx`) : '';
-            // בדיקה אם למשתמש יש חתימה (טקסט + תמונה) — להצגה ב-preview
+            // בדיקה אם למשתמש יש חתימה (טקסט + תמונות) — להצגה ב-preview ובחירה
             let hasSig = false;
             let sigImg: string | null = null;
+            let sigList: { id: string; title: string; dataBase64: string; imageType?: string }[] = [];
+            let firstSigId = '';
             const su = getSessionUser();
             try {
               const r = await apiFetch(apiUrl(`/users/${su?.id}`), { authUser: su });
               if (r.ok) { const u = await r.json(); hasSig = !!(u?.mailSignature && String(u.mailSignature).trim()); }
             } catch { /* ignore */ }
             try {
-              const ri = await apiFetch(apiUrl(`/users/${su?.id}/signature-image`), { authUser: su });
-              if (ri.ok) { const d = await ri.json(); if (d?.dataBase64) { sigImg = `data:${d.mimeType || 'image/png'};base64,${d.dataBase64}`; hasSig = true; } }
+              const rs = await apiFetch(apiUrl(`/users/${su?.id}/signatures`), { authUser: su });
+              if (rs.ok) { const list = await rs.json(); if (Array.isArray(list)) sigList = list; }
             } catch { /* ignore */ }
+            if (sigList.length) {
+              hasSig = true;
+              firstSigId = sigList[0].id;
+              sigImg = `data:${sigList[0].imageType || 'image/png'};base64,${sigList[0].dataBase64}`;
+            }
+            setEmailSignatures(sigList);
             // ערכי ברירת מחדל
             const defSubject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
             const defBody = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
@@ -2347,17 +2520,19 @@ export function QuoteNewScreen({
               subject: defSubject,
               body: defBody,
               includeSignature: hasSig,
+              signatureId: firstSigId,
               quoteId: id,
               attId: attId || '',
               docLink,
               serviceName: (reference || '').trim(),
             });
+            setEmailExtraAttIds([]); // איפוס קבצים נוספים בכל פתיחה של חלון השליחה
             setEmailModalOpen(true);
           }}>
-            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Mail size={18} /></span>
+            <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><Mail size={18} /></span>
             <span className="text-[10px] text-gray-500">שלח במייל</span>
           </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => { const phoneNum = (phone || '').replace(/\D/g, ''); const msg = encodeURIComponent(`הצעת מחיר ${quoteNo || ''} - ${customer || ''}`); window.open(`https://wa.me/${phoneNum}?text=${msg}`, '_blank'); }}>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => { setWaOpen(true); setWaMsg(''); setWaInstruction(''); void generateWaDraft(); }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><MessageCircle size={18} /></span>
             <span className="text-[10px] text-gray-500">וואטסאפ</span>
           </button>
@@ -2366,7 +2541,7 @@ export function QuoteNewScreen({
             <span className="text-[10px] text-gray-500">הדפס</span>
           </button>
           {onExit && (
-            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={onExit}>
+            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => onExit({ advanceToFollowUp: !!follow.trim() })}>
               <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></span>
               <span className="text-[10px] text-gray-500">סגור</span>
             </button>
@@ -2426,11 +2601,11 @@ export function QuoteNewScreen({
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500"><Plus size={12} /></span>
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-green-50 text-green-500"><Plus size={12} /></span>
                   פירוט פריטים
                   <span className="text-xs font-normal text-gray-400 mr-1">({lineItems.length})</span>
                 </h3>
-                <button type="button" className="flex items-center gap-2 rounded-xl bg-emerald-500 px-6 py-2.5 text-base font-bold text-white hover:bg-emerald-600 shadow-md transition-colors" onClick={() => { const next = newLineItem(); setLineItems((prev) => [...prev, next]); setSelectedLineIdx(lineItems.length); }}>
+                <button type="button" className="flex items-center gap-2 rounded-xl bg-green-500 px-6 py-2.5 text-base font-bold text-white hover:bg-green-600 shadow-md transition-colors" onClick={() => { const next = newLineItem(); setLineItems((prev) => [...prev, next]); setSelectedLineIdx(lineItems.length); }}>
                   <Plus size={20} />הוסף פריט
                 </button>
               </div>
@@ -2529,23 +2704,23 @@ export function QuoteNewScreen({
 
             {/* ── קבצים שנוצרו ── */}
             {(mergedFiles.length > 0 || (existingAttachments && existingAttachments.length > 0) || (!!quoteId && !!lastMergedDocPath) || !!quoteId || !!taskId) && (
-              <section className="rounded-2xl bg-white border border-emerald-100 shadow-sm p-4" dir="rtl">
+              <section className="rounded-2xl bg-white border border-green-100 shadow-sm p-4" dir="rtl">
                 <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-green-50 text-green-500">
                     <FileText size={12} />
                   </span>
                   קבצים שנוצרו
-                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.length ?? 0) + (quoteId && lastMergedDocPath ? 1 : 0)})</span>
+                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).length ?? 0) + (quoteId && lastMergedDocPath ? 1 : 0)})</span>
                 </h3>
                 <div className="space-y-2">
                   {mergedFiles.map((f, i) => (
-                    <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 hover:bg-emerald-100 transition-colors" title={f.name}>
-                      <FileText size={15} className="text-emerald-600 flex-shrink-0" />
-                      <span className="flex-1 text-sm font-semibold text-emerald-800 truncate">{f.name}</span>
-                      <span className="text-[11px] font-bold text-emerald-600 flex-shrink-0 border border-emerald-300 rounded-lg px-2 py-0.5">הורד</span>
+                    <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
+                      <FileText size={15} className="text-green-600 flex-shrink-0" />
+                      <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
+                      <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
                     </a>
                   ))}
-                  {existingAttachments?.map((att) => (
+                  {existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).map((att) => (
                     <button key={att.id} type="button" onClick={() => onDownloadAttachment?.(att)} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
                       <FileText size={15} className="text-slate-500 flex-shrink-0" />
                       <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
@@ -2560,7 +2735,7 @@ export function QuoteNewScreen({
                     </button>
                   )}
                   {/* הוספת קובץ ידנית (גרסה שנערכה) לרשימת הקבצים שנוצרו */}
-                  <label className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-emerald-300 bg-white px-4 py-2.5 hover:bg-emerald-50 transition-colors cursor-pointer text-sm font-bold text-emerald-700">
+                  <label className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-green-300 bg-white px-4 py-2.5 hover:bg-green-50 transition-colors cursor-pointer text-sm font-bold text-green-700">
                     <input
                       type="file"
                       className="hidden"
@@ -2580,7 +2755,7 @@ export function QuoteNewScreen({
             {/* ── Terms, Tracking & Sales Rep ── */}
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
               <h3 className="text-base font-bold text-gray-700 mb-2 flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-purple-50 text-purple-500"><FileText size={12} /></span>
+                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><FileText size={12} /></span>
                 תנאים ומעקב
               </h3>
               <div className="space-y-3">
@@ -2613,7 +2788,7 @@ export function QuoteNewScreen({
                     <input className={inp} value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} placeholder="0" />
                   </div>
                 </div>
-                {(() => { const n = parseInt(paymentsCount) || 0; const total = parseFloat(cashTotal) || 0; if (n > 1 && total > 0) { return <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 text-center">{n} תשלומים של {(total / n).toFixed(2)} ₪ לתשלום (כולל מע&quot;מ)</div>; } return null; })()}
+                {(() => { const n = parseInt(paymentsCount) || 0; const total = parseFloat(cashTotal) || 0; if (n > 1 && total > 0) { return <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm font-semibold text-green-700 text-center">{n} תשלומים של {(total / n).toFixed(2)} ₪ לתשלום (כולל מע&quot;מ)</div>; } return null; })()}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <div className={lbl}>נציג מכירה</div>
@@ -2637,7 +2812,7 @@ export function QuoteNewScreen({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-300">סה&quot;כ פריטים</span>
-                  <span className="font-bold text-emerald-400 text-lg">{subtotal || '0.00'} ₪</span>
+                  <span className="font-bold text-green-400 text-lg">{subtotal || '0.00'} ₪</span>
                 </div>
                 {parseFloat(discountPercent) > 0 && (
                   <>
@@ -2658,7 +2833,7 @@ export function QuoteNewScreen({
                 <div className="border-t border-slate-600 pt-4">
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold">סה&quot;כ לתשלום</span>
-                    <span className="text-2xl font-extrabold text-emerald-400">{cashTotal || '0.00'} ₪</span>
+                    <span className="text-2xl font-extrabold text-green-400">{cashTotal || '0.00'} ₪</span>
                   </div>
                 </div>
               </div>
@@ -2737,22 +2912,76 @@ export function QuoteNewScreen({
         </div>
       )}
 
+      {waOpen && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => !waBusy && setWaOpen(false)}>
+          <div className="w-full max-w-lg rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[92vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-3 flex items-center gap-2 border-b border-gray-100 pb-3 text-xl font-bold text-gray-800">
+              <MessageCircle size={22} className="text-green-500" /> שליחת הצעת מחיר בוואטסאפ
+            </div>
+            <div className="mb-3 text-sm text-gray-500">
+              הודעה שנוסחה אוטומטית{contact ? ` עבור ${contact}` : ''}. אפשר לערוך לפני השליחה.
+            </div>
+            {waBusy && !waMsg ? (
+              <div className="flex items-center justify-center gap-2 py-12 text-gray-400">
+                <RefreshCw size={18} className="animate-spin" /> מנסח הודעה…
+              </div>
+            ) : (
+              <>
+                <textarea
+                  value={waMsg}
+                  onChange={(e) => setWaMsg(e.target.value)}
+                  rows={7}
+                  dir="rtl"
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-400"
+                  placeholder="תוכן ההודעה…"
+                />
+                <div className="mt-3 flex gap-2">
+                  <input
+                    value={waInstruction}
+                    onChange={(e) => setWaInstruction(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !waBusy) generateWaDraft(waMsg); }}
+                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-green-400"
+                    placeholder="רוצה לשנות? כתוב הנחיה ולחץ ׳נסח מחדש׳"
+                  />
+                  <button type="button" disabled={waBusy} onClick={() => generateWaDraft(waMsg)} className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                    {waBusy ? '…' : 'נסח מחדש'}
+                  </button>
+                </div>
+              </>
+            )}
+            <div className="mt-5 flex items-center justify-between gap-2 border-t border-gray-100 pt-4">
+              <button type="button" onClick={() => setWaOpen(false)} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50">ביטול</button>
+              <button
+                type="button"
+                disabled={waBusy || !waMsg.trim()}
+                onClick={() => { let n = (phone || '').replace(/\D/g, ''); if (n.startsWith('0')) n = '972' + n.slice(1); window.open(`https://wa.me/${n}?text=${encodeURIComponent(waMsg)}`, '_blank'); setWaOpen(false); }}
+                className="flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                style={{ background: '#16a34a' }}
+              >
+                <MessageCircle size={16} /> שלח בוואטסאפ
+              </button>
+            </div>
+            {!(phone || '').trim() && <div className="mt-2 text-xs text-amber-600">⚠ אין מספר טלפון ללקוח — הוואטסאפ ייפתח ללא נמען.</div>}
+          </div>
+        </div>
+      )}
+
       {emailModalOpen && (
         <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => !emailSending && setEmailModalOpen(false)}>
           <div className="w-full max-w-3xl rounded-3xl border border-gray-200 bg-white p-8 shadow-2xl max-h-[92vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-6 flex items-center gap-3 border-b border-gray-100 pb-4 text-2xl font-bold text-gray-800">
-              <Mail size={26} className="text-sky-500" /> שליחת הצעת מחיר במייל
+              <Mail size={26} className="text-blue-500" /> שליחת הצעת מחיר במייל
             </div>
 
             <div className="space-y-5">
               {/* נמען ראשי + נמענים נוספים כ-chips */}
               <div>
                 <label className="mb-1.5 block text-sm font-semibold text-gray-700">אל <span className="font-normal text-gray-400">(Enter כדי להוסיף עוד נמען)</span></label>
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
                   {emailForm.toList.map((em) => (
-                    <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 px-3 py-1.5 text-sm text-sky-800" dir="ltr">
+                    <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1.5 text-sm text-blue-800" dir="ltr">
                       {em}
-                      <button type="button" className="text-base text-sky-500 hover:text-sky-700" onClick={() => removeRecipient(em, 'toList')}>×</button>
+                      <button type="button" className="text-base text-blue-500 hover:text-blue-700" onClick={() => removeRecipient(em, 'toList')}>×</button>
                     </span>
                   ))}
                   <input dir="ltr" className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
@@ -2769,7 +2998,7 @@ export function QuoteNewScreen({
               {/* CC כ-chips */}
               <div>
                 <label className="mb-1.5 block text-sm font-semibold text-gray-700">עותק (CC)</label>
-                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
                   {emailForm.ccList.map((em) => (
                     <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
                       {em}
@@ -2790,37 +3019,37 @@ export function QuoteNewScreen({
 
               {/* ── שלב 1: שאלון AI (מוצג עד שיש ניסוח) ── */}
               {!emailHasDraft && (
-                <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/60 p-5">
-                  <div className="mb-1 text-base font-bold text-violet-800">✨ ניסוח חכם (AI)</div>
-                  <div className="mb-4 text-sm text-violet-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
+                <div className="rounded-2xl border-2 border-blue-200 bg-blue-50/60 p-5">
+                  <div className="mb-1 text-base font-bold text-blue-800">✨ ניסוח חכם (AI)</div>
+                  <div className="mb-4 text-sm text-blue-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-violet-700">מיקום מדויק</label>
-                      <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                      <label className="mb-1 block text-sm font-medium text-blue-700">מיקום מדויק</label>
+                      <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                         value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
                         placeholder="מבנה משרדים, נתיבות" />
                     </div>
                     <div>
-                      <label className="mb-1 block text-sm font-medium text-violet-700">משך ביצוע משוער</label>
-                      <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                      <label className="mb-1 block text-sm font-medium text-blue-700">משך ביצוע משוער</label>
+                      <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                         value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
                         placeholder="עד 5 ימי עסקים" />
                     </div>
                   </div>
                   <div className="mt-3">
-                    <label className="mb-1 block text-sm font-medium text-violet-700">אופן / סוג העבודה</label>
-                    <input className="h-11 w-full rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                    <label className="mb-1 block text-sm font-medium text-blue-700">אופן / סוג העבודה</label>
+                    <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                       value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
                       placeholder="מיגון קרינה לקירות ולתקרה + דוח יישום" />
                   </div>
                   <div className="mt-3">
-                    <label className="mb-1 block text-sm font-medium text-violet-700">הערות נוספות <span className="font-normal text-violet-400">(אופציונלי)</span></label>
-                    <textarea rows={2} className="w-full rounded-xl border border-violet-200 bg-white px-3 py-2.5 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100 resize-y"
+                    <label className="mb-1 block text-sm font-medium text-blue-700">הערות נוספות <span className="font-normal text-blue-400">(אופציונלי)</span></label>
+                    <textarea rows={2} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-y"
                       value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
                       placeholder="כל פרט שיעזור לנסח…" />
                   </div>
                   <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button type="button" disabled={aiBusy} className="rounded-xl bg-violet-600 px-7 py-3 text-base font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                    <button type="button" disabled={aiBusy} className="rounded-xl bg-blue-600 px-7 py-3 text-base font-bold text-white hover:bg-blue-700 disabled:opacity-50"
                       onClick={() => generateAiDraft()}>
                       {aiBusy ? '✨ מנסח…' : '✨ נסח לי מייל'}
                     </button>
@@ -2829,7 +3058,7 @@ export function QuoteNewScreen({
                       דלג — כתוב ידנית
                     </button>
                   </div>
-                  <div className="mt-2 text-sm text-violet-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</div>
+                  <div className="mt-2 text-sm text-blue-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</div>
                 </div>
               )}
 
@@ -2837,24 +3066,24 @@ export function QuoteNewScreen({
               {emailHasDraft && (
                 <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
                   {/* כותרת ה-preview */}
-                  <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-l from-sky-50 to-white px-5 py-3">
+                  <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-l from-blue-50 to-white px-5 py-3">
                     <span className="text-sm font-bold text-gray-700">👁️ תצוגה מקדימה של המייל</span>
-                    {aiBusy && <span className="text-sm text-violet-600">✨ מעדכן…</span>}
+                    {aiBusy && <span className="text-sm text-blue-600">✨ מעדכן…</span>}
                   </div>
 
                   {/* גוף ה-preview — נראה כמו מייל אמיתי */}
                   <div className="bg-white px-6 py-5" dir="rtl">
                     {/* נושא — לחיצה לעריכה */}
                     {editingField === 'subject' ? (
-                      <input autoFocus className="mb-4 w-full rounded-lg border-2 border-sky-300 px-3 py-2 text-lg font-bold outline-none"
+                      <input autoFocus className="mb-4 w-full rounded-lg border-2 border-blue-300 px-3 py-2 text-lg font-bold outline-none"
                         value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))}
                         onBlur={() => setEditingField(null)}
                         onKeyDown={(e) => { if (e.key === 'Enter') setEditingField(null); }} />
                     ) : (
-                      <div className="group mb-4 cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('subject')} title="לחץ לעריכה">
+                      <div className="group mb-4 cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-blue-50" onClick={() => setEditingField('subject')} title="לחץ לעריכה">
                         <div className="text-[11px] font-semibold uppercase text-gray-400">נושא</div>
                         <div className="text-xl font-extrabold text-gray-900">{emailForm.subject || <span className="text-gray-300">— ללא נושא —</span>}
-                          <span className="ms-2 align-middle text-xs text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span>
+                          <span className="ms-2 align-middle text-xs text-blue-400 opacity-0 group-hover:opacity-100">✎ ערוך</span>
                         </div>
                       </div>
                     )}
@@ -2863,12 +3092,12 @@ export function QuoteNewScreen({
 
                     {/* תוכן — לחיצה לעריכה */}
                     {editingField === 'body' ? (
-                      <textarea autoFocus rows={12} className="w-full rounded-lg border-2 border-sky-300 px-3 py-2 text-base leading-relaxed outline-none resize-y"
+                      <textarea autoFocus rows={12} className="w-full rounded-lg border-2 border-blue-300 px-3 py-2 text-base leading-relaxed outline-none resize-y"
                         value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))}
                         onBlur={() => setEditingField(null)} />
                     ) : (
-                      <div className="group cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-sky-50" onClick={() => setEditingField('body')} title="לחץ לעריכה">
-                        <div className="mb-1 text-[11px] font-semibold uppercase text-gray-400">תוכן ההודעה <span className="text-sky-400 opacity-0 group-hover:opacity-100">✎ ערוך</span></div>
+                      <div className="group cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-blue-50" onClick={() => setEditingField('body')} title="לחץ לעריכה">
+                        <div className="mb-1 text-[11px] font-semibold uppercase text-gray-400">תוכן ההודעה <span className="text-blue-400 opacity-0 group-hover:opacity-100">✎ ערוך</span></div>
                         <div className="text-base leading-relaxed text-gray-800">
                           {emailForm.body
                             ? emailForm.body.split('\n').map((line, i) => {
@@ -2894,9 +3123,14 @@ export function QuoteNewScreen({
 
                     {/* קבצים מצורפים */}
                     <div className="mt-5 flex flex-wrap gap-2 border-t border-gray-100 pt-4">
-                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-                        📄 הצעת מחיר (DOCX)
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" title={emailAttachments.find((a) => a.id === emailForm.attId)?.fileName || ''}>
+                        📄 {emailAttachments.find((a) => a.id === emailForm.attId)?.fileName || 'הצעת מחיר.docx'}
                       </span>
+                      {emailExtraAttIds.map((eid) => (
+                        <span key={eid} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" title={emailAttachments.find((a) => a.id === eid)?.fileName || ''}>
+                          📄 {emailAttachments.find((a) => a.id === eid)?.fileName || 'קובץ'}
+                        </span>
+                      ))}
                       {emailForm.includeSignature && emailSigImage && (
                         <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                           🖼️ חתימה (תמונה)
@@ -2910,19 +3144,94 @@ export function QuoteNewScreen({
                     {aiFactsNote && <div className="rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700">{aiFactsNote}</div>}
                     {emailHasSignature && (
                       <label className="flex items-center gap-2.5 text-sm text-gray-700 cursor-pointer">
-                        <input type="checkbox" className="h-5 w-5 accent-sky-500" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
+                        <input type="checkbox" className="h-5 w-5 accent-blue-500" checked={emailForm.includeSignature} onChange={(e) => setEmailForm((p) => ({ ...p, includeSignature: e.target.checked }))} />
                         כלול חתימה אישית {emailSigImage ? '(טקסט + תמונה)' : ''}
                       </label>
                     )}
+                    {/* בחירת תמונת החתימה (כאשר יש יותר מאחת) */}
+                    {emailForm.includeSignature && emailSignatures.length > 1 && (
+                      <div className="flex items-center gap-2.5">
+                        <label className="text-sm font-medium text-gray-700 shrink-0">תמונת חתימה:</label>
+                        <select
+                          className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+                          value={emailForm.signatureId}
+                          onChange={(e) => {
+                            const sel = emailSignatures.find((s) => s.id === e.target.value);
+                            setEmailForm((p) => ({ ...p, signatureId: e.target.value }));
+                            setEmailSigImage(sel ? `data:${sel.imageType || 'image/png'};base64,${sel.dataBase64}` : null);
+                          }}
+                        >
+                          {emailSignatures.map((s) => (
+                            <option key={s.id} value={s.id}>{s.title}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    {/* ── קובץ ההצעה שיישלח: בחירה + העלאת גרסה ערוכה ── */}
+                    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <label className="text-sm font-medium text-gray-700 shrink-0">📎 קובץ שיישלח:</label>
+                        {emailAttachments.length > 1 ? (
+                          <select
+                            className="flex-1 min-w-0 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-blue-400"
+                            value={emailForm.attId}
+                            onChange={(e) => setEmailForm((p) => ({ ...p, attId: e.target.value, docLink: e.target.value ? apiUrl(`/public/attachments/${e.target.value}/price-quote.docx`) : p.docLink }))}
+                          >
+                            {emailAttachments.map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.fileName}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleDateString('he-IL')} ${new Date(a.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="flex-1 min-w-0 truncate text-sm font-semibold text-gray-800">{emailAttachments.find((a) => a.id === emailForm.attId)?.fileName || 'הצעת מחיר.docx'}</span>
+                        )}
+                      </div>
+                      <label className={`mt-2 flex items-center justify-center gap-2 rounded-lg border border-dashed border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 cursor-pointer ${emailAttBusy ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input
+                          type="file"
+                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          className="hidden"
+                          disabled={emailAttBusy}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadEditedQuoteFile(f); e.currentTarget.value = ''; }}
+                        />
+                        {emailAttBusy ? 'מצרף…' : '⬆️ העלה גרסה ערוכה (תחליף את הקובץ שיישלח)'}
+                      </label>
+                      <div className="mt-1 text-[11px] text-gray-400">ערכת את הקובץ שירד? העלה אותו כאן — הגרסה הזו תצורף במקום המקורית.</div>
+
+                      {/* ── קבצים נוספים: יישלחו בנוסף לקובץ הראשי, וכל DOCX יומר ל-PDF ── */}
+                      {emailExtraAttIds.length > 0 && (
+                        <div className="mt-2.5 flex flex-wrap gap-1.5">
+                          {emailExtraAttIds.map((eid) => {
+                            const nm = emailAttachments.find((a) => a.id === eid)?.fileName || 'קובץ';
+                            return (
+                              <span key={eid} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] text-emerald-800" title={nm}>
+                                📎 <span className="max-w-[160px] truncate">{nm}</span>
+                                <button type="button" onClick={() => removeExtraEmailAttachment(eid)} className="text-emerald-500 hover:text-emerald-700" aria-label="הסר קובץ">✕</button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <label className={`mt-2 flex items-center justify-center gap-2 rounded-lg border border-dashed border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer ${emailAttBusy ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <input
+                          type="file"
+                          className="hidden"
+                          disabled={emailAttBusy}
+                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void addEmailAttachmentFile(f); e.currentTarget.value = ''; }}
+                        />
+                        {emailAttBusy ? 'מצרף…' : '➕ הוסף קובץ (יישלח בנוסף — יומר ל-PDF)'}
+                      </label>
+                    </div>
                     {/* בקשת שינוי מ-AI */}
                     <div>
-                      <label className="mb-1 block text-sm font-semibold text-violet-700">✨ בקש מ-AI לשנות</label>
+                      <label className="mb-1 block text-sm font-semibold text-blue-700">✨ בקש מ-AI לשנות</label>
                       <div className="flex gap-2">
-                        <input className="h-11 flex-1 rounded-xl border border-violet-200 bg-white px-3 text-base outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100"
+                        <input className="h-11 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                           value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
                           placeholder="'יותר קצר', 'תוסיף שזמינים השבוע'…"
                           onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim() && !aiBusy) generateAiDraft(); }} />
-                        <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="rounded-xl bg-violet-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-violet-700 disabled:opacity-50"
+                        <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
                           onClick={() => generateAiDraft()}>
                           {aiBusy ? 'מעדכן…' : 'עדכן'}
                         </button>
@@ -2942,7 +3251,7 @@ export function QuoteNewScreen({
             <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
               {!emailHasDraft && <span className="me-auto text-sm text-gray-400">נסח או דלג לכתיבה ידנית כדי לשלוח</span>}
               <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
-              <button type="button" disabled={emailSending || !emailHasDraft || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-sky-500 px-10 py-3 text-base font-bold text-white hover:bg-sky-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
+              <button type="button" disabled={emailSending || !emailHasDraft || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-blue-500 px-10 py-3 text-base font-bold text-white hover:bg-blue-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
                 {emailSending ? 'שולח…' : '✉️ שלח'}
               </button>
             </div>

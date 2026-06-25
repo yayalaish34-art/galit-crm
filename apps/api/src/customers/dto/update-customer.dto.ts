@@ -26,6 +26,7 @@ export class UpdateCustomerDto {
   @IsOptional() @IsString() status?: string;
   @IsOptional() @IsArray() @IsString({ each: true }) services?: string[];
   @IsOptional() @IsString() notes?: string | null;
+  @IsOptional() @IsString() leadSource?: string | null;
   @IsOptional() @IsString() phone2?: string | null;
   @IsOptional() @IsString() phone3?: string | null;
   @IsOptional() @IsString() fax?: string | null;
@@ -100,6 +101,11 @@ export class UpdateCustomerDto {
   @IsOptional() @IsString() feature4?: string | null;
   @IsOptional() @IsString() companyWall?: string | null;
   @IsOptional() @IsString() feature8?: string | null;
+
+  /** סיווג "לא רלוונטי" */
+  @IsOptional() @IsString() notRelevantReason?: string | null;
+  @IsOptional() @IsString() notRelevantNote?: string | null;
+  @IsOptional() @IsString() notRelevantAt?: string | null;
 }
 
 export class ReferralSourceRowDto {
@@ -187,6 +193,8 @@ export class CreateCustomerDocumentDto {
   @IsOptional() @IsString() mimeType?: string | null;
   @IsOptional() @IsNumber() sizeBytes?: number | null;
   @IsOptional() @IsString() importLegacyId?: string | null;
+  /** תוכן הקובץ כ-base64 (ללא תחילית data:) — לאחסון בקובץ ב-DB */
+  @IsOptional() @IsString() dataBase64?: string | null;
 }
 
 export class UpdateCustomerDocumentDto {

@@ -13,5 +13,11 @@ export class DashboardController {
   manager(@Req() req: any) {
     return this.dashboardService.manager(req.user);
   }
+
+  @Get('me')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
+  me(@Req() req: any) {
+    return this.dashboardService.me(req.user);
+  }
 }
 

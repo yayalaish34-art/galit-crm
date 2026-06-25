@@ -1,4 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -6,7 +7,10 @@ import { LoginDto } from './login.dto';
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwt: JwtService,
+  ) {}
 
   async login(dto: LoginDto) {
     const email = dto.email.trim();
@@ -26,8 +30,17 @@ export class AuthService {
     const { password: _passwordOmit, ...safe } = user;
     void _passwordOmit;
 
+    // Signed JWT — the ONLY trusted proof of identity/role for protected endpoints.
+    const accessToken = this.jwt.sign({
+      sub: safe.id,
+      role: safe.role,
+      email: safe.email,
+      name: safe.name,
+    });
+
     return {
       ...safe,
+      accessToken,
       token: {
         id: safe.id,
         name: safe.name,

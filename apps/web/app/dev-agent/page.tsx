@@ -64,7 +64,7 @@ export default function DevAgentPage() {
 
   const statusColor: Record<RunStatus, string> = {
     idle: '#64748b',
-    running: '#3b82f6',
+    running: '#2563eb',
     success: '#22c55e',
     failed: '#ef4444',
   };
@@ -80,7 +80,7 @@ export default function DevAgentPage() {
     <div style={{ direction: 'rtl', minHeight: '100vh', background: '#f1f5f9', padding: '24px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '28px' }}>
-        <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'linear-gradient(135deg, #16a34a, #22c55e)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>
         </div>
         <div>
@@ -88,10 +88,10 @@ export default function DevAgentPage() {
           <p style={{ fontSize: '20px', color: '#64748b', margin: 0 }}>הפעלת Claude Code אוטומטית מתוך המערכת</p>
         </div>
         <div style={{ marginRight: 'auto', display: 'flex', gap: '12px' }}>
-          <a href="/dev-assistant" style={{ fontSize: '20px', fontWeight: 700, color: '#7c3aed', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #7c3aed', background: 'white' }}>
+          <a href="/dev-assistant" style={{ fontSize: '20px', fontWeight: 700, color: '#2563eb', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #2563eb', background: 'white' }}>
             עוזר פיתוח
           </a>
-          <a href="/dashboard" style={{ fontSize: '20px', fontWeight: 700, color: '#059669', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #059669', background: 'white' }}>
+          <a href="/dashboard" style={{ fontSize: '20px', fontWeight: 700, color: '#16a34a', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #16a34a', background: 'white' }}>
             חזרה לדשבורד
           </a>
         </div>
@@ -100,8 +100,8 @@ export default function DevAgentPage() {
       {/* Task Input */}
       <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
           </div>
           <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#1e293b', margin: 0 }}>משימת פיתוח</h2>
         </div>
@@ -127,7 +127,7 @@ export default function DevAgentPage() {
             boxSizing: 'border-box',
             opacity: status === 'running' ? 0.6 : 1,
           }}
-          onFocus={(e) => (e.target.style.borderColor = '#059669')}
+          onFocus={(e) => (e.target.style.borderColor = '#16a34a')}
           onBlur={(e) => (e.target.style.borderColor = '#e2e8f0')}
         />
         <button
@@ -138,7 +138,7 @@ export default function DevAgentPage() {
             padding: '16px 48px',
             borderRadius: '14px',
             border: 'none',
-            background: !task.trim() || status === 'running' ? '#cbd5e1' : 'linear-gradient(135deg, #059669, #10b981)',
+            background: !task.trim() || status === 'running' ? '#cbd5e1' : 'linear-gradient(135deg, #16a34a, #22c55e)',
             color: 'white',
             fontSize: '24px',
             fontWeight: 800,
@@ -190,8 +190,8 @@ export default function DevAgentPage() {
       {result && (
         <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#e0e7ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             </div>
             <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#1e293b', margin: 0 }}>לוגים</h2>
           </div>

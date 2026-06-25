@@ -20,6 +20,23 @@ const OMIT_SENSITIVE = {
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * שינוי סיסמה עצמי — המשתמש המחובר משנה את הסיסמה של עצמו בלבד (userId מגיע מה-JWT).
+   * דורש אימות הסיסמה הנוכחית כדי למנוע השתלטות על סשן פתוח.
+   */
+  async changeOwnPassword(userId: string | undefined, currentPassword: string, newPassword: string) {
+    if (!userId) throw new UnauthorizedException();
+    const next = String(newPassword || '');
+    if (next.length < 6) throw new BadRequestException('הסיסמה החדשה חייבת להכיל לפחות 6 תווים');
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+    const ok = await bcrypt.compare(String(currentPassword || ''), user.password);
+    if (!ok) throw new BadRequestException('הסיסמה הנוכחית שגויה');
+    const hash = await bcrypt.hash(next, 10);
+    await this.prisma.user.update({ where: { id: userId }, data: { password: hash } });
+    return { success: true as const };
+  }
+
   private async assertCanManageUsers(actor?: { id?: string; role?: string }) {
     const role = (actor?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
@@ -159,9 +176,25 @@ export class UsersService {
   }
 
   async update(id: string, data: any, actor?: { id?: string; role?: string }) {
-    await this.assertCanManageUsers(actor);
+    // כל עובד רשאי לערוך את הפרופיל שלו (שם, טלפון, Outlook, חתימה).
+    // עריכת עובד אחר — רק מי שמורשה לנהל עובדים.
+    const isSelf = !!actor?.id && actor.id === id;
+    const isManager = ['ADMIN', 'MANAGER'].includes((actor?.role || '').toUpperCase());
+    if (!isSelf) {
+      await this.assertCanManageUsers(actor);
+    }
 
     const normalized: any = { ...(data || {}) };
+    // עריכה עצמית של עובד שאינו מנהל — מניעת הסלמת הרשאות: מסירים שדות תפקיד/הרשאות/ארגון.
+    if (isSelf && !isManager) {
+      for (const f of [
+        'role', 'status', 'canViewFinance', 'canEditFinance', 'canDeleteCustomers',
+        'canDeleteLeads', 'canManageUsers', 'canManagePermissions', 'canViewAllRecords',
+        'serviceDepartments', 'employeeNumber',
+      ]) {
+        delete normalized[f];
+      }
+    }
     // Image fields are handled via dedicated endpoints — never via generic update.
     delete normalized.mailSignatureImage;
     delete normalized.mailSignatureImageType;
@@ -237,6 +270,87 @@ export class UsersService {
       dataBase64: Buffer.from(u.mailSignatureImage).toString('base64'),
       mimeType: u.mailSignatureImageType || 'image/png',
     };
+  }
+
+  // ───────────────────────── חתימות מרובות ─────────────────────────
+
+  /** רשימת כל החתימות של משתמש (כולל base64 לתצוגה מקדימה). */
+  async listSignatures(userId: string) {
+    const sigs = await this.prisma.userSignature.findMany({
+      where: { userId },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+    return sigs.map((s) => ({
+      id: s.id,
+      title: s.title,
+      imageType: s.imageType,
+      sortOrder: s.sortOrder,
+      dataBase64: Buffer.from(s.image).toString('base64'),
+    }));
+  }
+
+  /** הוספת חתימה חדשה (base64 נכנס, נשמר כבייטים). */
+  async addSignature(
+    userId: string,
+    title: string,
+    dataBase64: string,
+    mimeType: string | null,
+    actor?: { id?: string; role?: string },
+  ) {
+    if (actor?.id !== userId) await this.assertCanManageUsers(actor);
+    if (!dataBase64) throw new BadRequestException('חסרה תמונת חתימה');
+    const clean = dataBase64.replace(/^data:[^;]+;base64,/, '');
+    const buf = Buffer.from(clean, 'base64');
+    if (buf.length > 2 * 1024 * 1024) {
+      throw new BadRequestException('תמונת החתימה גדולה מדי (מקסימום 2MB)');
+    }
+    const count = await this.prisma.userSignature.count({ where: { userId } });
+    const created = await this.prisma.userSignature.create({
+      data: {
+        userId,
+        title: (title || '').trim() || `חתימה ${count + 1}`,
+        image: Uint8Array.from(buf),
+        imageType: mimeType || 'image/png',
+        sortOrder: count,
+      },
+    });
+    return {
+      id: created.id,
+      title: created.title,
+      imageType: created.imageType,
+      sortOrder: created.sortOrder,
+      dataBase64: Buffer.from(created.image).toString('base64'),
+    };
+  }
+
+  /** עדכון כותרת חתימה. */
+  async updateSignature(
+    userId: string,
+    sigId: string,
+    data: { title?: string },
+    actor?: { id?: string; role?: string },
+  ) {
+    if (actor?.id !== userId) await this.assertCanManageUsers(actor);
+    const sig = await this.prisma.userSignature.findUnique({ where: { id: sigId } });
+    if (!sig || sig.userId !== userId) throw new BadRequestException('חתימה לא נמצאה');
+    const updated = await this.prisma.userSignature.update({
+      where: { id: sigId },
+      data: { title: (data.title || '').trim() || sig.title },
+    });
+    return { id: updated.id, title: updated.title };
+  }
+
+  /** מחיקת חתימה. */
+  async deleteSignature(
+    userId: string,
+    sigId: string,
+    actor?: { id?: string; role?: string },
+  ) {
+    if (actor?.id !== userId) await this.assertCanManageUsers(actor);
+    const sig = await this.prisma.userSignature.findUnique({ where: { id: sigId } });
+    if (!sig || sig.userId !== userId) throw new BadRequestException('חתימה לא נמצאה');
+    await this.prisma.userSignature.delete({ where: { id: sigId } });
+    return { success: true };
   }
 
   async remove(id: string, actor?: { id?: string; role?: string }) {

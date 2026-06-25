@@ -468,6 +468,52 @@ export function removeTableColumnByPlaceholder(documentXml: string, placeholder:
 }
 
 /**
+ * חלק גדול מהתבניות מכילות סימנייה ריקה fldCity (מיקום עיר הלקוח במכתב) —
+ * בלי placeholder בתוכה ובלי {customerCity} בשום מקום אחר במסמך. התוצאה:
+ * עיר הלקוח לעולם לא מודפסת, גם כשללקוח יש עיר.
+ *
+ * הפונקציה רצה לפני render: אם סימניית fldCity ריקה (אין בה {customerCity}
+ * ואין טקסט), ואין {customerCity} במקום אחר בתבנית — מזריקה ריצת טקסט עם
+ * {customerCity} בתוך הסימנייה, תוך שימוש בעיצוב הריצה של פסקת הסימנייה
+ * (David, מודגש, קו תחתון, RTL). docxtemplater מחליף אח״כ את ה-placeholder.
+ * אם כבר קיים {customerCity} (בסימנייה או בתבנית) — לא נוגעת, כדי לא לכפול.
+ */
+export function ensureCityPlaceholderInBookmark(documentXml: string): string {
+  // אם כבר יש placeholder עיר כלשהו בתבנית — אין מה לעשות
+  if (documentXml.includes('{customerCity}')) return documentXml;
+
+  const startRe = /<w:bookmarkStart\b[^>]*\bw:name="fldCity"[^>]*\/>/;
+  const sm = startRe.exec(documentXml);
+  if (!sm) return documentXml;
+  const startEnd = sm.index + sm[0].length;
+
+  const endRe = /<w:bookmarkEnd\b[^>]*\/>/g;
+  endRe.lastIndex = startEnd;
+  const em = endRe.exec(documentXml);
+  if (!em) return documentXml;
+
+  // הסימנייה כבר מכילה טקסט/ריצה — לא מזריקים
+  const inner = documentXml.slice(startEnd, em.index);
+  if (/<w:t[ >]/.test(inner)) return documentXml;
+
+  // עיצוב הריצה: מתוך <w:rPr> של פסקת הסימנייה אם קיים, אחרת David 14 מודגש קו-תחתון RTL
+  let rPr =
+    '<w:rPr><w:rFonts w:cs="David"/><w:b/><w:bCs/><w:sz w:val="28"/><w:szCs w:val="28"/><w:u w:val="single"/><w:rtl/></w:rPr>';
+  const pStart = Math.max(
+    documentXml.lastIndexOf('<w:p ', sm.index),
+    documentXml.lastIndexOf('<w:p>', sm.index),
+  );
+  if (pStart !== -1) {
+    const pPrM = documentXml.slice(pStart, sm.index).match(/<w:pPr>[\s\S]*?<\/w:pPr>/);
+    const rPrM = pPrM ? pPrM[0].match(/<w:rPr>[\s\S]*?<\/w:rPr>/) : null;
+    if (rPrM) rPr = rPrM[0];
+  }
+
+  const run = `<w:r>${rPr}<w:t xml:space="preserve">{customerCity}</w:t></w:r>`;
+  return documentXml.slice(0, startEnd) + run + documentXml.slice(startEnd);
+}
+
+/**
  * הזרקת שורת "הנחה {discountPercent}" לטבלת הסיכום כשהיא חסרה.
  * חלק מהתבניות (10 מתוך 63) בנו טבלת סיכום בלי שורת הנחה — רק
  * "לאחר הנחה" / "מע״מ" / "סה״כ לתשלום" — כך שגם כשיש הנחה היא לא הוצגה.
@@ -646,6 +692,8 @@ export class DocxMergeService {
       const preFile = zip.file('word/document.xml');
       if (preFile) {
         let pre = preFile.asText();
+        // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
+        pre = ensureCityPlaceholderInBookmark(pre);
         // אין מחיקת עמודת "% הנחה לשורה": המבנה החדש מכיל שני זוגות טבלאות —
         // זוג ההנחה ({#hasDiscount}) כבר כולל את עמודת ההנחה, וזוג ללא-הנחה
         // ({^hasDiscount}) כבר בלעדיה. docxtemplater בוחר את הזוג הנכון לפי

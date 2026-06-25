@@ -72,11 +72,71 @@ model User {
   /// חתימת מייל אישית — מתווספת אוטומטית לגוף הצעות מחיר שנשלחות
   mailSignature         String?
   /// תמונת חתימה (לוגו/חתימה סרוקה) — מוטמעת בגוף המייל מתחת לטקסט
+  /// LEGACY: חתימה בודדת. נשמר לתאימות לאחור; חתימות מרובות נשמרות ב-UserSignature
   mailSignatureImage    Bytes?
   mailSignatureImageType String?
+  /// חתימות מרובות (תמונה + כותרת) — העובד בוחר את המתאימה בעת שליחת הצעה
+  signatures            UserSignature[] @relation("UserSignatures")
+  /// לידים נכנסים מהמייל שמשויכים למשתמש (owner)
+  incomingLeads         IncomingLead[]  @relation("IncomingLeadOwner")
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
   followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")
+}
+
+/// חתימת מייל מרובה למשתמש — תמונה + כותרת. מאפשר לעובד להחזיק כמה חתימות
+/// (לפי שירות/הקשר) ולבחור את הנכונה בעת שליחת הצעת מחיר.
+model UserSignature {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation("UserSignatures", fields: [userId], references: [id], onDelete: Cascade)
+  /// כותרת לזיהוי החתימה (למשל "חתימה כללית", "בדיקות מים", "קרינה")
+  title     String
+  /// בייטים של תמונת החתימה
+  image     Bytes
+  imageType String   @default("image/png")
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// ליד נכנס שזוהה אוטומטית ממייל ב-Outlook (נושא המכיל "ליד").
+/// משמש כמקור-אמת לפרטי הליד; ה-Task שנוצר ממנו מופיע ראשון ברשימת המשימות.
+model IncomingLead {
+  id              String             @id @default(uuid())
+  /// מזהה ההודעה ב-Graph (פר-תיבה) — ייחודי, מונע יצירה כפולה לאותו משתמש
+  messageId       String             @unique
+  /// Message-ID מ-RFC 5322 — זהה בכל תיבות הנמענים; משמש לקיבוץ אותו מייל בין עובדים
+  internetMessageId String?
+  subject         String
+  /// גוף המייל = פרטי הליד שהוזנו
+  body            String?
+  fromName        String?
+  fromEmail       String?
+  receivedAt      DateTime
+  status          IncomingLeadStatus @default(NEW)
+  /// בעל הטיפול הנוכחי (מי שקיבל את המייל, או מי שהועבר אליו)
+  ownerId         String
+  owner           User               @relation("IncomingLeadOwner", fields: [ownerId], references: [id])
+  /// אם הועבר — מזהה העובד שאליו הועבר (לתיעוד)
+  transferredToId String?
+  /// ה-Task שנוצר עבור הליד
+  taskId          String?
+  /// מתי הוצגה התראה צידית (כדי לא להקפיץ שוב)
+  notifiedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([internetMessageId])
+}
+
+enum IncomingLeadStatus {
+  NEW          // הגיע, ממתין — מוצג טופס "התחל טיפול / העבר"
+  ACTIVE       // התחיל טיפול או הועבר — מוצג ישירות עם פרטי הליד
+  DISMISSED    // נדחה
 }
 
 model Project {
@@ -154,6 +214,8 @@ model Customer {
   status      String         @default("ACTIVE")
   services    String[]
   notes       String?
+  /// מקור הגעה של הלקוח (נשמר מטופס "פתיחת פנייה" / כרטיס הלקוח)
+  leadSource  String?
   /// שדות מיובאים Followup / מערכת ישנה
   phone2           String?
   phone3           String?
@@ -221,6 +283,29 @@ model Customer {
   creditEnabled           Boolean?
   creditNumber            String?
   creditExpiry            String?
+
+  /// אוטומציית משוב ופולואו-אפ (לכל לקוח) — נשלט מסקשן "משוב"
+  /// משוב: חותמת זמן של בקשת המשוב האחרונה שנשלחה (למניעת כפילויות)
+  feedbackRequestedAt DateTime?
+  /// משוב: החרגת הלקוח משליחה אוטומטית של בקשת משוב
+  feedbackOptOut      Boolean?
+  /// פולואו-אפ: הפעלת פולואו-אפ אוטומטי ללקוח הספציפי הזה
+  autoFollowupEnabled Boolean?
+  /// פולואו-אפ: מרווח ימים מותאם אישית (דורס את הגלובלי)
+  followupIntervalDays Int?
+  /// פולואו-אפ: ערוץ ('email' | 'sms') — אם ריק, ברירת המחדל הגלובלית
+  followupChannel      String?
+  /// פולואו-אפ: מתי נשלח לאחרונה / מתי הבא צפוי
+  lastFollowupAt       DateTime?
+  nextFollowupAt       DateTime?
+
+  /// סיווג "לא רלוונטי" — נקבע כשעובד מסמן משימה כלא רלוונטית
+  /// קטגוריית הסיבה (יקר מדי / אי-התאמה בשירות / לא מעוניין / זמן לא טוב / לא ניתן ליצור קשר / אחר)
+  notRelevantReason   String?
+  /// פירוט חופשי (בעיקר עבור "אחר")
+  notRelevantNote     String?
+  /// מתי סווג כלא רלוונטי
+  notRelevantAt       DateTime?
 
   /// Legacy card — פרטים נוספים
   microwaveModel   String?
@@ -735,7 +820,12 @@ model Task {
   currentStage         Int?
   currentStageChangedAt DateTime?
 
+  /// אם מקורו של ה-task בליד נכנס מהמייל — מזהה ה-IncomingLead (לסידור-ראשון ולטופס המיוחד)
+  incomingLeadId       String?
+
   attachments TaskAttachment[]
+
+  @@index([incomingLeadId])
 }
 
 /// קבצים מצורפים למשימה (למשל: מסמך הצעת מחיר ממוזג) — נשמרים ישירות ב-DB כך שיישארו זמינים תמיד
@@ -797,6 +887,8 @@ model Document {
   description   String?
   mimeType      String?
   sizeBytes     Int?
+  /// תוכן הקובץ כ-base64 (להצעות מחיר חתומות וקבצים שמאוחסנים ב-DB — אין object storage)
+  dataBase64    String?      @db.Text
   documentDate  DateTime?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -947,6 +1039,7 @@ enum ReportStatus {
 enum DocumentType {
   CONTRACT
   QUOTE
+  SIGNED_QUOTE
   PLAN
   PHOTO
   REPORT

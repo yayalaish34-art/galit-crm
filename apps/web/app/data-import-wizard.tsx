@@ -219,7 +219,7 @@ export function DataImportWizard({
                 disabled={disabled}
                 onClick={() => setEntity(key)}
                 className={cn(
-                  'rounded-3xl border p-5 text-right shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/30',
+                  'rounded-3xl border p-5 text-right shadow-sm transition hover:border-green-300 hover:bg-green-50/30',
                   'border-slate-200 bg-white',
                 )}
               >
@@ -228,7 +228,7 @@ export function DataImportWizard({
                   <span
                     className={cn(
                       'rounded-full px-2 py-0.5 text-xs font-semibold',
-                      m.mode === 'full' ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900',
+                      m.mode === 'full' ? 'bg-green-100 text-green-900' : 'bg-amber-100 text-amber-900',
                     )}
                   >
                     {m.mode === 'full' ? 'פעיל' : 'תשתית'}
@@ -245,7 +245,7 @@ export function DataImportWizard({
         <div className="space-y-4">
           <button
             type="button"
-            className="text-sm font-semibold text-emerald-800 underline-offset-2 hover:underline"
+            className="text-sm font-semibold text-green-800 underline-offset-2 hover:underline"
             onClick={() => setEntity(null)}
           >
             ← חזרה לבחירת סוג ייבוא

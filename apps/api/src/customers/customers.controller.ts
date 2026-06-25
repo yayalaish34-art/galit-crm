@@ -35,6 +35,11 @@ export class CustomersController {
     return this.customersService.findPaged(query.page, query.limit, query.q, query.type);
   }
 
+  @Get('not-relevant')
+  listNotRelevant() {
+    return this.customersService.listNotRelevant();
+  }
+
   @Get(':id/full')
   findFull(@Param('id') id: string) {
     return this.customersService.findFull(id);
@@ -68,6 +73,11 @@ export class CustomersController {
   @Put(':id/external-data-rows')
   replaceExternalData(@Param('id') id: string, @Body() body: ReplaceExternalDataDto) {
     return this.customersService.replaceExternalDataRows(id, body);
+  }
+
+  @Get(':id/documents')
+  listDocuments(@Param('id') id: string, @Query('type') type?: string) {
+    return this.customersService.listCustomerDocuments(id, type);
   }
 
   @Post(':id/documents')

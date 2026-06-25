@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { apiFetch, apiUrl } from '../lib/api-base';
 import { parseApiErrorResponse } from '../lib/api-error';
+import { isAdminRole } from '../lib/roles';
 
 type SessionUser = { id: string; role: string };
 
@@ -94,6 +95,10 @@ export default function TasksLegacyPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [citySearch, setCitySearch] = useState('');
   const [textSearch, setTextSearch] = useState('');
+  // 'mine' = רק המשימות של העובד המחובר (ברירת מחדל), 'all' = כל המשימות
+  const [taskScope, setTaskScope] = useState<'mine' | 'all'>('mine');
+
+  const isAdmin = useMemo(() => isAdminRole(session?.role), [session]);
 
   useEffect(() => {
     setSession(readSession());
@@ -159,6 +164,7 @@ export default function TasksLegacyPage() {
         .filter(Boolean)
         .join(' ');
       if (quickText) params.set('text', quickText);
+      if (taskScope === 'all') params.set('scope', 'all');
       const res = await apiFetch(apiUrl(`/tasks?${params.toString()}`), { authUser: session });
       if (!res.ok) throw new Error(await parseApiErrorResponse(res));
       const data = (await res.json()) as TaskRow[];
@@ -178,12 +184,40 @@ export default function TasksLegacyPage() {
     if (!session) return;
     void loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, taskScope]);
 
   return (
     <main className="min-h-screen bg-[#ececec] p-3 text-slate-800" dir="rtl">
       <div className="mx-auto max-w-[1500px] rounded border border-slate-300 bg-[#f3f3f3]">
-        <header className="border-b border-slate-300 bg-[#efefef] px-3 py-2 text-sm font-semibold">מטלות</header>
+        <header className="flex items-center justify-between border-b border-slate-300 bg-[#efefef] px-3 py-2 text-sm font-semibold">
+          <span>מטלות</span>
+          {session && !isAdmin ? (
+            <div className="flex items-center gap-1 text-xs font-normal">
+              <button
+                type="button"
+                className={`rounded border px-3 py-1 ${
+                  taskScope === 'mine'
+                    ? 'border-blue-700 bg-blue-700 text-white'
+                    : 'border-slate-300 bg-white text-slate-700'
+                }`}
+                onClick={() => setTaskScope('mine')}
+              >
+                המשימות שלי
+              </button>
+              <button
+                type="button"
+                className={`rounded border px-3 py-1 ${
+                  taskScope === 'all'
+                    ? 'border-blue-700 bg-blue-700 text-white'
+                    : 'border-slate-300 bg-white text-slate-700'
+                }`}
+                onClick={() => setTaskScope('all')}
+              >
+                כל המשימות
+              </button>
+            </div>
+          ) : null}
+        </header>
 
         <section className="grid grid-cols-1 gap-3 border-b border-slate-300 p-3 lg:grid-cols-3">
           <div className="space-y-2 rounded border border-slate-300 bg-white p-2">
@@ -274,10 +308,10 @@ export default function TasksLegacyPage() {
         <section className="p-2">
           <div className="max-h-[400px] overflow-auto border border-slate-300 bg-white">
             <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-[#2d6ea3] text-white">
+              <thead className="sticky top-0 bg-[#2563eb] text-white">
                 <tr>
                   {columns.map((c) => (
-                    <th key={c.label} className="border border-[#8db0cf] px-2 py-1 text-right font-semibold">
+                    <th key={c.label} className="border border-[#93c5fd] px-2 py-1 text-right font-semibold">
                       {c.label}
                     </th>
                   ))}

@@ -284,16 +284,16 @@ export default function NewOrderPage() {
         <section className="grid grid-cols-[1fr_28px] gap-1 border-b border-slate-300 p-1">
           <div className="overflow-auto border border-slate-300 bg-white">
             <table className="w-full border-collapse text-xs">
-              <thead className="bg-[#2d6ea3] text-white">
+              <thead className="bg-[#2563eb] text-white">
                 <tr>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">קוד</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">מק"ט</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">תיאור המוצר</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">ערוץ הפצה</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">כמות</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">מחיר</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">הנחה %</th>
-                  <th className="border border-[#8db0cf] px-2 py-1 text-right">סה"כ</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">קוד</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">מק"ט</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">תיאור המוצר</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">ערוץ הפצה</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">כמות</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">מחיר</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">הנחה %</th>
+                  <th className="border border-[#93c5fd] px-2 py-1 text-right">סה"כ</th>
                 </tr>
               </thead>
               <tbody>
@@ -381,13 +381,13 @@ export default function NewOrderPage() {
               <div className="grid grid-cols-[1fr_30px] gap-1 p-2 text-xs">
                 <div className="overflow-auto border border-slate-300">
                   <table className="w-full border-collapse">
-                    <thead className="bg-[#2d6ea3] text-white">
+                    <thead className="bg-[#2563eb] text-white">
                       <tr>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">תאור המסמך</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">סוג המסמך</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">שם קובץ</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">תאריך</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">משתמש</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">תאור המסמך</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">סוג המסמך</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">שם קובץ</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">תאריך</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">משתמש</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -416,14 +416,14 @@ export default function NewOrderPage() {
               <div className="grid grid-cols-[1fr_30px] gap-1 p-2 text-xs">
                 <div className="overflow-auto border border-slate-300">
                   <table className="w-full border-collapse">
-                    <thead className="bg-[#2d6ea3] text-white">
+                    <thead className="bg-[#2563eb] text-white">
                       <tr>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">מספר תקופה</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">מספר אישור</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">תאריך חיוב</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">אמצעי חיוב</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">סוג עיסקה</th>
-                        <th className="border border-[#8db0cf] px-2 py-1 text-right">סכום חיוב</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">מספר תקופה</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">מספר אישור</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">תאריך חיוב</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">אמצעי חיוב</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">סוג עיסקה</th>
+                        <th className="border border-[#93c5fd] px-2 py-1 text-right">סכום חיוב</th>
                       </tr>
                     </thead>
                     <tbody>

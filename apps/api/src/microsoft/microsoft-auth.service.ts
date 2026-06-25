@@ -13,8 +13,11 @@ export class MicrosoftAuthService {
   private readonly logger = new Logger(MicrosoftAuthService.name);
 
   // offline_access → refresh tokens; Mail.Send → send; User.Read → resolve the mailbox address;
-  // Calendars.ReadWrite → create calendar events / send meeting invites (שלב "תיאום").
-  static readonly SCOPES = 'offline_access Mail.Send User.Read Calendars.ReadWrite';
+  // Calendars.ReadWrite → create calendar events / send meeting invites (שלב "תיאום");
+  // Mail.Read → קריאת תיבת הדואר לזיהוי מיילים נכנסים עם "ליד" בנושא (לידים אוטומטיים);
+  // Files.ReadWrite → המרת DOCX ל-PDF דרך ה-OneDrive (מנוע Word — כותרת/עיצוב זהים לתבנית).
+  // הוספת scope מחייבת חיבור-מחדש חד-פעמי של כל משתמש כדי לאשר את ההרשאה החדשה.
+  static readonly SCOPES = 'offline_access Mail.Send Mail.Read User.Read Calendars.ReadWrite Files.ReadWrite';
 
   constructor(private readonly prisma: PrismaService) {}
 

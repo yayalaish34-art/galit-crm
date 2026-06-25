@@ -161,10 +161,10 @@ export default function EventsHistoryPage() {
         <section className="p-2">
           <div className="max-h-[300px] overflow-auto border border-slate-300 bg-white">
             <table className="w-full border-collapse text-xs">
-              <thead className="sticky top-0 bg-[#2d6ea3] text-white">
+              <thead className="sticky top-0 bg-[#2563eb] text-white">
                 <tr>
                   {columns.map((c) => (
-                    <th key={c.label} className="border border-[#8db0cf] px-2 py-1 text-right font-semibold">{c.label}</th>
+                    <th key={c.label} className="border border-[#93c5fd] px-2 py-1 text-right font-semibold">{c.label}</th>
                   ))}
                 </tr>
               </thead>

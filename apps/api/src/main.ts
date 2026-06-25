@@ -44,11 +44,15 @@ async function bootstrap() {
       return true;
     }
 
-    // Main Vercel domain
-    if (origin === 'https://galit-crm.vercel.app') return true;
-
-    // Any Vercel preview domain (requested)
-    if (/^https:\/\/.+\.vercel\.app$/.test(origin)) return true;
+    // Production frontends — the `web` Vercel project's stable aliases ONLY.
+    // (Previously any *.vercel.app was allowed; tightened to these specific origins.)
+    // Add more without redeploy via the CORS_ORIGIN env var (checked above).
+    const ALLOWED_PROD_ORIGINS = [
+      'https://web-mu-one-96.vercel.app',
+      'https://web-yayalaish34-6177s-projects.vercel.app',
+      'https://web-yayalaish34-6177-yayalaish34-6177s-projects.vercel.app',
+    ];
+    if (ALLOWED_PROD_ORIGINS.includes(origin)) return true;
 
     return false;
   };

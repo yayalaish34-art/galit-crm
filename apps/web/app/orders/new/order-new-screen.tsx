@@ -30,7 +30,7 @@ const PRODUCT_ROWS: QuoteLookupRow[] = [
 const sectionCls = 'rounded-lg border border-slate-200 bg-slate-50/90 p-3';
 const sectionTitle = 'text-sm font-bold text-slate-800 mb-2 pb-1 border-b border-slate-200';
 const fieldLabel = 'block text-xs font-medium text-slate-600 mb-0.5';
-const fieldInput = 'w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300';
+const fieldInput = 'w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm outline-none focus:border-green-400 focus:ring-1 focus:ring-green-300';
 
 /* ─── line item type ─────────────────────────────────────────────────── */
 type LineItem = {
@@ -223,7 +223,7 @@ export function OrderNewScreen({
             חזרה
           </button>
         )}
-        <button type="button" className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">שמור</button>
+        <button type="button" className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700">שמור</button>
         <div className="flex-1" />
         <span className="text-xs text-slate-500">הזמנה</span>
         {form.orderCode && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">#{form.orderCode}</span>}
@@ -273,7 +273,7 @@ export function OrderNewScreen({
             <label className={fieldLabel}>איש קשר</label>
             <div className="flex items-center gap-1">
               <input className={fieldInput + ' flex-1'} value={form.contactName} onChange={set('contactName')} />
-              <button type="button" onClick={openContactPicker} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-indigo-600 hover:bg-slate-50" title="בחר איש קשר">👤</button>
+              <button type="button" onClick={openContactPicker} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-blue-600 hover:bg-slate-50" title="בחר איש קשר">👤</button>
             </div>
           </div>
           <div>
@@ -313,16 +313,16 @@ export function OrderNewScreen({
         <div className="flex items-center justify-between mb-2 pb-1 border-b border-slate-200">
           <span className="text-sm font-bold text-slate-800">פריטים</span>
           <div className="flex items-center gap-1">
-            <button type="button" onClick={addLine} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-emerald-700">+ שורה</button>
+            <button type="button" onClick={addLine} className="rounded bg-green-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-green-700">+ שורה</button>
             <button type="button" onClick={() => selectedLineIdx !== null && removeLine(selectedLineIdx)} className="rounded bg-red-500 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-600">× מחק</button>
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs" dir="rtl">
             <thead>
-              <tr className="bg-emerald-700 text-white">
+              <tr className="bg-green-700 text-white">
                 {['קוד', 'מק"ט', 'תאור המוצר', 'ערוץ', 'כמות', 'מחיר', 'הנחה%', 'סה"כ'].map((h) => (
-                  <th key={h} className="border border-emerald-600 px-2 py-1 text-right font-semibold whitespace-nowrap">{h}</th>
+                  <th key={h} className="border border-green-600 px-2 py-1 text-right font-semibold whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -331,7 +331,7 @@ export function OrderNewScreen({
                 const tot = lineTotal(li);
                 const sel = selectedLineIdx === idx;
                 return (
-                  <tr key={li.id} className={sel ? 'bg-emerald-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} onClick={() => setSelectedLineIdx(idx)}>
+                  <tr key={li.id} className={sel ? 'bg-green-50' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50'} onClick={() => setSelectedLineIdx(idx)}>
                     <td className="border border-slate-200 px-0 py-0">
                       <input className="w-14 border-none bg-transparent px-1 py-0.5 text-xs outline-none" value={li.code} onChange={setLine(idx, 'code')} />
                     </td>
@@ -344,7 +344,7 @@ export function OrderNewScreen({
                         <datalist id={`order-catalog-list-${idx}`}>
                           {PRODUCT_ROWS.map((p) => <option key={p.id} value={p.label} />)}
                         </datalist>
-                        <button type="button" className="px-1 text-xs text-indigo-500 hover:text-indigo-700" onClick={() => openProductPicker(idx)}>🔍</button>
+                        <button type="button" className="px-1 text-xs text-blue-500 hover:text-blue-700" onClick={() => openProductPicker(idx)}>🔍</button>
                       </div>
                     </td>
                     <td className="border border-slate-200 px-0 py-0">
@@ -384,7 +384,7 @@ export function OrderNewScreen({
             <div className="flex items-center justify-between gap-2">
               <span className="text-slate-600">הנחה %</span>
               <div className="flex items-center gap-1">
-                <input className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-xs outline-none focus:border-emerald-400" value={form.discountPct} onChange={set('discountPct')} />
+                <input className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-xs outline-none focus:border-green-400" value={form.discountPct} onChange={set('discountPct')} />
                 <span className="text-slate-400">₪{discAmt.toFixed(2)}</span>
               </div>
             </div>
@@ -394,7 +394,7 @@ export function OrderNewScreen({
             </div>
             <div className="flex items-center justify-between gap-2">
               <span className="text-slate-600">מע"מ %</span>
-              <input className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-xs outline-none focus:border-emerald-400" value={form.vatPct} onChange={set('vatPct')} />
+              <input className="w-12 rounded border border-slate-300 px-1 py-0.5 text-center text-xs outline-none focus:border-green-400" value={form.vatPct} onChange={set('vatPct')} />
             </div>
             <div className="flex items-center justify-between">
               <span className="text-slate-600">מע"מ</span>
@@ -402,7 +402,7 @@ export function OrderNewScreen({
             </div>
             <div className="flex items-center justify-between border-t border-slate-200 pt-1">
               <span className="font-bold text-slate-800">סה"כ לתשלום</span>
-              <span className="font-bold text-emerald-700">₪{total.toFixed(2)}</span>
+              <span className="font-bold text-green-700">₪{total.toFixed(2)}</span>
             </div>
           </div>
         </div>
@@ -443,7 +443,7 @@ export function OrderNewScreen({
       <div className={sectionCls}>
         <div className={sectionTitle}>הערות</div>
         <textarea
-          className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+          className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-green-400 focus:ring-1 focus:ring-green-300"
           rows={3}
           placeholder="הערות, פרטים נוספים..."
           dir="rtl"

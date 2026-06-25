@@ -1,19 +1,22 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { PdfConvertService } from './pdf-convert.service';
 
 @Injectable()
 export class QuoteMailService {
+  private readonly logger = new Logger(QuoteMailService.name);
   private transporter: nodemailer.Transporter;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly msAuth: MicrosoftAuthService,
     private readonly graphMail: GraphMailService,
+    private readonly pdfConvert: PdfConvertService,
   ) {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -43,6 +46,8 @@ export class QuoteMailService {
     recipientEmail: string,
     opts?: {
       attachmentId?: string;
+      /** כמה קבצים לצירוף (כל DOCX יומר ל-PDF בזמן השליחה). גובר על attachmentId. */
+      attachmentIds?: string[];
       docUrl?: string;
       customerName?: string;
       userId?: string;
@@ -50,6 +55,8 @@ export class QuoteMailService {
       body?: string;
       cc?: string[];
       includeSignature?: boolean;
+      /** מזהה החתימה הנבחרת (UserSignature). אם לא צוין — חתימת ברירת המחדל הישנה. */
+      signatureId?: string;
     },
   ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
     // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
@@ -75,43 +82,61 @@ export class QuoteMailService {
       throw new BadRequestException('הצעת מחיר לא נמצאה');
     }
 
-    // ── Resolve the document: prefer the DB task-attachment (persistent), then disk fallback ──
+    // ── Resolve the document(s) to send: task-attachment(s) → latest QuoteDocument → disk fallback ──
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    let fileName: string | null = null;
-    let attachmentContent: Buffer | null = null;
-    let attachmentPath: string | null = null;
+    const docs: { content: Buffer; fileName: string; mime: string }[] = [];
 
-    if (opts?.attachmentId) {
-      const att = await this.prisma.taskAttachment.findUnique({ where: { id: opts.attachmentId } });
+    // תמיכה בכמה קבצים: attachmentIds (רבים) או attachmentId (בודד — תאימות לאחור).
+    const attachmentIds = (opts?.attachmentIds?.length ? opts.attachmentIds : opts?.attachmentId ? [opts.attachmentId] : [])
+      .filter((x): x is string => !!x);
+    for (const attId of attachmentIds) {
+      const att = await this.prisma.taskAttachment.findUnique({ where: { id: attId } });
       if (att) {
-        attachmentContent = Buffer.from(att.data);
-        fileName = att.fileName;
+        docs.push({ content: Buffer.from(att.data), fileName: att.fileName, mime: att.mimeType || DOCX_MIME });
       }
     }
-    // Prefer DB-stored bytes from the latest QuoteDocument (survives deploys).
-    if (!attachmentContent && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
-      attachmentContent = Buffer.from(quote.quoteDocuments[0].data);
-      fileName = quote.quoteDocuments[0].fileName;
+    // Fallback: DB-stored bytes from the latest QuoteDocument (survives deploys), then disk path.
+    if (docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
+      docs.push({ content: Buffer.from(quote.quoteDocuments[0].data), fileName: quote.quoteDocuments[0].fileName, mime: DOCX_MIME });
     }
-    if (!attachmentContent) {
+    if (docs.length === 0) {
       let relPath: string | null = null;
+      let diskName: string | null = null;
       if (quote.quoteDocuments?.length > 0) {
         relPath = quote.quoteDocuments[0].filePath;
-        fileName = quote.quoteDocuments[0].fileName;
+        diskName = quote.quoteDocuments[0].fileName;
       } else if (quote.lastMergedDocPath) {
         relPath = quote.lastMergedDocPath;
-        fileName = path.basename(quote.lastMergedDocPath);
+        diskName = path.basename(quote.lastMergedDocPath);
       }
       if (!relPath) {
         throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
       }
       const absolutePath = path.resolve(process.cwd(), relPath);
       if (!fs.existsSync(absolutePath)) {
-        throw new BadRequestException(`קובץ המסמך לא נמצא בשרת: ${fileName}`);
+        throw new BadRequestException(`קובץ המסמך לא נמצא בשרת: ${diskName}`);
       }
-      attachmentPath = absolutePath;
-      // Graph needs the bytes in-memory; load once so both paths can use it.
-      attachmentContent = fs.readFileSync(absolutePath);
+      docs.push({ content: fs.readFileSync(absolutePath), fileName: diskName || 'הצעת מחיר.docx', mime: DOCX_MIME });
+    }
+
+    // ── המרה ל-PDF בזמן השליחה: כל קובץ DOCX מומר ל-PDF ונשלח כ-PDF (גם אם צורפו כמה קבצים). ──
+    // מנוע ראשי: Microsoft Graph (Word — כותרת/עיצוב זהים לתבנית) כשהמשתמש מחובר ל-Outlook;
+    // גיבוי: CloudConvert. ההמרה היא best-effort: אם שום מנוע לא זמין/נכשל — נשלח ה-DOCX המקורי.
+    const canConvert = (graphReady && !!opts?.userId) || this.pdfConvert.enabled;
+    for (const doc of docs) {
+      const isDocx = /\.docx$/i.test(doc.fileName) || doc.mime === DOCX_MIME;
+      if (!isDocx) continue; // קובץ שאינו DOCX (למשל PDF/תמונה) נשלח כמות שהוא
+      if (!canConvert) {
+        this.logger.warn(`PDF conversion not configured (Outlook/CloudConvert) — sending "${doc.fileName}" as DOCX`);
+        continue;
+      }
+      try {
+        doc.content = await this.pdfConvert.docxToPdf(doc.content, doc.fileName, opts?.userId);
+        doc.fileName = doc.fileName.replace(/\.docx$/i, '') + '.pdf';
+        doc.mime = 'application/pdf';
+      } catch (e: any) {
+        this.logger.warn(`PDF conversion failed for "${doc.fileName}" — sending DOCX: ${e?.message || e}`);
+      }
     }
 
     // ── Build the email (HTML עם לחצן/קישור מתויג + הקובץ מצורף) ──
@@ -141,15 +166,32 @@ export class QuoteMailService {
       if (sender?.mailSignature?.trim()) {
         parts.push(`<div style="color:#444;">${this.toHtml(sender.mailSignature)}</div>`);
       }
-      if (sender?.mailSignatureImage) {
+      // בחירת תמונת החתימה: אם נבחרה חתימה ספציפית (signatureId) — נשתמש בה;
+      // אחרת נופלים לחתימה הבודדת הישנה (תאימות לאחור).
+      let sigBytes: Buffer | null = null;
+      let sigType = 'image/png';
+      if (opts.signatureId) {
+        const chosen = await this.prisma.userSignature.findUnique({
+          where: { id: opts.signatureId },
+        });
+        if (chosen && chosen.userId === opts.userId) {
+          sigBytes = Buffer.from(chosen.image);
+          sigType = chosen.imageType || 'image/png';
+        }
+      }
+      if (!sigBytes && sender?.mailSignatureImage) {
+        sigBytes = Buffer.from(sender.mailSignatureImage);
+        sigType = sender.mailSignatureImageType || 'image/png';
+      }
+      if (sigBytes) {
         const cid = 'signature-image';
         signatureImage = {
-          content: Buffer.from(sender.mailSignatureImage),
-          contentType: sender.mailSignatureImageType || 'image/png',
+          content: sigBytes,
+          contentType: sigType,
           contentId: cid,
         };
         parts.push(
-          `<div style="margin-top:10px;"><img src="cid:${cid}" alt="חתימה" style="max-width:460px;max-height:220px;width:auto;height:auto;" /></div>`,
+          `<div style="margin-top:12px;"><img src="cid:${cid}" alt="חתימה" style="max-width:640px;max-height:320px;width:auto;height:auto;" /></div>`,
         );
       }
       if (parts.length) {
@@ -170,7 +212,7 @@ ${bodyHtml}
 ${signatureHtml}
 </div>`;
 
-    const finalFileName = fileName || 'הצעת מחיר.docx';
+    const finalFileName = docs[0]?.fileName || 'הצעת מחיר.docx';
 
     // Normalize CC: dedupe, trim, keep only valid-looking addresses.
     const cc = Array.from(
@@ -180,9 +222,7 @@ ${signatureHtml}
     // ── Send: Graph (user's Outlook) preferred, SMTP fallback ──
     let via: 'graph' | 'smtp';
     if (graphReady && opts?.userId) {
-      const graphAttachments = [
-        { name: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
-      ];
+      const graphAttachments = docs.map((d) => ({ name: d.fileName, contentType: d.mime, content: d.content }));
       if (signatureImage) {
         graphAttachments.push({
           name: 'signature' + (signatureImage.contentType === 'image/jpeg' ? '.jpg' : '.png'),
@@ -200,9 +240,7 @@ ${signatureHtml}
       });
       via = 'graph';
     } else {
-      const smtpAttachments: any[] = [
-        { filename: finalFileName, contentType: DOCX_MIME, content: attachmentContent! },
-      ];
+      const smtpAttachments: any[] = docs.map((d) => ({ filename: d.fileName, contentType: d.mime, content: d.content }));
       if (signatureImage) {
         smtpAttachments.push({
           filename: 'signature' + (signatureImage.contentType === 'image/jpeg' ? '.jpg' : '.png'),

@@ -19,6 +19,9 @@ export interface DraftContext {
   instruction?: string;
   previousSubject?: string;
   previousBody?: string;
+
+  /** ערוץ הניסוח: מייל (ברירת מחדל) או וואטסאפ (הודעה קצרה, בלי נושא) */
+  channel?: 'email' | 'whatsapp';
 }
 
 export interface DraftResult {
@@ -66,6 +69,34 @@ export class AiMailService {
 סוג העבודה: מיגון קרינה משדות מגנטיים — אספקה והתקנת מיגון לקירות כולל חפיפות ופחת, והנפקת דוח יישום מיגון להגשה לרשויות ולבנייה ירוקה
 משך ביצוע: עד 7 ימי עסקים`;
 
+  // ── ניסוח וואטסאפ: הודעה מנוסחת, מקצועית ובוגרת, בלי נושא ובלי שורות נתונים ──
+  private readonly WHATSAPP_SYSTEM = `אתה מנסח הודעות וואטסאפ בעברית עבור "גלית – החברה לאיכות הסביבה", המספקת בדיקות ושירותים סביבתיים.
+המשימה: לנסח הודעת וואטסאפ מלווה לשליחת הצעת מחיר ללקוח — הודעה מנוסחת היטב, מקצועית ובוגרת.
+כללים מחייבים:
+- אורך: 4 עד 6 שורות. סגנון אישי-מקצועי ומכובד, בגובה העיניים — לא מייל רשמי ולא הודעה קצרה ויבשה.
+- בלי אימוג'ים כלל, ובלי סלנג.
+- פתיחה: "שלום [שם]," בשם הפרטי בלבד (אם אין שם — "שלום רב,").
+- משפט פתיחה שמודיע שמצורפת/נשלחה הצעת מחיר עבור [השירות/העבודה], כולל מספר ההצעה אם נמסר.
+- משפט נוסף שמתאר בקצרה ובמילים בוגרות את מהות העבודה/השירות לפי הפרטים שנמסרו (בלי להמציא פרטים שלא נמסרו).
+- משפט שמזמין את הלקוח לעיין בהצעה ולחזור בכל שאלה או הבהרה, ומדגיש שנשמח ללוות אותו בתהליך.
+- סיום מכובד: "אשמח לעמוד לרשותך לכל שאלה." או נוסח דומה.
+- בלי נושא, בלי חתימה/שם, ובלי סכומים/תנאי תשלום/תוקף.
+- החזר JSON תקין בלבד עם המפתח "body" בלבד (טקסט עם שורות חדשות).`;
+
+  private readonly WHATSAPP_EXAMPLE_USER = `פרטי ההצעה:
+לקוח: אקספו תל אביב
+שם פרטי לפנייה: דיאנה
+שירות: מיגון קרינה אלקטרומגנטית
+מספר הצעה: 13762`;
+
+  private readonly WHATSAPP_EXAMPLE_ASSISTANT = JSON.stringify({
+    body: `שלום דיאנה,
+מצורפת הצעת מחיר (מס' 13762) עבור מיגון קרינה אלקטרומגנטית, שהכנו עבורכם בהתאם לפרטים שסיכמנו.
+ההצעה כוללת את כל מרכיבי העבודה הנדרשים לביצוע מקצועי ומלא, וריכזנו בה את כל הפרטים בצורה ברורה ושקופה.
+אשמח שתעיינו בהצעה בנוחות, ואם יעלו שאלות או נקודות שתרצו להבהיר — אני זמינה עבורכם.
+נשמח ללוות אתכם לאורך כל התהליך ולעמוד לרשותכם בכל עת.`,
+  });
+
   private readonly EXAMPLE_ASSISTANT = JSON.stringify({
     subject: 'הצעת מחיר למיגון קרינה אלקטרומגנטית – מתחם הכניסה אקספו תל אביב – מס\' 13762',
     body: `שלום דיאנה,
@@ -101,13 +132,22 @@ export class AiMailService {
       ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
     ].filter(Boolean).join('\n');
 
-    const messages: any[] = [
-      { role: 'system', content: this.SYSTEM },
-      { role: 'user', content: this.EXAMPLE_USER },
-      { role: 'assistant', content: this.EXAMPLE_ASSISTANT },
-    ];
+    const isWa = ctx.channel === 'whatsapp';
+    const messages: any[] = isWa
+      ? [
+          { role: 'system', content: this.WHATSAPP_SYSTEM },
+          { role: 'user', content: this.WHATSAPP_EXAMPLE_USER },
+          { role: 'assistant', content: this.WHATSAPP_EXAMPLE_ASSISTANT },
+        ]
+      : [
+          { role: 'system', content: this.SYSTEM },
+          { role: 'user', content: this.EXAMPLE_USER },
+          { role: 'assistant', content: this.EXAMPLE_ASSISTANT },
+        ];
 
-    let userPrompt = `פרטי ההצעה:\n${contextLines || '(אין פרטים נוספים)'}\n\nנסח נושא וגוף מייל בדיוק כמו בדוגמה.`;
+    let userPrompt = isWa
+      ? `פרטי ההצעה:\n${contextLines || '(אין פרטים נוספים)'}\n\nנסח הודעת וואטסאפ מקצועית ובוגרת בדיוק בסגנון הדוגמה — 4 עד 6 שורות, בלי אימוג'ים.`
+      : `פרטי ההצעה:\n${contextLines || '(אין פרטים נוספים)'}\n\nנסח נושא וגוף מייל בדיוק כמו בדוגמה.`;
     if (ctx.previousSubject || ctx.previousBody) {
       messages.push({
         role: 'assistant',
@@ -156,10 +196,10 @@ export class AiMailService {
       aiBody = String(content).trim();
     }
 
-    // ── הזרקת שורות הנתונים מהקוד אל גוף המייל (לפני משפט הסיום) ──
-    const body = this.injectFacts(aiBody, facts);
+    // ── הזרקת שורות הנתונים מהקוד אל גוף המייל (לפני משפט הסיום) — לא בוואטסאפ ──
+    const body = isWa ? aiBody : this.injectFacts(aiBody, facts);
 
-    return { subject: aiSubject, body, facts };
+    return { subject: isWa ? '' : aiSubject, body, facts };
   }
 
   /** שליפת מספר/סכום/תנאי תשלום מההצעה + חישוב תוקף = חודש מהיום. */

@@ -1049,7 +1049,7 @@ function EntityShell({
     <div className="rounded-3xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 p-5">
         <div className="flex flex-wrap items-center gap-2 text-xl font-bold text-slate-900">
-          <FileSpreadsheet className="h-6 w-6 text-emerald-700" />
+          <FileSpreadsheet className="h-6 w-6 text-green-700" />
           {title}
         </div>
         <p className="mt-1 text-sm text-slate-600">{description}</p>
@@ -1070,8 +1070,8 @@ function UploadRow({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 px-5 py-4 transition hover:bg-emerald-50">
-        <Upload className="h-5 w-5 text-emerald-700" />
+      <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border-2 border-dashed border-green-300 bg-green-50/50 px-5 py-4 transition hover:bg-green-50">
+        <Upload className="h-5 w-5 text-green-700" />
         <span className="font-semibold text-slate-800">בחר קובץ</span>
         <input
           type="file"
@@ -1191,7 +1191,7 @@ function PreviewTable<T>({
       </div>
       <div className="overflow-x-auto rounded-2xl border border-slate-200">
         <table className="w-full min-w-[640px] text-right text-sm">
-          <thead className="bg-emerald-50/90">
+          <thead className="bg-green-50/90">
             <tr>
               {columns.map((c) => (
                 <th key={c} className="px-2 py-2">
@@ -1236,9 +1236,9 @@ function SummaryBlock({
   labels: [string, string, string, string];
 }) {
   return (
-    <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5">
-      <h3 className="text-lg font-bold text-emerald-900">סיכום</h3>
-      <ul className="list-inside list-disc space-y-1 text-sm text-emerald-950">
+    <div className="space-y-3 rounded-2xl border border-green-200 bg-green-50/60 p-5">
+      <h3 className="text-lg font-bold text-green-900">סיכום</h3>
+      <ul className="list-inside list-disc space-y-1 text-sm text-green-950">
         <li>
           {labels[0]}: {summary.created}
         </li>
@@ -1257,7 +1257,7 @@ function SummaryBlock({
       </ul>
       <button
         type="button"
-        className="rounded-2xl border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-900"
+        className="rounded-2xl border border-green-300 bg-white px-4 py-2 text-sm font-semibold text-green-900"
         onClick={onAgain}
       >
         ייבוא נוסף

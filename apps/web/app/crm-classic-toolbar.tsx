@@ -28,6 +28,7 @@ import {
   Target,
   TrendingUp,
   Bot,
+  UserX,
 } from 'lucide-react';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
@@ -756,7 +757,29 @@ export function CrmLegacyTopNav({
                   onClick={() => go('dashboard')}
                 />
                 <Sep />
-                <NavBtn label="חיוג" Icon={Phone} disabled title="חיוג — מודול טלפוניה לא מחובר (שלב מעבר)" />
+                {role === 'admin' ? (
+                  <NavBtn
+                    label="משוב"
+                    Icon={MessageSquare}
+                    title="משוב לקוחות — בקשת דירוג בגוגל"
+                    active={current === 'feedback'}
+                    onClick={() => go('feedback')}
+                  />
+                ) : (
+                  <NavBtn label="חיוג" Icon={Phone} disabled title="חיוג — מודול טלפוניה לא מחובר (שלב מעבר)" />
+                )}
+                {canAccess(role, 'not-relevant') && (
+                  <>
+                    <Sep />
+                    <NavBtn
+                      label="לא רלוונטי"
+                      Icon={UserX}
+                      title="לקוחות שסווגו כלא רלוונטי — מקובץ לפי סיבה"
+                      active={current === 'not-relevant'}
+                      onClick={() => go('not-relevant')}
+                    />
+                  </>
+                )}
               </>
             )}
 

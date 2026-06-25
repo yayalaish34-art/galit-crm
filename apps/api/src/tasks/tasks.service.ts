@@ -5,16 +5,26 @@ import { PrismaService } from '../prisma/prisma.service';
 export class TasksService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll({ projectId, user }: { projectId?: string; user?: { id?: string; role?: string } } = {}) {
+  findAll({
+    projectId,
+    scope,
+    user,
+  }: {
+    projectId?: string;
+    scope?: string;
+    user?: { id?: string; role?: string };
+  } = {}) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
 
     const baseWhere: any = projectId ? { projectId } : {};
-    if (role === 'SALES' || role === 'TECHNICIAN') {
+    // מנהל מערכת רואה את כל המשימות. כל שאר העובדים רואים כברירת מחדל
+    // רק את המשימות שלהם, אך יכולים לבקש את כולן באמצעות scope=all.
+    if (role !== 'ADMIN') {
       if (!user?.id) throw new UnauthorizedException('Missing user id');
-      baseWhere.ownerId = user.id;
-    } else if (role !== 'ADMIN' && role !== 'MANAGER') {
-      throw new ForbiddenException();
+      if ((scope || '').toLowerCase() !== 'all') {
+        baseWhere.ownerId = user.id;
+      }
     }
 
     return this.prisma.task.findMany({
@@ -43,7 +53,41 @@ export class TasksService {
     } else if (role !== 'ADMIN' && role !== 'MANAGER') {
       throw new ForbiddenException();
     }
+    if (!data?.title || !String(data.title).trim()) {
+      data = { ...data, title: await this.buildTaskTitle(data) };
+    }
     return this.prisma.task.create({ data });
+  }
+
+  /**
+   * בניית כותרת אוטומטית למשימה כשלא הוזנה כותרת ידנית.
+   * פורמט: "שם לקוח — שם מוצר". נופל לשם הליד אם אין לקוח, ומדלג על המוצר אם חסר.
+   */
+  private async buildTaskTitle(data: any): Promise<string> {
+    const product = String(data?.productName ?? '').trim();
+    let who = '';
+
+    const customerId = data?.customerId ?? data?.customer?.connect?.id;
+    if (customerId) {
+      const customer = await this.prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { name: true },
+      });
+      who = String(customer?.name ?? '').trim();
+    }
+
+    if (!who) {
+      const leadId = data?.leadId ?? data?.lead?.connect?.id;
+      if (leadId) {
+        const lead = await this.prisma.lead.findUnique({
+          where: { id: leadId },
+          select: { fullName: true },
+        });
+        who = String(lead?.fullName ?? '').trim();
+      }
+    }
+
+    return [who, product].filter(Boolean).join(' — ') || 'משימה חדשה';
   }
 
   async update(id: string, data: any, user?: { id?: string; role?: string }) {

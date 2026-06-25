@@ -6,13 +6,17 @@ import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('tasks')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Get()
-  findAll(@Req() req: any, @Query('projectId') projectId?: string) {
-    return this.tasksService.findAll({ projectId, user: req.user });
+  findAll(
+    @Req() req: any,
+    @Query('projectId') projectId?: string,
+    @Query('scope') scope?: string,
+  ) {
+    return this.tasksService.findAll({ projectId, scope, user: req.user });
   }
 
   @Get(':id')

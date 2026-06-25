@@ -269,6 +269,26 @@ export class DashboardService {
       .slice(0, 10);
 
     const leadStatusOf = (l: any) => ((l?.leadStatus || l?.status || l?.stage || '') as string).toUpperCase();
+
+    // Incoming leads feed + who took each one (which employee). Most recent first.
+    const recentLeadsTaken = [...leads]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 15)
+      .map((l) => {
+        const owner = l.assignedUserId ? users.find((u) => u.id === l.assignedUserId) : null;
+        return {
+          id: l.id,
+          name: l.fullName || `${l.firstName || ''} ${l.lastName || ''}`.trim() || l.company || 'ליד',
+          phone: l.phone || '',
+          source: (l.utm_source || l.source || '').toString() || '—',
+          serviceType: (l.serviceType || l.service || '').toString() || '—',
+          createdAt: l.createdAt.toISOString(),
+          status: leadStatusOf(l),
+          assignedUserId: l.assignedUserId || null,
+          assignedUserName: owner?.name || null,
+        };
+      });
+
     const leadStatuses = leads.map(leadStatusOf);
     const leadsNew = leadStatuses.filter((s) => s === 'NEW').length;
     const leadsInTreatment = leadStatuses.filter((s) => ['CONTACTED', 'FU_1', 'FU_2', 'QUOTE_SENT', 'NEGOTIATION'].includes(s)).length;
@@ -359,6 +379,7 @@ export class DashboardService {
         leadsByServiceType,
         openProjects,
       },
+      recentLeadsTaken,
       coreCounts: {
         leadsNew,
         leadsInTreatment,
@@ -384,6 +405,163 @@ export class DashboardService {
     } catch {
       return this.managerEmptyPayload();
     }
+  }
+
+  /**
+   * Personal dashboard for a single employee — real per-employee sales metrics
+   * pulled from the correct tables (leads/opportunities/quotes/tasks) and scoped
+   * to the requesting user. Used by the non-manager employee dashboard.
+   */
+  async me(user?: { id?: string; role?: string }) {
+    const role = (user?.role || '').toUpperCase();
+    if (!role) throw new UnauthorizedException('Missing role');
+    const userId = user?.id;
+    if (!userId) throw new UnauthorizedException('Missing user id');
+
+    try {
+      const now = new Date();
+      const som = startOfMonth(now);
+
+      const [me, leads, opportunities, quotes, tasks] = await Promise.all([
+        this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true } }),
+        this.prisma.lead.findMany({
+          where: { assignedUserId: userId },
+          orderBy: [{ createdAt: 'desc' }],
+        }),
+        this.prisma.opportunity.findMany({
+          where: { assignedUserId: userId },
+          select: { id: true, estimatedValue: true, pipelineStage: true, createdAt: true },
+        }),
+        // A quote "belongs" to the user if they are its sales rep / performer,
+        // or it sits on an opportunity / lead assigned to them.
+        this.prisma.quote.findMany({
+          where: {
+            OR: [
+              { salesRepresentativeId: userId },
+              { performerUserId: userId },
+              { opportunity: { assignedUserId: userId } },
+              { lead: { assignedUserId: userId } },
+            ],
+          },
+          select: { id: true, status: true, totalAmount: true, amount: true, updatedAt: true },
+        }),
+        this.prisma.task.findMany({
+          where: { ownerId: userId },
+          select: { id: true, status: true, dueDate: true },
+        }),
+      ]);
+
+      const leadStatusOf = (l: any) => ((l?.leadStatus || l?.status || l?.stage || '') as string).toUpperCase();
+      const statuses = leads.map(leadStatusOf);
+      const leadsNew = statuses.filter((s) => s === 'NEW').length;
+      const leadsInTreatment = statuses.filter((s) => ['CONTACTED', 'FU_1', 'FU_2', 'QUOTE_SENT', 'NEGOTIATION'].includes(s)).length;
+      const leadsWon = statuses.filter((s) => s === 'WON').length;
+      const leadsLost = statuses.filter((s) => s === 'LOST').length;
+      const totalLeads = leads.length;
+
+      const isWon = (q: any) => q.status === QuoteStatus.APPROVED || q.status === (QuoteStatus as any).SIGNED;
+      const quotesSent = quotes.filter((q) => q.status === QuoteStatus.SENT).length;
+      const quotesApproved = quotes.filter(isWon).length;
+      const openQuotes = quotes.filter((q) => q.status === QuoteStatus.DRAFT || q.status === QuoteStatus.SENT).length;
+      const wonRevenueTotal = quotes.filter(isWon).reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+      const wonRevenueThisMonth = quotes
+        .filter((q) => isWon(q) && q.updatedAt >= som)
+        .reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+
+      const openOpps = opportunities.filter((o) => o.pipelineStage !== OpportunityStage.WON && o.pipelineStage !== OpportunityStage.LOST);
+      const pipelineValue = openOpps.reduce((a, o) => a + Number(o.estimatedValue ?? 0), 0);
+      const wonOpps = opportunities.filter((o) => o.pipelineStage === OpportunityStage.WON).length;
+      const lostOpps = opportunities.filter((o) => o.pipelineStage === OpportunityStage.LOST).length;
+      const winRate = (wonOpps + lostOpps) === 0 ? 0 : wonOpps / (wonOpps + lostOpps);
+
+      const openTaskStatuses = new Set<TaskStatus>([TaskStatus.OPEN, TaskStatus.IN_PROGRESS]);
+      const openTasks = tasks.filter((t) => openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)).length;
+      const overdueTasks = tasks.filter((t) => {
+        if (!t.dueDate) return false;
+        if (!openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)) return false;
+        return t.dueDate.getTime() < now.getTime();
+      }).length;
+
+      const conversionLeadToQuote = totalLeads === 0 ? 0 : Math.round((quotesSent / totalLeads) * 100);
+      const conversionQuoteToWon = quotesSent === 0 ? 0 : Math.round((quotesApproved / quotesSent) * 100);
+
+      const bySource = new Map<string, number>();
+      const byService = new Map<string, number>();
+      for (const l of leads) {
+        const src = ((l as any).utm_source || (l as any).source || 'לא ידוע').toString();
+        bySource.set(src, (bySource.get(src) || 0) + 1);
+        const svc = ((l as any).serviceType || (l as any).service || 'אחר').toString();
+        byService.set(svc, (byService.get(svc) || 0) + 1);
+      }
+      const leadsBySource = Array.from(bySource.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+      const leadsByServiceType = Array.from(byService.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
+
+      const recentLeads = leads.slice(0, 8).map((l) => ({
+        id: l.id,
+        name: l.fullName || `${l.firstName || ''} ${l.lastName || ''}`.trim() || l.company || 'ליד',
+        phone: l.phone || '',
+        serviceType: l.serviceType || l.service || '',
+        source: (l as any).source || '',
+        status: leadStatusOf(l),
+        createdAt: l.createdAt ? l.createdAt.toISOString() : null,
+      }));
+
+      return {
+        updatedAt: now.toISOString(),
+        user: { id: me?.id || userId, name: me?.name || '', role: me?.role || role },
+        kpis: {
+          leadsNew,
+          leadsInTreatment,
+          leadsWon,
+          leadsLost,
+          totalLeads,
+          openTasks,
+          overdueTasks,
+          openQuotes,
+          quotesSent,
+          quotesApproved,
+          wonRevenueThisMonth,
+          wonRevenueTotal,
+          pipelineValue,
+          winRate,
+          conversionLeadToQuote,
+          conversionQuoteToWon,
+        },
+        leadsBySource,
+        leadsByServiceType,
+        recentLeads,
+      };
+    } catch {
+      return this.meEmptyPayload(userId, role);
+    }
+  }
+
+  private meEmptyPayload(userId: string, role: string) {
+    return {
+      updatedAt: new Date().toISOString(),
+      user: { id: userId, name: '', role },
+      kpis: {
+        leadsNew: 0,
+        leadsInTreatment: 0,
+        leadsWon: 0,
+        leadsLost: 0,
+        totalLeads: 0,
+        openTasks: 0,
+        overdueTasks: 0,
+        openQuotes: 0,
+        quotesSent: 0,
+        quotesApproved: 0,
+        wonRevenueThisMonth: 0,
+        wonRevenueTotal: 0,
+        pipelineValue: 0,
+        winRate: 0,
+        conversionLeadToQuote: 0,
+        conversionQuoteToWon: 0,
+      },
+      leadsBySource: [],
+      leadsByServiceType: [],
+      recentLeads: [],
+    };
   }
 
   /** Safe JSON when Prisma schema is ahead of DB (missing columns / relations). */
@@ -415,6 +593,7 @@ export class DashboardService {
       },
       alerts: { agingDeals: [], inactiveLeads: [] },
       breakdowns: { leadsByServiceType: [], openProjects: [] },
+      recentLeadsTaken: [],
       coreCounts: {
         leadsNew: 0,
         leadsInTreatment: 0,

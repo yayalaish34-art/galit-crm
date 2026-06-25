@@ -79,6 +79,7 @@ export class CustomersService {
     if (dto.status !== undefined) out.status = dto.status;
     if (dto.services !== undefined) out.services = dto.services;
     if (dto.notes !== undefined) out.notes = dto.notes;
+    if (dto.leadSource !== undefined) out.leadSource = dto.leadSource;
     if (dto.phone2 !== undefined) out.phone2 = dto.phone2;
     if (dto.phone3 !== undefined) out.phone3 = dto.phone3;
     if (dto.fax !== undefined) out.fax = dto.fax;
@@ -154,7 +155,32 @@ export class CustomersService {
     if (dto.companyWall !== undefined) out.companyWall = dto.companyWall;
     if (dto.feature8 !== undefined) out.feature8 = dto.feature8;
 
+    if (dto.notRelevantReason !== undefined) out.notRelevantReason = dto.notRelevantReason;
+    if (dto.notRelevantNote !== undefined) out.notRelevantNote = dto.notRelevantNote;
+    if (dto.notRelevantAt !== undefined) out.notRelevantAt = parseOptionalDate(dto.notRelevantAt);
+
     return out;
+  }
+
+  /** לקוחות שסווגו כ"לא רלוונטי" — לרשימה המקובצת לפי סיבה. */
+  async listNotRelevant() {
+    return this.prisma.customer.findMany({
+      where: { notRelevantReason: { not: null } },
+      select: {
+        id: true,
+        name: true,
+        contactName: true,
+        phone: true,
+        email: true,
+        city: true,
+        services: true,
+        notRelevantReason: true,
+        notRelevantNote: true,
+        notRelevantAt: true,
+      },
+      orderBy: { notRelevantAt: 'desc' },
+      take: 2000,
+    });
   }
 
   async findAll() {
@@ -258,7 +284,12 @@ export class CustomersService {
         this.prisma.document.findMany({
           where: { customerId: id },
           orderBy: { createdAt: 'desc' },
-          include: {
+          // לא מחזירים כאן dataBase64 (כבד) — תוכן הקובץ נטען לפי דרישה דרך GET /documents
+          select: {
+            id: true, name: true, documentType: true, filePath: true,
+            description: true, mimeType: true, sizeBytes: true, documentDate: true,
+            createdAt: true, updatedAt: true, importLegacyId: true,
+            projectId: true, customerId: true, reportId: true, uploadedById: true,
             uploadedBy: { select: { id: true, name: true, email: true } },
           },
         }),
@@ -573,11 +604,34 @@ export class CustomersService {
         documentDate: parseOptionalDate(dto.documentDate ?? undefined) ?? null,
         mimeType: dto.mimeType?.trim() || null,
         sizeBytes: dto.sizeBytes ?? null,
+        dataBase64: dto.dataBase64?.trim() || null,
         importLegacyId: dto.importLegacyId?.trim() || null,
         uploadedById: uploadedById || null,
       },
       include: {
         uploadedBy: { select: { id: true, name: true, email: true } },
+      },
+    });
+  }
+
+  /** רשימת מסמכים של לקוח (אופציונלי לפי סוג). כולל dataBase64 — לטעינה לפי דרישה (הצעות חתומות). */
+  async listCustomerDocuments(customerId: string, type?: string) {
+    await this.ensureCustomer(customerId);
+    return this.prisma.document.findMany({
+      where: {
+        customerId,
+        ...(type ? { documentType: parseDocumentType(type) } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        documentType: true,
+        mimeType: true,
+        sizeBytes: true,
+        dataBase64: true,
+        createdAt: true,
+        uploadedBy: { select: { id: true, name: true } },
       },
     });
   }

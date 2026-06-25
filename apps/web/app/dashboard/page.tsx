@@ -3,6 +3,7 @@
 import { apiUrl, getApiBaseUrl, apiFetch } from '../lib/api-base';
 import { parseApiErrorResponse } from '../lib/api-error';
 import { CustomerLegacyCard } from '../customer-legacy-card';
+import { SignedQuotesSection } from '../signed-quotes-section';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
 import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
 import { OrderNewScreen, OrderOldStyleToolbar } from '../orders/new/order-new-screen';
@@ -15,7 +16,7 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
-import { SERVICE_CATEGORIES, flattenAllServices } from '../lib/service-categories';
+import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku } from '../lib/service-categories';
 import {
   Users,
   FileText,
@@ -90,15 +91,18 @@ import {
   Lock,
   Droplets,
   Leaf,
-  Sniff,
   HelpCircle,
   CalendarPlus,
   Video,
   ExternalLink,
+  Send,
+  Save,
+  Smartphone,
 } from 'lucide-react';
 
 import { DataImportWizard } from '../data-import-wizard';
 import { FollowupImportPanel } from '../followup-import-panel';
+import { ChangePasswordSection } from '../change-password-section';
 import { isAdminRole } from '../lib/roles';
 import {
   CrmLegacyTopNav,
@@ -576,6 +580,8 @@ type Task = {
   currentStage?: number | null;
   currentStageChangedAt?: string | null;
   createdAt?: string;
+  /** מזהה IncomingLead אם ה-task מקורו בליד נכנס מהמייל (לסידור-ראשון ולטופס המיוחד) */
+  incomingLeadId?: string | null;
 };
 
 type Customer = {
@@ -1248,8 +1254,9 @@ function TableCell({
   children,
   className = '',
   colSpan,
-}: React.PropsWithChildren<{ className?: string; colSpan?: number }>) {
-  return <td colSpan={colSpan} className={cn('px-4 py-3 align-top', className)}>{children}</td>;
+  title,
+}: React.PropsWithChildren<{ className?: string; colSpan?: number; title?: string }>) {
+  return <td colSpan={colSpan} title={title} className={cn('px-4 py-3 align-top', className)}>{children}</td>;
 }
 
 function Modal({
@@ -1271,26 +1278,26 @@ function Modal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className={cn('w-full rounded-3xl bg-white shadow-2xl', maxWidth)}>
+    <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4">
+      <div className={cn('relative flex max-h-[90vh] w-full flex-col rounded-3xl bg-white shadow-2xl', maxWidth)}>
         {!hideHeader && (
-          <div className="flex items-center justify-between border-b px-5 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
             <h3 className={cn('text-lg font-bold', titleClassName)}>{title}</h3>
             <button onClick={onClose} className="rounded-full p-2 hover:bg-slate-100" aria-label="סגור">
               <X className="h-5 w-5" />
             </button>
           </div>
         )}
-        <div className="max-h-[80vh] overflow-y-auto p-5 relative">
-          {hideHeader && (
-            <button
-              onClick={onClose}
-              className="absolute right-5 top-5 rounded-full bg-white/80 p-2 shadow-sm hover:bg-white"
-              aria-label="סגור"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          )}
+        {hideHeader && (
+          <button
+            onClick={onClose}
+            className="absolute right-5 top-5 z-10 rounded-full bg-white/80 p-2 shadow-sm hover:bg-white"
+            aria-label="סגור"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
           {children}
         </div>
       </div>
@@ -1361,7 +1368,7 @@ function CustomerSearchModal({
 
         {/* Large smart search input */}
         <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
             <Search className="h-5 w-5 shrink-0 text-slate-400" />
             <input
               ref={inputRef}
@@ -1395,7 +1402,7 @@ function CustomerSearchModal({
                 <button
                   type="button"
                   onClick={() => onNewCustomer(query.trim())}
-                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-emerald-700 transition-colors"
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
                 >
                   <Plus className="h-4 w-4" />
                   צור לקוח חדש — &ldquo;{query.trim()}&rdquo;
@@ -1419,7 +1426,7 @@ function CustomerSearchModal({
                 {results.map((c) => (
                   <tr
                     key={c.id}
-                    className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-emerald-50"
+                    className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-green-50"
                     onClick={() => onSelect(c)}
                     onDoubleClick={() => onSelect(c)}
                   >
@@ -1432,7 +1439,7 @@ function CustomerSearchModal({
                     <td className="px-3 py-2">
                       <span className={cn(
                         'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                        c.status === 'פעיל' ? 'bg-emerald-100 text-emerald-700' :
+                        c.status === 'פעיל' ? 'bg-green-100 text-green-700' :
                         c.status === 'לא פעיל' ? 'bg-slate-100 text-slate-500' :
                         'bg-slate-100 text-slate-600'
                       )}>{c.status || '—'}</span>
@@ -1543,7 +1550,7 @@ function QuoteSearchModal({
 
         {/* Large smart search input */}
         <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-200">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
             <Search className="h-5 w-5 shrink-0 text-slate-400" />
             <input
               ref={inputRef}
@@ -1595,7 +1602,7 @@ function QuoteSearchModal({
                   return (
                     <tr
                       key={qt.id}
-                      className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-emerald-50"
+                      className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-green-50"
                       onClick={() => onSelect(qt)}
                       onDoubleClick={() => onSelect(qt)}
                     >
@@ -1608,7 +1615,7 @@ function QuoteSearchModal({
                       <td className="px-3 py-2">
                         <span className={cn(
                           'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                          qt.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
+                          qt.status === 'APPROVED' ? 'bg-green-100 text-green-700' :
                           qt.status === 'SENT' ? 'bg-blue-100 text-blue-700' :
                           qt.status === 'DRAFT' ? 'bg-slate-100 text-slate-600' :
                           qt.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
@@ -1618,7 +1625,7 @@ function QuoteSearchModal({
                       <td className="px-3 py-2">
                         <span className={cn(
                           'inline-block rounded-full px-2 py-0.5 text-xs font-bold',
-                          expired ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'
+                          expired ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
                         )}>
                           {validLabel}
                         </span>
@@ -1670,9 +1677,9 @@ function LogoMark({ size = 40 }: { size?: number }) {
 function statusBadge(status: string) {
   const map: Record<string, string> = {
     NEW: 'bg-slate-100 text-slate-700',
-    FU_1: 'bg-amber-100 text-amber-700',
-    FU_2: 'bg-orange-100 text-orange-700',
-    QUOTE_SENT: 'bg-blue-100 text-blue-700',
+    FU_1: 'bg-blue-100 text-blue-700',
+    FU_2: 'bg-blue-100 text-blue-700',
+    QUOTE_SENT: 'bg-green-100 text-green-700',
     WON: 'bg-green-100 text-green-700',
     LOST: 'bg-red-100 text-red-700',
     DRAFT: 'bg-slate-100 text-slate-700',
@@ -1687,11 +1694,11 @@ function statusBadge(status: string) {
     WAITING_APPROVAL: 'bg-blue-100 text-blue-700',
     SCHEDULED: 'bg-blue-100 text-blue-700',
     ON_THE_WAY: 'bg-orange-100 text-orange-700',
-    FIELD_WORK_DONE: 'bg-emerald-100 text-emerald-800',
+    FIELD_WORK_DONE: 'bg-green-100 text-green-800',
     WAITING_DATA: 'bg-slate-100 text-slate-700',
     REPORT_WRITING: 'bg-blue-100 text-blue-700',
     SENT_TO_CLIENT: 'bg-blue-100 text-blue-700',
-    CLOSED: 'bg-emerald-100 text-emerald-800',
+    CLOSED: 'bg-green-100 text-green-800',
     POSTPONED: 'bg-amber-100 text-amber-700',
     CANCELLED: 'bg-red-100 text-red-700',
   };
@@ -1919,15 +1926,12 @@ function normalizeLeadRowFromApi(lead: any, index: number): Lead {
 }
 
 function canAccess(role: AppUserRole, key: string) {
-  const accessMap: Record<AppUserRole, string[]> = {
-    admin: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'],
-    manager: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'users', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'],
-    sales: ['leads', 'pipeline', 'customers', 'quotes', 'tasks', 'interaction-new', 'order-new'],
-    technician: ['projects', 'tasks', 'fieldSchedule', 'lab', 'interaction-new', 'order-new'],
-    expert: ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'tasks', 'fieldSchedule', 'interaction-new', 'order-new'],
-    billing: ['quotes', 'interaction-new', 'order-new'],
-  };
-  return accessMap[role].includes(key);
+  // כל העובדים מקבלים גישה מלאה לכל הפיצ'רים. "ניהול עובדים" ('users') ו"משוב" ('feedback') = אדמין בלבד.
+  if (key === 'users' || key === 'feedback') return role === 'admin';
+  // סקשן "לקוחות שסווגו כלא רלוונטי" — אדמין ומנהל.
+  if (key === 'not-relevant') return role === 'admin' || role === 'manager';
+  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'];
+  return FULL.includes(key);
 }
 
 function authHeaders(currentUser: AppUser | null): Record<string, string> {
@@ -2264,7 +2268,7 @@ function LeadProfile({
           <div className="text-sm font-semibold">התקדמות ליד</div>
           <div className="flex flex-wrap items-center gap-2">
             {steps.map((s, idx) => (
-              <div key={s.key} className={cn('rounded-full px-3 py-1 text-xs font-semibold', idx <= stepIndex ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600')}>
+              <div key={s.key} className={cn('rounded-full px-3 py-1 text-xs font-semibold', idx <= stepIndex ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600')}>
                 {s.label}
               </div>
             ))}
@@ -3078,7 +3082,7 @@ function LeadDetailPage({
               </div>
               <Badge className={statusBadge(form.leadStatus)}>{leadStatusLabel(form.leadStatus)}</Badge>
               {nearExpiryQuote && (
-                <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
                   אזהרה: הצעה פגה בעוד {nearExpiryQuote.diffDays} ימים
                 </span>
               )}
@@ -3140,7 +3144,7 @@ function LeadDetailPage({
       {sanitizedError && (
         <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{sanitizedError}</div>
       )}
-      {success && <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{success}</div>}
+      {success && <div className="rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">{success}</div>}
 
       <div className="flex flex-wrap gap-2">
         <Button style={{ background: galit.primary }} onClick={saveLead} disabled={saving}>
@@ -3601,6 +3605,17 @@ type ManagerDashboardPayload = {
       updatedAt?: string;
     }>;
   };
+  recentLeadsTaken?: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    source: string;
+    serviceType: string;
+    createdAt: string;
+    status: string;
+    assignedUserId: string | null;
+    assignedUserName: string | null;
+  }>;
   coreCounts?: {
     leadsNew: number;
     leadsInTreatment: number;
@@ -3673,9 +3688,9 @@ function ManagerDashboard({
 
   const leavesDecor = (
     <div className="pointer-events-none absolute -left-3 -top-3 h-20 w-20 opacity-25">
-      <div className="absolute left-6 top-1 h-8 w-5 rotate-[-20deg] rounded-full bg-emerald-400" />
-      <div className="absolute left-12 top-6 h-7 w-4 rotate-[18deg] rounded-full bg-emerald-500" />
-      <div className="absolute left-2 top-7 h-6 w-4 rotate-[-35deg] rounded-full bg-emerald-300" />
+      <div className="absolute left-6 top-1 h-8 w-5 rotate-[-20deg] rounded-full bg-green-400" />
+      <div className="absolute left-12 top-6 h-7 w-4 rotate-[18deg] rounded-full bg-green-500" />
+      <div className="absolute left-2 top-7 h-6 w-4 rotate-[-35deg] rounded-full bg-green-300" />
     </div>
   );
 
@@ -3752,14 +3767,17 @@ function ManagerDashboard({
     })),
   ].slice(0, 5);
 
-  const teamRows = data.leaderboard.slice(0, 4).map((r, idx) => ({
-    id: r.repId,
-    name: r.repName,
-    pct: Math.min(100, Math.round((r.attainmentPct || 0) * 100)),
-    amount: Math.round(r.wonRevenueThisMonth || 0),
-    color:
-      idx === 0 ? 'bg-emerald-600' : idx === 1 ? 'bg-emerald-500' : idx === 2 ? 'bg-emerald-400' : 'bg-emerald-300',
-  }));
+  const incomingLeadsFeed = (data.recentLeadsTaken ?? []).slice(0, 8);
+  const relativeTimeHe = (iso: string) => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 1) return 'הרגע';
+    if (mins < 60) return `לפני ${mins} ד׳`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `לפני ${hrs} ש׳`;
+    const days = Math.round(hrs / 24);
+    return `לפני ${days} ימים`;
+  };
 
   return (
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-6" dir="rtl">
@@ -3771,7 +3789,7 @@ function ManagerDashboard({
               <CardContent className="p-6">
                 <div className="text-sm font-semibold text-slate-500">{kpi.title}</div>
                 <div className="mt-3 text-4xl font-black text-slate-900">{kpi.value}</div>
-                <div className="mt-2 text-xs text-emerald-700">{kpi.sub}</div>
+                <div className="mt-2 text-xs text-green-700">{kpi.sub}</div>
               </CardContent>
             </Card>
           ))}
@@ -3842,7 +3860,7 @@ function ManagerDashboard({
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-emerald-50">
+                  <TableRow className="bg-green-50">
                     <TableHead>משימה</TableHead>
                     <TableHead>לקוח</TableHead>
                     <TableHead>תאריך יעד</TableHead>
@@ -3866,32 +3884,42 @@ function ManagerDashboard({
               <CardTitle className="text-xl font-bold text-slate-900">השפעה סביבתית (CO2 שנחסך)</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col items-center justify-center py-10">
-              <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-4xl">🌳</div>
-              <div className="text-4xl font-black text-emerald-700">1,200 טון</div>
+              <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-4xl">🌳</div>
+              <div className="text-4xl font-black text-green-700">1,200 טון</div>
               <div className="mt-2 text-sm text-slate-500">חיסכון מצטבר בפרויקטים פעילים</div>
             </CardContent>
           </Card>
 
           <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xl font-bold text-slate-900">ביצועי צוות מכירות</CardTitle>
+              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <UserPlus className="h-5 w-5 text-green-600" /> לידים נכנסים — מי לקח כל ליד
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {teamRows.map((row) => (
-                <div key={row.id} className="space-y-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <div className="h-8 w-8 rounded-full bg-emerald-100" />
-                      <div className="text-sm font-semibold text-slate-800">{row.name}</div>
+            <CardContent className="space-y-2.5">
+              {incomingLeadsFeed.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-400">אין לידים נכנסים עדיין</div>
+              ) : (
+                incomingLeadsFeed.map((row) => (
+                  <div key={row.id} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-bold text-slate-800">{row.name}</div>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <span className="truncate">{row.serviceType !== '—' ? row.serviceType : row.source}</span>
+                        <span className="text-slate-300">·</span>
+                        <span className="flex-shrink-0">{relativeTimeHe(row.createdAt)}</span>
+                      </div>
                     </div>
-                    <div className="text-xs text-slate-500">{formatCurrencyILS(row.amount)}</div>
+                    {row.assignedUserName ? (
+                      <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+                        <UserCircle2 className="h-3.5 w-3.5" /> {row.assignedUserName}
+                      </span>
+                    ) : (
+                      <span className="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">טרם נלקח</span>
+                    )}
                   </div>
-                  <div className="h-2 w-full rounded-full bg-slate-100">
-                    <div className={cn('h-2 rounded-full', row.color)} style={{ width: `${row.pct}%` }} />
-                  </div>
-                  <div className="text-xs text-emerald-700">{row.pct}%</div>
-                </div>
-              ))}
+                ))
+              )}
             </CardContent>
           </Card>
         </div>
@@ -3906,219 +3934,1080 @@ function ManagerDashboard({
   );
 }
 
-function DashboardPage({
-  leads,
-  quotes,
-  opportunities,
-  projects,
-  tasks,
-  stats,
+type MeDashboardPayload = {
+  updatedAt: string;
+  user: { id: string; name: string; role: string };
+  kpis: {
+    leadsNew: number;
+    leadsInTreatment: number;
+    leadsWon: number;
+    leadsLost: number;
+    totalLeads: number;
+    openTasks: number;
+    overdueTasks: number;
+    openQuotes: number;
+    quotesSent: number;
+    quotesApproved: number;
+    wonRevenueThisMonth: number;
+    wonRevenueTotal: number;
+    pipelineValue: number;
+    winRate: number;
+    conversionLeadToQuote: number;
+    conversionQuoteToWon: number;
+  };
+  leadsBySource: Array<{ name: string; value: number }>;
+  leadsByServiceType: Array<{ name: string; value: number }>;
+  recentLeads: Array<{ id: string; name: string; phone: string; serviceType: string; source: string; status: string; createdAt: string | null }>;
+};
+
+/** כרטיס מדד אישי — אייקון צבעוני, מספר גדול, תווית והערה. */
+function EmployeeStatCard({
+  title,
+  value,
+  sub,
+  icon: Icon,
+  accent,
 }: {
-  leads: Lead[];
-  quotes: Quote[];
-  opportunities: Opportunity[];
-  projects: Project[];
-  tasks: Task[];
-  stats?: DashboardStats | null;
+  title: string;
+  value: string | number;
+  sub?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  accent: { from: string; to: string; ring: string; text: string };
 }) {
-  const leadStatus = (l: Lead) => (l.leadStatus || l.status || l.stage || '').toUpperCase();
-  const leadsNew = leads.filter((l) => leadStatus(l) === 'NEW').length;
-  const leadsInTreatment = leads.filter((l) => ['CONTACTED', 'FU_1', 'FU_2', 'QUOTE_SENT', 'NEGOTIATION'].includes(leadStatus(l))).length;
-  const wonDeals = leads.filter((l) => leadStatus(l) === 'WON').length;
-  const lostDeals = leads.filter((l) => leadStatus(l) === 'LOST').length;
-  const openTasks = tasks.filter((t) => ['OPEN', 'IN_PROGRESS'].includes((t.status || 'OPEN').toUpperCase())).length;
-  const overdueTasks = tasks.filter((t) => {
-    const st = (t.status || 'OPEN').toUpperCase();
-    if (!['OPEN', 'IN_PROGRESS'].includes(st)) return false;
-    if (!t.dueDate) return false;
-    return new Date(t.dueDate).getTime() < Date.now();
-  }).length;
-  const openQuotes = quotes.filter((q) => ['DRAFT', 'SENT'].includes((q.status || '').toUpperCase())).length;
+  return (
+    <div className="group relative overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(15,23,42,0.12)]">
+      <div className={cn('absolute -left-10 -top-10 h-28 w-28 rounded-full opacity-10 transition-transform duration-500 group-hover:scale-125', accent.ring)} />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-slate-500">{title}</div>
+          <div className="mt-2 text-[28px] font-black leading-none text-slate-900">{value}</div>
+          {sub ? <div className={cn('mt-2 text-xs font-medium', accent.text)}>{sub}</div> : null}
+        </div>
+        <div className={cn('flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-sm', accent.from, accent.to)}>
+          <Icon className="h-6 w-6" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
-  const totalLeads = leads.length;
-  const revenueTotal = quotes
-    .filter((q) => q.status === 'APPROVED' || q.status === 'SIGNED')
-    .reduce((acc, q) => acc + Number(q.totalAmount ?? q.amount ?? 0), 0);
+/** שורת מדד עם פס התקדמות. */
+function MetricProgressRow({ label, value, display, color }: { label: string; value: number; display: string; color: string }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-slate-600">{label}</div>
+        <div className="text-sm font-bold text-slate-900">{display}</div>
+      </div>
+      <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className={cn('h-2 rounded-full transition-all duration-700', color)} style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
+      </div>
+    </div>
+  );
+}
 
-  const leadsBySource = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const l of leads) {
-      const key = (l.source || 'לא ידוע').toString();
-      map.set(key, (map.get(key) || 0) + 1);
+/** פירוק לידים לפי מפתח עם פסים אופקיים. */
+function LeadBreakdownBars({ title, icon: Icon, rows, barClass }: { title: string; icon: React.ComponentType<{ className?: string }>; rows: Array<{ name: string; value: number }>; barClass: string }) {
+  const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+  return (
+    <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+          <Icon className="h-4 w-4 text-slate-400" /> {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {rows.length === 0 ? (
+          <div className="py-6 text-center text-sm text-slate-400">אין נתונים עדיין</div>
+        ) : (
+          rows.map((r) => (
+            <div key={r.name}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="truncate text-slate-700">{r.name}</span>
+                <span className="font-bold text-slate-900">{r.value}</span>
+              </div>
+              <div className="mt-1 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className={cn('h-2.5 rounded-full', barClass)} style={{ width: `${Math.round((r.value / max) * 100)}%` }} />
+              </div>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const LEAD_STATUS_STYLE: Record<string, { label: string; cls: string }> = {
+  NEW: { label: 'חדש', cls: 'bg-blue-100 text-blue-700' },
+  CONTACTED: { label: 'נוצר קשר', cls: 'bg-indigo-100 text-indigo-700' },
+  FU_1: { label: 'מעקב 1', cls: 'bg-amber-100 text-amber-700' },
+  FU_2: { label: 'מעקב 2', cls: 'bg-amber-100 text-amber-700' },
+  QUOTE_SENT: { label: 'הצעה נשלחה', cls: 'bg-purple-100 text-purple-700' },
+  NEGOTIATION: { label: 'מו"מ', cls: 'bg-purple-100 text-purple-700' },
+  WON: { label: 'זכייה', cls: 'bg-emerald-100 text-emerald-700' },
+  LOST: { label: 'אבוד', cls: 'bg-rose-100 text-rose-700' },
+  NOT_RELEVANT: { label: 'לא רלוונטי', cls: 'bg-slate-100 text-slate-600' },
+};
+
+function DashboardPage({
+  currentUser,
+  tasks,
+  onOpenLeads,
+}: {
+  currentUser: AppUser;
+  tasks: Task[];
+  onOpenLeads?: () => void;
+}) {
+  const [me, setMe] = useState<MeDashboardPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadMe = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(apiUrl('/dashboard/me'), { authUser: currentUser });
+      if (res.ok) setMe((await res.json()) as MeDashboardPayload);
+    } catch {
+      /* keep last data */
+    } finally {
+      setLoading(false);
     }
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-  }, [leads]);
+  }, [currentUser]);
 
-  const leadsByServiceType = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const l of leads) {
-      const key = (l.service || 'לא ידוע').toString();
-      map.set(key, (map.get(key) || 0) + 1);
-    }
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
-  }, [leads]);
+  useEffect(() => {
+    void loadMe();
+  }, [loadMe]);
 
-  const quotesSent = quotes.filter((q) => q.status === 'SENT').length;
-  const quotesApproved = quotes.filter((q) => q.status === 'APPROVED' || q.status === 'SIGNED').length;
-  const lostOpportunities = opportunities.filter((o) => (o.pipelineStage || '').toUpperCase() === 'LOST').length;
+  const k = me?.kpis;
+  const firstName = (me?.user.name || currentUser.name || '').trim().split(/\s+/)[0] || '';
+  const greeting = (() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'בוקר טוב';
+    if (h < 18) return 'צהריים טובים';
+    return 'ערב טוב';
+  })();
+  const todayLabel = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-  const conversionLeadsToSent =
-    totalLeads === 0 ? 0 : Math.round((quotesSent / totalLeads) * 100);
-  const conversionSentToApproved =
-    quotesSent === 0 ? 0 : Math.round((quotesApproved / quotesSent) * 100);
+  const myTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => (t.ownerId ? t.ownerId === currentUser.id : false))
+        .filter((t) => ['OPEN', 'IN_PROGRESS'].includes((t.status || 'OPEN').toUpperCase()))
+        .slice(0, 6),
+    [tasks, currentUser.id],
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="לידים חדשים" value={leadsNew} sub="סטטוס חדש" icon={Users} />
-        <KpiCard title="לידים בטיפול" value={leadsInTreatment} sub="בטיפול שוטף" icon={Clock3} />
-        <KpiCard title="לידים שזכו" value={wonDeals} sub="נסגרו בהצלחה" icon={CheckCircle2} />
-        <KpiCard title="לידים שאבדו" value={lostDeals} sub="נסגרו כאבודים" icon={AlertTriangle} />
-        <KpiCard title="משימות פתוחות" value={openTasks} sub="פתוחות/בביצוע" icon={ClipboardList} />
-        <KpiCard title="משימות באיחור" value={overdueTasks} sub="עבר תאריך יעד" icon={Clock3} />
-        <KpiCard title="הצעות מחיר פתוחות" value={openQuotes} sub="טיוטה / נשלחה" icon={FileText} />
-        <KpiCard title="הכנסות חתומות" value={formatCurrencyILS(revenueTotal)} sub='סה"כ חתום' icon={FileText} />
+    <div className="space-y-6" dir="rtl">
+      {/* ── Hero ── */}
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-7 py-7 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
+        <div className="pointer-events-none absolute -left-8 -top-10 h-44 w-44 rounded-full bg-white/10" />
+        <div className="pointer-events-none absolute right-16 -bottom-16 h-52 w-52 rounded-full bg-white/5" />
+        <Leaf className="pointer-events-none absolute -right-2 top-4 h-28 w-28 rotate-12 text-white/10" />
+        <div className="relative flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-medium text-white/80">
+              <Sparkles className="h-4 w-4" /> {todayLabel}
+            </div>
+            <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">
+              {greeting}{firstName ? `, ${firstName}` : ''}
+            </h1>
+            <p className="mt-1 text-sm text-white/85">סקירת הביצועים האישית שלך — הנתונים מתעדכנים ישירות ממסד הנתונים.</p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <div className="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+              <div className="text-[11px] text-white/75">לידים פעילים</div>
+              <div className="text-xl font-black">{(k?.leadsNew ?? 0) + (k?.leadsInTreatment ?? 0)}</div>
+            </div>
+            <div className="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+              <div className="text-[11px] text-white/75">אחוז זכייה</div>
+              <div className="text-xl font-black">{Math.round((k?.winRate ?? 0) * 100)}%</div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card>
-          <CardHeader>
-            <CardTitle>מדדי מכירות</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">הצעות שנשלחו</div>
-              <div className="text-lg font-bold">{quotesSent}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">הצעות מאושרות</div>
-              <div className="text-lg font-bold">{quotesApproved}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">הזדמנויות אבודות</div>
-              <div className="text-lg font-bold">{lostOpportunities}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">המרה: ליד → נשלח</div>
-              <div className="text-lg font-bold">{conversionLeadsToSent}%</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">המרה: נשלח → מאושר</div>
-              <div className="text-lg font-bold">{conversionSentToApproved}%</div>
-            </div>
-          </CardContent>
-        </Card>
+      {loading && !me ? (
+        <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען את הדשבורד שלך…</div>
+      ) : (
+        <>
+          {/* ── KPI cards ── */}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <EmployeeStatCard title="לידים חדשים" value={k?.leadsNew ?? 0} sub="ממתינים לטיפול" icon={Users} accent={{ from: 'from-blue-500', to: 'to-blue-600', ring: 'bg-blue-500', text: 'text-blue-600' }} />
+            <EmployeeStatCard title="לידים בטיפול" value={k?.leadsInTreatment ?? 0} sub="בתהליך מכירה" icon={PhoneCall} accent={{ from: 'from-amber-500', to: 'to-orange-500', ring: 'bg-amber-500', text: 'text-amber-600' }} />
+            <EmployeeStatCard title="הצעות מחיר פתוחות" value={k?.openQuotes ?? 0} sub="טיוטה / נשלחה" icon={FileText} accent={{ from: 'from-purple-500', to: 'to-fuchsia-600', ring: 'bg-purple-500', text: 'text-purple-600' }} />
+            <EmployeeStatCard title="משימות באיחור" value={k?.overdueTasks ?? 0} sub="דורשות טיפול מיידי" icon={AlertTriangle} accent={{ from: 'from-rose-500', to: 'to-red-600', ring: 'bg-rose-500', text: 'text-rose-600' }} />
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>תפעול (Wave 3)</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">דוחות בכתיבה</div>
-              <div className="text-lg font-bold">{stats?.reportsWaitingWriting ?? 0}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">דוחות בבקרה</div>
-              <div className="text-lg font-bold">{stats?.reportsInReview ?? 0}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">דוחות נשלחו השבוע</div>
-              <div className="text-lg font-bold">{stats?.reportsSentThisWeek ?? 0}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">דגימות באנליזה</div>
-              <div className="text-lg font-bold">{stats?.samplesInAnalysis ?? 0}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">חריגות בדגימות</div>
-              <div className="text-lg font-bold">{stats?.abnormalSampleResults ?? 0}</div>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border p-3">
-              <div className="text-sm text-slate-600">פרויקטים ממתינים לנתונים</div>
-              <div className="text-lg font-bold">{stats?.projectsWaitingForData ?? 0}</div>
-            </div>
-          </CardContent>
-        </Card>
+          {/* ── Sales metrics + lead funnel ── */}
+          <div className="grid gap-4 xl:grid-cols-3">
+            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                  <Target className="h-4 w-4 text-slate-400" /> מדדי מכירות אישיים
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-x-8 gap-y-5 md:grid-cols-2">
+                <MetricProgressRow label="המרה: ליד → הצעה" value={k?.conversionLeadToQuote ?? 0} display={`${k?.conversionLeadToQuote ?? 0}%`} color="bg-gradient-to-l from-blue-400 to-blue-600" />
+                <MetricProgressRow label="אחוז זכייה כולל" value={Math.round((k?.winRate ?? 0) * 100)} display={`${Math.round((k?.winRate ?? 0) * 100)}%`} color="bg-gradient-to-l from-emerald-400 to-green-600" />
+                <MetricProgressRow label="הצעות שנשלחו / מאושרות" value={k?.quotesSent ? Math.round(((k?.quotesApproved ?? 0) / k.quotesSent) * 100) : 0} display={`${k?.quotesApproved ?? 0} / ${k?.quotesSent ?? 0}`} color="bg-gradient-to-l from-amber-400 to-orange-500" />
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>לידים לפי מקור</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {leadsBySource.length === 0 ? (
-              <div className="text-sm text-slate-500">אין נתונים</div>
-            ) : (
-              leadsBySource.slice(0, 8).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between rounded-2xl border p-3">
-                  <div className="text-sm text-slate-700">{k}</div>
-                  <div className="text-sm font-semibold">{v}</div>
+            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                  <BarChart3 className="h-4 w-4 text-slate-400" /> צינור הלידים שלי
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {[
+                  { label: 'חדשים', value: k?.leadsNew ?? 0, cls: 'bg-blue-500' },
+                  { label: 'בטיפול', value: k?.leadsInTreatment ?? 0, cls: 'bg-amber-500' },
+                  { label: 'זכייה', value: k?.leadsWon ?? 0, cls: 'bg-emerald-500' },
+                  { label: 'אבודים', value: k?.leadsLost ?? 0, cls: 'bg-rose-400' },
+                ].map((row) => {
+                  const total = (k?.totalLeads ?? 0) || 1;
+                  return (
+                    <div key={row.label} className="flex items-center gap-3">
+                      <div className="w-14 text-xs font-medium text-slate-500">{row.label}</div>
+                      <div className="h-3 flex-1 overflow-hidden rounded-full bg-slate-100">
+                        <div className={cn('h-3 rounded-full', row.cls)} style={{ width: `${Math.round((row.value / total) * 100)}%` }} />
+                      </div>
+                      <div className="w-7 text-left text-sm font-bold text-slate-800">{row.value}</div>
+                    </div>
+                  );
+                })}
+                <div className="mt-2 rounded-2xl bg-slate-50 p-3 text-center">
+                  <div className="text-xs text-slate-500">סה״כ לידים משויכים אליי</div>
+                  <div className="text-2xl font-black text-slate-900">{k?.totalLeads ?? 0}</div>
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>לידים לפי סוג שירות</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {leadsByServiceType.length === 0 ? (
-              <div className="text-sm text-slate-500">אין נתונים</div>
-            ) : (
-              leadsByServiceType.slice(0, 8).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between rounded-2xl border p-3">
-                  <div className="text-sm text-slate-700">{k}</div>
-                  <div className="text-sm font-semibold">{v}</div>
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+          {/* ── Lead breakdowns ── */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <LeadBreakdownBars title="לידים לפי מקור" icon={Radio} rows={me?.leadsBySource ?? []} barClass="bg-gradient-to-l from-teal-400 to-emerald-500" />
+            <LeadBreakdownBars title="לידים לפי סוג שירות" icon={FlaskConical} rows={me?.leadsByServiceType ?? []} barClass="bg-gradient-to-l from-sky-400 to-blue-500" />
+          </div>
+
+          {/* ── Recent leads + my tasks ── */}
+          <div className="grid gap-4 xl:grid-cols-3">
+            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                  <Users className="h-4 w-4 text-slate-400" /> הלידים האחרונים שלי
+                </CardTitle>
+                {onOpenLeads ? (
+                  <button type="button" onClick={onOpenLeads} className="flex items-center gap-1 text-xs font-semibold text-emerald-600 hover:text-emerald-700">
+                    לכל הלידים <ArrowLeft className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </CardHeader>
+              <CardContent className="p-0">
+                {(me?.recentLeads ?? []).length === 0 ? (
+                  <div className="py-10 text-center text-sm text-slate-400">אין לידים משויכים אליך עדיין</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {(me?.recentLeads ?? []).map((l) => {
+                      const st = LEAD_STATUS_STYLE[l.status] || { label: l.status || '—', cls: 'bg-slate-100 text-slate-600' };
+                      return (
+                        <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-slate-800">{l.name}</div>
+                            <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+                              {l.serviceType ? <span className="truncate">{l.serviceType}</span> : null}
+                              {l.phone ? <span className="text-slate-300">·</span> : null}
+                              {l.phone ? <span dir="ltr">{l.phone}</span> : null}
+                            </div>
+                          </div>
+                          <span className={cn('flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold', st.cls)}>{st.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                  <ClipboardList className="h-4 w-4 text-slate-400" /> המשימות שלי
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2.5">
+                {myTasks.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-slate-400">אין משימות פתוחות 🎉</div>
+                ) : (
+                  myTasks.map((t) => (
+                    <div key={t.id} className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3">
+                      <div className="text-sm font-semibold text-slate-800">{t.title}</div>
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-xs text-slate-500">{t.due || '—'}</span>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">עדיפות {taskPriorityLabel(t.priority)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+type FeedbackCustomer = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  contactName: string;
+  city: string;
+  lastDoneAt: string;
+  lastService: string;
+  doneTasksCount: number;
+};
+
+/** סיבות הסיווג "לא רלוונטי" — משותף לפופאפ המשימה ולסקשן "לקוחות שסווגו כלא רלוונטי". */
+const NOT_RELEVANT_REASONS = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'אחר'] as const;
+
+/** קישור הדירוג של גלית בגוגל (כפי שנמסר). */
+const GOOGLE_REVIEW_URL =
+  'https://www.google.com/search?hl=he-IL&gl=il&q=%D7%92%D7%9C%D7%99%D7%AA+-+%D7%94%D7%97%D7%91%D7%A8%D7%94+%D7%9C%D7%90%D7%99%D7%9B%D7%95%D7%AA+%D7%94%D7%A1%D7%91%D7%99%D7%91%D7%94,+%D7%90%D7%95%D7%A1%D7%98%D7%A8%D7%95%D7%91%D7%A1%D7%A7%D7%99+11,+%D7%A8%D7%A2%D7%A0%D7%A0%D7%94&ludocid=6353540875700534600&lsig=AB86z5XBBuvKEizwumoxn7pKhEyY#lrd=0x151d381236a2b835:0x582c4fc3920dfd48,3';
+
+type FbAutomation = { enabled: boolean; delayDays: number; sendHour: number; channel: 'email' | 'sms'; subject: string; message: string };
+type FuAutomation = { enabledGlobal: boolean; intervalDays: number; sendHour: number; channel: 'email' | 'sms'; subject: string; message: string };
+type SmsCfg = { enabled: boolean; provider: string; senderId: string; companyPhone: string; hasApiKey: boolean; hasApiSecret: boolean };
+type FollowupCustomer = {
+  id: string; name: string; email: string; phone: string; city: string;
+  autoFollowupEnabled: boolean | null; followupIntervalDays: number | null; followupChannel: string | null;
+  lastFollowupAt: string | null; nextFollowupAt: string | null;
+};
+
+/** דאשבורד משוב לקוחות (admin בלבד) — שליחת בקשות משוב אישיות, אוטומציה ופולואו-אפ תקופתי. */
+function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
+  const [tab, setTab] = useState<'customers' | 'followup' | 'settings'>('customers');
+  const [rows, setRows] = useState<FeedbackCustomer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [phoneModal, setPhoneModal] = useState<{ row: FeedbackCustomer; channel: 'whatsapp' | 'sms'; phone: string } | null>(null);
+
+  // ── חלון עריכת מייל המשוב לפני שליחה (טיוטה אישית) ──
+  const [compose, setCompose] = useState<{ row: FeedbackCustomer; subject: string; message: string } | null>(null);
+  const [composeState, setComposeState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [sentIds, setSentIds] = useState<Record<string, boolean>>({});
+
+  // ── הגדרות אוטומציה + SMS ──
+  const [fb, setFb] = useState<FbAutomation | null>(null);
+  const [fu, setFu] = useState<FuAutomation | null>(null);
+  const [sms, setSms] = useState<SmsCfg | null>(null);
+  const [smsKeyInput, setSmsKeyInput] = useState('');
+  const [savingFb, setSavingFb] = useState(false);
+  const [savingFu, setSavingFu] = useState(false);
+  const [savingSms, setSavingSms] = useState(false);
+  const [runMsg, setRunMsg] = useState('');
+  const [running, setRunning] = useState<'fb' | 'fu' | null>(null);
+
+  // ── פולואו אפ פר-לקוח ──
+  const [fuCustomers, setFuCustomers] = useState<FollowupCustomer[]>([]);
+  const [fuLoading, setFuLoading] = useState(false);
+  const [fuSearch, setFuSearch] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await apiFetch(apiUrl('/feedback/customers'), { authUser: currentUser });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch {
+      setError('טעינת רשימת המשוב נכשלה. נסה שוב מאוחר יותר.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      const res = await apiFetch(apiUrl('/feedback/settings'), { authUser: currentUser });
+      if (!res.ok) return;
+      const d = await res.json();
+      setFb(d.feedback); setFu(d.followup); setSms(d.sms);
+    } catch { /* ignore */ }
+  }, [currentUser]);
+  useEffect(() => { void loadSettings(); }, [loadSettings]);
+
+  const loadFollowupCustomers = useCallback(async () => {
+    setFuLoading(true);
+    try {
+      const res = await apiFetch(apiUrl('/feedback/followup-customers'), { authUser: currentUser });
+      if (res.ok) setFuCustomers(await res.json());
+    } catch { /* ignore */ } finally { setFuLoading(false); }
+  }, [currentUser]);
+  useEffect(() => { if (tab === 'followup') void loadFollowupCustomers(); }, [tab, loadFollowupCustomers]);
+
+  const feedbackMessage = (name: string) => {
+    const first = (name || '').trim().split(/\s+/)[0] || '';
+    return (
+      `${first ? `שלום ${first},` : 'שלום רב,'}\n` +
+      `תודה שבחרת ב"גלית – החברה לאיכות הסביבה". נשמח מאוד לשמוע את דעתך על השירות שקיבלת.\n` +
+      `נשמח אם תוכל/י לדרג אותנו ולכתוב חוות דעת קצרה — זה עוזר לנו מאוד:\n` +
+      `${GOOGLE_REVIEW_URL}\n` +
+      `תודה רבה!`
+    );
+  };
+
+  // פותח את חלון העריכה עם טיוטה אישית (נושא + גוף) שנטענת מהשרת; קישור הדירוג מתווסף אוטומטית בשליחה.
+  const openCompose = async (row: FeedbackCustomer) => {
+    let subject = 'נשמח לשמוע את דעתך — גלית, החברה לאיכות הסביבה';
+    let message = '';
+    try {
+      const res = await apiFetch(apiUrl(`/feedback/draft?name=${encodeURIComponent(row.name || '')}`), { authUser: currentUser });
+      if (res.ok) { const d = await res.json(); subject = d.subject || subject; message = d.message || ''; }
+    } catch { /* ignore */ }
+    if (!message) {
+      const first = (row.name || '').trim().split(/\s+/)[0] || 'לקוח/ה יקר/ה';
+      message = `שלום ${first},\nתודה שבחרת ב"גלית – החברה לאיכות הסביבה". היה לנו עונג לעבוד איתך, ונשמח מאוד לשמוע איך היה.\nנשמח אם תוכל/י להקדיש רגע ולדרג אותנו — זה עוזר לנו מאוד.`;
+    }
+    setComposeState('idle');
+    setCompose({ row, subject, message });
+  };
+
+  const sendCompose = async () => {
+    if (!compose) return;
+    setComposeState('sending');
+    try {
+      const res = await apiFetch(apiUrl('/feedback/send-email'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          customerId: compose.row.id, email: compose.row.email, customerName: compose.row.name,
+          subject: compose.subject, message: compose.message,
+        }),
+      });
+      if (!res.ok) throw new Error();
+      setComposeState('sent');
+      setSentIds((p) => ({ ...p, [compose.row.id]: true }));
+      setTimeout(() => setCompose(null), 900);
+    } catch { setComposeState('error'); }
+  };
+
+  const sendViaPhone = () => {
+    if (!phoneModal) return;
+    const { row, channel, phone } = phoneModal;
+    const msg = feedbackMessage(row.name);
+    const digits = (phone || '').replace(/\D/g, '');
+    if (!digits) return;
+    if (channel === 'whatsapp') {
+      const wa = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
+      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+    } else {
+      window.open(`sms:${phone}?body=${encodeURIComponent(msg)}`, '_blank');
+    }
+    setPhoneModal(null);
+  };
+
+  const saveFb = async () => {
+    if (!fb) return; setSavingFb(true);
+    try {
+      const res = await apiFetch(apiUrl('/feedback/settings/feedback'), { method: 'POST', authUser: currentUser, body: JSON.stringify(fb) });
+      if (res.ok) setFb(await res.json());
+    } catch { /* ignore */ } finally { setSavingFb(false); }
+  };
+  const saveFu = async () => {
+    if (!fu) return; setSavingFu(true);
+    try {
+      const res = await apiFetch(apiUrl('/feedback/settings/followup'), { method: 'POST', authUser: currentUser, body: JSON.stringify(fu) });
+      if (res.ok) setFu(await res.json());
+    } catch { /* ignore */ } finally { setSavingFu(false); }
+  };
+  const saveSms = async () => {
+    if (!sms) return; setSavingSms(true);
+    try {
+      const body: Record<string, unknown> = { enabled: sms.enabled, provider: sms.provider, senderId: sms.senderId, companyPhone: sms.companyPhone };
+      if (smsKeyInput.trim()) body.apiKey = smsKeyInput.trim();
+      const res = await apiFetch(apiUrl('/feedback/settings/sms'), { method: 'POST', authUser: currentUser, body: JSON.stringify(body) });
+      if (res.ok) { setSms(await res.json()); setSmsKeyInput(''); }
+    } catch { /* ignore */ } finally { setSavingSms(false); }
+  };
+
+  const runNow = async (which: 'fb' | 'fu') => {
+    setRunning(which); setRunMsg('');
+    try {
+      const url = which === 'fb' ? '/feedback/run/feedback' : '/feedback/run/followup';
+      const res = await apiFetch(apiUrl(url), { method: 'POST', authUser: currentUser });
+      if (res.ok) {
+        const d = await res.json();
+        setRunMsg(which === 'fb'
+          ? `נשלחו ${d.sent} בקשות משוב · דולגו ${d.skipped}`
+          : `פולואו-אפ: נשלחו ${d.sent} · תוזמנו ${d.scheduled} · דולגו ${d.skipped}`);
+      } else setRunMsg('הפעולה נכשלה');
+    } catch { setRunMsg('הפעולה נכשלה'); } finally { setRunning(null); }
+    void load();
+  };
+
+  const toggleFuCustomer = async (
+    c: FollowupCustomer,
+    patch: Partial<Pick<FollowupCustomer, 'autoFollowupEnabled' | 'followupIntervalDays' | 'followupChannel'>>,
+  ) => {
+    setFuCustomers((prev) => prev.map((x) => (x.id === c.id ? { ...x, ...patch } : x)));
+    try {
+      await apiFetch(apiUrl(`/feedback/followup-customers/${c.id}`), { method: 'POST', authUser: currentUser, body: JSON.stringify(patch) });
+    } catch { void loadFollowupCustomers(); }
+  };
+
+  const fmtDate = (iso: string) => {
+    try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
+  };
+
+  const inputCls = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400';
+  const labelCls = 'mb-1 block text-[11px] font-bold text-slate-500';
+  const hourOptions = Array.from({ length: 24 }, (_, h) => h);
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      {/* ── Hero ── */}
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-7 py-7 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
+        <Star className="pointer-events-none absolute -right-2 top-3 h-28 w-28 rotate-12 text-white/10" />
+        <div className="relative">
+          <div className="flex items-center gap-2 text-sm font-medium text-white/80">
+            <MessageCircle className="h-4 w-4" /> משוב ופולואו-אפ
+          </div>
+          <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">משוב לקוחות ופולואו-אפ</h1>
+          <p className="mt-1 text-sm text-white/85">
+            שלח בקשות משוב אישיות, הגדר שליחה אוטומטית אחרי סגירת עבודה, ונהל פולואו-אפ תקופתי ללקוחות.
+          </p>
+        </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle>פרויקטים פעילים</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {projects.map((p) => (
-              <div key={p.id} className="rounded-2xl border p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="font-semibold">{p.name}</div>
-                    <div className="mt-1 text-sm text-slate-500">
-                      {p.client} · אחראי: {p.owner} · יעד: {p.due}
+      {/* ── ניווט טאבים ── */}
+      <div className="flex flex-wrap gap-2">
+        {([
+          { k: 'customers', label: 'בקשות משוב', icon: <MessageCircle className="h-4 w-4" /> },
+          { k: 'followup', label: 'פולואו אפ', icon: <Bell className="h-4 w-4" /> },
+          { k: 'settings', label: 'אוטומציה והגדרות', icon: <Settings className="h-4 w-4" /> },
+        ] as const).map((t) => (
+          <button
+            key={t.k}
+            type="button"
+            onClick={() => setTab(t.k)}
+            className={cn(
+              'flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold transition',
+              tab === t.k ? 'bg-[#2f5c32] text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50',
+            )}
+          >
+            {t.icon} {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ════════════ טאב: בקשות משוב ════════════ */}
+      {tab === 'customers' && (
+        loading ? (
+          <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען לקוחות למשוב…</div>
+        ) : error ? (
+          <div className="rounded-3xl bg-red-50 p-6 text-sm text-red-700">{error}</div>
+        ) : (
+          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" /> לקוחות עם עבודות שהסתיימו
+              </CardTitle>
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">{rows.length} לקוחות</span>
+            </CardHeader>
+            <CardContent className="p-0">
+              {rows.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-400">אין עדיין לקוחות עם משימות שהסתיימו</div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {rows.map((row) => {
+                    const sent = sentIds[row.id];
+                    return (
+                      <div key={row.id} className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate text-sm font-bold text-slate-800">{row.name}</span>
+                            {row.doneTasksCount > 1 ? (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{row.doneTasksCount} עבודות</span>
+                            ) : null}
+                            {sent ? (
+                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">נשלח משוב</span>
+                            ) : null}
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+                            {row.lastService ? <span className="truncate">{row.lastService}</span> : null}
+                            {row.city ? <><span className="text-slate-300">·</span><span>{row.city}</span></> : null}
+                            {row.lastDoneAt ? <><span className="text-slate-300">·</span><span>הסתיים {fmtDate(row.lastDoneAt)}</span></> : null}
+                            {row.email ? <><span className="text-slate-300">·</span><span dir="ltr">{row.email}</span></> : <span className="text-amber-600">אין מייל</span>}
+                          </div>
+                        </div>
+                        <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void openCompose(row)}
+                            disabled={!row.email}
+                            className="flex items-center gap-1.5 rounded-xl bg-[#4ba647] px-3 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                            title={!row.email ? 'אין כתובת מייל ללקוח' : 'פתח טיוטה ושלח בקשת משוב במייל דרך Outlook'}
+                          >
+                            <Mail className="h-3.5 w-3.5" /> שלח במייל
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPhoneModal({ row, channel: 'whatsapp', phone: row.phone || '' })}
+                            className="flex items-center gap-1.5 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 transition hover:bg-green-100"
+                          >
+                            <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPhoneModal({ row, channel: 'sms', phone: row.phone || '' })}
+                            className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
+                          >
+                            <Phone className="h-3.5 w-3.5" /> SMS
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )
+      )}
+
+      {/* ════════════ טאב: פולואו אפ ════════════ */}
+      {tab === 'followup' && fu && (
+        <div className="space-y-6">
+          {/* פולואו אפ גלובלי */}
+          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                <Bell className="h-4 w-4 text-amber-500" /> פולואו-אפ תקופתי
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <label className="flex items-center gap-3 rounded-2xl bg-amber-50 px-4 py-3">
+                <input type="checkbox" className="h-5 w-5 accent-amber-600" checked={fu.enabledGlobal} onChange={(e) => setFu({ ...fu, enabledGlobal: e.target.checked })} />
+                <div>
+                  <div className="text-sm font-bold text-slate-800">פולואו-אפ אוטומטי לכל הלקוחות</div>
+                  <div className="text-xs text-slate-500">שולח לכל הלקוחות הודעת פולואו-אפ נחמדה כל פרק זמן שתבחר.</div>
+                </div>
+              </label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
+                  <label className={labelCls}>כל כמה ימים</label>
+                  <input type="number" min={1} className={inputCls} value={fu.intervalDays} onChange={(e) => setFu({ ...fu, intervalDays: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className={labelCls}>שעת שליחה</label>
+                  <select className={inputCls} value={fu.sendHour} onChange={(e) => setFu({ ...fu, sendHour: Number(e.target.value) })}>
+                    {hourOptions.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ערוץ</label>
+                  <select className={inputCls} value={fu.channel} onChange={(e) => setFu({ ...fu, channel: e.target.value as 'email' | 'sms' })}>
+                    <option value="email">מייל</option>
+                    <option value="sms">SMS</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>נושא ההודעה</label>
+                <input className={inputCls} value={fu.subject} onChange={(e) => setFu({ ...fu, subject: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>גוף ההודעה (אפשר {'{firstName}'} לשם הלקוח)</label>
+                <textarea className={`${inputCls} resize-none`} rows={4} value={fu.message} onChange={(e) => setFu({ ...fu, message: e.target.value })} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void saveFu()} disabled={savingFu} className="flex items-center gap-1.5 rounded-xl bg-[#2f5c32] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50">
+                  {savingFu ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} שמור הגדרות
+                </button>
+                <button type="button" onClick={() => void runNow('fu')} disabled={running === 'fu'} className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-700 transition hover:bg-amber-100 disabled:opacity-50">
+                  {running === 'fu' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} הרץ פולואו-אפ עכשיו
+                </button>
+                {runMsg ? <span className="text-xs text-slate-500">{runMsg}</span> : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* בחירת לקוחות לפולואו-אפ */}
+          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                <Users className="h-4 w-4 text-emerald-500" /> בחירת לקוחות לפולואו-אפ
+              </CardTitle>
+              <div className="relative">
+                <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-300" />
+                <input value={fuSearch} onChange={(e) => setFuSearch(e.target.value)} placeholder="חיפוש לקוח…" className="w-48 rounded-xl border border-slate-200 bg-white py-2 pr-9 pl-3 text-sm outline-none focus:border-emerald-400" />
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              {fuLoading ? (
+                <div className="py-10 text-center text-sm text-slate-400">טוען לקוחות…</div>
+              ) : (
+                <div className="max-h-[480px] divide-y divide-slate-100 overflow-auto">
+                  {fuCustomers
+                    .filter((c) => !fuSearch || (c.name || '').includes(fuSearch) || (c.city || '').includes(fuSearch))
+                    .map((c) => (
+                      <div key={c.id} className="flex flex-col gap-2 px-5 py-3 hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
+                        <label className="flex min-w-0 flex-1 items-center gap-3 cursor-pointer">
+                          <input type="checkbox" className="h-5 w-5 accent-emerald-600" checked={!!c.autoFollowupEnabled} onChange={(e) => void toggleFuCustomer(c, { autoFollowupEnabled: e.target.checked })} />
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-slate-800">{c.name}</div>
+                            <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-slate-400">
+                              {c.city ? <span>{c.city}</span> : null}
+                              {c.nextFollowupAt ? <><span className="text-slate-300">·</span><span>הבא: {fmtDate(c.nextFollowupAt)}</span></> : null}
+                              {c.lastFollowupAt ? <><span className="text-slate-300">·</span><span>אחרון: {fmtDate(c.lastFollowupAt)}</span></> : null}
+                            </div>
+                          </div>
+                        </label>
+                        <div className="flex flex-shrink-0 items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] text-slate-400">כל</span>
+                            <input
+                              type="number" min={1} disabled={!c.autoFollowupEnabled}
+                              value={c.followupIntervalDays ?? ''}
+                              placeholder={String(fu.intervalDays)}
+                              onChange={(e) => void toggleFuCustomer(c, { followupIntervalDays: e.target.value ? Number(e.target.value) : null })}
+                              className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs outline-none focus:border-emerald-400 disabled:opacity-40"
+                            />
+                            <span className="text-[11px] text-slate-400">ימים</span>
+                          </div>
+                          <select
+                            disabled={!c.autoFollowupEnabled}
+                            value={c.followupChannel || ''}
+                            onChange={(e) => void toggleFuCustomer(c, { followupChannel: (e.target.value || null) as 'email' | 'sms' | null })}
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-xs outline-none focus:border-emerald-400 disabled:opacity-40"
+                          >
+                            <option value="">ברירת מחדל</option>
+                            <option value="email">מייל</option>
+                            <option value="sms">SMS</option>
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  {fuCustomers.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">אין לקוחות להצגה</div> : null}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ════════════ טאב: אוטומציה והגדרות ════════════ */}
+      {tab === 'settings' && fb && sms && (
+        <div className="space-y-6">
+          {/* אוטומציית משוב */}
+          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                <Send className="h-4 w-4 text-emerald-500" /> שליחת משוב אוטומטית
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <label className="flex items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3">
+                <input type="checkbox" className="h-5 w-5 accent-emerald-600" checked={fb.enabled} onChange={(e) => setFb({ ...fb, enabled: e.target.checked })} />
+                <div>
+                  <div className="text-sm font-bold text-slate-800">שלח בקשת משוב לכולם אוטומטית</div>
+                  <div className="text-xs text-slate-500">אחרי שמשימה נסגרה, המערכת תשלח בקשת משוב ללקוח בעצמה — בלי לזכור ידנית.</div>
+                </div>
+              </label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div>
+                  <label className={labelCls}>כמה ימים אחרי סגירת העבודה</label>
+                  <input type="number" min={0} className={inputCls} value={fb.delayDays} onChange={(e) => setFb({ ...fb, delayDays: Number(e.target.value) })} />
+                </div>
+                <div>
+                  <label className={labelCls}>שעת שליחה</label>
+                  <select className={inputCls} value={fb.sendHour} onChange={(e) => setFb({ ...fb, sendHour: Number(e.target.value) })}>
+                    {hourOptions.map((h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>ערוץ</label>
+                  <select className={inputCls} value={fb.channel} onChange={(e) => setFb({ ...fb, channel: e.target.value as 'email' | 'sms' })}>
+                    <option value="email">מייל</option>
+                    <option value="sms">SMS</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className={labelCls}>נושא המייל</label>
+                <input className={inputCls} value={fb.subject} onChange={(e) => setFb({ ...fb, subject: e.target.value })} />
+              </div>
+              <div>
+                <label className={labelCls}>גוף ההודעה (קישור הדירוג מתווסף אוטומטית · אפשר {'{firstName}'})</label>
+                <textarea className={`${inputCls} resize-none`} rows={4} value={fb.message} onChange={(e) => setFb({ ...fb, message: e.target.value })} />
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void saveFb()} disabled={savingFb} className="flex items-center gap-1.5 rounded-xl bg-[#2f5c32] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50">
+                  {savingFb ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} שמור הגדרות
+                </button>
+                <button type="button" onClick={() => void runNow('fb')} disabled={running === 'fb'} className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50">
+                  {running === 'fb' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} שלח לכולם עכשיו
+                </button>
+                {runMsg ? <span className="text-xs text-slate-500">{runMsg}</span> : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* הגדרות SMS */}
+          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+                <Smartphone className="h-4 w-4 text-blue-500" /> חיבור מספר החברה לשליחת SMS
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700">
+                חבר את מספר החברה כדי לשלוח ללקוחות בקשות משוב ופולואו-אפ ב-SMS. הזן את פרטי ספק ה-SMS שלך — ברגע שיחובר, אפשר יהיה לבחור SMS כערוץ השליחה האוטומטי.
+              </div>
+              <label className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+                <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={sms.enabled} onChange={(e) => setSms({ ...sms, enabled: e.target.checked })} />
+                <div className="text-sm font-bold text-slate-800">הפעל שליחת SMS</div>
+              </label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div>
+                  <label className={labelCls}>ספק SMS</label>
+                  <input className={inputCls} placeholder="לדוגמה: 019 / InforU / Twilio" value={sms.provider} onChange={(e) => setSms({ ...sms, provider: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>מספר / שם השולח</label>
+                  <input className={inputCls} dir="ltr" placeholder="Galit" value={sms.senderId} onChange={(e) => setSms({ ...sms, senderId: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>מספר הטלפון של החברה</label>
+                  <input className={inputCls} dir="ltr" placeholder="03-0000000" value={sms.companyPhone} onChange={(e) => setSms({ ...sms, companyPhone: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>מפתח API {sms.hasApiKey ? <span className="text-emerald-600">· מוגדר</span> : null}</label>
+                  <input className={inputCls} dir="ltr" type="password" placeholder={sms.hasApiKey ? '•••••••• (נשמר)' : 'הדבק מפתח API'} value={smsKeyInput} onChange={(e) => setSmsKeyInput(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void saveSms()} disabled={savingSms} className="flex items-center gap-1.5 rounded-xl bg-[#2563eb] px-4 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50">
+                  {savingSms ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} שמור חיבור SMS
+                </button>
+                <span className="text-[11px] text-slate-400">החיבור בפועל לספק יושלם בהמשך — ההגדרות נשמרות מאובטח בשרת.</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── חלון עריכת טיוטת המשוב ── */}
+      {compose && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => composeState !== 'sending' && setCompose(null)}>
+          <div className="w-full max-w-lg rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-800">
+              <Mail size={20} className="text-emerald-500" /> בקשת משוב ל{compose.row.name}
+            </div>
+            <div className="mb-4 text-xs text-gray-500" dir="ltr">{compose.row.email}</div>
+            <label className={labelCls}>נושא</label>
+            <input className={`${inputCls} mb-3`} value={compose.subject} onChange={(e) => setCompose({ ...compose, subject: e.target.value })} />
+            <label className={labelCls}>תוכן ההודעה</label>
+            <textarea className={`${inputCls} mb-2 resize-none`} rows={6} value={compose.message} onChange={(e) => setCompose({ ...compose, message: e.target.value })} />
+            <div className="mb-4 flex items-center gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
+              <Star className="h-3.5 w-3.5" /> קישור הדירוג בגוגל יתווסף אוטומטית ככפתור בתחתית המייל.
+            </div>
+            {composeState === 'error' ? <div className="mb-3 text-xs text-rose-500">שליחת המייל נכשלה — ודא שחשבון ה-Outlook מחובר ונסה שוב.</div> : null}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setCompose(null)} disabled={composeState === 'sending'} className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">ביטול</button>
+              <button
+                type="button"
+                onClick={() => void sendCompose()}
+                disabled={composeState === 'sending' || composeState === 'sent'}
+                className="flex items-center gap-2 rounded-xl bg-[#4ba647] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+              >
+                {composeState === 'sending' ? <Loader2 size={16} className="animate-spin" /> : composeState === 'sent' ? <CheckCircle2 size={16} /> : <Send size={16} />}
+                {composeState === 'sent' ? 'נשלח' : 'שלח דרך Outlook'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── מודל הזנת מספר טלפון ל-WhatsApp / SMS ── */}
+      {phoneModal && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => setPhoneModal(null)}>
+          <div className="w-full max-w-sm rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-800">
+              {phoneModal.channel === 'whatsapp' ? <MessageCircle size={20} className="text-green-500" /> : <Phone size={20} className="text-blue-500" />}
+              שליחת משוב ב{phoneModal.channel === 'whatsapp' ? '-WhatsApp' : '-SMS'}
+            </div>
+            <div className="mb-4 text-sm text-gray-500">הזן את מספר הטלפון של {phoneModal.row.name} לשליחה.</div>
+            <input
+              autoFocus
+              type="tel"
+              dir="ltr"
+              value={phoneModal.phone}
+              onChange={(e) => setPhoneModal((p) => (p ? { ...p, phone: e.target.value } : p))}
+              onKeyDown={(e) => { if (e.key === 'Enter') sendViaPhone(); }}
+              placeholder="050-0000000"
+              className="mb-4 h-11 w-full rounded-xl border border-gray-200 px-4 text-right text-base outline-none focus:border-green-400"
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPhoneModal(null)} className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-gray-50">ביטול</button>
+              <button
+                type="button"
+                onClick={sendViaPhone}
+                disabled={!phoneModal.phone.replace(/\D/g, '')}
+                className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                style={{ background: phoneModal.channel === 'whatsapp' ? '#16a34a' : '#2563eb' }}
+              >
+                {phoneModal.channel === 'whatsapp' ? <MessageCircle size={16} /> : <Phone size={16} />} שלח
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type NotRelevantCustomer = {
+  id: string; name: string; contactName: string; phone: string; email: string; city: string;
+  services: string[]; notRelevantReason: string; notRelevantNote: string | null; notRelevantAt: string | null;
+};
+
+/** מטא-דאטה לכל סיבת סיווג — צבע ואייקון. */
+const NOT_RELEVANT_META: Record<string, { color: string; bg: string; border: string; icon: React.ReactNode }> = {
+  'יקר מדי': { color: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200', icon: <TrendingUp className="h-5 w-5" /> },
+  'אי-התאמה בשירות': { color: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', icon: <Target className="h-5 w-5" /> },
+  'לא מעוניין': { color: 'text-slate-600', bg: 'bg-slate-100', border: 'border-slate-200', icon: <X className="h-5 w-5" /> },
+  'זמן לא טוב': { color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', icon: <Clock3 className="h-5 w-5" /> },
+  'לא ניתן ליצור קשר': { color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', icon: <PhoneCall className="h-5 w-5" /> },
+  'אחר': { color: 'text-gray-600', bg: 'bg-gray-50', border: 'border-gray-200', icon: <HelpCircle className="h-5 w-5" /> },
+};
+
+/** סקשן "לקוחות שסווגו כלא רלוונטי" — מקובץ לפי סיבה; לחיצה על סיבה פותחת את הלקוחות שתחתיה. */
+function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: AppUser; onOpenCustomerById: (id: string) => void }) {
+  const [rows, setRows] = useState<NotRelevantCustomer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [openReason, setOpenReason] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await apiFetch(apiUrl('/customers/not-relevant'), { authUser: currentUser });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch {
+      setError('טעינת הרשימה נכשלה. נסה שוב מאוחר יותר.');
+    } finally { setLoading(false); }
+  }, [currentUser]);
+  useEffect(() => { void load(); }, [load]);
+
+  // קיבוץ לפי סיבה — כל סיבה שאינה ברשימה הקנונית נכנסת ל"אחר".
+  const grouped = useMemo(() => {
+    const map = new Map<string, NotRelevantCustomer[]>();
+    for (const r of NOT_RELEVANT_REASONS) map.set(r, []);
+    for (const c of rows) {
+      const key = (NOT_RELEVANT_REASONS as readonly string[]).includes(c.notRelevantReason) ? c.notRelevantReason : 'אחר';
+      map.get(key)!.push(c);
+    }
+    return map;
+  }, [rows]);
+
+  const fmtDate = (iso: string | null) => {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
+  };
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      {/* ── Hero ── */}
+      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#7f1d1d] via-[#b91c1c] to-[#ef4444] px-7 py-7 text-white shadow-[0_18px_40px_rgba(127,29,29,0.35)]">
+        <X className="pointer-events-none absolute -right-2 top-3 h-28 w-28 rotate-12 text-white/10" />
+        <div className="relative">
+          <div className="flex items-center gap-2 text-sm font-medium text-white/80">
+            <AlertCircle className="h-4 w-4" /> סיווג לקוחות
+          </div>
+          <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">לקוחות שסווגו כלא רלוונטי</h1>
+          <p className="mt-1 text-sm text-white/85">
+            כל לקוח שעובד סימן כ"לא רלוונטי" מופיע כאן, מקובץ לפי הסיבה. לחץ על סיבה כדי לראות את כל הלקוחות שתחתיה.
+          </p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען…</div>
+      ) : error ? (
+        <div className="rounded-3xl bg-red-50 p-6 text-sm text-red-700">{error}</div>
+      ) : rows.length === 0 ? (
+        <div className="rounded-3xl bg-white p-12 text-center text-sm text-slate-400 shadow-sm">אין עדיין לקוחות שסווגו כלא רלוונטי</div>
+      ) : (
+        <div className="space-y-3">
+          {NOT_RELEVANT_REASONS.map((reason) => {
+            const list = grouped.get(reason) || [];
+            const meta = NOT_RELEVANT_META[reason];
+            const isOpen = openReason === reason;
+            return (
+              <div key={reason} className={cn('overflow-hidden rounded-3xl border bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]', meta.border)}>
+                <button
+                  type="button"
+                  onClick={() => setOpenReason(isOpen ? null : reason)}
+                  className="flex w-full items-center justify-between gap-3 px-5 py-4 text-right transition hover:bg-slate-50"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl', meta.bg, meta.color)}>{meta.icon}</div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-800">{reason}</div>
+                      <div className="text-[11px] text-slate-400">{list.length} לקוחות</div>
                     </div>
                   </div>
-                  <Badge className={statusBadge(p.status)}>{statusLabel(p.status)}</Badge>
-                </div>
-                <div className="mt-3">
-                  <Progress value={p.progress} />
-                  <div className="mt-2 text-xs text-slate-500">התקדמות {p.progress}%</div>
-                </div>
+                  <div className="flex items-center gap-2">
+                    <span className={cn('rounded-full px-3 py-1 text-xs font-bold', meta.bg, meta.color)}>{list.length}</span>
+                    {isOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </div>
+                </button>
+                {isOpen && (
+                  list.length === 0 ? (
+                    <div className="border-t border-slate-100 py-8 text-center text-xs text-slate-400">אין לקוחות בסיבה זו</div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 border-t border-slate-100">
+                      {list.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => onOpenCustomerById(c.id)}
+                          className="flex w-full flex-col gap-1 px-5 py-3 text-right transition hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-bold text-slate-800">{c.name}</div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
+                              {c.contactName && c.contactName !== c.name ? <span className="truncate">{c.contactName}</span> : null}
+                              {c.phone ? <><span className="text-slate-300">·</span><span dir="ltr">{c.phone}</span></> : null}
+                              {c.city ? <><span className="text-slate-300">·</span><span>{c.city}</span></> : null}
+                              {c.notRelevantAt ? <><span className="text-slate-300">·</span><span>סווג {fmtDate(c.notRelevantAt)}</span></> : null}
+                            </div>
+                            {reason === 'אחר' && c.notRelevantNote ? (
+                              <div className="mt-1 text-[11px] text-slate-400">סיבה: {c.notRelevantNote}</div>
+                            ) : null}
+                          </div>
+                          <ChevronLeft className="hidden h-4 w-4 flex-shrink-0 text-slate-300 lg:block" />
+                        </button>
+                      ))}
+                    </div>
+                  )
+                )}
               </div>
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>משימות להיום</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {tasks.map((t) => (
-              <div key={t.id} className="rounded-2xl border p-3">
-                <div className="font-medium">{t.title}</div>
-                <div className="mt-1 text-sm text-slate-500">{t.owner} · {t.due}</div>
-                <div className="mt-2 inline-block rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">עדיפות {taskPriorityLabel(t.priority)}</div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -4688,11 +5577,11 @@ function LeadsPage({
   const rowBgByStatus = (s: string) => {
     const map: Record<string, string> = {
       NEW: 'bg-blue-50/70',
-      CONTACTED: 'bg-red-50/60',
-      FU_1: 'bg-yellow-50/70',
-      FU_2: 'bg-yellow-50/70',
-      QUOTE_SENT: 'bg-orange-50/70',
-      NEGOTIATION: 'bg-orange-100/60',
+      CONTACTED: 'bg-blue-50/70',
+      FU_1: 'bg-blue-50/70',
+      FU_2: 'bg-blue-50/70',
+      QUOTE_SENT: 'bg-green-50/70',
+      NEGOTIATION: 'bg-green-100/60',
       WON: 'bg-green-50/70',
       LOST: 'bg-slate-100/60',
       NOT_RELEVANT: 'bg-slate-100/50',
@@ -4704,11 +5593,11 @@ function LeadsPage({
   const statusBadge = (s: string) => {
     const map: Record<string, string> = {
       NEW: 'bg-blue-500 text-white',
-      CONTACTED: 'bg-red-500 text-white',
-      FU_1: 'bg-yellow-500 text-white',
-      FU_2: 'bg-yellow-600 text-white',
-      QUOTE_SENT: 'bg-orange-500 text-white',
-      NEGOTIATION: 'bg-orange-600 text-white',
+      CONTACTED: 'bg-blue-500 text-white',
+      FU_1: 'bg-blue-500 text-white',
+      FU_2: 'bg-blue-600 text-white',
+      QUOTE_SENT: 'bg-green-600 text-white',
+      NEGOTIATION: 'bg-green-700 text-white',
       WON: 'bg-green-600 text-white',
       LOST: 'bg-slate-400 text-white',
       NOT_RELEVANT: 'bg-slate-400 text-white',
@@ -4762,7 +5651,7 @@ function LeadsPage({
 
       {loadError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-sm text-red-700">{loadError}</div>}
       {(error || success) && (
-        <div className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>
+        <div className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -4853,7 +5742,7 @@ function LeadsPage({
             { key: 'untouched15', label: 'לא טופל 15 דק\'', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700' },
             { key: 'src_facebook', label: 'פייסבוק', color: 'bg-blue-700', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-800' },
             { key: 'src_google', label: 'גוגל', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
-            { key: 'src_site', label: 'אתר', color: 'bg-teal-600', hoverBg: 'hover:bg-teal-50', borderColor: 'border-teal-200', textColor: 'text-teal-700' },
+            { key: 'src_site', label: 'אתר', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'svc_radiation', label: 'קרינה', color: 'bg-amber-600', hoverBg: 'hover:bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700' },
             { key: 'svc_radon', label: 'ראדון', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'hot', label: 'חם', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700', icon: 'flame' },
@@ -5057,7 +5946,7 @@ function LeadsPage({
                                       </div>
                                     )}
                                     <div className="flex items-center gap-2">
-                                      <div className="rounded-full bg-emerald-100 p-1.5"><Users className="h-3 w-3 text-emerald-600" /></div>
+                                      <div className="rounded-full bg-green-100 p-1.5"><Users className="h-3 w-3 text-green-600" /></div>
                                       <span className="text-slate-400">נציג:</span>
                                       <span className="font-bold text-slate-800">{leadAssigneeLabel(lead)}</span>
                                     </div>
@@ -5077,7 +5966,7 @@ function LeadsPage({
                                     )}
                                     {(lead.address || lead.city) && (
                                       <div className="flex items-center gap-2">
-                                        <div className="rounded-full bg-rose-100 p-1.5"><MapPin className="h-3 w-3 text-rose-500" /></div>
+                                        <div className="rounded-full bg-blue-100 p-1.5"><MapPin className="h-3 w-3 text-blue-500" /></div>
                                         <span className="text-slate-400">כתובת:</span>
                                         <span className="font-bold text-slate-800">{[lead.address, lead.city].filter(Boolean).join(', ')}</span>
                                       </div>
@@ -5142,10 +6031,10 @@ function LeadsPage({
                                   </a>
                                 )}
 
-                                {/* Create quote — orange */}
+                                {/* Create quote — blue */}
                                 <button onClick={() => createQuoteFromLead(lead)}
                                   className="flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-extrabold text-white shadow-lg transition hover:brightness-110"
-                                  style={{ background: 'linear-gradient(135deg, #f59e0b, #d97706)' }}>
+                                  style={{ background: 'linear-gradient(135deg, #2563eb, #1d4ed8)' }}>
                                   <FileText className="h-5 w-5" />
                                   <span>צור הצעת מחיר</span>
                                 </button>
@@ -5469,7 +6358,7 @@ function CitySearchInput({
             <li key={c}>
               <button
                 type="button"
-                className="w-full px-4 py-2.5 text-right text-sm text-slate-800 hover:bg-emerald-50"
+                className="w-full px-4 py-2.5 text-right text-sm text-slate-800 hover:bg-green-50"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   cancelBlur();
@@ -5487,7 +6376,7 @@ function CitySearchInput({
   );
 }
 
-const TYPE_PIE_PALETTE = ['#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#84cc16', '#65a30d', '#94a3b8'];
+const TYPE_PIE_PALETTE = ['#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#22c55e', '#65a30d', '#94a3b8'];
 
 /** חישובי אנליטיקה אמיתיים לדף לקוחות (ללא מספרים קשיחים) */
 function computeCustomersPageAnalytics(
@@ -5902,6 +6791,7 @@ function CustomersPage({
         city: form.city.trim(),
         address: form.address.trim() ? form.address.trim() : null,
         status: form.status || 'ACTIVE',
+        leadSource: form.leadSource || null,
         services: isEditing
           ? (form.services || '')
               .split(',')
@@ -5991,7 +6881,7 @@ function CustomersPage({
       envCo2ReductionTons: '',
       envCertifications: '',
       envExtraNotes: '',
-      leadSource: '',
+      leadSource: (customer as any).leadSource || '',
       designatedSalesManager: '',
     });
     setCreateError('');
@@ -6057,7 +6947,7 @@ function CustomersPage({
   }, [customers]);
 
   const customerFormControlClass =
-    '!text-lg h-14 rounded-2xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100';
+    '!text-lg h-14 rounded-2xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100';
 
   return (
     <div className="bg-[#f7fbf5] p-4 md:p-6 space-y-4" dir="rtl">
@@ -6172,7 +7062,7 @@ function CustomersPage({
               const statusRaw = (customer.status || 'ACTIVE').toUpperCase();
               const statusUi =
                 statusRaw === 'ACTIVE'
-                  ? { label: 'פעיל', cls: 'bg-emerald-100 text-emerald-800' }
+                  ? { label: 'פעיל', cls: 'bg-green-100 text-green-800' }
                   : statusRaw === 'INACTIVE'
                     ? { label: 'לא פעיל', cls: 'bg-red-100 text-red-700' }
                     : { label: 'בטיפול', cls: 'bg-amber-100 text-amber-800' };
@@ -6262,7 +7152,7 @@ function CustomersPage({
           const statusRaw = (customer.status || 'ACTIVE').toUpperCase();
           const mobileStatusUi =
             statusRaw === 'ACTIVE'
-              ? { label: 'פעיל', cls: 'bg-emerald-100 text-emerald-800' }
+              ? { label: 'פעיל', cls: 'bg-green-100 text-green-800' }
               : statusRaw === 'INACTIVE'
                 ? { label: 'לא פעיל', cls: 'bg-red-100 text-red-700' }
                 : { label: 'בטיפול', cls: 'bg-amber-100 text-amber-800' };
@@ -6414,6 +7304,21 @@ function CustomersPage({
                   onChange={(v) => setForm({ ...form, city: v })}
                   inputClassName={customerFormControlClass}
                 />
+              </FormField>
+              <FormField label="מקור הגעה" labelClassName="text-base font-semibold text-slate-800">
+                <select
+                  value={form.leadSource || ''}
+                  onChange={(e) => setForm({ ...form, leadSource: e.target.value })}
+                  className={cn(customerFormControlClass, 'cursor-pointer')}
+                >
+                  <option value="">בחר מקור...</option>
+                  {['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'טלפון', 'אחר'].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                  {form.leadSource && !['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'טלפון', 'אחר'].includes(form.leadSource) && (
+                    <option value={form.leadSource}>{form.leadSource}</option>
+                  )}
+                </select>
               </FormField>
               <FormField label="סיווג הלקוח" labelClassName="text-base font-semibold text-slate-800">
                 <select
@@ -7143,7 +8048,8 @@ function QuotesPage({
       return;
     }
     const waPhone = phone.startsWith('972') ? phone : phone.startsWith('0') ? `972${phone.slice(1)}` : phone;
-    const msg = `שלום, מצורפת/מצ״ב הצעת המחיר שהוכנה עבורך על ידי גלית - החברה לאיכות הסביבה.\nנשמח לעמוד לרשותך לכל שאלה.${pdfReady && currentQuoteId ? `\n\nקישור PDF (נדרשת גישה למערכת):\n${pdfUrlForShare}` : ''}`;
+    const customerFirstName = (selectedCustomer?.name || '').trim().split(/\s+/)[0] || '';
+    const msg = `${customerFirstName ? `שלום ${customerFirstName},` : 'שלום רב,'}\nמצורפת הצעת המחיר שהכנו עבורך ב"גלית – החברה לאיכות הסביבה", בהתאם לפרטים שסיכמנו.\nההצעה כוללת את כל מרכיבי העבודה הנדרשים, וריכזנו בה את הפרטים בצורה ברורה ושקופה.\nנשמח שתעיין בהצעה בנוחות, ואם יעלו שאלות או נקודות שתרצה להבהיר — אנחנו זמינים עבורך.\nאשמח לעמוד לרשותך לכל שאלה.${pdfReady && currentQuoteId ? `\n\nקישור לצפייה בהצעה (נדרשת גישה למערכת):\n${pdfUrlForShare}` : ''}`;
     window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
@@ -7288,7 +8194,7 @@ function QuotesPage({
           </CardHeader>
           <CardContent className="space-y-3">
             {(error || success) && (
-              <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+              <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
                 {error || success}
               </div>
             )}
@@ -7394,7 +8300,7 @@ function QuotesPage({
                     ? quoteTemplatesList[0]
                     : quoteTemplatesList.find((t: { id: string }) => t.id === selectedTemplateId);
                 return tplSel?.docxTemplatePath ? (
-                  <p className="mt-1 text-xs text-emerald-800">
+                  <p className="mt-1 text-xs text-green-800">
                     נבחרה תבנית Word (DOCX) — המסמך נבנה מקובץ המקור; אין מיזוג HTML.
                   </p>
                 ) : null;
@@ -7553,7 +8459,7 @@ function QuotesPage({
 
             <div className="text-sm text-slate-600">סה״כ כולל מע״מ: <span className="font-semibold">{formatCurrencyILS(computeTotal)}</span></div>
             {currentQuoteId && (
-              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-xs text-emerald-900">
+              <div className="rounded-2xl border border-green-100 bg-green-50/50 px-3 py-2 text-xs text-green-900">
                 מזהה הצעה נוכחית: <span className="font-mono font-semibold">{currentQuoteId}</span>
                 {pdfReady ? ' · PDF זמין' : ' · עדיין ללא PDF'}
               </div>
@@ -7638,7 +8544,7 @@ function QuotesPage({
             <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
               <div className="text-lg font-bold">{aiDraft.title}</div>
               {aiDraft.customerNameHint && (
-                <div className="text-sm text-emerald-800">זיהוי לקוח (הצעה): {aiDraft.customerNameHint}</div>
+                <div className="text-sm text-green-800">זיהוי לקוח (הצעה): {aiDraft.customerNameHint}</div>
               )}
               <div className="text-sm text-slate-700">{aiDraft.description}</div>
               {aiDraft.siteOrProject && <div className="text-xs text-slate-500">אתר / היקף: {aiDraft.siteOrProject}</div>}
@@ -7664,7 +8570,7 @@ function QuotesPage({
                 </div>
                 <div className="rounded-xl bg-white px-2 py-2 sm:col-span-2">
                   <div className="text-xs text-slate-500">סה״כ כולל מע״מ</div>
-                  <div className="font-bold text-emerald-800">{formatCurrencyILS(aiDraft.totalWithVat)}</div>
+                  <div className="font-bold text-green-800">{formatCurrencyILS(aiDraft.totalWithVat)}</div>
                 </div>
               </div>
               <div className="text-sm"><span className="font-semibold">הערות:</span> {aiDraft.notes}</div>
@@ -8865,7 +9771,7 @@ function OpportunitiesPage({
 
   const stageBadgeClass = (stage: string) => {
     const s = (stage || '').toUpperCase();
-    if (s === 'WON') return 'bg-emerald-100 text-emerald-800';
+    if (s === 'WON') return 'bg-green-100 text-green-800';
     if (s === 'LOST') return 'bg-red-100 text-red-700';
     if (s === 'NEGOTIATION') return 'bg-amber-100 text-amber-800';
     return 'bg-slate-100 text-slate-700';
@@ -8873,7 +9779,7 @@ function OpportunitiesPage({
 
   const opportunityStatusChip = (stage: string) => {
     const s = (stage || '').toUpperCase();
-    if (s === 'WON') return { label: 'נסגר', cls: 'bg-emerald-100 text-emerald-800' };
+    if (s === 'WON') return { label: 'נסגר', cls: 'bg-green-100 text-green-800' };
     if (s === 'LOST') return { label: 'הופסד', cls: 'bg-red-100 text-red-700' };
     return { label: 'בטיפול', cls: 'bg-amber-50 text-amber-800' };
   };
@@ -8890,7 +9796,7 @@ function OpportunitiesPage({
                   <div className="font-bold text-slate-900">{currentUser.name}</div>
                   <div className="text-xs text-slate-500">{roleLabel(currentUser.role)}</div>
                 </div>
-                <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-green-50 text-green-700">
                   <Bell className="h-5 w-5" />
                   <span className="absolute -left-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
                     3
@@ -8915,7 +9821,7 @@ function OpportunitiesPage({
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between gap-2">
                 <span className="text-slate-500">פוטנציאל כולל</span>
-                <span className="font-bold text-emerald-700">{formatCurrencyILS(totalPipelineValue)}</span>
+                <span className="font-bold text-green-700">{formatCurrencyILS(totalPipelineValue)}</span>
               </div>
               <div className="flex justify-between gap-2">
                 <span className="text-slate-500">הזדמנויות פתוחות</span>
@@ -8931,7 +9837,7 @@ function OpportunitiesPage({
               </div>
               <div className="flex justify-between gap-2 border-t border-slate-100 pt-2">
                 <span className="text-slate-500">הכנסה צפויה (פתוח)</span>
-                <span className="font-bold text-emerald-800">{formatCurrencyILS(openPipelineValue)}</span>
+                <span className="font-bold text-green-800">{formatCurrencyILS(openPipelineValue)}</span>
               </div>
             </CardContent>
           </Card>
@@ -8986,7 +9892,7 @@ function OpportunitiesPage({
               {sourceChips.map((c) => (
                 <span
                   key={c.label}
-                  className="rounded-full border border-emerald-100 bg-emerald-50/80 px-3 py-1.5 text-xs font-semibold text-emerald-900"
+                  className="rounded-full border border-green-100 bg-green-50/80 px-3 py-1.5 text-xs font-semibold text-green-900"
                 >
                   {c.label} · {c.count}
                 </span>
@@ -8996,7 +9902,7 @@ function OpportunitiesPage({
         </aside>
 
         <div className="order-2 space-y-4 lg:order-2">
-          <div className="rounded-[28px] border border-emerald-100/80 bg-[#f7fbf5] p-5 shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
+          <div className="rounded-[28px] border border-green-100/80 bg-[#f7fbf5] p-5 shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0 flex-1 text-center md:text-right">
                 <h1 className="text-2xl font-black leading-tight text-slate-900 md:text-4xl">
@@ -9078,7 +9984,7 @@ function OpportunitiesPage({
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredOpportunities.length === 0 ? (
-              <div className="col-span-full rounded-3xl border border-dashed border-emerald-200 bg-white/80 py-14 text-center text-sm text-slate-500">
+              <div className="col-span-full rounded-3xl border border-dashed border-green-200 bg-white/80 py-14 text-center text-sm text-slate-500">
                 לא נמצאו הזדמנות מתאימות
               </div>
             ) : (
@@ -9107,14 +10013,14 @@ function OpportunitiesPage({
                       <span className="font-medium text-slate-700">{o.projectOrServiceName}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-lg font-black text-emerald-700">{formatCurrencyILS(Number(o.estimatedValue || 0))}</span>
+                      <span className="text-lg font-black text-green-700">{formatCurrencyILS(Number(o.estimatedValue || 0))}</span>
                       <span className="text-xs text-slate-500">
                         {o.targetCloseDate ? new Date(o.targetCloseDate).toLocaleDateString('he-IL') : 'ללא תאריך יעד'}
                       </span>
                     </div>
                     <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
                       <div className="flex items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-green-700">
                           <UserCircle2 className="h-5 w-5" />
                         </div>
                         <div className="text-right">
@@ -9135,7 +10041,7 @@ function OpportunitiesPage({
           <Card className="overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.08)]">
             <CardContent className="space-y-4 p-6">
               <div className="flex flex-col items-center text-center">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 ring-4 ring-emerald-50">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-green-700 ring-4 ring-green-50">
                   <UserCircle2 className="h-12 w-12" />
                 </div>
                 <div className="mt-3 text-lg font-bold text-slate-900">{currentUser.name}</div>
@@ -9238,7 +10144,7 @@ function OpportunitiesPage({
           ) : (
             <>
               {(error || success) && (
-                <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+                <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
                   {error || success}
                 </div>
               )}
@@ -9474,7 +10380,7 @@ function ReportsPage({
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -9710,7 +10616,7 @@ function DocumentsPage({
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -9957,7 +10863,7 @@ function LabSamplesPage({
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-800'}`}>
+        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -10122,7 +11028,8 @@ function SettingsPage({
   settingsJumpTab?: SettingsToolbarJumpTab | null;
   onSettingsJumpConsumed?: () => void;
 }) {
-  const canManageUsersEffective = currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.canManageUsers;
+  // ניהול עובדים (הוספה/מחיקה/עריכת אחרים) + העברת דאטה — אדמין בלבד.
+  const canManageUsersEffective = currentUser.role === 'admin';
   const canManagePermissionsEffective = currentUser.role === 'admin' || currentUser.canManagePermissions;
   const canDataImport =
     canAccess(currentUser.role, 'customers') ||
@@ -10136,11 +11043,12 @@ function SettingsPage({
   const canManageCustomerClassifications = currentUser.role === 'admin' || currentUser.role === 'manager';
   /** ייבוא Followup מרוכז — רק מנהל מערכת (ה-API דורש ADMIN) */
   const canFollowupImport = isAdminRole(currentUser.role);
-  /** רק אדמין/מנהל — כלי החלפת עובד / אחריות (לא משתמש עם canManageUsers בלבד) */
-  const canEmployeeHandoff = currentUser.role === 'admin' || currentUser.role === 'manager';
+  /** העברת כל הדאטה/המשימות של עובד לעובד אחר — אדמין בלבד */
+  const canEmployeeHandoff = currentUser.role === 'admin';
   const canManageQuoteTemplates = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   type SettingsTabKey =
+    | 'myProfile'
     | 'employees'
     | 'employeeHandoff'
     | 'permissions'
@@ -10156,13 +11064,12 @@ function SettingsPage({
 
   const defaultTab: SettingsTabKey = canManageUsersEffective
     ? 'employees'
-    : canManagePermissionsEffective
-      ? 'permissions'
-      : 'services';
+    : 'myProfile';
 
   const [tab, setTab] = useState<SettingsTabKey>(defaultTab);
 
   const tabs: Array<{ key: SettingsTabKey; label: string; enabled: boolean }> = [
+    { key: 'myProfile', label: 'הפרופיל שלי', enabled: true },
     { key: 'employees', label: 'עובדים', enabled: canManageUsersEffective },
     { key: 'employeeHandoff', label: 'החלפת עובד / אחריות', enabled: canEmployeeHandoff },
     { key: 'permissions', label: 'תפקידים והרשאות', enabled: canManagePermissionsEffective },
@@ -10247,6 +11154,59 @@ function SettingsPage({
         if (d?.dataBase64) setSigImagePreview(`data:${d.mimeType || 'image/png'};base64,${d.dataBase64}`);
       }
     } catch { /* ignore */ }
+  };
+  // ── חתימות מרובות (תמונה + כותרת) ──
+  type UserSig = { id: string; title: string; dataBase64: string; imageType?: string };
+  const [userSignatures, setUserSignatures] = useState<UserSig[]>([]);
+  const [newSigTitle, setNewSigTitle] = useState('');
+  const loadUserSignatures = async (userId: string) => {
+    setUserSignatures([]);
+    try {
+      const r = await apiFetch(apiUrl(`/users/${userId}/signatures`), { authUser: currentUser });
+      if (r.ok) {
+        const list = await r.json();
+        if (Array.isArray(list)) setUserSignatures(list);
+      }
+    } catch { /* ignore */ }
+  };
+  const uploadUserSignature = async (file: File, title: string) => {
+    if (!empEditing) return;
+    if (file.size > 2 * 1024 * 1024) { alert('התמונה גדולה מדי (מקסימום 2MB)'); return; }
+    setSigImageBusy(true);
+    try {
+      const dataUrl: string = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result));
+        fr.onerror = rej;
+        fr.readAsDataURL(file);
+      });
+      const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signatures`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ title: title.trim(), dataBase64: dataUrl, mimeType: file.type }),
+      });
+      if (r.ok) { const created = await r.json(); setUserSignatures((prev) => [...prev, created]); setNewSigTitle(''); }
+      else alert('העלאת החתימה נכשלה');
+    } catch { alert('שגיאה בהעלאת החתימה'); }
+    finally { setSigImageBusy(false); }
+  };
+  const renameUserSignature = async (sigId: string, title: string) => {
+    if (!empEditing) return;
+    try {
+      await apiFetch(apiUrl(`/users/${empEditing.id}/signatures/${sigId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ title }),
+      });
+    } catch { /* ignore */ }
+  };
+  const deleteUserSignature = async (sigId: string) => {
+    if (!empEditing) return;
+    setSigImageBusy(true);
+    try {
+      const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signatures/${sigId}`), { method: 'DELETE', authUser: currentUser });
+      if (r.ok) setUserSignatures((prev) => prev.filter((s) => s.id !== sigId));
+    } catch { /* ignore */ } finally { setSigImageBusy(false); }
   };
   const refreshMsStatus = async () => {
     try {
@@ -10596,12 +11556,15 @@ function SettingsPage({
     setEmpModalOpen(true);
   };
   const openEditEmp = (u: any) => {
-    if (!canManageUsersEffective) return;
+    // ניהול אחרים = אדמין בלבד; כל עובד רשאי לפתוח את הפרופיל של עצמו
+    if (!canManageUsersEffective && u?.id !== currentUser.id) return;
     setEmpEditing(u);
     setSmtpTestMsg('');
     setMsStatus({ connected: false, email: null });
     refreshMsStatus();
     loadSignatureImage(u.id);
+    loadUserSignatures(u.id);
+    setNewSigTitle('');
     setEmpForm({
       name: u.name || '',
       email: u.email || '',
@@ -11096,7 +12059,7 @@ function SettingsPage({
 
       {empError && <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{empError}</div>}
       {catalogError && <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{catalogError}</div>}
-      {settingsMsg && <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{settingsMsg}</div>}
+      {settingsMsg && <div className="rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">{settingsMsg}</div>}
 
       {tab === 'import' && canDataImport && (
         <DataImportWizard
@@ -11210,6 +12173,36 @@ function SettingsPage({
           </CardContent>
         </Card>
       )}
+
+      {tab === 'myProfile' && (() => {
+        const meRecord =
+          users.find((u: any) => u.id === currentUser.id) ||
+          users.find((u: any) => normalizeEmail(u.email || '') === normalizeEmail(currentUser.email || '')) ||
+          null;
+        return (
+          <Card>
+            <CardHeader><CardTitle>הפרופיל שלי</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-lg font-bold text-slate-800">{currentUser.name}</div>
+                <div className="text-sm text-slate-500">{currentUser.email}</div>
+                <div className="mt-1 text-xs text-slate-400">תפקיד: {employeeRoleLabel(currentUser.role)}</div>
+              </div>
+              <div className="text-sm text-slate-600">
+                כאן אפשר לעדכן את הפרטים האישיים שלך, לחבר את חשבון ה-Outlook שלך לשליחת מיילים, ולהוסיף חתימות אישיות.
+              </div>
+              <Button
+                style={{ background: galit.primary }}
+                onClick={() => { if (meRecord) openEditEmp(meRecord); }}
+                disabled={!meRecord}
+              >
+                ערוך את הפרופיל שלי (Outlook · חתימה · טלפון)
+              </Button>
+              {!meRecord && <div className="text-xs text-amber-600">לא נמצאה רשומת משתמש — רענן את הדף ונסה שוב.</div>}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {tab === 'employees' && canManageUsersEffective && (
         <Card>
@@ -12060,7 +13053,7 @@ function SettingsPage({
         </Card>
       )}
 
-      <Modal open={empModalOpen} onClose={() => setEmpModalOpen(false)} title={empEditing ? 'עריכת עובד' : 'עובד חדש'} maxWidth="max-w-xl">
+      <Modal open={empModalOpen} onClose={() => setEmpModalOpen(false)} title={empEditing ? (canManageUsersEffective ? 'עריכת עובד' : 'הפרופיל שלי') : 'עובד חדש'} maxWidth="max-w-xl">
         <div className="space-y-3">
           <FormField label="שם עובד">
             <Input value={empForm.name} onChange={(e) => setEmpForm((p) => ({ ...p, name: e.target.value }))} placeholder="שם" />
@@ -12073,6 +13066,7 @@ function SettingsPage({
               <Input value={empForm.password} onChange={(e) => setEmpForm((p) => ({ ...p, password: e.target.value }))} placeholder="סיסמה" />
             </FormField>
           )}
+          {canManageUsersEffective && (<>
           <FormField label="תפקיד">
             <select
               value={empForm.role}
@@ -12143,10 +13137,12 @@ function SettingsPage({
               <option value="INACTIVE">לא פעיל</option>
             </select>
           </FormField>
+          </>)}
           <FormField label="טלפון">
             <PhoneInput value={empForm.phone} onChange={(v) => setEmpForm((p) => ({ ...p, phone: v }))} placeholder="טלפון" />
           </FormField>
 
+          {canManageUsersEffective && (
           <div className="rounded-2xl border bg-slate-50 p-4">
             <div className="mb-2 text-sm font-semibold">מחלקות / תחומי אחריות</div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -12171,6 +13167,12 @@ function SettingsPage({
             </div>
             <div className="mt-3 text-xs text-slate-500">לידים יוכלו להתאים אוטומטית לפי שירות/מחלקה עתידית.</div>
           </div>
+          )}
+
+          {/* שינוי סיסמה — רק כשעורכים את הפרופיל של המשתמש המחובר עצמו */}
+          {empEditing && currentUser && empEditing.id === currentUser.id && (
+            <ChangePasswordSection currentUser={{ id: currentUser.id, role: currentUser.role }} />
+          )}
 
           {empEditing && (
             <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
@@ -12237,19 +13239,47 @@ function SettingsPage({
               placeholder={'בברכה,\nשם מלא\nתפקיד | גלית – החברה לאיכות הסביבה\nטלפון: 0XX-XXXXXXX'}
             />
 
-            {/* תמונת חתימה (לוגו / חתימה סרוקה) */}
+            {/* תמונות חתימה (מרובות — תמונה + כותרת) */}
             <div className="mt-3 border-t border-blue-100 pt-3">
-              <div className="mb-1.5 text-xs font-semibold text-blue-800">תמונת חתימה (לוגו / חתימה סרוקה)</div>
+              <div className="mb-1.5 text-xs font-semibold text-blue-800">תמונות חתימה</div>
+              <div className="mb-2 text-[11px] text-slate-500">ניתן להוסיף כמה חתימות עם כותרת לכל אחת — בשליחת הצעת מחיר בוחרים את המתאימה.</div>
               {empEditing ? (
                 <>
-                  {sigImagePreview && (
-                    <div className="mb-2 rounded-lg border border-slate-200 bg-white p-2 inline-block">
-                      <img src={sigImagePreview} alt="חתימה" className="max-h-24 max-w-[260px]" />
+                  {userSignatures.length > 0 ? (
+                    <div className="space-y-2 mb-3">
+                      {userSignatures.map((sig) => (
+                        <div key={sig.id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-2">
+                          <img src={`data:${sig.imageType || 'image/png'};base64,${sig.dataBase64}`} alt={sig.title} className="max-h-16 max-w-[150px] object-contain shrink-0" />
+                          <input
+                            className="flex-1 min-w-0 rounded-lg border border-slate-200 px-2 py-1.5 text-xs outline-none focus:border-blue-400"
+                            value={sig.title}
+                            placeholder="כותרת החתימה"
+                            onChange={(e) => { const v = e.target.value; setUserSignatures((prev) => prev.map((s) => s.id === sig.id ? { ...s, title: v } : s)); }}
+                            onBlur={(e) => renameUserSignature(sig.id, e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={sigImageBusy}
+                            className="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            onClick={() => deleteUserSignature(sig.id)}
+                          >
+                            מחק
+                          </button>
+                        </div>
+                      ))}
                     </div>
+                  ) : (
+                    <div className="text-[11px] text-slate-400 mb-2">אין עדיין חתימות.</div>
                   )}
                   <div className="flex items-center gap-2">
-                    <label className="cursor-pointer rounded-xl border border-blue-200 bg-white px-4 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50">
-                      {sigImagePreview ? 'החלף תמונה' : 'העלה תמונה'}
+                    <input
+                      className="flex-1 min-w-0 rounded-xl border border-slate-200 px-3 py-1.5 text-xs outline-none focus:border-blue-400"
+                      value={newSigTitle}
+                      onChange={(e) => setNewSigTitle(e.target.value)}
+                      placeholder="כותרת לחתימה החדשה (למשל: קרינה, בדיקות מים)"
+                    />
+                    <label className="cursor-pointer shrink-0 rounded-xl border border-blue-200 bg-white px-4 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50">
+                      + הוסף חתימה
                       <input
                         type="file"
                         accept="image/png,image/jpeg,image/jpg"
@@ -12257,49 +13287,16 @@ function SettingsPage({
                         disabled={sigImageBusy}
                         onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          if (!file) return;
-                          if (file.size > 2 * 1024 * 1024) { alert('התמונה גדולה מדי (מקסימום 2MB)'); return; }
-                          setSigImageBusy(true);
-                          try {
-                            const dataUrl: string = await new Promise((res, rej) => {
-                              const fr = new FileReader();
-                              fr.onload = () => res(String(fr.result));
-                              fr.onerror = rej;
-                              fr.readAsDataURL(file);
-                            });
-                            const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signature-image`), {
-                              method: 'POST',
-                              authUser: currentUser,
-                              body: JSON.stringify({ dataBase64: dataUrl, mimeType: file.type }),
-                            });
-                            if (r.ok) setSigImagePreview(dataUrl);
-                            else alert('העלאת התמונה נכשלה');
-                          } catch { alert('שגיאה בהעלאת התמונה'); }
-                          finally { setSigImageBusy(false); e.target.value = ''; }
+                          if (file) await uploadUserSignature(file, newSigTitle);
+                          e.target.value = '';
                         }}
                       />
                     </label>
-                    {sigImagePreview && (
-                      <button
-                        type="button"
-                        disabled={sigImageBusy}
-                        className="rounded-xl border border-red-200 bg-white px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                        onClick={async () => {
-                          setSigImageBusy(true);
-                          try {
-                            const r = await apiFetch(apiUrl(`/users/${empEditing.id}/signature-image`), { method: 'DELETE', authUser: currentUser });
-                            if (r.ok) setSigImagePreview(null);
-                          } catch { /* ignore */ } finally { setSigImageBusy(false); }
-                        }}
-                      >
-                        הסר תמונה
-                      </button>
-                    )}
                   </div>
                   <div className="mt-1 text-[11px] text-slate-400">PNG/JPG עד 2MB. מומלץ רקע שקוף (PNG).</div>
                 </>
               ) : (
-                <div className="text-[11px] text-slate-400">ניתן להעלות תמונת חתימה לאחר שמירת המשתמש.</div>
+                <div className="text-[11px] text-slate-400">ניתן להעלות תמונות חתימה לאחר שמירת המשתמש.</div>
               )}
             </div>
           </div>
@@ -12708,7 +13705,7 @@ function TasksPage({
   const [error, setError] = useState('');
   const [searchQ, setSearchQ] = useState('');
   const [quickFilter, setQuickFilter] = useState<string>('all');
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(true);
   /* ── expandedTaskId: parent is the single source of truth ──
    * Local state is ONLY used as fallback when parent props are not provided.
    * When parent IS provided, we read/write directly to parent — no local copy. */
@@ -12735,6 +13732,64 @@ function TasksPage({
       _setLocalManualStep(v);
     }
   }, [extSetManualStepOverride]);
+
+  /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
+  const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
+  const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
+  /**
+   * החלטת התאמת ליד ללקוח קיים — נשמרת בין רענונים כדי לא לשאול שוב "האם זה אותו אחד?".
+   * הערך: מזהה הלקוח שאושר, או '__none__' אם המשתמש סימן שזה ליד חדש.
+   */
+  const LEAD_MATCH_DECISIONS_KEY = 'galit:leadMatchDecisions';
+  const [leadMatchDecisions, setLeadMatchDecisions] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(window.localStorage.getItem(LEAD_MATCH_DECISIONS_KEY) || '{}'); } catch { return {}; }
+  });
+  const recordLeadMatchDecision = useCallback((key: string, value: string) => {
+    setLeadMatchDecisions((prev) => {
+      const next = { ...prev, [key]: value };
+      try { window.localStorage.setItem(LEAD_MATCH_DECISIONS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  const prevLeadIdsRef = useRef<Set<string>>(new Set());
+  const loadIncomingLeads = useCallback(async () => {
+    try {
+      const r = await apiFetch(apiUrl('/incoming-leads'), { authUser: currentUser });
+      if (!r.ok) return;
+      const list = await r.json();
+      if (!Array.isArray(list)) return;
+      // אם ליד שהיה לנו נעלם — מישהו אחר "תפס" אותו → רענון משימות כדי שהמשימה התלויה תיעלם
+      const newIds = new Set<string>(list.map((l: any) => l.id));
+      let lost = false;
+      prevLeadIdsRef.current.forEach((id) => { if (!newIds.has(id)) lost = true; });
+      prevLeadIdsRef.current = newIds;
+      setIncomingLeads(list);
+      if (lost) void onReloadTasks?.();
+    } catch { /* ignore */ }
+  }, [currentUser, onReloadTasks]);
+  useEffect(() => {
+    void loadIncomingLeads();
+    const t = window.setInterval(() => void loadIncomingLeads(), 20_000); // קצב מהיר לתפיסת ליד בין עובדים
+    return () => window.clearInterval(t);
+  }, [loadIncomingLeads]);
+  // מיפוי taskId → הליד הנכנס (לטופס ולפרטים)
+  const leadByTaskId = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const l of incomingLeads) { if (l.taskId) m[l.taskId] = l; }
+    return m;
+  }, [incomingLeads]);
+  const startLead = async (leadId: string) => {
+    setIncomingLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: 'ACTIVE' } : l)));
+    try { await apiFetch(apiUrl(`/incoming-leads/${leadId}/start`), { method: 'POST', authUser: currentUser }); } catch { /* ignore */ }
+  };
+  const transferLead = async (leadId: string, toUserId: string) => {
+    if (!toUserId) return;
+    try { await apiFetch(apiUrl(`/incoming-leads/${leadId}/transfer`), { method: 'POST', authUser: currentUser, body: JSON.stringify({ toUserId }) }); } catch { /* ignore */ }
+    setIncomingLeads((prev) => prev.filter((l) => l.id !== leadId));
+    setExpandedTaskId(null);
+    void onReloadTasks?.();
+  };
 
   /* ══════ שלב "תיאום" — אינטגרציית יומן Outlook (Microsoft Graph) ══════ */
   // סטטוס חיבור ה-Outlook של המשתמש המחובר (לכפתור החיבור בשלב התיאום)
@@ -12777,6 +13832,7 @@ function TasksPage({
     employeeIds: string[]; // עובדים נוספים שיוזמנו כמשתתפים
   };
   const [coordForms, setCoordForms] = useState<Record<string, Partial<CoordMeetingForm>>>({});
+  const [coordDurationManual, setCoordDurationManual] = useState<Record<string, boolean>>({});
   const [coordBusy, setCoordBusy] = useState<Record<string, boolean>>({});
   const [coordError, setCoordError] = useState<Record<string, string>>({});
   const [coordResult, setCoordResult] = useState<Record<string, { webLink: string | null; joinUrl: string | null; invited: string[] }>>({});
@@ -12833,7 +13889,9 @@ function TasksPage({
     serviceName: string;
   }>>({});
   /* ── מאמן המכירות: האם להציג את כל ההתנגדויות (ברירת מחדל: רק שתיים ראשונות + כפתור הרחבה) ── */
-  const [expandedObjections, setExpandedObjections] = useState<Record<string, boolean>>({});
+  /* ── טאב פעיל בכרטיס מאמן המכירות (שלב "שיחת מכירה") ובשלב "פולואו אפ" — לפי מזהה משימה ── */
+  const [callCoachTab, setCallCoachTab] = useState<Record<string, 'service' | 'objections' | 'closings'>>({});
+  const [followupTab, setFollowupTab] = useState<Record<string, 'service' | 'objections' | 'closings'>>({});
   /* ── מסמכים מצורפים למשימה (למשל קובץ הצעת מחיר ממוזג) ── */
   const [taskAttachments, setTaskAttachments] = useState<Record<string, { id: string; fileName: string; mimeType: string; createdAt: string }[]>>({});
   const [attachmentDownloading, setAttachmentDownloading] = useState<Record<string, boolean>>({});
@@ -12872,6 +13930,27 @@ function TasksPage({
   const [followupManualOpen, setFollowupManualOpen] = useState<Record<string, boolean>>({});
   const [followupManualValue, setFollowupManualValue] = useState<Record<string, string>>({});
   const [copiedPhrase, setCopiedPhrase] = useState<string | null>(null);
+  /**
+   * משימות שנקבע להן מעקב בשלב "הצעת מחיר" וממתינות לקידום לשלב "פולואפ".
+   * הקידום בפועל מתבצע רק כשעוזבים את המשימה (סגירה/מעבר) — כדי לא לקטוע עריכת ההצעה.
+   */
+  const [followupPendingAdvance, setFollowupPendingAdvance] = useState<Record<string, boolean>>({});
+  const followupPendingAdvanceRef = useRef<Record<string, boolean>>({});
+  useEffect(() => { followupPendingAdvanceRef.current = followupPendingAdvance; }, [followupPendingAdvance]);
+  // מזהה יציאה ממשימה (expandedTaskId השתנה ממנה) → מקדם לשלב "פולואפ" אם נקבע מעקב.
+  const prevExpandedTaskRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevExpandedTaskRef.current;
+    prevExpandedTaskRef.current = expandedTaskId;
+    if (!prev || prev === expandedTaskId) return;
+    if (!followupPendingAdvanceRef.current[prev]) return;
+    const taskId = prev;
+    setFollowupPendingAdvance((p) => { const n = { ...p }; delete n[taskId]; return n; });
+    // עדכון אופטימי + קידום השלב; שמירה ל-DB מתבצעת באפקט סנכרון השלבים (manualStepOverride → currentStage).
+    setTasks((tp) => tp.map((t) => t.id === taskId ? { ...t, type: 'SALES_FOLLOWUP', currentStage: 3 } : t));
+    setManualStepOverride((mp) => ({ ...mp, [taskId]: 3 }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedTaskId]);
   const clearFollowupSuccess = (taskId: string) =>
     window.setTimeout(() => setFollowupSuccess((p) => { const n = { ...p }; delete n[taskId]; return n; }), 3000);
   const scheduleFollowupAt = async (taskId: string, dueDate: Date) => {
@@ -12882,6 +13961,9 @@ function TasksPage({
         authUser: currentUser,
         body: JSON.stringify({ dueDate: dueDate.toISOString(), priority: 'HIGH' }),
       });
+      // קביעת מעקב מסמנת שהמשימה צריכה לעבור לשלב "פולואפ" — אבל רק כשעוזבים את המשימה,
+      // כדי לא לקטוע עריכה של הצעת המחיר. הקידום בפועל מתבצע באפקט שמזהה יציאה/סגירה מהמשימה.
+      setFollowupPendingAdvance((p) => ({ ...p, [taskId]: true }));
       await onReloadTasks?.();
       setFollowupSuccess((p) => ({ ...p, [taskId]: 'schedule' }));
       clearFollowupSuccess(taskId);
@@ -12987,37 +14069,86 @@ function TasksPage({
       const svc = allSvcs.find((s: any) => s.sku === t.productName || s.id === t.productName);
       const svcName: string = svc?.name || t.productName;
       const custName = t.leadName || t.customerName || 'הלקוח';
-      const fixedServiceInfo = getServiceInfoForCategory(catId);
+      const fixedServiceInfo = getServiceInfo(t.productName, catId);
       const coachCopy = buildSalesCoachCopy(catId, svcName, custName);
       setAiCoach((prev) => ({ ...prev, [t.id]: { loading: false, objections: coachCopy.objections, closings: coachCopy.closings, serviceInfo: fixedServiceInfo, serviceName: svcName } }));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks]);
-  const getCallForm = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any) => {
+  /**
+   * חילוץ פרטי ליד מגוף מייל בפורמט "תווית בשורה / ערך בשורה הבאה" (טופס אתר).
+   * מזהה: שם מלא, טלפון, אימייל, סוג השירות, הודעה. כולל fallback ב-regex.
+   */
+  const parseLeadBody = (body?: string | null) => {
+    const out = { fullName: '', phone: '', email: '', serviceType: '', message: '' };
+    if (!body) return out;
+    const rawLines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+    // תוויות לכל שדה — ארוכות לפני קצרות (כדי ש"שם מלא" יקדים ל"שם")
+    const LABELS: Record<keyof typeof out, string[]> = {
+      fullName: ['שם מלא', 'שם ושם משפחה', 'שם פרטי ומשפחה', 'שם הפונה', 'שם'],
+      phone: ['טלפון נייד', 'מספר טלפון', 'מס׳ טלפון', 'טלפון', 'נייד', 'פלאפון'],
+      email: ['כתובת אימייל', 'כתובת מייל', 'אימייל', 'מייל', 'דוא"ל', 'דואל', 'email', 'e-mail'],
+      serviceType: ['סוג השירות המבוקש', 'סוג השירות', 'השירות המבוקש', 'שירות מבוקש', 'סוג בדיקה', 'שירות'],
+      message: ['תוכן הפנייה', 'פרטים נוספים', 'הודעה', 'הערות', 'הערה', 'פירוט', 'תוכן'],
+    };
+    const keys = Object.keys(LABELS) as (keyof typeof out)[];
+    const allLabels = keys.flatMap((k) => LABELS[k]);
+    const stripColon = (s: string) => s.replace(/[:：]\s*$/, '').trim();
+    const isLabel = (s: string) => allLabels.some((l) => stripColon(s) === l);
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&');
+
+    // מעבר 1 — "תווית: ערך" באותה שורה (פורמט אלמנטור)
+    for (const raw of rawLines) {
+      for (const key of keys) {
+        if (out[key]) continue;
+        for (const lbl of LABELS[key]) {
+          const m = raw.match(new RegExp('^' + esc(lbl) + '\\s*[:：]\\s*(.+)$'));
+          if (m && m[1].trim()) { out[key] = m[1].trim(); break; }
+        }
+      }
+    }
+    // מעבר 2 — תווית בשורה אחת, ערך בשורה הבאה (פורמט טופס עם טבלה)
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = stripColon(rawLines[i]);
+      const next = i + 1 < rawLines.length ? rawLines[i + 1] : '';
+      const val = next && !isLabel(next) ? next.trim() : '';
+      if (!val) continue;
+      for (const key of keys) {
+        if (!out[key] && LABELS[key].some((l) => line === l)) { out[key] = val; break; }
+      }
+    }
+    if (!out.email) { const m = body.match(/[\w.+-]+@[\w-]+\.[\w.-]+/); if (m) out.email = m[0]; }
+    if (!out.phone) { const m = body.match(/0\d[-\s]?\d{1,2}[-\s]?\d{6,7}/); if (m) out.phone = m[0].replace(/[-\s]/g, ''); }
+    out.phone = out.phone.replace(/[^\d+]/g, '');
+    if (out.email && !out.email.includes('@')) out.email = '';
+    return out;
+  };
+
+  const getCallForm = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any, leadPrefill?: { fullName?: string; phone?: string; email?: string; serviceType?: string; message?: string } | null) => {
     if (callFormData[taskId]) return callFormData[taskId];
-    // Initialize from existing data — prefer the lead, then fall back to the linked customer card
-    const rawName = task.leadName || task.customerName || linkedLead?.fullName || linkedCustomer?.contactName || linkedCustomer?.name || '';
+    // Initialize from existing data — prefer parsed lead email, then lead/customer
+    const rawName = leadPrefill?.fullName || task.leadName || task.customerName || linkedLead?.fullName || linkedCustomer?.contactName || linkedCustomer?.name || '';
     const nameParts = rawName.split(' ');
     return {
       fullName: rawName,
       firstName: linkedLead?.firstName || nameParts[0] || '',
       lastName: linkedLead?.lastName || nameParts.slice(1).join(' ') || '',
       company: task.leadCompany || linkedLead?.company || (linkedCustomer?.type !== 'PRIVATE' ? linkedCustomer?.name : '') || '',
-      phone: task.leadPhone || linkedLead?.phone || linkedCustomer?.phone || '',
-      email: task.leadEmail || linkedLead?.email || linkedCustomer?.email || '',
+      phone: leadPrefill?.phone || task.leadPhone || linkedLead?.phone || linkedCustomer?.phone || '',
+      email: leadPrefill?.email || task.leadEmail || linkedLead?.email || linkedCustomer?.email || '',
       city: linkedLead?.city || linkedCustomer?.city || '',
       address: linkedLead?.address || linkedCustomer?.address || '',
       role: '',
-      leadSource: linkedLead?.source || '',
+      leadSource: linkedLead?.source || linkedCustomer?.leadSource || (leadPrefill ? 'אתר' : ''),
       companySize: '',
       inquiryDate: new Date().toISOString().slice(0, 10),
       customerType: linkedLead?.company ? 'עסקי' : (linkedCustomer ? (linkedCustomer.type === 'PRIVATE' ? 'פרטי' : 'עסקי') : 'פרטי'),
-      serviceType: linkedLead?.serviceType || linkedLead?.service || '',
+      serviceType: leadPrefill?.serviceType || linkedLead?.serviceType || linkedLead?.service || '',
       contactName: linkedCustomer?.contactName || '',
       assignedUserId: task.ownerId || currentUser?.id || '',
       internalNotes: '',
       companyRegNumber: '',
-      notes: linkedCustomer?.notes || linkedLead?.notes || '',
+      notes: leadPrefill?.message || linkedCustomer?.notes || linkedLead?.notes || '',
       serviceSubType: linkedLead?.serviceSubType || '',
       serviceSubTypeOther: '',
       needDescription: '',
@@ -13040,11 +14171,11 @@ function TasksPage({
       [taskId]: { ...(prev[taskId] || {}), [field]: value },
     }));
   };
-  const initCallFormIfNeeded = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any) => {
+  const initCallFormIfNeeded = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any, leadPrefill?: { fullName?: string; phone?: string; email?: string; serviceType?: string; message?: string } | null) => {
     if (!callFormData[taskId]) {
       setCallFormData((prev) => ({
         ...prev,
-        [taskId]: getCallForm(taskId, linkedLead, task, linkedCustomer),
+        [taskId]: getCallForm(taskId, linkedLead, task, linkedCustomer, leadPrefill),
       }));
     }
   };
@@ -13252,11 +14383,13 @@ function TasksPage({
   const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
   const weekEndStr = weekEnd.toLocaleDateString('en-CA');
 
-  const kpiToday = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
-  const kpiOverdue = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
-  const kpiWeek = effectiveTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
-  const kpiDoneToday = effectiveTasks.filter((t) => { return t.status === 'DONE'; }).length;
-  const kpiQuoteFollowup = effectiveTasks.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION' && t.status !== 'DONE' && t.status !== 'CANCELLED').length;
+  /* ה-KPI מחושבים על אותו בסיס כמו הטבלה — מכבדים את הפילטר "רק שלי". */
+  const kpiBaseTasks = onlyMine ? effectiveTasks.filter((t) => t.ownerId === currentUser.id) : effectiveTasks;
+  const kpiToday = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiOverdue = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiWeek = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  const kpiDoneToday = kpiBaseTasks.filter((t) => { return t.status === 'DONE'; }).length;
+  const kpiQuoteFollowup = kpiBaseTasks.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION' && t.status !== 'DONE' && t.status !== 'CANCELLED').length;
 
   /* ── ids of the 10 most-recently-created customers ── */
   const recentCustomerIds = useMemo(() => {
@@ -13295,7 +14428,7 @@ function TasksPage({
     } else if (quickFilter === 'open') {
       list = list.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS');
     } else if (quickFilter === 'done') {
-      list = list.filter((t) => t.status === 'DONE');
+      list = list.filter((t) => (t.status || '').toUpperCase() === 'DONE' || (t.type || '').toUpperCase() === 'DONE');
     } else if (quickFilter === 'leads') {
       list = list.filter((t) => t.leadId || t.leadName);
     } else if (quickFilter === 'customers') {
@@ -13304,6 +14437,15 @@ function TasksPage({
       list = list.filter((t) => t.customerId && recentCustomerIds.has(t.customerId));
     } else if (quickFilter === 'quotes') {
       list = list.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION');
+    }
+    // משימות שהושלמו/בוטלו לא מוצגות באף תצוגה — חוץ מהפילטר המפורש "הושלמו".
+    // מסתיר גם status=DONE/CANCELLED וגם type=DONE (רשומות ישנות מהמסד).
+    if (quickFilter !== 'done') {
+      list = list.filter((t) => {
+        const s = (t.status || '').toUpperCase();
+        const tp = (t.type || '').toUpperCase();
+        return s !== 'DONE' && s !== 'CANCELLED' && tp !== 'DONE';
+      });
     }
     return list;
   }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
@@ -13360,14 +14502,252 @@ function TasksPage({
       'מתבצעת עם ציוד מדידה מתקדם ומאפשרת גם תחזית והמלצות למיגון בעת הצורך',
     ],
   };
-  /** מחזיר את "מידע על השירות" הקבוע לפי מזהה קטגוריה (עם נפילה חזרה לתוכן כללי) */
-  const getServiceInfoForCategory = (categoryId?: string | null): string[] =>
-    (categoryId && SERVICE_INFO_BY_CATEGORY[categoryId]) || [
-      'הבדיקה מתבצעת על ידי צוות מקצועי ומוסמך, בהתאם לתקנים ולדרישות החוק',
-      'הדוח המתקבל בסיום הוא מסמך ברור ומסודר שניתן להציג לרשויות, ללקוחות או לגורמים מסדירים',
-      'מספקת תמונת מצב מדויקת שמאפשרת לקבל החלטות נכונות ולמנוע הפתעות בהמשך',
-      'מותאמת הן ללקוחות פרטיים והן לעסקים, מוסדות וחברות',
-    ];
+  /* ── מידע על השירות לפי מק"ט (override ספציפי לכל שירות) ──
+     נבדק ראשון. אם אין ערך למק"ט — נופלים לתת-הקבוצה, ואז לקטגוריה, ולבסוף לטקסט גנרי.
+     המפתח הוא ה-SKU/id מתוך SERVICE_CATEGORIES. */
+  const SERVICE_INFO_BY_SKU: Record<string, string[]> = {
+    // ── קרינה: בדיקות (כל מק"ט עם הסבר ייעודי משלו) ──
+    '9': [ // בדיקת קרינה אלקטרומגנטית מרשת החשמל
+      'מדידת עוצמת השדה המגנטי (ELF) הנפלט מתשתיות החשמל — קווי מתח, שנאים ולוחות חשמל',
+      'מאתרת אזורים בבית או במשרד שבהם רמות הקרינה חורגות מהמומלץ, ומראה בדיוק היכן הבעיה',
+      'הדוח כולל מיפוי ברור של רמות החשיפה והמלצות מעשיות להפחתה במידת הצורך',
+      'מתאימה לבתים, גני ילדים, משרדים ומבנים הסמוכים לתשתיות חשמל',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '56': [ // בדיקת קרינה משולבת מדוח רשת החשמל
+      'בדיקת קרינה אלקטרומגנטית בשילוב נתוני העומס מחברת החשמל, לתמונה מדויקת לאורך זמן',
+      'מאפשרת להעריך לא רק את הרגע הנוכחי אלא גם את החשיפה הצפויה בשעות העומס',
+      'מספקת הערכה אמינה יותר ממדידה רגעית בלבד, ומסמך מסודר להגשה לרשויות',
+      'מומלצת כשרוצים ודאות לגבי החשיפה לאורך היממה ולא רק בנקודת זמן אחת',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '83': [ // בדיקת קרינה רציפה מרשת החשמל
+      'מדידה רציפה של הקרינה לאורך פרק זמן ממושך, ולא רק בנקודת זמן בודדת',
+      'חושפת שיאי חשיפה ושינויים לאורך היממה שבדיקה רגעית עלולה לפספס',
+      'מספקת בסיס נתונים מוצק לקבלת החלטות ולתכנון מיגון אם נדרש',
+      'מתאימה במיוחד לחדרי שינה, חדרי ילדים ומקומות שבהם שוהים שעות רבות',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '10064': [ // בדיקת קרינה מרכב היברידי / חשמלי
+      'מדידת רמות הקרינה האלקטרומגנטית בתוך רכב היברידי או חשמלי, בנסיעה ובעמידה',
+      'מאתרת את הנקודות ברכב שבהן החשיפה גבוהה יותר (מושבים, אזור הסוללה)',
+      'נותנת תשובה ברורה לנהגים ולהורים שמבלים שעות רבות ברכב',
+      'כוללת המלצות פשוטות להפחתת החשיפה בעת השימוש ברכב',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '002': [ // RF — אנטנות סלולריות ומתקני שידור
+      'מדידת קרינת רדיו (RF) הנפלטת מאנטנות סלולריות, מתקני שידור ונקודות Wi-Fi',
+      'בודקת האם רמות הקרינה בסביבת המבנה עומדות בתקן המשרד להגנת הסביבה',
+      'רלוונטית במיוחד למבנים סמוכים לאנטנות או לגגות שעליהם מותקנים מתקני שידור',
+      'הדוח יכול לשמש מול הרשויות, ועדי בתים או חברות הסלולר',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '10034': [ // בדיקת איפוס ואיזון הארקות
+      'בדיקה ייעודית לאיתור זרמים תועים ובעיות הארקה שגורמים לשדות מגנטיים מוגברים',
+      'מאתרת את מקור הבעיה במערכת החשמל — ולא רק את התסמין',
+      'מאפשרת תיקון ממוקד שמפחית את הקרינה במקום, ולעיתים חוסך מיגון יקר',
+      'מתאימה כשמדידה קודמת הראתה רמות חריגות וצריך להבין מאיפה הן מגיעות',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    '10166': [ // המלצות למיגון קרינה
+      'מסמך המלצות מקצועי לאחר הבדיקה — מה לעשות כדי להפחית את החשיפה לקרינה',
+      'מתרגם את ממצאי המדידה לצעדים מעשיים: שינוי מיקום, איזון הארקות או מיגון',
+      'עוזר ללקוח להבין מה באמת נדרש ומה מיותר — וכך לחסוך בעלויות',
+      'ניתן כשירות נלווה לבדיקת הקרינה',
+      'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
+    ],
+    // ── קרינה: בדיקות נוספות ודוחות ──
+    '10036': ['הבדיקה מודדת את קרינת הרקע מסוג RF ו-ELF באתר בתחילת שלב הבנייה', 'המדידה המוקדמת קובעת את רמות הקרינה הקיימות לפני הקמת המבנה', 'הדוח נדרש לצורך קבלת אישור בנייה ירוקה ועמידה בתקני התכן הסביבתי', 'מתאימה ליזמים ולקבלנים בפרויקטים החותרים לתקן בנייה ירוקה', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10041': ['השירות כולל הכנת מפרט מיגון קרינה לצורך הגשת דוח חזוי בשלב התכנון', 'המפרט מגדיר את אמצעי המיגון הנדרשים לעמידה ברמות הקרינה המותרות', 'הדוח החזוי מעריך את רמות הקרינה הצפויות ומפרט את פתרונות המיגון המתאימים', 'מתאים למתכננים וליזמים הנדרשים להציג מפרט מיגון בשלב הרישוי', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10006': ['השירות מספק ייעוץ ופיקוח עליון בנושא מיגון קרינה בשלב שלאחר הבנייה', 'הפיקוח מוודא כי אמצעי המיגון בוצעו בפועל בהתאם למפרט שאושר', 'הדוח מאשר את תקינות יישום המיגון ואת עמידתו ברמות הקרינה המותרות', 'מתאים ליזמים ולקבלנים הנדרשים לאמת את ביצוע המיגון בסיום הבנייה', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10165': ['הבדיקה מודדת את הקרינה האלקטרומגנטית מרשת החשמל לצורך מתן היתר בנייה או אכלוס', 'המדידה מאמתת כי רמות הקרינה במבנה עומדות בדרישות הרשויות והתקנים', 'הדוח משמש כאסמכתה רשמית בהליכי רישוי ומתן היתר מול הרשויות', 'מתאימה ליזמים ולבעלי נכסים הנדרשים להציג בדיקת קרינה לקבלת היתר', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10082': ['השירות כולל הכנת דוח מעשי לאיכות הסביבה (איכ״ס) לאחר הקמת אתר השידור', 'הדוח מבוסס על מדידות קרינה שבוצעו בפועל בסביבת האתר לאחר הפעלתו', 'התוצאות מושוות לרמות הקרינה המותרות ומאמתות את עמידת האתר בתקנים', 'מתאים למפעילי אתרי שידור הנדרשים להגיש דוח איכ״ס לרשויות', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10081': ['השירות כולל הכנת דוח תיאורטי לאיכות הסביבה (איכ״ס) לפני הקמת אתר השידור', 'הדוח מעריך את רמות הקרינה הצפויות מהאתר על בסיס נתוני התכנון', 'התחזית מאפשרת לוודא מראש כי האתר יעמוד ברמות הקרינה המותרות', 'מתאים למפעילי אתרי שידור הנדרשים להגיש דוח חזוי בשלב הרישוי', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10167': ['הבדיקה מודדת את רמות הקרינה לפני ביצוע עבודות המיגון ולאחריהן', 'ההשוואה בין שתי המדידות מכמתת את יעילות המיגון בהפחתת הקרינה', 'הדוח מציג את שיעור ההפחתה ומאמת כי הרמות ירדו אל מתחת לסף המומלץ', 'מתאימה ללקוחות המבקשים לאמת את אפקטיביות עבודות המיגון שבוצעו', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    '10163': ['השירות כולל הכנת דוח יישום מיגון קרינה להגשה לרשויות ולמסגרת בנייה ירוקה', 'הדוח מתעד את אמצעי המיגון שבוצעו ואת השפעתם על רמות הקרינה במבנה', 'התוצאות מאמתות את עמידת המבנה בתקני הקרינה ובדרישות הבנייה הירוקה', 'מתאים ליזמים ולקבלנים הנדרשים להגיש דוח יישום מיגון לרשויות', 'מיועד בעיקר להגשה מסודרת לרשויות, יזמים או גורמי תכנון לפי דרישה'],
+    // ── קרינה: מיגון, חומרים והתקנות ──
+    '10096': ['המיגון מותקן על הקיר ומפחית את הקרינה האלקטרומגנטית החודרת אל החלל מצדו השני', 'החומר נבחר מתוך פלדת שנאים, אלומיניום או פלדת סיליקון בהתאם לעוצמת השדה', 'עובי החומר וסוגו נקבעים לפי ממצאי הבדיקה כדי למגן בדיוק היכן שצריך', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10098': ['המיגון מותקן על התקרה וחוסם קרינה אלקטרומגנטית המגיעה מהקומה שמעל', 'משמש כאשר מקור הקרינה נמצא מעל החלל הממוגן כגון לוח חשמל או שנאי', 'סוג החומר ועוביו נקבעים לפי עוצמת הקרינה הנמדדת בתקרה', 'לאחר ההתקנה מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10100': ['המיגון מותקן ברצפה וחוסם קרינה אלקטרומגנטית העולה מהקומה שמתחת', 'נדרש כאשר מתחת לחלל ממוקם לוח חשמל, שנאי או ריכוז מונים', 'החומר ועוביו נקבעים לפי עוצמת השדה הנמדד ברצפה', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10097': ['חיפוי גבס מותקן מעל שכבת המיגון ומסתיר אותה בתוך הקיר', 'העבודה כוללת שפכטל וצבע להשלמת הגימור עד למצב מוכן לשימוש', 'הגבס מגן על שכבת המיגון ומאפשר משטח חלק וצבוע כרגיל', 'התוצאה היא קיר ממוגן הזהה במראהו לקיר רגיל בחדר', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10099': ['המיגון מותקן על חזית לוח החשמל וחוסם קרינה הנפלטת מהציוד', 'לוח החשמל הוא מקור קרינה משמעותי המחייב מיגון ממוקד בחזיתו', 'סוג החומר ועוביו נקבעים לפי עוצמת הקרינה הנמדדת מול הלוח', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10101': ['חיפוי פרקט למינציה בעובי 8 מ״מ מותקן מעל שכבת המיגון ברצפה', 'הפרקט מסתיר את המיגון ומספק משטח הליכה גמור ועמיד', 'החיפוי מגן על שכבת המיגון מפני בלאי ושומר על תפקודה לאורך זמן', 'התוצאה היא רצפה ממוגנת בעלת מראה וגימור של פרקט רגיל', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10106': ['דלת הזזה ממוגנת קרינה חוסמת מעבר קרינה אלקטרומגנטית דרך פתח הדלת', 'הדלת מבטיחה רצף מיגון גם באזור הפתח שאחרת נותר חשוף', 'חומר המיגון משולב בגוף הדלת בהתאם לעוצמת הקרינה הנדרשת', 'בסיום מתבצעת מדידה חוזרת לאימות אטימות המיגון באזור הפתח', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10107': ['המיגון מותקן בתוך הנישה שבה ממוקם לוח החשמל וחוסם את קרינתו', 'הנישה ממוגנת מכל צדדיה כדי למנוע פליטת קרינה אל החדר', 'סוג החומר ועוביו נקבעים לפי עוצמת הקרינה הנמדדת בלוח', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10108': ['מיגון פח מותקן לאורך קווי ההזנה החשמליים החוצים את החלל', 'קווי ההזנה נושאים זרם גבוה ומהווים מקור קרינה לאורך מסלולם', 'הפח עוטף את הקו וחוסם את הקרינה הנפלטת ממנו אל הסביבה', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10109': ['המיגון מותקן על תעלת הכבלים המחוררת וחוסם קרינה הנפלטת מהכבלים', 'תעלת הכבלים מרכזת מוליכים רבים והופכת למקור קרינה מרוכז', 'חומר המיגון עוטף את התעלה תוך שמירה על גישה לכבלים', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10110': ['יחידת MUMETAL במידות 450x450 מותקנת בקיר למיגון נקודתי של קרינה', 'חומר ה-MUMETAL בעל חדירות מגנטית גבוהה ויעיל במיוחד נגד שדות מגנטיים', 'היחידה ממוקמת בנקודה שבה נמדדה עוצמת קרינה גבוהה בקיר', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10111': ['המיגון מותקן מול ריכוז המונים וחוסם את הקרינה הנפלטת ממנו', 'ריכוז מונים מרכז זרמים ממספר דירות ומהווה מקור קרינה חזק', 'סוג החומר ועוביו נקבעים לפי עוצמת הקרינה הנמדדת מול הריכוז', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10093': ['פלדת שנאים בעובי 0.35 מ״מ היא חומר מיגון יעיל נגד שדות מגנטיים בתדר רשת', 'הפלדה בעלת חדירות מגנטית גבוהה המסיטה את שטף הקרינה ומפחיתה אותו', 'היא מותקנת על קירות, תקרות, רצפות או דלתות בהתאם למקור הקרינה', 'מספר שכבות מותקנות זו על זו כאשר נדרש מיגון בעוצמה גבוהה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10094': ['אלומיניום בעובי 1.5 מ״מ משמש למיגון קרינה וכולל בידוד פנימי בעובי 0.2 מ״מ', 'האלומיניום יעיל בהפחתת שדות חשמליים ומשלים את מיגון השדות המגנטיים', 'הבידוד הפנימי מפריד בין שכבות החומר ומונע מגע חשמלי ביניהן', 'החומר מותקן על המשטח הנדרש בהתאם לממצאי הבדיקה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10144': ['פלדת סיליקון בעובי 0.5 מ״מ בצפיפות גבוהה היא חומר מיגון לשדות מגנטיים חזקים', 'הצפיפות הגבוהה מגבירה את יעילות החסימה ומתאימה לעוצמות קרינה גבוהות', 'החומר מותקן על קירות, תקרות או רצפות בהתאם למקור הקרינה', 'עוביו וסוגו נקבעים לפי ממצאי הבדיקה כדי למגן בדיוק היכן שצריך', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10152': ['פלדת סיליקון מסוג 1 היא שכבת מיגון בסיסית לשדות מגנטיים בתדר רשת', 'החומר נמדד ומתומחר לפי מילימטר בהתאם לשטח ולעובי הנדרש', 'הוא מותקן על המשטח הממוגן כשכבה בודדת או כחלק ממבנה רב-שכבתי', 'סוג השכבה נבחר לפי עוצמת הקרינה הנמדדת באתר', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10153': ['פלדת סיליקון מסוג 2 היא שכבת מיגון לעוצמות קרינה גבוהות מסוג 1', 'החומר נמדד ומתומחר לפי מילימטר בהתאם לשטח ולעובי הנדרש', 'הוא מותקן על המשטח הממוגן כשכבה בודדת או בשילוב שכבות נוספות', 'סוג השכבה נבחר לפי עוצמת הקרינה הנמדדת באתר', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10154': ['אלומיניום דל פחמן מסוג 3 משמש למיגון שדות חשמליים בתדר רשת', 'החומר נמדד ומתומחר לפי מילימטר בהתאם לשטח ולעובי הנדרש', 'הוא משלים את מיגון השדות המגנטיים ומותקן יחד עם שכבות הפלדה', 'סוג השכבה נבחר לפי ממצאי הבדיקה באתר', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10116': ['מיגון דלת בפלדת שנאים במידות 10x10 ובעובי 0.35 מ״מ חוסם קרינה דרך פתח הדלת', 'הפלדה משולבת בגוף הדלת ומבטיחה רצף מיגון גם באזור הפתח', 'הדלת ממוגנת בהתאם לעוצמת הקרינה הנמדדת באזור המעבר', 'בסיום מתבצעת מדידה חוזרת לאימות אטימות המיגון בדלת', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10115': ['מיגון דלת שנאים בעובי 1.5 מ״מ ובמידות 10x10 לחסימת קרינה דרך פתח הדלת', 'העובי המוגבר מתאים לאזורי מעבר שבהם נמדדה עוצמת קרינה גבוהה', 'הפלדה משולבת בגוף הדלת ומבטיחה רצף מיגון מלא בפתח', 'בסיום מתבצעת מדידה חוזרת לאימות אטימות המיגון בדלת', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10118': ['דלת מחוררת אלקטרומגנטית ממוגנת חוסמת קרינה תוך שמירה על מעבר אוויר', 'החירור מאפשר אוורור או ניקוז חום בלי לפגוע ביעילות המיגון', 'הדלת מותקנת בפתח שבו נדרש מיגון לצד צורך באוורור', 'בסיום מתבצעת מדידה חוזרת לאימות אטימות המיגון בדלת', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10124': ['סעיף זה מגלם פחת וחפיפות בשיעור 10% הנדרשים בעבודות מיגון הקרינה', 'חפיפת שכבות החומר חיונית למניעת פערים שדרכם עלולה לחדור קרינה', 'הפחת מכסה את שולי החיתוך וההתאמה של לוחות המיגון לשטח', 'התוספת מבטיחה כיסוי רציף ואטום של כל המשטח הממוגן', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10145': ['המיגון מותקן סביב כל פס צבירה בלוח החשמל וחוסם את קרינתו', 'פס הצבירה נושא זרם גבוה ומהווה מקור קרינה מרוכז בתוך הלוח', 'המיגון מבוצע לכל פס בנפרד כדי לחסום את הקרינה במקורה', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10146': ['תעלת חשמל ממוגנת קרינה מותקנת במקום תעלה רגילה לחסימת קרינה במקורה', 'התעלה עוטפת את המוליכים בחומר מיגון ומונעת פליטת קרינה לסביבה', 'הפתרון מתאים למסלולי הזנה גלויים החוצים חללים מאוישים', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10164': ['תעלת חשמל בצורת ח׳ ממוגנת קרינה מותקנת בתקרה לחסימת קרינת המוליכים', 'הצורה הזוויתית מתאימה למסלול הכבלים לאורך התקרה ופינותיה', 'המיגון עוטף את התעלה ומונע פליטת קרינה אל החלל שמתחת', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10128': ['בידוד PVC מותקן בין שכבת האלומיניום לשכבת הסיליקון במבנה המיגון', 'הבידוד מונע מגע חשמלי ישיר בין שני המתכתים השונים', 'הפרדה זו חיונית לתפקוד תקין של מערכת המיגון הרב-שכבתית', 'הבידוד מותקן כחלק בלתי נפרד מהרכבת שכבות המיגון', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10136': ['ארון חשמל ממוגן קרינה מותקן כך שכל פאותיו חוסמות את קרינת הציוד שבתוכו', 'הארון מרכז את מקורות הקרינה וממגן אותם במקום אחד', 'חומר המיגון משולב בדפנות הארון בהתאם לעוצמת הקרינה הפנימית', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10140': ['סעיף זה כולל הובלה והתקנה של מיגון לקירות מסוג A100 באתר הלקוח', 'המיגון מסוג A100 מותקן על הקיר בהתאם לעוצמת הקרינה הנמדדת', 'ההובלה מביאה את חומרי המיגון אל האתר מוכנים להתקנה', 'בסיום מתבצעת מדידה חוזרת לאימות ירידת הקרינה לרמה הבטוחה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10129': ['חיפוי קירות בלוחות עופרת בעובי 0.5 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 0.5 מ״מ מתאים לרמות הגנה בסיסיות במרפאות ובמעבדות', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10130': ['חיפוי קירות בלוחות עופרת בעובי 1 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 1 מ״מ מספק הגנה מוגברת המתאימה לחדרי רנטגן רבים', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10131': ['חיפוי קירות בלוחות עופרת בעובי 1.5 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 1.5 מ״מ מתאים לחדרים עם מקורות רנטגן בעוצמה בינונית עד גבוהה', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10133': ['חיפוי קירות בלוחות עופרת בעובי 2 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 2 מ״מ מתאים לחדרי הדמיה עם מקורות רנטגן בעוצמה גבוהה', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10134': ['חיפוי קירות בלוחות עופרת בעובי 2.5 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 2.5 מ״מ מספק הגנה ברמה גבוהה לחדרי הדמיה מתקדמים', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    '10135': ['חיפוי קירות בלוחות עופרת בעובי 3 מ״מ חוסם קרינת רנטגן החודרת דרך הקיר', 'העופרת היא חומר צפוף הבולם קרינה מייננת ביעילות גבוהה', 'עובי 3 מ״מ מספק את רמת ההגנה הגבוהה ביותר בסדרה לחדרים עתירי קרינה', 'העובי הנדרש נקבע לפי עוצמת מקור הרנטגן ותקני ההגנה', 'הפתרון מותאם לממצאי המדידה כדי להפחית את הקרינה בצורה ממוקדת ויעילה'],
+    // ── אוויר ──
+    '66': ['הבדיקה מודדת ריכוזי מזהמים באוויר הסביבתי החיצוני ומשווה אותם לערכי הסביבה הקבועים בתקנות', 'הדוח מציג בבירור אם איכות האוויר באתר עומדת בערכי הייחוס של המשרד להגנת הסביבה', 'מתאימה לעסקים, מפעלים ורשויות שרוצים לוודא עמידה בדרישות הסביבתיות', 'הדיגום מתבצע בשטח בעזרת ציוד מקצועי ומכויל', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '72': ['הבדיקה בוחנת את איכות האוויר בתוך מבנים סגורים ומאתרת מזהמים שעלולים להשפיע על הבריאות', 'הדוח מראה אם ריכוזי המזהמים בחלל הפנימי תקינים וראויים לשהייה ממושכת', 'מתאימה למשרדים, מוסדות חינוך ומגורים שבהם שוהים אנשים לאורך זמן', 'הדיגום מתבצע בתוך המבנה ואינו מפריע לפעילות השוטפת', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10046': ['הבדיקה מודדת מזהמים הנפלטים מתחבורה כגון חלקיקים וגזים בקרבת צירי תנועה', 'הדוח מאפשר להעריך את השפעת התחבורה על איכות האוויר באזור הנבדק', 'מתאימה לרשויות ולגופים המתכננים מבנים או שטחים סמוך לכבישים', 'הדיגום מתבצע בנקודות מוגדרות לאורך פרק זמן מייצג', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10072': ['הבדיקה מאתרת ומכמתת ריכוזי פורמלדהיד באוויר, חומר שעלול להשתחרר מרהיטים וחומרי בנייה', 'הדוח מציג אם ריכוזי הפורמלדהיד נמצאים בטווח הבטוח לשהייה במבנה', 'מתאימה למבנים חדשים, מבנים משופצים ולמקומות עם ריהוט מעץ מעובד', 'הדיגום מתבצע בחלל הפנימי ללא הפרעה לפעילות', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '69': ['הבדיקה מאתרת נוכחות נבגי עובש באוויר ומזהה את סוגי העובש הקיימים במבנה', 'הדוח משווה בין רמות העובש בפנים לבין החוץ ומצביע על מקור אפשרי לבעיה', 'מתאימה למבנים עם רטיבות, עובש נראה או ריח אופייני', 'הדיגום מהיר ומתבצע בעזרת ציוד ייעודי ללכידת נבגים', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10066': ['הדיגום הנוסף מאפשר לבחון נקודות נוספות באתר באותו ביקור ולקבל תמונה מלאה יותר', 'הדוח מרחיב את מיפוי העובש במבנה ומסייע לאתר את מוקדי הבעיה', 'מתאים לאתרים גדולים או למבנים עם מספר חללים נפרדים לבדיקה', 'הדיגום מתבצע בעזרת ציוד ייעודי ובאותו תהליך מקצועי', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10073': ['הדיגום הנוסף בוחן נוכחות חיידקים באוויר בנקודה נוספת באתר באותו ביקור', 'הדוח מרחיב את הבדיקה המיקרוביאלית ומספק תמונה מקיפה יותר של איכות האוויר', 'מתאים למבנים עם מספר חללים או אזורים החשודים בזיהום', 'הדיגום מתבצע בעזרת ציוד מקצועי המותאם ללכידת חיידקים', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10126': ['הדיגום בוחן נוכחות עובש על משטחים מוצקים בנקודה נוספת באתר באותו ביקור', 'הדוח מזהה את סוגי העובש שהתפתחו על המשטח ומסייע לאתר את מקור הרטיבות', 'מתאים למשטחים עם כתמים, היפוך צבע או סימני רטיבות', 'הדיגום מתבצע בעזרת מטוש או הדבקה ואינו פוגע במשטח', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10078': ['היום הנוסף מאפשר להמשיך את הדיגום הסביבתי על פני יותר מיממה אחת לקבלת נתונים מייצגים', 'הדוח מתבסס על איסוף ממושך יותר ומשקף טוב יותר את השונות באיכות האוויר', 'מתאים לאתרים הדורשים מעקב מורחב או עמידה בדרישות רגולטוריות', 'הדיגום ממשיך באותן נקודות ובאותו ציוד מכויל', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10047': ['התוספת מרחיבה את הבדיקה למדידת ריכוזי אמוניה באוויר, גז בעל ריח חריף ומגרה', 'הדוח מציג אם ריכוזי האמוניה נמצאים בטווח הבטוח ועומדים בערכי הייחוס', 'מתאימה לאתרים עם תהליכי ייצור, חקלאות או מקורות פליטה של אמוניה', 'הדיגום משולב בבדיקת האוויר הקיימת ללא צורך בביקור נפרד', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10127': ['התחנה מנטרת באופן רציף מגוון מזהמים כימיים באוויר לאורך תקופה מוגדרת', 'הדוח מספק נתונים מפורטים על מגמות וריכוזי המזהמים לאורך זמן', 'מתאימה לפרויקטים ולאתרים הדורשים מעקב סביבתי ממושך ומדויק', 'הניטור מתבצע בעזרת ציוד אוטומטי המותקן באתר', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    '10159': ['החודש הנוסף מאריך את תקופת הניטור הרציף של המזהמים הכימיים באתר', 'הדוח המורחב מאפשר זיהוי מגמות עונתיות ושינויים לאורך זמן ממושך יותר', 'מתאים לפרויקטים ארוכי טווח הדורשים מעקב סביבתי מתמשך', 'הניטור ממשיך בעזרת אותו ציוד אוטומטי המותקן באתר', 'נותן ללקוח תמונת מצב על איכות האוויר והגורמים שעלולים להשפיע על השהייה במקום'],
+    // ── אסבסט ──
+    '10023': ['הסקר מבוצע על ידי בודק אסבסט מוסמך ומאתר נוכחות חומרים המכילים אסבסט במבנה', 'הדוח מתעד את מיקום האסבסט, מצבו ורמת הסיכון ומסייע בקבלת החלטות לטיפול', 'מתאים למבנים ישנים, לפני שיפוץ או הריסה ולמילוי דרישות רגולטוריות', 'הסקר כולל בחינה חזותית ולקיחת דגימות במידת הצורך', 'מסייע להבין אם קיים סיכון אסבסט ומה הצעד הנכון להמשך טיפול בטוח'],
+    '10026': ['הבדיקה מזהה אם צובר חשוד מכיל אסבסט באמצעות ניתוח מעבדתי של הדגימה', 'הדוח קובע בבירור אם החומר מכיל אסבסט ומהו סוג האסבסט שזוהה', 'מתאימה לזיהוי מהיר של חומר חשוד לפני המשך עבודות באתר', 'הדיגום מתבצע בזהירות ובהתאם לנהלי הבטיחות הנדרשים', 'מסייע להבין אם קיים סיכון אסבסט ומה הצעד הנכון להמשך טיפול בטוח'],
+    '10112': ['הניטור מודד את ריכוז סיבי האסבסט באוויר באמצעות שתי דגימות באתר', 'הדוח מציג אם ריכוז הסיבים באוויר עומד בערכים המותרים לשהייה בטוחה', 'מתאים למעקב במהלך עבודות הסרת אסבסט או לאחר אירוע חשוד', 'הדיגום מתבצע בעזרת ציוד ייעודי לאיסוף סיבים מהאוויר', 'מסייע להבין אם קיים סיכון אסבסט ומה הצעד הנכון להמשך טיפול בטוח'],
+    // ── מים ──
+    '63': ['הבדיקה המיקרוביאלית המלאה מתבצעת במעבדה מוסמכת ומאתרת חיידקים העלולים לזהם את מי השתייה', 'הדגימה נלקחת באתר על ידי דוגם מוסמך לפי הנהלים הנדרשים', 'הדוח מראה בבירור אם המים עומדים בתקן הישראלי למי שתייה מבחינה מיקרוביאלית', 'מתאימה לבתים, מוסדות ועסקים שרוצים לוודא שהמים בטוחים לשתייה', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10076': ['בדיקת המתכות החלקית מאתרת ריכוזים של מתכות נפוצות שעלולות להזיק לבריאות במי השתייה', 'הדגימה נלקחת באתר על ידי דוגם מוסמך בהתאם לנהלים הנדרשים', 'הדוח מציג את ריכוזי המתכות ומשווה אותם לערכים המותרים בתקן למי שתייה', 'מתאימה למי שרוצה בדיקה ממוקדת וזולה יותר של המתכות העיקריות במים', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10120': ['השירות משלב בדיקה מיקרוביאלית מלאה יחד עם בדיקת מתכות חלקית במסגרת אחת', 'הבדיקה מאתרת גם חיידקים וגם ריכוזי מתכות נפוצות שעלולים לפגוע בבריאות', 'הדגימה נלקחת באתר על ידי דוגם מוסמך והבדיקה מתבצעת במעבדה מוסמכת', 'מתאימה למי שרוצה תמונה רחבה יותר על איכות מי השתייה במחיר משולב', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10121': ['בדיקת המתכות המלאה בוחנת מגוון רחב של מתכות כבדות וקלות במי השתייה', 'הבדיקה מאתרת ריכוזים חריגים שעלולים להצטבר בגוף ולפגוע בבריאות לאורך זמן', 'הדוח משווה את כל הערכים שנמדדו לתקן הישראלי למי שתייה', 'מתאימה לבתים, מוסדות ועסקים הרוצים בדיקת מתכות מקיפה ויסודית', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10122': ['השירות כולל בדיקת מתכות מלאה יחד עם בדיקה מיקרוביאלית מלאה למי השתייה', 'הבדיקה נותנת תמונה כוללת על זיהומים חיידקיים וריכוזי מתכות במים', 'הדגימה נלקחת באתר והבדיקה מתבצעת במעבדה מוסמכת לפי התקנים', 'מתאימה למי שרוצה את הבדיקה המקיפה ביותר לאיכות מי השתייה', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10075': ['הבדיקה המיקרוביאלית המלאה מאתרת חיידקים העלולים לזהם את מי השתייה', 'דיגום זה הוא דגימה נוספת הנלקחת באתר לצד הדגימה הראשונה לצורך אימות או השוואה', 'הדגימה נלקחת על ידי דוגם מוסמך והבדיקה מתבצעת במעבדה מוסמכת', 'מתאימה למקרים שבהם נדרשת נקודת דיגום נוספת או חזרה על הבדיקה', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    '10077': ['בדיקת המתכות החלקית מאתרת ריכוזים של מתכות נפוצות במי השתייה', 'דיגום זה הוא דגימה נוספת הנלקחת באתר לצד הדגימה הראשונה', 'הדגימה נלקחת על ידי דוגם מוסמך והבדיקה מתבצעת במעבדה מוסמכת', 'מתאימה למי שצריך נקודת דיגום נוספת לבדיקת המתכות במים', 'נותן תשובה ברורה האם איכות המים עומדת בדרישות ומה נדרש לעשות במקרה של חריגה'],
+    // ── ריח ──
+    '10013': ['השירות מאתר את מקור מטרד הריח ומסייע בגיבוש פתרון לסילוקו', 'הבדיקה כוללת זיהוי שיטתי של מקורות הריח בשטח ובסביבתם', 'הצוות ממליץ על דרכי פעולה להפחתה ולמניעה של חזרת המטרד', 'מתאימה לעסקים ותושבים הסובלים ממטרדי ריח ומעוניינים בפתרון מעשי', 'מסייע לתעד את מטרד הריח ולהציג ממצאים ברורים מול גורמים מקצועיים או רשויות'],
+    '10003': ['בדיקת הריח מתבצעת על ידי צוות מריחים מאומן המעריך את עוצמת הריח ואופיו', 'השיטה מבוססת על חוש הריח האנושי בהתאם למתודולוגיה מקובלת', 'הממצאים מתעדים את עוצמת המטרד ומסייעים בקבלת החלטות מול הרשויות', 'מתאימה לבירור מטרדי ריח ולתיעוד אובייקטיבי של המצב בשטח', 'מסייע לתעד את מטרד הריח ולהציג ממצאים ברורים מול גורמים מקצועיים או רשויות'],
+    '10083': ['בדיקת הריח מתבצעת על ידי בודק ריח מוסמך בעל הכשרה והסמכה מתאימה', 'הבודק מעריך את עוצמת הריח ואופיו לפי שיטות מקובלות ומדידות מתועדות', 'הדוח מספק תיעוד מקצועי שניתן להגיש לרשויות ולגורמים המוסמכים', 'מתאימה למקרים הדורשים חוות דעת מוסמכת ומבוססת על מטרד ריח', 'מסייע לתעד את מטרד הריח ולהציג ממצאים ברורים מול גורמים מקצועיים או רשויות'],
+    '10055': ['הדוח הסביבתי מעריך את אופן פיזור הריחות מהמקור אל הסביבה הקרובה', 'ההערכה מבוססת על נתוני פליטה, תנאי אקלים ומודלים של פיזור ריחות', 'הדוח ערוך בהתאם לדרישות ומיועד להגשה לרשויות הסביבתיות', 'מתאים למפעלים ועסקים הנדרשים להציג הערכת השפעה של ריחות לרשויות', 'מסייע לתעד את מטרד הריח ולהציג ממצאים ברורים מול גורמים מקצועיים או רשויות'],
+    // ── תרמי ──
+    '10156': ['הדוח בוחן את התאמת המבנה או המערכת לדרישות תקן 1045 בתחום הבידוד התרמי', 'הבדיקה כוללת איסוף נתונים והשוואתם לערכים הנדרשים בתקן', 'הדוח מספק תיעוד מסודר שניתן להגיש לרשויות ולגורמי התכנון', 'מתאים לפרויקטים הנדרשים להוכיח עמידה בדרישות הבידוד התרמי בתקן 1045', 'מסייע להוכיח עמידה בדרישות התקן ולזהות פערים כבר בשלב התכנון או הבדיקה'],
+    '10157': ['הדוח בוחן את התאמת המבנה לדרישות תקן 5282 בתחום דירוג האנרגיה', 'הבדיקה מעריכה את ביצועי האנרגיה של המבנה ביחס לערכים הנדרשים בתקן', 'הדוח מספק תיעוד מקצועי שניתן להגיש לרשויות ולגורמי התכנון', 'מתאים לפרויקטים הנדרשים להציג דירוג אנרגטי לפי תקן 5282', 'מסייע להוכיח עמידה בדרישות התקן ולזהות פערים כבר בשלב התכנון או הבדיקה'],
+    '10158': ['הבדיקה התרמית מתבצעת במעבדה מוסמכת ובוחנת את הנתונים בהתאם לתקנים הרלוונטיים', 'הבדיקה כוללת מדידה וניתוח של מאפיינים תרמיים של החומר או המבנה', 'הדוח מספק תוצאות מהימנות שניתן להסתמך עליהן לצורך אישור ההתאמה', 'מתאימה לפרויקטים הזקוקים לאימות מעבדתי של נתונים תרמיים', 'מסייע להוכיח עמידה בדרישות התקן ולזהות פערים כבר בשלב התכנון או הבדיקה'],
+    // ── ראדון ──
+    '10044': ['בדיקת ראדון קצרת טווח מודדת את ריכוז הגז במבנה לאורך מספר ימים בלבד', 'הבדיקה מתבצעת על ידי בודק מוסמך ובהתאם לדרישות החוק והתקן', 'מתאימה לאיתור מהיר של חשיפה מוגברת לגז הראדון הרדיואקטיבי', 'הדוח מספק תמונת מצב ברורה שניתן להגיש לרשויות', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10017': ['בדיקת ראדון ארוכת טווח מודדת את ריכוז הגז לאורך מספר חודשים', 'משך המדידה הממושך מספק ממוצע מדויק ואמין יותר של רמות החשיפה', 'הבדיקה מתבצעת על ידי בודק מוסמך ובהתאם לדרישות החוק והתקן', 'מתאימה לבתים פרטיים, מוסדות ועסקים המעוניינים בהערכה יסודית', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '61': ['ערכה לבדיקת ראדון קצרת טווח המיועדת להצבה עצמית במבנה', 'הערכה מודדת את ריכוז הגז לאורך מספר ימים ונשלחת לניתוח במעבדה', 'פתרון נוח וזמין לאיתור ראשוני של רמות ראדון מוגברות', 'מתאימה לבתים פרטיים, מוסדות ועסקים', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10000': ['ערכה לבדיקת ראדון ארוכת טווח המיועדת להצבה עצמית במבנה', 'המדידה הממושכת לאורך חודשים מספקת ממוצע מהימן של רמות הגז', 'פתרון נוח להערכה יסודית של חשיפה ממושכת לראדון', 'מתאימה לבתים פרטיים, מוסדות ועסקים', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '87': ['פרט ראדון הוא רכיב מדידה המשמש לאיסוף נתונים על ריכוז הגז', 'הרכיב מותקן במבנה ומאפשר ניטור מדויק של רמות הראדון', 'מהווה חלק ממערך הבדיקה לאיתור חשיפה מוגברת לגז', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10022': ['גלאי ראדון רציף מדגם RD200 מודד ומציג את ריכוז הגז בזמן אמת', 'המכשיר מאפשר מעקב שוטף אחר שינויים ברמות הראדון במבנה', 'מתאים לניטור מתמשך בבתים פרטיים, מוסדות ועסקים', 'מספק נתונים רציפים לזיהוי מגמות חשיפה לאורך זמן', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10095': ['גלאי ראדון רציף מדגם RD200P Radon Eye מודד את ריכוז הגז בזמן אמת', 'המכשיר מציג קריאות עדכניות ומאפשר מעקב נוח אחר רמות הראדון', 'מתאים לניטור ביתי ומקצועי של חשיפה לגז הרדיואקטיבי', 'מספק נתונים רציפים לזיהוי מגמות לאורך זמן', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10160': ['גלאי ראדון מדגם RADELEC כולל לידר למדידת ריכוז הגז במבנה', 'המכשיר מספק מדידה מקצועית ומדויקת של רמות הראדון', 'מתאים לשימוש של בודקים מוסמכים ולניטור סביבתי מתקדם', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10161': ['גלאי אלקטרוני ארוך טווח חדש למדידת ריכוז גז הראדון במבנה', 'המכשיר מבצע מדידה ממושכת המספקת ממוצע מהימן של רמות החשיפה', 'מתאים לניטור יסודי בבתים פרטיים, מוסדות ועסקים', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10162': ['גלאי אלקטרוני קצר טווח חדש למדידת ריכוז גז הראדון במבנה', 'המכשיר מאפשר איתור מהיר של רמות ראדון מוגברות תוך ימים ספורים', 'מתאים לבדיקה ראשונית בבתים פרטיים, מוסדות ועסקים', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '70': ['כיול גלאי ראדון מבטיח את דיוק המדידה בהתאם לתקן', 'הכיול נדרש לחידוש ההיתר של בודק הראדון המוסמך', 'התהליך מבטיח שהמכשיר מספק קריאות מהימנות ותקפות', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    '10069': ['הנפקת תעודת כיול למכשיר RD200 מאשרת את דיוק המדידה', 'התעודה מהווה אסמכתה רשמית לתקינות הגלאי ולהתאמתו לתקן', 'נדרשת לשמירה על מהימנות תוצאות הבדיקה לאורך זמן', 'נותן הערכה ברורה של רמת החשיפה לגז ראדון והאם נדרש המשך טיפול'],
+    // ── קרקע ──
+    '10027': ['סקר קרקע היסטורי בוחן את עברו של המגרש ושימושי הקרקע הקודמים בו', 'הסקר מאתר מקורות זיהום אפשריים על בסיס מידע ותיעוד היסטורי', 'נדרש לרישוי בנייה, עסקאות נדל״ן והגנת הסביבה', 'הדוח מספק תמונת מצב ברורה שניתן להגיש לרשויות', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10050': ['הכנת תוכנית דיגום לקרקע מגדירה את שיטת הדיגום ונקודות הבדיקה באתר', 'התוכנית נערכת בהתאם לדרישות החוק והנחיות המשרד להגנת הסביבה', 'מהווה בסיס מקצועי לביצוע סקר קרקע יסודי ומדויק', 'נדרשת לרישוי בנייה ולתהליכי הגנת הסביבה', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10087': ['בדיקת רעידות ממכונות דחיקת צינור מנטרת את עוצמת התנודות בקרקע', 'הבדיקה מאתרת חריגות העלולות לפגוע במבנים ובתשתיות סמוכות', 'מתבצעת בהתאם לדרישות התקן ולהנחיות המקצועיות', 'הדוח מספק תיעוד שניתן להגיש לרשויות ולגורמים מעורבים', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10102': ['דיגום קרקע על פי סעיף מס׳ 1 כולל איסוף דגימות לבדיקת זיהום', 'הדיגום מתבצע בהתאם לדרישות החוק ולהנחיות המשרד להגנת הסביבה', 'הדגימות נשלחות למעבדה לאיתור מזהמים בקרקע', 'נדרש לרישוי בנייה, עסקאות נדל״ן והגנת הסביבה', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10103': ['דיגום גז קרקע על פי סעיף מס׳ 1 בודק את הימצאות גזים מזהמים בקרקע', 'הדיגום מאתר גזים נדיפים העלולים לחלחל אל תוך מבנים', 'מתבצע בהתאם לדרישות החוק ולהנחיות המשרד להגנת הסביבה', 'נדרש לרישוי בנייה ולתהליכי הגנת הסביבה', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10088': ['דיגום נוסף באתר לבדיקת חיידקים בחול תחת ריצוף בוחן זיהום מיקרוביאלי', 'הדיגום מאתר נוכחות חיידקים העלולים להעיד על חדירת שפכים או לחות', 'מתבצע בהתאם לדרישות המקצועיות ולהנחיות התקן', 'הדוח מספק תמונת מצב ברורה לגבי מצב הקרקע מתחת לריצוף', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    '10089': ['בדיקת פעימות וספיקת משאבות מבטיחה דיגום תקין של חול לבדיקת חיידקים', 'הבדיקה מוודאת שהמשאבות פועלות בעוצמה ובקצב הנדרשים לדיגום מהימן', 'מתבצעת בהתאם לדרישות המקצועיות ולהנחיות התקן', 'מהווה שלב חיוני להבטחת איכות ודיוק תוצאות הדיגום', 'מסייע לאתר חשד לזיהום בקרקע ולבסס החלטות תכנון, רישוי או טיפול'],
+    // ── רעש ואקוסטיקה ──
+    '73': ['הבדיקה מודדת את מפלסי הרעש הסביבתי בהתאם לתקנות ולתקן הישראלי לפי סעיף 1', 'הדוח משמש לרישוי עסק, להגשה לרשויות ולהתמודדות עם תלונות תושבים', 'מבוצעת בציוד מדידה מכויל ועל ידי בודק מנוסה בשטח', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10011': ['הבדיקה מודדת את מפלסי הרעש הסביבתי באופן רציף לאורך תקופה של עד 24 שעות', 'המדידה הרציפה משקפת את השונות ברמות הרעש לאורך שעות היום והלילה', 'הדוח משמש לעמידה בתקנות, לרישוי עסק ולבירור תלונות', 'מבוצעת בציוד מכויל המותקן באתר לאורך כל תקופת המדידה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10048': ['הבדיקה מרחיבה את המדידה הרציפה ביום מדידה נוסף מעבר ל-24 השעות הראשונות', 'יום נוסף מאפשר אפיון מדויק יותר של מקור הרעש בתנאי הפעלה משתנים', 'הנתונים משולבים בדוח לצורך הערכה מהימנה של עמידה בתקנות', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10012': ['הבדיקה מודדת את מפלסי הרעש הנובעים מתנועת כלי רכב בכבישים סמוכים', 'המדידה מבוצעת בהתאם לתקנות ולמתודולוגיה הנדרשת לרעש מתחבורה', 'הדוח משמש לתכנון, להערכת מטרדים ולהתמודדות עם תלונות תושבים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10028': ['הבדיקה מודדת את מפלסי הרעש בתחומי המקרקעין של המתלונן או המשתחם הנבדק', 'המדידה בוחנת עמידה במגבלות הרעש המותרות באזור הנבדק', 'הדוח משמש לבירור תלונות, לרישוי עסק ולעמידה בתקנות', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10043': ['הבדיקה מודדת את מפלסי הרעש הנפלטים מציוד ומכונות באתרי בנייה', 'המדידה מבוצעת בהתאם לתקנות למניעת מפגעים (רעש מציוד בנייה) משנת 1979', 'הדוח משמש לעמידה בתנאי הרישוי ולהפחתת מטרדי רעש לסביבה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10085': ['הבדיקה מודדת את מפלסי הרעש הנובעים מתנועת מטוסים באזורי השפעה', 'המדידה מאפיינת את רמות הרעש ואת תדירות אירועי המעבר מעל האתר', 'הדוח משמש להערכת מטרדים, לתכנון ולהתמודדות עם תלונות תושבים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10060': ['הבדיקה בוחנת את בידוד הקול הנישא באוויר ואת בידוד הקול ההולם בין חללים', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי למבני מגורים, ת״י 1004', 'הדוח מאמת עמידה בדרישות הבידוד האקוסטי הנדרשות בתקן', 'מבוצעת בציוד מדידה מכויל ובשיטות הקבועות בתקן', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10061': ['הבדיקה בוחנת בידוד קול נישא באוויר וקול הולם בחדר נוסף מעבר לחדר הראשון', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי ת״י 1004', 'הוספת חדר מאפשרת כיסוי מלא של חללי המבנה הנדרשים לבדיקה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10058': ['הבדיקה בוחנת את בידוד הקול ההולם המועבר דרך רצפות ותקרות בין חללים', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי למבני מגורים, ת״י 1004', 'הדוח מאמת עמידה בדרישות בידוד הקול ההולם הקבועות בתקן', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10059': ['הבדיקה בוחנת את בידוד הקול ההולם בחדר נוסף מעבר לחדר הראשון', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי ת״י 1004', 'הוספת חדר מאפשרת כיסוי מלא של החללים הנדרשים לבדיקת קול הולם', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10070': ['הבדיקה בוחנת את בידוד הקול הנישא באוויר בין חללים סמוכים במבנה', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי למבני מגורים, ת״י 1004', 'הדוח מאמת עמידה בדרישות בידוד הקול הנישא באוויר הקבועות בתקן', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10071': ['הבדיקה בוחנת את בידוד הקול הנישא באוויר בחדר נוסף מעבר לחדר הראשון', 'המדידה מבוצעת בהתאם לתקן הבידוד האקוסטי ת״י 1004', 'הוספת חדר מאפשרת כיסוי מלא של החללים הנדרשים לבדיקת קול נישא באוויר', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10062': ['הבדיקה מלווה מבנה בבנייה ובוחנת את ביצועי הבידוד האקוסטי בשלבי ההקמה', 'הליווי מאפשר זיהוי וטיפול בכשלים אקוסטיים עוד בטרם השלמת המבנה', 'הדוח תומך בעמידה בתקן הבידוד האקוסטי ת״י 1004 בקבלת המבנה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10042': ['הסקר מאפיין את מקורות הרעידות במבנה ואת דרכי התפשטותן בחללים', 'הממצאים משמשים בסיס להמלצות הנדסיות להפחתת מפלסי הרעידות', 'הסקר מסייע במניעת מטרדים ובשיפור הנוחות האקוסטית במבנה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10056': ['הבדיקה מודדת את מפלסי הרעש הנפלטים מפעולת המעלית אל הדירות הסמוכות', 'המדידה בוחנת עמידה בדרישות הרעש והבידוד האקוסטי הנדרשות במבנה', 'הדוח משמש לאיתור מטרדים ולהתמודדות עם תלונות דיירים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10123': ['הבדיקה מרחיבה את מדידת רעש המעלית למעלית נוספת באותו מבנה', 'המדידה מבוצעת באותה מתודולוגיה לבחינת עמידה בדרישות הרעש', 'הדוח משלב את ממצאי כלל המעליות הנבדקות במבנה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10037': ['השירות כולל ייעוץ הנדסי לזיהוי מקורות רעש ולתכנון אמצעים להפחתתם', 'הייעוץ מותאם למאפייני האתר ולדרישות הרגולטוריות הרלוונטיות', 'ההמלצות מסייעות בעמידה בתקנות ובהפחתת מטרדי רעש לסביבה', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10086': ['הבדיקה מודדת את מפלסי הרעידות המועברות במבנה ובסביבתו', 'המדידה מאפיינת את עוצמת הרעידות ואת השפעתן על הנוחות והמבנה', 'הדוח משמש להערכת מטרדים ולתכנון אמצעי הפחתה מתאימים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10079': ['השירות כולל בדיקה אקוסטית ומתן חוות דעת לצורך היתר לבריכה פרטית', 'הבדיקה בוחנת את מפלסי הרעש מציוד הבריכה אל הסביבה הסמוכה', 'הדוח משמש להגשה לרשויות ולעמידה בתנאי ההיתר הנדרשים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10125': ['הבדיקה מודדת את ההספק האקוסטי ומפלסי הרעש הנפלטים מאולם או פאב', 'המדידה בוחנת עמידה במגבלות הרעש כלפי הסביבה ובתי המגורים הסמוכים', 'הדוח משמש לרישוי עסק ולהתמודדות עם תלונות תושבים', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10139': ['הבדיקה מודדת את הרעש הנפלט ממערכות מיזוג, אוורור ומערכות מבנה נוספות', 'המדידה בוחנת עמידה בדרישות הרעש והבידוד האקוסטי הנדרשות', 'הדוח משמש לאיתור מטרדים ולעמידה בתקנות ובתנאי הרישוי', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    '10119': ['השירות כולל חיזוי מפלסי הרעש הצפויים מכביש חדש בשלב התכנון', 'החיזוי מבוסס על מודל אקוסטי ועל נתוני תנועה ותוואי הדרך המתוכנן', 'הדוח משמש לתכנון אמצעי הפחתה ולעמידה בדרישות הסביבתיות', 'מסייע להבין את מקור המטרד ואת רמת העמידה בדרישות התקן והתקנות'],
+    // ── גהות תעסוקתית ──
+    '62': ['בדיקת רעש תעסוקתי לעובדים החשופים לרעש בסביבת העבודה', 'הבדיקה נדרשת לפי תקנות הבטיחות בעבודה לעובדים בסביבה רועשת', 'תוצאות הבדיקה מסייעות בקביעת אמצעי מיגון והגנת שמיעה', 'מסייע למעסיק להעריך חשיפת עובדים ולתכנן אמצעי הגנה מתאימים'],
+    '98': ['סקר מקדים לאיתור מוקדי רעש תעסוקתי ומיפוי העובדים הנחשפים', 'הסקר מגדיר את היקף הניטור הנדרש ואת נקודות הדגימה באתר', 'משמש בסיס לתכנון בדיקת הרעש המלאה בהמשך', 'מסייע למעסיק להעריך חשיפת עובדים ולתכנן אמצעי הגנה מתאימים'],
+    '10084': ['סקר מקדים למיפוי חשיפת עובדים לחומרים כימיים ולרעש בסביבת העבודה', 'הסקר מזהה את הגורמים הנדרשים לניטור ומגדיר את נקודות הדגימה', 'תוצאות הסקר קובעות את היקף הניטור הסביבתי התעסוקתי הנדרש', 'מסייע למעסיק להעריך חשיפת עובדים ולתכנן אמצעי הגנה מתאימים'],
+    '10104': ['יום עבודה של ניטור סביבתי תעסוקתי באתר הלקוח', 'הניטור כולל דגימות בסביבת העבודה לאורך יום עבודה מלא', 'הדגימות מועברות למעבדה לצורך ניתוח וקבלת תוצאות', 'מסייע למעסיק להעריך חשיפת עובדים ולתכנן אמצעי הגנה מתאימים'],
+    '10105': ['טופס מידע להסדרת ההתקשרות בין הלקוח לבין החברה', 'הטופס מרכז את פרטי הלקוח ואת היקף השירות המוזמן', 'מהווה בסיס לתיאום ולביצוע הבדיקות בהמשך', 'מסייע למעסיק להעריך חשיפת עובדים ולתכנן אמצעי הגנה מתאימים'],
+    // ── בנייה ירוקה ──
+    '10148': ['הכנת אוגדן מקדמי לשלב א לאישור מכון ההתעדה לבנייה ירוקה', 'האוגדן מבוסס על התכניות האדריכליות ועל דרישות התקן', 'מוגש למכון ההתעדה לצורך אישור ההיתכנות בשלב התכנון', 'מסייע לקדם את הפרויקט מול מכון ההתעדה ולעמוד בדרישות התקן'],
+    '10149': ['הכנת אוגדן שלב ב להגשה למכון ההתעדה לבנייה ירוקה', 'העבודה כוללת ביקור בשטח ובדיקת התאמת הביצוע לתכניות', 'מתן הנחיות לצוות הניהול ולעובדים לעמידה בדרישות התקן', 'מסייע לקדם את הפרויקט מול מכון ההתעדה ולעמוד בדרישות התקן'],
+    '10150': ['ייעוץ תרמי והנחיות לבנייה ירוקה בהתאם לתקן 1045', 'הכנת דוח אנרגטי לפי תקן 5282 לבחינת ביצועי המעטפת', 'הייעוץ מסייע בעמידה בדרישות הבנייה הירוקה בשלב התכנון', 'מסייע לקדם את הפרויקט מול מכון ההתעדה ולעמוד בדרישות התקן'],
+    // ── תסקיר וחוות דעת ──
+    '10137': ['תסקיר סביבתי הנדרש לצורך קבלת היתר בנייה מהרשויות', 'התסקיר בוחן את השפעות הפרויקט על הסביבה ומציע אמצעי מיתון', 'מוגש לוועדת התכנון כחלק מהליך הוצאת ההיתר', 'מספק בסיס מקצועי לקבלת החלטות ולהצגת עמדה מסודרת מול הרשויות'],
+    '10015': ['הכנת חוות דעת סביבתית מקצועית בנושא הנבדק', 'חוות הדעת מבוססת על נתוני שטח ועל הוראות הדין הרלוונטיות', 'משמשת להגשה לרשויות או לצורך הליך משפטי או תכנוני', 'מספק בסיס מקצועי לקבלת החלטות ולהצגת עמדה מסודרת מול הרשויות'],
+    // ── כללי / לוגיסטיקה ──
+    '10090': ['השתתפות בדיונים ובישיבות מול רשויות אדריכלים ורגולטורים', 'הליווי כולל הצגת עמדה מקצועית ומענה לשאלות הגורמים', 'מסייע בקידום אישור הפרויקט מול הגורמים המעורבים', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10032': ['מתן עדות מקצועית בבית משפט בנושא שבתחום מומחיות החברה', 'הסעיף מכסה את זמן ההכנה וההתייצבות של המומחה לדיון', 'רלוונטי כאשר נדרשת חוות דעת מקצועית במסגרת הליך משפטי', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10091': ['ביצוע שינויים בתוכנית לאחר השלמת העבודה המקורית', 'הסעיף מכסה עדכון מסמכים והתאמתם לדרישות שהשתנו', 'רלוונטי כאשר נדרשים תיקונים בעקבות שינוי בפרויקט', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10113': ['קבלת תוצאות הבדיקה בנוהל דחוף בלוח זמנים מקוצר', 'הסעיף מכסה את עלות הטיפול המזורז במעבדה ובדיווח', 'רלוונטי כאשר הלקוח נדרש לתוצאות במהירות גבוהה מהרגיל', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '82': ['מכסה את עלות הגעת הצוות לאתר הלקוח לצורך ביצוע השירות', 'מחושב בהתאם למרחק ולמספר ההגעות הנדרשות', 'רלוונטי כאשר השירות מבוצע מחוץ למשרדי החברה', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10117': ['מכסה את עלות הובלת הציוד או הדגימות בין האתרים', 'רלוונטי כאשר נדרשת הסעת ציוד דגימה או חומרים לאתר', 'מחושב בהתאם להיקף ההובלה ולמרחק', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10092': ['משלוח דלת לדלת באמצעות חברת שליחויות חיצונית', 'מכסה את עלות איסוף ומסירת החבילה בין הכתובות', 'רלוונטי כאשר נדרשת העברת דגימות או מסמכים בין הצדדים', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10142': ['משלוח עד דלת הלקוח של דגימות ערכות או מסמכים', 'מכסה את עלות המסירה לכתובת שהוגדרה על ידי הלקוח', 'רלוונטי בעת העברת חומרים מהחברה אל הלקוח', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10143': ['משלוח חזרה למעבדה של דגימות שנאספו באתר', 'מכסה את עלות העברת הדגימות מהלקוח אל המעבדה לניתוח', 'רלוונטי כאשר הדגימות נשלחות לבדיקה מעבדתית', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '65': ['מקדמה לתשלום על חשבון השירות בעת הזמנת העבודה', 'מהווה תנאי לפתיחת ההזמנה ולתחילת ביצוע השירות', 'תיזקף על חשבון התמורה הכוללת בחשבונית הסופית', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+    '10114': ['סעיף כללי לכיסוי הוצאות ושירותים שאינם מפורטים בנפרד', 'רלוונטי לרכיבים נוספים שעולים במהלך ביצוע העבודה', 'היקפו נקבע בהתאם לצורך הספציפי בכל הזמנה', 'משלים את השירות המקצועי בהתאם לצורך התפעולי או הדרישה בפרויקט'],
+  };
+  /* ── מידע על השירות לפי תת-קבוצה ──
+     מכסה עשרות מק"טים דומים (למשל כל חומרי המיגון) בטקסט אחד נכון, מבלי לכתוב לכל מק"ט בנפרד.
+     ניתן תמיד לדרוס מק"ט ספציפי דרך SERVICE_INFO_BY_SKU. */
+  const SERVICE_INFO_BY_SUBGROUP: Record<string, string[]> = {
+    radiation_elf_permit: [ // ELF היתר
+      'בדיקות ודוחות קרינה ELF הנדרשים לקבלת היתרי בנייה ואישורי בנייה ירוקה',
+      'כוללים מדידת רקע בתחילת הבנייה והכנת מפרט מיגון לדוח החזוי',
+      'מבוצעים בהתאם לדרישות הרשויות ומכוני ההתעדה',
+      'מבטיחים שהפרויקט יעמוד בדרישות הקרינה מול הוועדה המקומית',
+    ],
+    radiation_rf_permit: [ // RF היתר
+      'הכנת דוחות קרינת RF (איכ"ס) הנדרשים להקמת אתרי שידור ואנטנות',
+      'כוללת דוח תיאורטי לפני ההקמה ודוח מעשי לאחר ההקמה',
+      'מבוצעת בהתאם לדרישות המשרד להגנת הסביבה',
+      'מאפשרת לקבל את ההיתרים הנדרשים להפעלת המתקן',
+    ],
+    radiation_shielding: [ // מיגון קרינה — התקנה, לא בדיקה
+      'התקנת מיגון פיזי להפחתת קרינה אלקטרומגנטית — בקירות, תקרות, רצפות ולוחות חשמל',
+      'מבוצע בחומרים ייעודיים (פלדת שנאים, אלומיניום, סיליקון) לפי סוג ועוצמת הקרינה',
+      'מתוכנן לפי ממצאי הבדיקה כדי למגן בדיוק היכן שצריך ולחסוך בעלויות מיותרות',
+      'בסיום מתבצעת מדידה חוזרת לוודא שהקרינה ירדה לרמה הבטוחה',
+    ],
+    radiation_xray_shielding: [ // מיגון רנטגן — התקנת עופרת
+      'התקנת מיגון עופרת לקירות וחללים שבהם פועל ציוד רנטגן (מרפאות, מעבדות, וטרינרים)',
+      'עובי לוחות העופרת נקבע לפי עוצמת הקרן וסוג הציוד, בהתאם לתקן',
+      'מגן על המטופלים, הצוות והסביבה מפני קרינה מייננת',
+      'נדרש לעיתים כתנאי לרישוי המתקן מול משרד הבריאות',
+    ],
+  };
+  const GENERIC_SERVICE_INFO = [
+    'הבדיקה מתבצעת על ידי צוות מקצועי ומוסמך, בהתאם לתקנים ולדרישות החוק',
+    'הדוח המתקבל בסיום הוא מסמך ברור ומסודר שניתן להציג לרשויות, ללקוחות או לגורמים מסדירים',
+    'מספקת תמונת מצב מדויקת שמאפשרת לקבל החלטות נכונות ולמנוע הפתעות בהמשך',
+    'מותאמת הן ללקוחות פרטיים והן לעסקים, מוסדות וחברות',
+  ];
+  /** מחזיר את "מידע על השירות" לפי סדר עדיפות: מק"ט → תת-קבוצה → קטגוריה → גנרי */
+  const getServiceInfo = (sku?: string | null, categoryId?: string | null): string[] => {
+    if (sku && SERVICE_INFO_BY_SKU[sku]) return SERVICE_INFO_BY_SKU[sku];
+    const subgroupId = sku ? getSubgroupIdForSku(sku) : null;
+    if (subgroupId && SERVICE_INFO_BY_SUBGROUP[subgroupId]) return SERVICE_INFO_BY_SUBGROUP[subgroupId];
+    if (categoryId && SERVICE_INFO_BY_CATEGORY[categoryId]) return SERVICE_INFO_BY_CATEGORY[categoryId];
+    return GENERIC_SERVICE_INFO;
+  };
 
   /* ── מאמן המכירות: תוכן קבוע (hard-coded) של מענה להתנגדויות ומשפטי סגירה, לפי קטגוריית שירות ──
      הטקסטים בנויים כתבניות עם {firstName} ו-{serviceName} שמוחלפים בזמן אמת — כך שכל שירות
@@ -13617,6 +14997,8 @@ function TasksPage({
   /* ── coach action popups: "חזרה מאוחרת יותר" (snooze to high priority) / "העברה למומחה" (transfer to colleague) ── */
   const [coachActionPopup, setCoachActionPopup] = useState<{ taskId: string; type: 'snooze' | 'transfer' | 'lost' } | null>(null);
   const [coachSnoozeCustom, setCoachSnoozeCustom] = useState<Record<string, string>>({});
+  const [coachSnoozeDate, setCoachSnoozeDate] = useState<Record<string, string>>({});
+  const [coachSnoozeTime, setCoachSnoozeTime] = useState<Record<string, string>>({});
   const [coachLostOtherReason, setCoachLostOtherReason] = useState<Record<string, string>>({});
 
   /* ── snooze task: set future dueDate & advance to next task ── */
@@ -13777,6 +15159,7 @@ function TasksPage({
           companyRegNumber: fd.companyRegNumber || null,
           status: 'ACTIVE',
           services: fd.serviceType ? [fd.serviceType] : [],
+          leadSource: fd.leadSource || null,
           notes: fd.notes || null,
         }),
       });
@@ -13819,26 +15202,53 @@ function TasksPage({
     onNavigate?.('tasks');
   };
 
+  /* ── מסמן לקוח כ"לא רלוונטי" עם סיבה — מעביר אותו לסקשן "לקוחות שסווגו כלא רלוונטי" ── */
+  const markCustomerNotRelevant = async (customerId: string, reason: string, note: string | null) => {
+    try {
+      await apiFetch(apiUrl(`/customers/${customerId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({
+          notRelevantReason: reason,
+          notRelevantNote: note,
+          notRelevantAt: new Date().toISOString(),
+        }),
+      });
+    } catch { /* silent */ }
+  };
+
   /* ── Coach "דחייה למאוחר יותר": set future dueDate, persist customer, return to list ── */
-  const coachSnooze = async (task: Task, minutes: number) => {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() + minutes);
+  const coachSnoozeToDate = async (task: Task, futureDate: Date) => {
     await saveCustomerForTask(task);
     try {
       await apiFetch(apiUrl(`/tasks/${task.id}`), {
         method: 'PATCH',
         authUser: currentUser,
-        body: JSON.stringify({ dueDate: d.toISOString() }),
+        body: JSON.stringify({ dueDate: futureDate.toISOString() }),
       });
     } catch { /* silent */ }
     await onReloadTasks?.();
     returnToTasksScreen();
+  };
+  const coachSnooze = async (task: Task, minutes: number) => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + minutes);
+    await coachSnoozeToDate(task, d);
   };
 
   /* ── "חזרה מאוחרת יותר" — popup מהמאמן: מחזיר את המשימה לעדיפות גבוהה בעוד X זמן ── */
   const renderCoachSnoozePopup = (task: Task) => {
     const taskId = task.id;
     const customVal = coachSnoozeCustom[taskId] || '';
+    const dateVal = coachSnoozeDate[taskId] || '';
+    const timeVal = coachSnoozeTime[taskId] || '09:00';
+    const minDateStr = new Date().toISOString().slice(0, 10);
+    const submitSnoozeDate = () => {
+      if (!dateVal) return;
+      const d = new Date(`${dateVal}T${(timeVal || '09:00')}:00`);
+      if (isNaN(d.getTime())) return;
+      void coachSnoozeToDate(task, d);
+    };
     return (
       <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
         <button type="button" onClick={() => setCoachActionPopup(null)} className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" style={{ width: 24, height: 24 }}>
@@ -13874,6 +15284,30 @@ function TasksPage({
             <button
               disabled={!customVal || Number(customVal) < 1}
               onClick={() => { if (customVal && Number(customVal) >= 1) { void coachSnooze(task, Number(customVal)); } }}
+              className="rounded-xl px-3 py-2 text-sm font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              אישור
+            </button>
+          </div>
+          <div className="border-t border-slate-100 my-1" />
+          <div className="text-[11px] font-bold text-slate-400">בחירת תאריך ושעה</div>
+          <input
+            type="date"
+            min={minDateStr}
+            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-amber-400"
+            value={dateVal}
+            onChange={(e) => setCoachSnoozeDate((p) => ({ ...p, [taskId]: e.target.value }))}
+          />
+          <div className="flex gap-2 items-center">
+            <input
+              type="time"
+              className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-center font-bold focus:outline-none focus:ring-2 focus:ring-amber-400"
+              value={timeVal}
+              onChange={(e) => setCoachSnoozeTime((p) => ({ ...p, [taskId]: e.target.value }))}
+            />
+            <button
+              disabled={!dateVal}
+              onClick={submitSnoozeDate}
               className="rounded-xl px-3 py-2 text-sm font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               אישור
@@ -13922,7 +15356,7 @@ function TasksPage({
 
   /* ── "לא רלוונטי" — popup: בחר סיבה ואז סגור את הליד ── */
   const renderCoachLostPopup = (task: Task) => {
-    const reasons = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'אחר'];
+    const reasons = NOT_RELEVANT_REASONS;
     const showOtherInput = coachActionPopup?.taskId === task.id && coachActionPopup.type === 'lost' && coachLostOtherReason[task.id] !== undefined;
     const otherVal = coachLostOtherReason[task.id] || '';
     return (
@@ -13947,8 +15381,9 @@ function TasksPage({
                     setCoachLostOtherReason((p) => ({ ...p, [task.id]: '' }));
                     return;
                   }
-                  await saveCustomerForTask(task);
+                  const cid = await saveCustomerForTask(task);
                   await updateTaskField(task.id, { status: 'CANCELLED', description: reason });
+                  if (cid) await markCustomerNotRelevant(cid, reason, null);
                   returnToTasksScreen();
                 }}
                 className="rounded-xl px-4 py-2 text-sm font-bold border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition-colors text-right"
@@ -13979,8 +15414,9 @@ function TasksPage({
                 onClick={async () => {
                   const reasonText = otherVal.trim();
                   setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; });
-                  await saveCustomerForTask(task);
+                  const cid = await saveCustomerForTask(task);
                   await updateTaskField(task.id, { status: 'CANCELLED', description: reasonText });
+                  if (cid) await markCustomerNotRelevant(cid, 'אחר', reasonText);
                   returnToTasksScreen();
                 }}
                 className="flex-1 rounded-xl px-4 py-2 text-sm font-bold text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
@@ -14114,11 +15550,11 @@ function TasksPage({
     { key: 'customerCard', label: 'פתיחת פנייה', color: '#3b82f6' },
     { key: 'inquiry',      label: 'התאמת הפתרון',   color: '#2563eb' },
     { key: 'call',         label: 'שיחת מכירה',   color: '#3b82f6' },
-    { key: 'followup',     label: 'פולואפ', color: '#f97316' },
+    { key: 'followup',     label: 'פולואפ', color: '#2563eb' },
     { key: 'coordination', label: 'תיאום',  color: '#3b82f6' },
     { key: 'execution',    label: 'ביצוע',  color: '#2563eb' },
     { key: 'report',       label: 'דוח',    color: '#3b82f6' },
-    { key: 'collection',   label: 'גבייה',  color: '#ec4899' },
+    { key: 'collection',   label: 'גבייה',  color: '#2563eb' },
     { key: 'feedback',     label: 'משוב',   color: '#2563eb' },
     { key: 'closed',       label: 'נסגר',   color: '#22c55e' },
   ];
@@ -14172,7 +15608,7 @@ function TasksPage({
           { title: 'באיחור', value: kpiOverdue, icon: AlertCircle, color: '#ef4444', sub: 'דורשות טיפול' },
           { title: 'השבוע', value: kpiWeek, icon: CalendarDays, color: '#3b82f6', sub: '7 ימים קרובים' },
           { title: 'הושלמו', value: kpiDoneToday, icon: CheckCircle2, color: '#22c55e', sub: 'סה"כ שהושלמו' },
-          { title: 'פולואפ הצעות', value: kpiQuoteFollowup, icon: FileText, color: '#f59e0b', sub: 'ממתינות למעקב' },
+          { title: 'פולואפ הצעות', value: kpiQuoteFollowup, icon: FileText, color: '#2563eb', sub: 'ממתינות למעקב' },
         ].map((kpi) => {
           const KIcon = kpi.icon;
           return (
@@ -14205,13 +15641,20 @@ function TasksPage({
               onChange={(e) => setSearchQ(e.target.value)}
             />
           </div>
-          {/* only mine */}
+          {/* ownership toggle — exactly one active (green) at a time */}
           <button
             className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${onlyMine ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
             style={onlyMine ? { background: galit.primary } : {}}
-            onClick={() => setOnlyMine(!onlyMine)}
+            onClick={() => setOnlyMine(true)}
           >
             רק שלי
+          </button>
+          <button
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${!onlyMine ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+            style={!onlyMine ? { background: galit.primary } : {}}
+            onClick={() => setOnlyMine(false)}
+          >
+            של כולם
           </button>
           <div className="h-5 w-px bg-slate-200" />
           {/* quick filter pills */}
@@ -14270,8 +15713,9 @@ function TasksPage({
               const p = (t.priority || 'MEDIUM').toUpperCase();
               const isDone = s === 'DONE' || s === 'CANCELLED';
               const isOverdue = t.dueDate && new Date(t.dueDate) < today && !isDone;
-              const contactName = t.leadName || t.customerName || '';
-              const contactPhone = t.leadPhone || '';
+              const leadParsed = t.incomingLeadId ? parseLeadBody(t.description) : null;
+              const contactName = t.leadName || t.customerName || leadParsed?.fullName || '';
+              const contactPhone = t.leadPhone || leadParsed?.phone || '';
               const relatedTo = t.projectName || taskTypeLabel(t.type || 'GENERAL');
               const dueDisplay = t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '-';
               const dueTime = t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -14290,7 +15734,14 @@ function TasksPage({
                     </td>
                     {/* title + type */}
                     <td className="px-3 py-3">
-                      <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>{t.title}</div>
+                      <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>{(() => {
+                        const step = manualStepOverride[t.id] ?? detectStep(t);
+                        if (t.incomingLeadId && step === 0) return `ליד חדש נכנס${contactName ? ' — ' + contactName : ''}`;
+                        const STAGE: Record<number, string> = { 0: 'פתיחת פנייה', 1: 'התאמת פתרון', 2: 'שיחת מכירה', 3: 'פולואפ', 4: 'תיאום', 5: 'ביצוע', 6: 'דוח', 7: 'גבייה', 8: 'משוב', 9: 'הושלם', 99: 'הצעת מחיר' };
+                        const base = STAGE[step] || taskTypeLabel(t.type || 'GENERAL');
+                        const detail = [t.projectName, contactName].filter(Boolean).join(' · ');
+                        return detail ? `${base} — ${detail}` : (t.title || base);
+                      })()}</div>
                       <div className="mt-0.5 text-[11px] text-slate-400">{taskTypeLabel(t.type || 'GENERAL')}</div>
                     </td>
                     {/* related to */}
@@ -14362,7 +15813,7 @@ function TasksPage({
                     const QUOTE_STEP_IDX = 99; // display-only stage — not in progressSteps/detectStep
                     const visibleProgressStepsExtended = [
                       ...visibleProgressSteps.slice(0, 3), // 0=כרטיס לקוח, 1=התאמת הפתרון, 2=שיחת מכירה
-                      { key: 'quotePrep', label: 'הצעת מחיר', color: '#f59e0b', origIdx: QUOTE_STEP_IDX },
+                      { key: 'quotePrep', label: 'הצעת מחיר', color: '#2563eb', origIdx: QUOTE_STEP_IDX },
                       ...visibleProgressSteps.slice(3), // 3=פולואפ, 4=תיאום, 5=ביצוע
                     ];
                     const totalSteps = visibleProgressStepsExtended.length;
@@ -14380,12 +15831,12 @@ function TasksPage({
                       { icon: AlertTriangle, color: '#f97316', bg: '#fff7ed', label: 'עדיפות', value: priorityLabel(p) },
                       { icon: Calendar, color: '#2563eb', bg: '#eff6ff', label: 'תאריך יעד', value: t.due },
                       { icon: Clock3, color: '#2563eb', bg: '#eff6ff', label: 'שעה', value: t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : null },
-                      { icon: BarChart3, color: '#22c55e', bg: '#ecfdf5', label: 'סטטוס', value: taskStatusLabel(s) },
+                      { icon: BarChart3, color: '#22c55e', bg: '#f0fdf4', label: 'סטטוס', value: taskStatusLabel(s) },
                       { icon: Hash, color: '#3b82f6', bg: '#eff6ff', label: 'סוג לקוח / חברה', value: t.leadCompany },
                     ].filter((f) => f.value && f.value !== '-');
                     /* Hoist to outer scope so bottom bar + all sections can access them */
                     const stageKey = currentStep === QUOTE_STEP_IDX ? 'quotePrep' : (progressSteps[currentStep]?.key || 'inquiry');
-                    const stageColor = currentStep === QUOTE_STEP_IDX ? '#f59e0b' : (progressSteps[currentStep]?.color || '#2563eb');
+                    const stageColor = currentStep === QUOTE_STEP_IDX ? '#2563eb' : (progressSteps[currentStep]?.color || '#2563eb');
                     const linkedLeadForHeader = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
                     /* ── validation gate: can this task leave "כרטיס לקוח" (stage 0) without a saved contact? ──
                        Mirrors canSaveCard inside the stage-0 block below, computed here so the
@@ -14426,7 +15877,11 @@ function TasksPage({
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
                               <button
                                 type="button"
-                                onClick={() => setExpandedTaskId(null)}
+                                onClick={() => {
+                                  // יציאה משלב "ביצוע" (step 5) → המשימה הושלמה ונעלמת מהרשימה
+                                  if ((manualStepOverride[t.id] ?? detectStep(t)) === 5) void updateTaskField(t.id, { status: 'DONE' });
+                                  setExpandedTaskId(null);
+                                }}
                                 className="flex items-center justify-center gap-1 rounded-lg font-bold text-white transition hover:brightness-110 active:scale-95"
                                 style={{ background: '#ef4444', height: 30, minWidth: 58, fontSize: 12, paddingInline: 10 }}
                               >
@@ -14721,8 +16176,10 @@ function TasksPage({
                             const ccSourceDisplay = ccSourceMap[ccSourceRaw.toLowerCase()] || ccSourceRaw || 'לא צוין';
                             const linkedCustomerForCard = t.customerId ? customers.find((c) => c.id === t.customerId) : null;
                             const isExistingCustomer = !!(t.customerId || linkedLead);
-                            initCallFormIfNeeded(t.id, linkedLead, t, linkedCustomerForCard);
-                            const fd = callFormData[t.id] || getCallForm(t.id, linkedLead, t, linkedCustomerForCard);
+                            // ליד נכנס מהמייל → חילוץ אוטומטי של שם/טלפון/אימייל/שירות/הודעה למילוי מראש
+                            const ccLeadPrefill = t.incomingLeadId ? parseLeadBody(leadByTaskId[t.id]?.body || t.description) : null;
+                            initCallFormIfNeeded(t.id, linkedLead, t, linkedCustomerForCard, ccLeadPrefill);
+                            const fd = callFormData[t.id] || getCallForm(t.id, linkedLead, t, linkedCustomerForCard, ccLeadPrefill);
                             const setF = (field: string, value: string) => updateCallForm(t.id, field, value);
                             const derivedFullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
                             const ccContacts0 = taskContactsMap[t.id] || [];
@@ -14797,6 +16254,7 @@ function TasksPage({
                                       companyRegNumber: fd.companyRegNumber || null,
                                       status: 'ACTIVE',
                                       services: fd.serviceType ? [fd.serviceType] : [],
+                                      leadSource: fd.leadSource || null,
                                       notes: fd.notes || null,
                                     }),
                                   });
@@ -14875,6 +16333,168 @@ function TasksPage({
                             }
                             return (
                               <div className="px-8 pb-6" style={{ direction: 'rtl', background: '#F8FAFC' }}>
+                                {/* ── ליד נכנס מהמייל: פרטי הליד + טופס "התחל / העבר" ── */}
+                                {(() => {
+                                  const lead = t.incomingLeadId ? leadByTaskId[t.id] : null;
+                                  if (!lead) return null;
+                                  return (
+                                    <div className="pt-5">
+                                      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 mb-3">
+                                        <div className="flex items-center gap-2 mb-5">
+                                          <span className="inline-flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
+                                          <span className="text-[18px] font-extrabold text-blue-900">פרטי הליד</span>
+                                          {lead.status === 'NEW' && <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[11px] font-bold text-white">חדש</span>}
+                                        </div>
+                                        {(() => {
+                                          const p = parseLeadBody(lead.body || t.description);
+                                          const rows = [
+                                            { label: 'שם', value: p.fullName },
+                                            { label: 'טלפון', value: p.phone, href: p.phone ? `tel:${p.phone.replace(/[^\d+]/g, '')}` : '' },
+                                            { label: 'אימייל', value: p.email, href: p.email ? `mailto:${p.email}` : '' },
+                                            { label: 'סוג השירות / בדיקה', value: p.serviceType, full: true },
+                                            { label: 'הודעה', value: p.message, full: true },
+                                          ].filter((r) => r.value);
+                                          if (!rows.length) {
+                                            return <div className="whitespace-pre-wrap text-[15px] text-slate-700 leading-relaxed">{lead.body || t.description || '—'}</div>;
+                                          }
+                                          return (
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                                              {rows.map((r) => (
+                                                <div key={r.label} className={r.full ? 'sm:col-span-2' : ''}>
+                                                  <div className="text-[12px] font-bold text-blue-500 mb-1">{r.label}</div>
+                                                  {r.href
+                                                    ? <a href={r.href} dir="ltr" className="block text-[22px] font-extrabold text-slate-900 hover:text-blue-700 break-words" style={{ textAlign: 'right' }}>{r.value}</a>
+                                                    : <div className="text-[22px] font-extrabold text-slate-900 break-words leading-snug">{r.value}</div>}
+                                                </div>
+                                              ))}
+                                            </div>
+                                          );
+                                        })()}
+                                        {(lead.fromName || lead.fromEmail) && (
+                                          <div className="text-[11px] text-blue-600 mt-5 pt-3 border-t border-blue-200">מאת: {lead.fromName || ''}{lead.fromEmail ? ` <${lead.fromEmail}>` : ''}</div>
+                                        )}
+                                      </div>
+                                      {/* ── התאמה ללקוח קיים לפי שם/טלפון ── */}
+                                      {(() => {
+                                        const p = parseLeadBody(lead.body || t.description);
+                                        const norm = (s?: string | null) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+                                        const digits = (s?: string | null) => (s || '').replace(/\D/g, '');
+                                        const lName = norm(p.fullName);
+                                        const lPhone = digits(p.phone);
+                                        if (!lName && !lPhone) return null;
+                                        const matched = customers.find((c) =>
+                                          (lName && (norm(c.name) === lName || norm((c as any).contactName) === lName)) ||
+                                          (lPhone.length >= 9 && digits((c as any).phone) === lPhone)
+                                        );
+                                        // מפתח יציב לזיהוי הליד — כדי לשמור את ההחלטה בין רענונים.
+                                        const leadKey = (lead.id || t.id) as string;
+                                        const decision = leadMatchDecisions[leadKey];
+                                        // ניווט אמין לכרטיס הלקוח — תמיד עם האובייקט העדכני מרשימת הלקוחות.
+                                        const openCustomerCard = (cust: Customer) => {
+                                          const fresh = customers.find((c) => c.id === cust.id) || cust;
+                                          onOpenCustomer?.(fresh);
+                                        };
+
+                                        // כבר אושר שזה אותו לקוח — לא שואלים שוב, מציגים קישור ישיר.
+                                        if (decision && decision !== '__none__') {
+                                          const linked = customers.find((c) => c.id === decision) || matched;
+                                          if (linked) {
+                                            return (
+                                              <div className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                                <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
+                                                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                                  מקושר ללקוח קיים: <span className="underline">{linked.name}</span>
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openCustomerCard(linked); }}
+                                                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
+                                                >
+                                                  <UserCircle2 className="h-4 w-4" /> פתח כרטיס לקוח
+                                                </button>
+                                              </div>
+                                            );
+                                          }
+                                        }
+
+                                        // סומן כליד חדש — לא שואלים שוב.
+                                        if (decision === '__none__') {
+                                          return (
+                                            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
+                                              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                              <span className="underline">{p.fullName || 'הליד'}</span> מטופל כליד חדש
+                                            </div>
+                                          );
+                                        }
+
+                                        // נמצאה התאמה אך טרם הוכרעה — שואלים פעם אחת בלבד.
+                                        if (matched) {
+                                          return (
+                                            <div className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                              <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
+                                                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                                נמצא <span className="underline">{matched.name || p.fullName}</span> ברשימת הלקוחות — האם זה אותו אחד?
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, matched.id); openCustomerCard(matched); }}
+                                                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
+                                                >
+                                                  <UserCircle2 className="h-4 w-4" /> כן, פתח כרטיס לקוח
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, '__none__'); }}
+                                                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50"
+                                                >
+                                                  לא, ליד חדש
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+                                        return (
+                                          <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
+                                            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                            <span className="underline">{p.fullName || 'הליד'}</span> לא נמצא כלקוח קיים — אנא התחל תהליך
+                                          </div>
+                                        );
+                                      })()}
+                                      {lead.status === 'NEW' && (
+                                        <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3">
+                                          <button
+                                            type="button"
+                                            onClick={() => startLead(lead.id)}
+                                            className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+                                            style={{ background: '#16a34a' }}
+                                          >
+                                            <CheckCircle2 className="h-4 w-4" /> התחל טיפול בליד
+                                          </button>
+                                          <span className="text-slate-300">|</span>
+                                          <span className="text-sm font-semibold text-slate-600">העבר ל:</span>
+                                          <select
+                                            value={leadTransferSel[lead.id] || ''}
+                                            onChange={(e) => setLeadTransferSel((p) => ({ ...p, [lead.id]: e.target.value }))}
+                                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                                          >
+                                            <option value="">בחר עובד…</option>
+                                            {users.filter((u) => u.id !== currentUser.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                          </select>
+                                          <button
+                                            type="button"
+                                            disabled={!leadTransferSel[lead.id]}
+                                            onClick={() => transferLead(lead.id, leadTransferSel[lead.id])}
+                                            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
+                                            style={{ background: '#2563eb' }}
+                                          >
+                                            <UserPlus className="h-4 w-4" /> העבר
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 {/* ── header ── */}
                                 <div className="flex items-center gap-3.5 py-5">
                                   <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: '#1E293B' }}>
@@ -14964,26 +16584,26 @@ function TasksPage({
                                       </div>
                                       {/* Auto-contact for PRIVATE — מוצג ומולא אוטומטית מהפרטים שהוזנו למעלה */}
                                       {isPrivate && (
-                                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
+                                        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
                                           <div className="flex items-center justify-between mb-3">
-                                            <span className="text-[13px] font-semibold text-emerald-700 flex items-center gap-2">
+                                            <span className="text-[13px] font-semibold text-green-700 flex items-center gap-2">
                                               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                                               איש קשר 1
-                                              <span className="mr-1 text-[11px] font-medium text-emerald-600">(ראשי · מולא אוטומטית מהפרטים שלמעלה)</span>
+                                              <span className="mr-1 text-[11px] font-medium text-green-600">(ראשי · מולא אוטומטית מהפרטים שלמעלה)</span>
                                             </span>
                                           </div>
                                           <div className="grid grid-cols-2 gap-3">
                                             <div>
-                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">שם איש קשר</div>
-                                              <div className="text-[14px] text-emerald-900">{derivedFullName || '—'}</div>
+                                              <div className="text-[12px] font-semibold text-green-700 mb-1">שם איש קשר</div>
+                                              <div className="text-[14px] text-green-900">{derivedFullName || '—'}</div>
                                             </div>
                                             <div>
-                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">טלפון</div>
-                                              <div className="text-[14px] text-emerald-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.phone || '—'}</div>
+                                              <div className="text-[12px] font-semibold text-green-700 mb-1">טלפון</div>
+                                              <div className="text-[14px] text-green-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.phone || '—'}</div>
                                             </div>
                                             <div className="col-span-2">
-                                              <div className="text-[12px] font-semibold text-emerald-700 mb-1">אימייל</div>
-                                              <div className="text-[14px] text-emerald-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.email || '—'}</div>
+                                              <div className="text-[12px] font-semibold text-green-700 mb-1">אימייל</div>
+                                              <div className="text-[14px] text-green-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.email || '—'}</div>
                                             </div>
                                           </div>
                                         </div>
@@ -14993,7 +16613,7 @@ function TasksPage({
                                           <div className="flex items-center justify-between mb-3">
                                             <span className="text-[13px] font-semibold text-black">
                                               איש קשר {idx + 1}
-                                              {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-emerald-600">(ראשי)</span>}
+                                              {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-green-600">(ראשי)</span>}
                                             </span>
                                             <button type="button" onClick={() => removeContact(pc.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 transition-all">
                                               <X className="h-4 w-4" />
@@ -15109,16 +16729,16 @@ function TasksPage({
                               {(() => {
                                 const catMeta: Record<string, { color: string; light: string; Icon: React.ElementType }> = {
                                   water:                { color: '#2563eb', light: '#eff6ff', Icon: Waves },
-                                  odor:                 { color: '#3b82f6', light: '#eff6ff', Icon: Wind },
-                                  soil:                 { color: '#16a34a', light: '#f0fdf4', Icon: Shield },
-                                  asbestos:             { color: '#f59e0b', light: '#fffbeb', Icon: AlertTriangle },
-                                  air:                  { color: '#2563eb', light: '#eff6ff', Icon: Sparkles },
-                                  radon:                { color: '#ef4444', light: '#fef2f2', Icon: Radio },
-                                  noise:                { color: '#f97316', light: '#fff7ed', Icon: Volume2 },
-                                  radiation:            { color: '#2563eb', light: '#eff6ff', Icon: Zap },
-                                  'green-building':     { color: '#15803d', light: '#f0fdf4', Icon: Leaf },
-                                  'occupational-health':{ color: '#2563eb', light: '#eff6ff', Icon: Users },
-                                  'environmental-opinion':{ color: '#0f766e', light: '#f0fdfa', Icon: FileText },
+                                  odor:                 { color: '#65a30d', light: '#f7fee7', Icon: Wind },
+                                  soil:                 { color: '#a16207', light: '#fffbeb', Icon: Shield },
+                                  asbestos:             { color: '#ea580c', light: '#fff7ed', Icon: AlertTriangle },
+                                  air:                  { color: '#0891b2', light: '#ecfeff', Icon: Sparkles },
+                                  radon:                { color: '#4f46e5', light: '#eef2ff', Icon: Radio },
+                                  noise:                { color: '#db2777', light: '#fdf2f8', Icon: Volume2 },
+                                  radiation:            { color: '#7c3aed', light: '#f5f3ff', Icon: Zap },
+                                  'green-building':     { color: '#16a34a', light: '#f0fdf4', Icon: Leaf },
+                                  'occupational-health':{ color: '#0d9488', light: '#f0fdfa', Icon: Users },
+                                  'environmental-opinion':{ color: '#0369a1', light: '#f0f9ff', Icon: FileText },
                                   general:              { color: '#64748b', light: '#f8fafc', Icon: ClipboardList },
                                   thermal:              { color: '#dc2626', light: '#fef2f2', Icon: Flame },
                                 };
@@ -15146,7 +16766,7 @@ function TasksPage({
                                           setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }));
                                           const custObj = customers.find((c) => c.id === t.customerId);
                                           const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
-                                          const fixedServiceInfo = getServiceInfoForCategory(activeCat.id);
+                                          const fixedServiceInfo = getServiceInfo(svcId, activeCat.id);
                                           const coachCopy = buildSalesCoachCopy(activeCat.id, svcName, custName);
                                           setAiCoach((prev) => ({ ...prev, [t.id]: { loading: false, objections: coachCopy.objections, closings: coachCopy.closings, serviceInfo: fixedServiceInfo, serviceName: svcName } }));
                                         };
@@ -15285,18 +16905,18 @@ function TasksPage({
                                           const extraCats = SERVICE_CATEGORIES.filter((c) => EXTRA_CAT_IDS.includes(c.id));
                                           const catGradients: Record<string, string> = {
                                             water:                  'linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)',
-                                            odor:                   'linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%)',
-                                            soil:                   'linear-gradient(135deg,#22c55e 0%,#15803d 100%)',
-                                            asbestos:               'linear-gradient(135deg,#f59e0b 0%,#d97706 100%)',
-                                            air:                    'linear-gradient(135deg,#2563eb 0%,#2563eb 100%)',
-                                            radon:                  'linear-gradient(135deg,#ef4444 0%,#b91c1c 100%)',
-                                            noise:                  'linear-gradient(135deg,#f97316 0%,#c2410c 100%)',
-                                            radiation:              'linear-gradient(135deg,#2563eb 0%,#4c1d95 100%)',
-                                            'green-building':       'linear-gradient(135deg,#16a34a 0%,#14532d 100%)',
-                                            thermal:                'linear-gradient(135deg,#dc2626 0%,#f97316 100%)',
-                                            'environmental-opinion':'linear-gradient(135deg,#0f766e 0%,#134e4a 100%)',
+                                            odor:                   'linear-gradient(135deg,#84cc16 0%,#4d7c0f 100%)',
+                                            soil:                   'linear-gradient(135deg,#ca8a04 0%,#a16207 100%)',
+                                            asbestos:               'linear-gradient(135deg,#f97316 0%,#ea580c 100%)',
+                                            air:                    'linear-gradient(135deg,#06b6d4 0%,#0891b2 100%)',
+                                            radon:                  'linear-gradient(135deg,#6366f1 0%,#4338ca 100%)',
+                                            noise:                  'linear-gradient(135deg,#ec4899 0%,#be185d 100%)',
+                                            radiation:              'linear-gradient(135deg,#8b5cf6 0%,#6d28d9 100%)',
+                                            'green-building':       'linear-gradient(135deg,#22c55e 0%,#15803d 100%)',
+                                            thermal:                'linear-gradient(135deg,#ef4444 0%,#b91c1c 100%)',
+                                            'environmental-opinion':'linear-gradient(135deg,#0284c7 0%,#075985 100%)',
                                             general:                'linear-gradient(135deg,#64748b 0%,#334155 100%)',
-                                            'occupational-health':  'linear-gradient(135deg,#2563eb 0%,#0c4a6e 100%)',
+                                            'occupational-health':  'linear-gradient(135deg,#14b8a6 0%,#0f766e 100%)',
                                           };
                                           const renderCatCard = (cat: typeof SERVICE_CATEGORIES[number]) => {
                                             const meta = catMeta[cat.id] ?? { color: '#64748b', light: '#f8fafc', Icon: ClipboardList };
@@ -15366,7 +16986,7 @@ function TasksPage({
                               <div className="px-8 pb-6 pt-2">
                                 {renderStageActionBar(t, {
                                   label: 'מעבר לשיחת מכירה',
-                                  circleBg: '#3b82f6',
+                                  circleBg: '#16a34a',
                                   icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                   onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 })),
                                   disabled: !t.productName,
@@ -15382,7 +17002,7 @@ function TasksPage({
                             const serviceRaw = linkedLead?.service || linkedLead?.serviceType || t.projectName || taskTypeLabel(t.type || 'GENERAL');
                             const linkedCustomerForCall = t.customerId ? customers.find((c) => c.id === t.customerId) : null;
                             /* init form data from lead/task/customer if not yet initialized */
-                            initCallFormIfNeeded(t.id, linkedLead, t, linkedCustomerForCall);
+                            initCallFormIfNeeded(t.id, linkedLead, t, linkedCustomerForCall, t.incomingLeadId ? parseLeadBody(leadByTaskId[t.id]?.body || t.description) : null);
                             const fd = callFormData[t.id] || getCallForm(t.id, linkedLead, t, linkedCustomerForCall);
                             const setF = (field: string, value: string) => updateCallForm(t.id, field, value);
                             /* call script */
@@ -15464,6 +17084,12 @@ function TasksPage({
                             const urgencyNum = fd.urgency === 'נמוכה' ? 15 : fd.urgency === 'בינונית' ? 50 : fd.urgency === 'גבוהה' ? 85 : 50;
                             const OBJECTIONS_LIST = ['יקר לי','אני צריך לחשוב על זה','יש לנו כבר ספק','אני צריך להתייעץ עם מישהו נוסף','לא דחוף לנו כרגע'];
                             const coach = aiCoach[t.id];
+                            const activeCoachTab = callCoachTab[t.id] || 'service';
+                            const coachTabs = [
+                              { key: 'service' as const, label: 'מידע על השירות', icon: ClipboardList, accent: '#2563eb' },
+                              { key: 'objections' as const, label: 'מענה להתנגדויות', icon: AlertTriangle, accent: '#d97706' },
+                              { key: 'closings' as const, label: 'משפטי סגירה', icon: Star, accent: '#16a34a' },
+                            ];
                             return (
                             <div className="px-3 flex flex-col" style={{ direction: 'rtl', gap: '4px', paddingBottom: '2px' }}>
 
@@ -15495,88 +17121,81 @@ function TasksPage({
                                     </div>
                                   </div>
 
-                                  <div className="grid grid-cols-3 gap-px" style={{ background: '#e6e9f0' }}>
+                                  {/* ── סרגל טאבים ── */}
+                                  <div className="flex" style={{ background: '#e6e9f0', gap: 1, padding: '0 1px' }}>
+                                    {coachTabs.map((tabDef) => {
+                                      const TabIcon = tabDef.icon;
+                                      const isActive = activeCoachTab === tabDef.key;
+                                      return (
+                                        <button
+                                          key={tabDef.key}
+                                          type="button"
+                                          onClick={() => setCallCoachTab((prev) => ({ ...prev, [t.id]: tabDef.key }))}
+                                          className="flex-1 flex items-center justify-center gap-2 transition-colors"
+                                          style={{
+                                            padding: '14px 10px',
+                                            background: isActive ? '#ffffff' : '#f1f5f9',
+                                            borderBottom: isActive ? `3px solid ${tabDef.accent}` : '3px solid transparent',
+                                            color: isActive ? '#1e293b' : '#94a3b8',
+                                          }}
+                                        >
+                                          <TabIcon className="h-5 w-5" style={{ color: isActive ? tabDef.accent : '#94a3b8' }} />
+                                          <span className="font-extrabold" style={{ fontSize: '15px' }}>{tabDef.label}</span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
 
-                                    {/* ── עמודה 1: מידע על השירות ── */}
-                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#eff6ff 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-2 mb-3">
-                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#dbeafe' }}>
-                                          <ClipboardList className="h-5 w-5 text-blue-600" />
-                                        </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>מידע על השירות</span>
-                                      </div>
-                                      {coach?.serviceInfo?.length ? (
-                                        <ul className="space-y-2">
+                                  {/* ── תוכן הטאב הפעיל (על כל הרוחב) ── */}
+                                  <div className="p-7 bg-white" style={{ minHeight: 180 }}>
+
+                                    {/* ── מידע על השירות ── */}
+                                    {activeCoachTab === 'service' && (
+                                      coach?.serviceInfo?.length ? (
+                                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
                                           {coach.serviceInfo.map((b, i) => (
-                                            <li key={i} className="flex items-start gap-2 text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>
-                                              <span className="mt-1.5 flex-shrink-0 rounded-full" style={{ width: 6, height: 6, background: '#2563eb' }} />
+                                            <li key={i} className="flex items-start gap-2.5 text-slate-700 font-semibold" style={{ fontSize: '18px', lineHeight: 1.7 }}>
+                                              <span className="mt-2.5 flex-shrink-0 rounded-full" style={{ width: 8, height: 8, background: '#2563eb' }} />
                                               {b}
                                             </li>
                                           ))}
                                         </ul>
                                       ) : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות בשלב התאמת הפתרון כדי לקבל מידע מותאם</p>
-                                      )}
-                                    </div>
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '15px' }}>בחר שירות בשלב התאמת הפתרון כדי לקבל מידע מותאם</p>
+                                      )
+                                    )}
 
-                                    {/* ── עמודה 2: התנגדויות ── */}
-                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#fffbeb 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-2 mb-3">
-                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#fef3c7' }}>
-                                          <AlertTriangle className="h-5 w-5 text-amber-600" />
-                                        </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>מענה להתנגדויות</span>
-                                      </div>
-                                      {coach?.objections.length ? (() => {
-                                        const isObjExpanded = !!expandedObjections[t.id];
-                                        const visibleQs = isObjExpanded ? OBJECTIONS_LIST : OBJECTIONS_LIST.slice(0, 2);
-                                        return (
-                                          <div className="space-y-2">
-                                            {visibleQs.map((q, i) => (
-                                              <div key={i} className="rounded-xl border border-amber-200/70 bg-white shadow-sm p-2.5 transition-shadow hover:shadow-md">
-                                                <span className="inline-block font-extrabold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5 mb-1" style={{ fontSize: '11px' }}>❝ {q} ❞</span>
-                                                <div className="text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>{coach.objections[i] || '...'}</div>
-                                              </div>
-                                            ))}
-                                            {OBJECTIONS_LIST.length > 2 && (
-                                              <button
-                                                type="button"
-                                                onClick={() => setExpandedObjections((prev) => ({ ...prev, [t.id]: !isObjExpanded }))}
-                                                className="flex items-center gap-1.5 text-amber-700 font-bold transition hover:text-amber-800"
-                                                style={{ fontSize: '11px' }}
-                                              >
-                                                {isObjExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                                                {isObjExpanded ? 'הצג פחות' : `הצג עוד ${OBJECTIONS_LIST.length - 2} התנגדויות`}
-                                              </button>
-                                            )}
-                                          </div>
-                                        );
-                                      })() : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות לקבלת תשובות מותאמות אישית</p>
-                                      )}
-                                    </div>
-
-                                    {/* ── עמודה 3: משפטי סגירה ── */}
-                                    <div className="p-5" style={{ background: 'linear-gradient(180deg,#ecfdf5 0%,#ffffff 50%)' }}>
-                                      <div className="flex items-center gap-2 mb-3">
-                                        <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 36, height: 36, background: '#d1fae5' }}>
-                                          <Star className="h-5 w-5 text-emerald-600" />
-                                        </div>
-                                        <span className="font-extrabold text-slate-800" style={{ fontSize: '14px' }}>משפטי סגירה</span>
-                                      </div>
-                                      {coach?.closings.length ? (
-                                        <div className="space-y-2">
-                                          {coach.closings.map((c, i) => (
-                                            <div key={i} className="flex items-start gap-2 rounded-xl border border-emerald-200/70 bg-white shadow-sm p-2.5 transition-shadow hover:shadow-md">
-                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 18, height: 18, fontSize: 10, background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>{i + 1}</span>
-                                              <span className="text-slate-700 font-semibold" style={{ fontSize: '13px', lineHeight: 1.5 }}>{c}</span>
+                                    {/* ── מענה להתנגדויות ── */}
+                                    {activeCoachTab === 'objections' && (
+                                      coach?.objections.length ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                          {OBJECTIONS_LIST.map((q, i) => (
+                                            <div key={i} className="rounded-xl border border-amber-200/70 bg-amber-50/40 shadow-sm p-3.5 transition-shadow hover:shadow-md">
+                                              <span className="inline-block font-extrabold text-amber-700 bg-amber-100 rounded-full px-2.5 py-0.5 mb-1.5" style={{ fontSize: '13px' }}>❝ {q} ❞</span>
+                                              <div className="text-slate-700 font-semibold" style={{ fontSize: '15px', lineHeight: 1.6 }}>{coach.objections[i] || '...'}</div>
                                             </div>
                                           ))}
                                         </div>
                                       ) : (
-                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '13px' }}>בחר שירות לקבלת משפטי סגירה מותאמים אישית</p>
-                                      )}
-                                    </div>
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '15px' }}>בחר שירות לקבלת תשובות מותאמות אישית</p>
+                                      )
+                                    )}
+
+                                    {/* ── משפטי סגירה ── */}
+                                    {activeCoachTab === 'closings' && (
+                                      coach?.closings.length ? (
+                                        <div className="flex flex-col gap-2.5">
+                                          {coach.closings.map((c, i) => (
+                                            <div key={i} className="flex items-start gap-3 rounded-xl border border-green-200/70 bg-green-50/40 shadow-sm p-3.5 transition-shadow hover:shadow-md">
+                                              <span className="flex items-center justify-center rounded-full font-extrabold text-white flex-shrink-0" style={{ width: 22, height: 22, fontSize: 12, background: 'linear-gradient(135deg,#22c55e,#16a34a)' }}>{i + 1}</span>
+                                              <span className="text-slate-700 font-semibold" style={{ fontSize: '15px', lineHeight: 1.6 }}>{c}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '15px' }}>בחר שירות לקבלת משפטי סגירה מותאמים אישית</p>
+                                      )
+                                    )}
 
                                   </div>
                                 </div>
@@ -15585,7 +17204,7 @@ function TasksPage({
                               {/* ── CIRCULAR ACTION BUTTONS ── */}
                               <div id={`step2-${t.id}`} className="flex justify-center items-start gap-8 py-1">
                                 {([
-                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#2563eb', activeRing: 'ring-4 ring-blue-300', icon: <ArrowUpRight className="h-7 w-7 text-white" />, popup: null as null | 'snooze' | 'transfer' | 'lost' },
+                                  { key: 'שליחת הצעה', label: 'שליחת הצעת מחיר', circleBg: '#16a34a', activeRing: 'ring-4 ring-green-300', icon: <ArrowUpRight className="h-7 w-7 text-white" />, popup: null as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'העברה למומחה', label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" />, popup: 'transfer' as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'חזרה מאוחרת', label: 'חזרה מאוחרת יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" />, popup: 'snooze' as null | 'snooze' | 'transfer' | 'lost' },
                                   { key: 'לא רלוונטי', label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" />, popup: 'lost' as null | 'snooze' | 'transfer' | 'lost' },
@@ -15639,45 +17258,47 @@ function TasksPage({
                             const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || '').replace(/[^\d+]/g, '');
                             const fu3Email = t.leadEmail || linkedLeadForHeader?.email || '';
                             const waLink3 = fu3Phone ? `https://wa.me/${fu3Phone.replace(/^0/, '972')}` : null;
+                            const coach = aiCoach[t.id];
+                            const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
                               <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
                                 {/* ── כותרת פולואפ + טיימר + פעולות יצירת קשר ── */}
-                                <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-orange-50 to-amber-50 px-6 py-5 shadow-sm">
+                                <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
                                   <div className="flex flex-wrap items-start justify-between gap-4">
                                     <div className="flex items-start gap-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#fffbeb' }}>
-                                        <Timer className="h-7 w-7 text-amber-500" />
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
+                                        <Timer className="h-7 w-7 text-blue-500" />
                                       </div>
                                       <div>
-                                        <div className="text-xl md:text-2xl font-extrabold text-amber-900 leading-snug">
+                                        <div className="text-xl md:text-2xl font-extrabold text-blue-900 leading-snug">
                                           {followupCustomerName} מחכה להצעה שלו כבר{waitingSince ? ':' : ''}
                                         </div>
                                         {waitingSince ? (
                                           <div className="flex items-baseline gap-1.5 mt-1.5 flex-wrap">
                                             {waitingDays! >= 1 && (
                                               <>
-                                                <span className="text-3xl font-extrabold text-amber-600">{waitingDays}</span>
-                                                <span className="text-sm font-bold text-amber-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
+                                                <span className="text-3xl font-extrabold text-blue-600">{waitingDays}</span>
+                                                <span className="text-sm font-bold text-blue-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
                                               </>
                                             )}
                                             {waitingHours! > 0 && (
                                               <>
-                                                <span className="text-2xl font-extrabold text-amber-600">{waitingHours}</span>
-                                                <span className="text-sm font-bold text-amber-700">שעות</span>
+                                                <span className="text-2xl font-extrabold text-blue-600">{waitingHours}</span>
+                                                <span className="text-sm font-bold text-blue-700">שעות</span>
                                               </>
                                             )}
                                             {waitingDays === 0 && waitingHours === 0 && (
-                                              <span className="text-sm font-bold text-amber-700">פחות משעה</span>
+                                              <span className="text-sm font-bold text-blue-700">פחות משעה</span>
                                             )}
                                           </div>
                                         ) : (
-                                          <div className="text-sm font-bold text-amber-700 mt-1.5">נשלחה לאחרונה</div>
+                                          <div className="text-sm font-bold text-blue-700 mt-1.5">נשלחה לאחרונה</div>
                                         )}
                                         {/* recommendation: time left out of the 3-day follow-up window */}
                                         {remainingMs != null && (
                                           <div
                                             className="mt-2.5 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-bold"
-                                            style={{ background: remainingMs > 0 ? '#fff7ed' : '#fef2f2', color: remainingMs > 0 ? '#c2410c' : '#dc2626' }}
+                                            style={{ background: remainingMs > 0 ? '#eff6ff' : '#fef2f2', color: remainingMs > 0 ? '#2563eb' : '#dc2626' }}
                                           >
                                             <Sparkles className="h-3.5 w-3.5" />
                                             {remainingMs > 0
@@ -15713,40 +17334,40 @@ function TasksPage({
                                 const objectionPhrases: { objection: string; response: string }[] = [
                                   {
                                     objection: '"המחיר קצת גבוה לי"',
-                                    response: 'אני שומע אותך — בוא נראה אם יש דרך להתאים את ההצעה לתקציב שלך, יש לנו גם אפשרות לפריסת תשלומים נוחה',
+                                    response: 'אני ממש מבין, המחיר זה שיקול חשוב. בוא נמצא ביחד משהו שמתאים לך — אפשר גם לפרוס לתשלומים נוחים כדי שזה לא יכביד עליך',
                                   },
                                   {
                                     objection: '"אני צריך לחשוב על זה"',
-                                    response: 'ברור, זו החלטה חשובה. מה בדיוק כדאי שאבהיר לך עכשיו כדי שתוכל להחליט בראש שקט?',
+                                    response: 'לגמרי, זה לא משהו שצריך להחליט עליו בלחץ. יש משהו מסוים שמטריד אותך שאוכל לעזור לך להבין כבר עכשיו?',
                                   },
                                   {
                                     objection: '"אני צריך להתייעץ עם השותף/ה"',
-                                    response: 'מצוין — אשלח סיכום קצר שיעזור בהחלטה המשותפת, ונקבע זמן קבוע לחזור ולסגור',
+                                    response: 'אין בעיה בכלל, חשוב שתחליטו ביחד. אשלח לך סיכום קצר וברור שיעזור לכם בשיחה, ונסגור מתי שנוח לכם שאחזור',
                                   },
                                   {
                                     objection: '"לא דחוף לנו כרגע"',
-                                    response: 'אני מבין, אבל ככל שמתעכבים — כך גם העלות/הסיכון עולה. בוא נקבע תאריך נוח גם אם הוא לא השבוע',
+                                    response: 'מבין אותך לגמרי. רק כדאי לזכור שלפעמים זה רק מסתבך עם הזמן — אז בוא פשוט נשריין תאריך נוח, גם אם הוא בעוד כמה שבועות',
                                   },
                                   {
                                     objection: '"קיבלנו הצעה זולה יותר במקום אחר"',
-                                    response: 'תודה שאתה משתף — אשמח להבין מה כלול בהצעה השנייה, כדי שנשווה אותה נכון להצעה שלנו',
+                                    response: 'יפה שבדקתם, זה נכון להשוות. בוא נעבור ביחד על מה בדיוק כלול אצלם — לפעמים ההבדל הוא דווקא בדברים הקטנים שחשובים בסוף',
                                   },
                                   {
                                     objection: '"לא ראיתי את ההצעה / לא הגיע המייל"',
-                                    response: 'אין בעיה, אני שולח לך אותה עכשיו גם בוואטסאפ — אפשר להעיף מבט ולדבר עוד כמה דקות?',
+                                    response: 'אוי, סליחה על זה — אני שולח לך אותה עכשיו ישר לוואטסאפ. תוכל להציץ ונדבר על זה רגע ביחד?',
                                   },
                                   {
                                     objection: '"תחזרו אליי בעוד כמה ימים"',
-                                    response: 'בשמחה — מתי בדיוק נוח לך שאחזור? אני אקבע תזכורת כדי שלא נפספס',
+                                    response: 'בכיף, אני לא רוצה להציק. תגיד לי מתי הכי נוח לך ואחזור בדיוק אז — ארשום לעצמי תזכורת שלא נשכח',
                                   },
                                 ];
 
                                 const closingPhrases: string[] = [
-                                  'אם נסגור היום — אני שומר לך את המחיר מההצעה ומתאם תאריך מהיר לביצוע',
-                                  'מה דעתך שנקבע כבר עכשיו תאריך לתחילת העבודה?',
-                                  'יש עוד נקודה שלא ברורה ומונעת ממך לתת אישור היום?',
-                                  'אז אני רושם אותך למועד הקרוב — מסכים?',
-                                  'אני שולח לך אישור הזמנה עכשיו, ונדאג שתהיו בין הראשונים בתור',
+                                  'אם בא לך שנתקדם כבר עכשיו — אשמח לשמור לך את המחיר מההצעה ולתאם תאריך נוח שיוריד לך את זה מהראש',
+                                  'מה אתה אומר, נמצא ביחד תאריך טוב להתחיל? ככה זה כבר מסודר ולא תצטרך לחשוב על זה יותר',
+                                  'יש משהו שעדיין לא לגמרי ברור או קצת מהסס אותך? אשמח לעבור על זה איתך, בלי שום לחץ',
+                                  'אני יכול לשריין לך כבר עכשיו את המועד הכי קרוב שנוח לך — מה אתה אומר?',
+                                  'אם זה מתאים לך, אני מסדר את ההזמנה עכשיו ודואג שתהיו מהראשונים בתור',
                                 ];
 
                                 const copyPhrase = (p: string) => {
@@ -15756,10 +17377,10 @@ function TasksPage({
                                 };
 
                                 return (
-                                  <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-emerald-50 shadow-sm p-6">
+                                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
                                     <div className="flex items-center gap-3 mb-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#ffe4e6' }}>
-                                        <HelpCircle className="h-6 w-6 text-rose-500" />
+                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#eff6ff' }}>
+                                        <HelpCircle className="h-6 w-6 text-blue-600" />
                                       </div>
                                       <div>
                                         <div className="text-base font-extrabold text-slate-800">מענה להתנגדויות ומשפטי סגירה</div>
@@ -15767,60 +17388,106 @@ function TasksPage({
                                       </div>
                                     </div>
 
-                                    <div className="mb-5">
-                                      <div className="text-[11px] font-bold text-rose-400 uppercase tracking-wide mb-2">אם הלקוח אומר...</div>
+                                    {/* ── סרגל טאבים ── */}
+                                    <div className="flex gap-2 mb-5">
+                                      {([
+                                        { key: 'service' as const, label: 'מידע על השירות', icon: ClipboardList, accent: '#2563eb' },
+                                        { key: 'objections' as const, label: 'מענה להתנגדויות', icon: HelpCircle, accent: '#d97706' },
+                                        { key: 'closings' as const, label: 'משפטי סגירה', icon: Star, accent: '#16a34a' },
+                                      ]).map((tabDef) => {
+                                        const TabIcon = tabDef.icon;
+                                        const isActive = activeFollowupTab === tabDef.key;
+                                        return (
+                                          <button
+                                            key={tabDef.key}
+                                            type="button"
+                                            onClick={() => setFollowupTab((prev) => ({ ...prev, [t.id]: tabDef.key }))}
+                                            className="flex-1 flex items-center justify-center gap-2 rounded-xl transition-all"
+                                            style={{
+                                              padding: '12px 10px',
+                                              background: isActive ? '#ffffff' : 'transparent',
+                                              border: isActive ? `2px solid ${tabDef.accent}` : '2px solid #e2e8f0',
+                                              color: isActive ? '#1e293b' : '#94a3b8',
+                                              boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.06)' : 'none',
+                                            }}
+                                          >
+                                            <TabIcon className="h-5 w-5" style={{ color: isActive ? tabDef.accent : '#94a3b8' }} />
+                                            <span className="font-extrabold" style={{ fontSize: '15px' }}>{tabDef.label}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* ── מידע על השירות ── */}
+                                    {activeFollowupTab === 'service' && (
+                                      coach?.serviceInfo?.length ? (
+                                        <ul className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-3">
+                                          {coach.serviceInfo.map((b, i) => (
+                                            <li key={i} className="flex items-start gap-2.5 text-slate-700 font-semibold" style={{ fontSize: '16px', lineHeight: 1.7 }}>
+                                              <span className="mt-2.5 flex-shrink-0 rounded-full" style={{ width: 8, height: 8, background: '#2563eb' }} />
+                                              {b}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <p className="text-slate-400 font-semibold" style={{ fontSize: '15px' }}>בחר שירות בשלב התאמת הפתרון כדי לקבל מידע מותאם</p>
+                                      )
+                                    )}
+
+                                    {/* ── מענה להתנגדויות ── */}
+                                    {activeFollowupTab === 'objections' && (
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         {objectionPhrases.map((item, i) => (
                                           <div
                                             key={item.objection}
-                                            className="rounded-xl border border-rose-100 bg-white p-3"
+                                            className="rounded-xl border border-slate-200 bg-white p-3.5"
                                             style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
                                           >
                                             <div className="flex items-start gap-2 mb-2">
-                                              <HelpCircle className="h-4 w-4 text-rose-400 flex-shrink-0 mt-0.5" />
-                                              <div className="text-[12px] font-bold text-rose-500 leading-snug">{item.objection}</div>
+                                              <HelpCircle className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                                              <div className="text-[14px] font-bold text-slate-700 leading-snug">{item.objection}</div>
                                             </div>
                                             <button
                                               onClick={() => copyPhrase(item.response)}
-                                              className="w-full text-right rounded-lg px-3 py-2 text-[13px] font-semibold text-slate-700 bg-emerald-50 border border-emerald-100 hover:bg-emerald-100 hover:border-emerald-300 hover:shadow-sm active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-2 group"
+                                              className="w-full text-right rounded-lg px-3 py-2.5 text-[14px] font-semibold text-slate-700 bg-green-50 border border-green-100 hover:bg-green-100 hover:border-green-300 hover:shadow-sm active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-2 group"
                                             >
                                               <span>{item.response}</span>
                                               {copiedPhrase === item.response
                                                 ? <span className="text-[10px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
-                                                : <Copy className="h-3.5 w-3.5 text-emerald-300 group-hover:text-emerald-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                : <Copy className="h-3.5 w-3.5 text-green-300 group-hover:text-green-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                                               }
                                             </button>
                                           </div>
                                         ))}
                                       </div>
-                                    </div>
+                                    )}
 
-                                    <div>
-                                      <div className="text-[11px] font-bold text-emerald-500 uppercase tracking-wide mb-2">משפטי סגירה</div>
-                                      <div className="flex flex-col gap-2">
+                                    {/* ── משפטי סגירה ── */}
+                                    {activeFollowupTab === 'closings' && (
+                                      <div className="flex flex-col gap-2.5">
                                         {closingPhrases.map((p, i) => (
                                           <button
                                             key={p}
                                             onClick={() => copyPhrase(p)}
-                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${(objectionPhrases.length + i) * 0.05}s both` }}
-                                            className="text-right rounded-xl px-4 py-2.5 text-sm font-semibold text-emerald-800 bg-white border border-emerald-200 hover:bg-emerald-50 hover:border-emerald-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
+                                            style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
+                                            className="text-right rounded-xl px-4 py-3 text-base font-semibold text-green-800 bg-white border border-green-200 hover:bg-green-50 hover:border-green-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
                                           >
                                             <span>{p}</span>
                                             {copiedPhrase === p
                                               ? <span className="text-[11px] font-bold text-green-600 flex-shrink-0 animate-bounce">✓ הועתק</span>
-                                              : <Copy className="h-3.5 w-3.5 text-emerald-300 group-hover:text-emerald-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                              : <Copy className="h-3.5 w-3.5 text-green-300 group-hover:text-green-500 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                                             }
                                           </button>
                                         ))}
                                       </div>
-                                    </div>
+                                    )}
                                   </div>
                                 );
                               })()}
                               <div>
                                 {renderStageActionBar(t, {
                                   label: 'מעבר לתיאום',
-                                  circleBg: '#3b82f6',
+                                  circleBg: '#16a34a',
                                   icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                   onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 4 })),
                                 })}
@@ -15863,7 +17530,7 @@ function TasksPage({
                                 <div className="px-5 py-3 flex flex-wrap items-center gap-x-5 gap-y-2.5" style={{ background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
                                   {/* מתי להזכיר לך שוב */}
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <Timer className="h-4 w-4 text-orange-500 flex-shrink-0" />
+                                    <Timer className="h-4 w-4 text-blue-500 flex-shrink-0" />
                                     <span className="text-[12px] font-bold text-slate-700">מעקב:</span>
                                     {REMINDER_QUICK_OPTIONS.map((opt) => (
                                       <button
@@ -15874,7 +17541,7 @@ function TasksPage({
                                           void (opt.minutes != null ? scheduleFollowupMinutes(t.id, opt.minutes) : scheduleFollowup(t.id, opt.days || 1));
                                         }}
                                         disabled={fuBusy}
-                                        className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors bg-slate-100 text-slate-600 hover:bg-orange-100 hover:text-orange-700 disabled:opacity-40"
+                                        className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40"
                                       >
                                         {opt.label}
                                       </button>
@@ -15882,7 +17549,7 @@ function TasksPage({
                                     <button
                                       type="button"
                                       onClick={() => setFollowupManualOpen((p) => ({ ...p, [t.id]: !p[t.id] }))}
-                                      className={cn('rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors', fuManualOpen ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
+                                      className={cn('rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors', fuManualOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200')}
                                     >
                                       ידני
                                     </button>
@@ -15899,7 +17566,7 @@ function TasksPage({
                                           onClick={() => { if (!fuManualValue) return; void scheduleFollowupAt(t.id, new Date(fuManualValue)).then(() => setFollowupManualOpen((p) => ({ ...p, [t.id]: false }))); }}
                                           disabled={fuBusy || !fuManualValue}
                                           className="flex items-center gap-1 rounded-xl px-3 py-1 text-[11px] font-bold text-white disabled:opacity-40"
-                                          style={{ background: '#f97316' }}
+                                          style={{ background: '#2563eb' }}
                                         >
                                           {fuBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Clock3 className="h-3.5 w-3.5" />}קבע
                                         </button>
@@ -15927,9 +17594,13 @@ function TasksPage({
                                   prefillCustomer={quotePrefillCust}
                                   prefillServiceName={quotePrefillSvc}
                                   taskId={t.id}
-                                  onExit={() => {
-                                    // בסגירת מסך ההצעה — מעבירים את המשימה לשלב "פולואפ" (step4 / index 3).
-                                    setManualStepOverride((prev) => ({ ...prev, [t.id]: 3 }));
+                                  onExit={(info?: { advanceToFollowUp?: boolean }) => {
+                                    // נקבע "מעקב" (תאריך פולואפ) → מסמנים שצריך לקדם לשלב "פולואפ".
+                                    // הקידום בפועל מתבצע ביציאה מהמשימה (האפקט שמזהה סגירה) — כך שאפשר
+                                    // להמשיך לערוך את ההצעה לפני הסגירה, ובכניסה הבאה detectStep יפתח בשלב "פולואפ".
+                                    if (info?.advanceToFollowUp) {
+                                      setFollowupPendingAdvance((p) => ({ ...p, [t.id]: true }));
+                                    }
                                     setExpandedTaskId(null);
                                   }}
                                   /* שמירה/"מעקב" משאירה את המשתמש במסך ההצעה — לא מקדמת שלב */
@@ -15979,6 +17650,7 @@ function TasksPage({
                               { v: 120, label: 'שעתיים' },
                               { v: 180, label: '3 שעות' },
                             ];
+                            const isManualDuration = coordDurationManual[t.id] ?? !durationOptions.some((o) => o.v === durationMin);
 
                             const createMeeting = async () => {
                               setCoordError((p) => ({ ...p, [t.id]: '' }));
@@ -16031,6 +17703,9 @@ function TasksPage({
                                 }
                                 const data = await r.json();
                                 setCoordResult((p) => ({ ...p, [t.id]: data }));
+                                // נקבעה פגישה ב-Outlook → המשימה הושלמה. שומרים status=DONE
+                                // (השדה הקנוני ל"הושלם") כך שהמשימה יוצאת מרשימת המשימות הפעילות.
+                                void updateTaskField(t.id, { status: 'DONE' });
                               } catch {
                                 setCoordError((p) => ({ ...p, [t.id]: 'שגיאת רשת — נסו שוב' }));
                               } finally {
@@ -16061,7 +17736,7 @@ function TasksPage({
                                     </div>
                                     {/* סטטוס חיבור Outlook */}
                                     {coordOutlook.connected ? (
-                                      <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-bold" style={{ background: '#ecfdf5', color: '#047857' }}>
+                                      <div className="flex items-center gap-2 rounded-xl px-3 py-2 text-[12px] font-bold" style={{ background: '#f0fdf4', color: '#15803d' }}>
                                         <CheckCircle2 className="h-4 w-4" />
                                         <span>Outlook מחובר{coordOutlook.email ? ` · ${coordOutlook.email}` : ''}</span>
                                       </div>
@@ -16079,14 +17754,17 @@ function TasksPage({
                                   </div>
                                 </div>
 
+                                {/* ── סקשן: הצעת מחיר חתומה ── */}
+                                <SignedQuotesSection customerId={(t.customerId as string | undefined) ?? null} currentUser={currentUser} />
+
                                 {/* ── תוצאה: פגישה נוצרה ── */}
                                 {result && (
-                                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-6 py-4 shadow-sm">
-                                    <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-base mb-1">
+                                  <div className="rounded-2xl border border-green-200 bg-green-50 px-6 py-4 shadow-sm">
+                                    <div className="flex items-center gap-2 text-green-800 font-extrabold text-base mb-1">
                                       <CheckCircle2 className="h-5 w-5" /> הפגישה נוצרה ביומן Outlook
                                     </div>
                                     {result.invited?.length > 0 && (
-                                      <div className="text-[13px] text-emerald-700 font-semibold">
+                                      <div className="text-[13px] text-green-700 font-semibold">
                                         נשלחו הזמנות ל: {result.invited.join(', ')}
                                       </div>
                                     )}
@@ -16097,7 +17775,7 @@ function TasksPage({
                                         </a>
                                       )}
                                       {result.joinUrl && (
-                                        <a href={result.joinUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold text-white" style={{ background: '#6264a7' }}>
+                                        <a href={result.joinUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-bold text-white" style={{ background: '#1d4ed8' }}>
                                           <Video className="h-3.5 w-3.5" /> קישור Teams
                                         </a>
                                       )}
@@ -16123,9 +17801,34 @@ function TasksPage({
                                     </div>
                                     <div>
                                       <label className={labelCls}>משך</label>
-                                      <select className={fieldBox} value={durationMin} onChange={(e) => updateCoordForm(t.id, { durationMin: Number(e.target.value) })}>
+                                      <select
+                                        className={fieldBox}
+                                        value={isManualDuration ? 'custom' : durationMin}
+                                        onChange={(e) => {
+                                          if (e.target.value === 'custom') {
+                                            setCoordDurationManual((p) => ({ ...p, [t.id]: true }));
+                                          } else {
+                                            setCoordDurationManual((p) => ({ ...p, [t.id]: false }));
+                                            updateCoordForm(t.id, { durationMin: Number(e.target.value) });
+                                          }
+                                        }}
+                                      >
                                         {durationOptions.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                                        <option value="custom">אחר (ידני)…</option>
                                       </select>
+                                      {isManualDuration && (
+                                        <div className="mt-2 flex items-center gap-2">
+                                          <input
+                                            type="number"
+                                            min={1}
+                                            className={fieldBox}
+                                            value={durationMin}
+                                            placeholder="משך בדקות"
+                                            onChange={(e) => updateCoordForm(t.id, { durationMin: Math.max(1, Number(e.target.value) || 0) })}
+                                          />
+                                          <span className="text-[12px] font-bold text-slate-500 whitespace-nowrap">דקות</span>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
 
@@ -16207,7 +17910,7 @@ function TasksPage({
                                 <div>
                                   {renderStageActionBar(t, {
                                     label: 'מעבר לביצוע',
-                                    circleBg: '#2563eb',
+                                    circleBg: '#16a34a',
                                     icon: <ArrowUpRight className="h-7 w-7 text-white" />,
                                     onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 5 })),
                                   })}
@@ -16215,8 +17918,22 @@ function TasksPage({
                               </div>
                             );
                           })() : (
-                          <>
-                          </>
+                          <div className="px-8 py-10 flex flex-col items-center justify-center text-center" style={{ direction: 'rtl' }}>
+                            <div className="flex items-center justify-center rounded-2xl mb-4" style={{ width: 56, height: 56, background: '#f0fdf4' }}>
+                              <CheckCircle2 className="h-8 w-8" style={{ color: '#16a34a' }} />
+                            </div>
+                            <div className="text-xl font-extrabold text-slate-800 mb-1">סיום הטיפול</div>
+                            <div className="text-sm text-slate-500 mb-6">סיים את השירות וסגור את המשימה</div>
+                            <button
+                              type="button"
+                              onClick={() => { void updateTaskField(t.id, { status: 'DONE' }); setExpandedTaskId(null); }}
+                              className="flex items-center gap-2 rounded-xl px-8 py-3 text-base font-bold text-white transition hover:brightness-110 active:scale-95"
+                              style={{ background: '#16a34a' }}
+                            >
+                              <CheckCircle2 className="h-5 w-5" /> סגור משימה
+                            </button>
+                            <div className="mt-12 text-base font-bold text-slate-600">שירות הפקת דוחות אוטומטי בקרוב....</div>
+                          </div>
                           )}
 
                             </div>{/* end center col */}
@@ -16745,14 +18462,6 @@ function LoginPage({
                   התחבר
                 </Button>
               </div>
-
-              <div className="mt-6 rounded-2xl bg-slate-50 p-4 text-xs text-slate-600 sm:text-sm">
-                <div className="font-semibold text-slate-800">משתמשי דמו</div>
-                <div className="mt-2">admin@galit.local / 1234</div>
-                <div>technician@galit.local / 1234</div>
-                <div>sales@galit.local / 1234</div>
-                <div>manager@galit.local / 1234</div>
-              </div>
             </div>
           </div>
         </div>
@@ -17258,6 +18967,7 @@ export default function GalitCRMPrototype() {
         productName: t.productName ?? undefined,
         currentStage: t.currentStage ?? null,
         currentStageChangedAt: t.currentStageChangedAt ?? null,
+        incomingLeadId: t.incomingLeadId ?? null,
         createdAt: t.createdAt ?? undefined,
       }));
       setTasks(normalized);
@@ -17657,6 +19367,9 @@ export default function GalitCRMPrototype() {
       setCurrentUser(mappedUser);
       try {
         localStorage.setItem(GALIT_CRM_SESSION_STORAGE_KEY, JSON.stringify(sessionPayloadFromAppUser(mappedUser)));
+        // Store the signed JWT — apiFetch attaches it as the Bearer token on every request.
+        // Key must match AUTH_TOKEN_STORAGE_KEY in app/lib/api-base.ts.
+        if (data.accessToken) localStorage.setItem('galit-crm-token', String(data.accessToken));
       } catch {
         // ignore quota / private mode
       }
@@ -17868,6 +19581,7 @@ export default function GalitCRMPrototype() {
     }
     try {
       localStorage.removeItem(GALIT_CRM_SESSION_STORAGE_KEY);
+      localStorage.removeItem('galit-crm-token');
     } catch {
       // ignore
     }
@@ -17884,7 +19598,7 @@ export default function GalitCRMPrototype() {
   /* ── Tab helpers ── */
   const tabScreenLabels: Record<string, string> = {
     tasks: 'משימות', 'quote-new': 'הצעת מחיר חדשה', 'customer-profile': 'כרטיס לקוח',
-    'lead-profile': 'כרטיס ליד', dashboard: 'דשבורד', leads: 'לידים', quotes: 'הצעות מחיר',
+    'lead-profile': 'כרטיס ליד', dashboard: 'דשבורד', leads: 'לידים', quotes: 'הצעות מחיר', feedback: 'משוב',
   };
 
   const openInTab = (type: string, label?: string, extra?: { customerId?: string | null; leadId?: string | null }) => {
@@ -18118,6 +19832,67 @@ export default function GalitCRMPrototype() {
     setAuthBootstrapped(true);
   }, []);
 
+  // ── התראה צידית גלובלית: לידים נכנסים חדשים (בכל עמוד) ──
+  const [leadToasts, setLeadToasts] = useState<{ id: string; subject: string; taskId?: string | null; ownerId?: string | null; dedupeKey: string }[]>([]);
+  // מפתחות לידים שכבר נסגרו (לפי internetMessageId — אותו מייל שהגיע לכמה תיבות = פריט אחד).
+  // נשמר ב-localStorage לכל משתמש כדי לא להקפיץ שוב אחרי רענון — חשוב למנהלים, שלהם אין notifiedAt בשרת.
+  const dismissedLeadKeysRef = useRef<Set<string>>(new Set());
+  const persistDismissedKey = (key: string) => {
+    if (!key || !currentUser?.id) return;
+    dismissedLeadKeysRef.current.add(key);
+    try {
+      const arr = Array.from(dismissedLeadKeysRef.current).slice(-500); // cap כדי לא לתפוח ללא גבול
+      window.localStorage.setItem(`galit_dismissed_lead_keys_${currentUser.id}`, JSON.stringify(arr));
+    } catch { /* ignore */ }
+  };
+  const dismissLeadToast = (id: string, ownerId?: string | null, dedupeKey?: string) => {
+    if (dedupeKey) persistDismissedKey(dedupeKey);
+    setLeadToasts((prev) => prev.filter((x) => x.id !== id));
+    // מסמנים notifiedAt בשרת רק כשהבעלים עצמו מאשר — כך מנהל שסוגר התראה על ליד של עובד אחר
+    // לא מבטל את ההתראה של אותו עובד.
+    if (ownerId && currentUser?.id && ownerId === currentUser.id) {
+      apiFetch(apiUrl('/incoming-leads/notified'), { method: 'POST', authUser: currentUser, body: JSON.stringify({ ids: [id] }) }).catch(() => {});
+    }
+  };
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    // טעינת המפתחות שכבר נסגרו עבור המשתמש הנוכחי (כדי לא להקפיץ שוב אחרי רענון)
+    dismissedLeadKeysRef.current = new Set();
+    try {
+      const raw = window.localStorage.getItem(`galit_dismissed_lead_keys_${currentUser.id}`);
+      const arr = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(arr)) dismissedLeadKeysRef.current = new Set(arr);
+    } catch { /* ignore */ }
+    const check = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/incoming-leads/pending'), { authUser: currentUser });
+        if (!r.ok) return;
+        const list = await r.json();
+        if (cancelled || !Array.isArray(list) || list.length === 0) return;
+        setLeadToasts((prev) => {
+          const have = new Set(prev.map((x) => x.id));
+          const haveKeys = new Set(prev.map((x) => x.dedupeKey));
+          const seenKeys = new Set<string>();
+          // dedup לפי internetMessageId: אותו מייל-ליד שהגיע לכמה תיבות = פופ-אפ אחד בלבד.
+          const fresh: { id: string; subject: string; taskId?: string | null; ownerId?: string | null; dedupeKey: string }[] = [];
+          for (const l of list as any[]) {
+            const dedupeKey = l.internetMessageId || l.id;
+            if (dismissedLeadKeysRef.current.has(dedupeKey)) continue; // כבר נסגר בעבר
+            if (haveKeys.has(dedupeKey) || seenKeys.has(dedupeKey) || have.has(l.id)) continue; // כבר מוצג / כפילות
+            seenKeys.add(dedupeKey);
+            fresh.push({ id: l.id, subject: l.subject, taskId: l.taskId, ownerId: l.ownerId, dedupeKey });
+          }
+          return fresh.length ? [...prev, ...fresh] : prev;
+        });
+        // לא מסמנים notified כאן! הסימון קורה רק ב-dismissLeadToast (אישור המשתמש).
+      } catch { /* ignore */ }
+    };
+    void check();
+    const t = window.setInterval(check, 60_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [currentUser?.id]);
+
   if (!authBootstrapped) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100" dir="rtl">
@@ -18132,6 +19907,22 @@ export default function GalitCRMPrototype() {
 
   return (
     <div className="min-h-screen bg-slate-50" dir="rtl">
+      {/* ── התראות צידיות: לידים נכנסים חדשים (גלובלי, בכל עמוד) ── */}
+      {leadToasts.length > 0 && (
+        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72, left: 16 }} dir="rtl">
+          {leadToasts.map((lt) => (
+            <div key={lt.id} className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-blue-900">ליד חדש התקבל!</div>
+                <div className="text-[12px] text-slate-600 truncate">{lt.subject}</div>
+                <button onClick={() => { if (lt.taskId) setPendingExpandTaskId(lt.taskId); navigateSafely('tasks'); void reloadTasks(); dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey); }} className="mt-2 rounded-lg bg-blue-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-blue-700">פתח את הליד</button>
+              </div>
+              <button onClick={() => dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex min-h-0 min-h-screen flex-col">
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {false ? (
@@ -18162,7 +19953,7 @@ export default function GalitCRMPrototype() {
           {/* Header bar removed — page starts directly from the green toolbar */}
 
           {topNotice && (
-            <div className="mb-4 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <div className="mb-4 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">
               {topNotice}
             </div>
           )}
@@ -18291,7 +20082,7 @@ export default function GalitCRMPrototype() {
               </FormField>
 
               {quickCreateSuccess && (
-                <div className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+                <div className="rounded-2xl bg-green-50 px-4 py-2 text-sm text-green-800">
                   {quickCreateSuccess}
                 </div>
               )}
@@ -18352,7 +20143,7 @@ export default function GalitCRMPrototype() {
                   <div key={tab.id} className="flex items-center">
                     <button
                       onClick={() => switchToTab(tab.id)}
-                      className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold transition-all ${isActive ? 'bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
+                      className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-bold transition-all ${isActive ? 'bg-green-50 text-green-700 shadow-sm ring-1 ring-green-200' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'}`}
                     >
                       {tab.type === 'tasks' && <ClipboardList className="h-4 w-4" />}
                       {tab.type === 'quote-new' && <FileText className="h-4 w-4" />}
@@ -18388,8 +20179,20 @@ export default function GalitCRMPrototype() {
                 }}
               />
             ) : (
-              <DashboardPage leads={effectiveLeads} quotes={quotes} opportunities={opportunities} projects={projects} tasks={tasks} stats={dashboardStats} />
+              <DashboardPage currentUser={currentUser} tasks={tasks} onOpenLeads={canAccess(currentUser.role, 'leads') ? () => navigateSafely('leads') : undefined} />
             )
+          )}
+          {current === 'feedback' && canAccess(currentUser.role, 'feedback') && (
+            <FeedbackPage currentUser={currentUser} />
+          )}
+          {current === 'not-relevant' && canAccess(currentUser.role, 'not-relevant') && (
+            <NotRelevantPage
+              currentUser={currentUser}
+              onOpenCustomerById={(id) => {
+                const c = customers.find((x) => x.id === id);
+                openCustomerPage(c ?? ({ id } as Customer));
+              }}
+            />
           )}
           {current === 'leads' && canAccess(currentUser.role, 'leads') && (
             <LeadsPage
@@ -18452,7 +20255,7 @@ export default function GalitCRMPrototype() {
                     className={cn(
                       'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
                       workspaceTab === 'card'
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-green-600 text-white shadow-sm'
                         : 'text-slate-600 hover:bg-slate-100'
                     )}
                   >
@@ -18465,7 +20268,7 @@ export default function GalitCRMPrototype() {
                     className={cn(
                       'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
                       (workspaceTab === 'quote-new' || workspaceTab === 'quote-edit')
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-green-600 text-white shadow-sm'
                         : 'text-slate-600 hover:bg-slate-100'
                     )}
                   >
@@ -18489,7 +20292,9 @@ export default function GalitCRMPrototype() {
               )}
 
               {/* Banner: start a new handling process for an existing customer */}
-              {!isNewCustomerMode && !newlyCreatedTaskId && workspaceTab === 'card' && (
+              {!isNewCustomerMode && !newlyCreatedTaskId && workspaceTab === 'card' && (() => {
+                const openTask = tasks.find((t) => t.customerId === selectedCustomer.id && ['OPEN', 'IN_PROGRESS'].includes(String(t.status || '').toUpperCase()));
+                return (
                 <div className="mb-3 flex items-center justify-between rounded-2xl px-5 py-3 shadow-sm border border-slate-200 bg-white" style={{ direction: 'rtl' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: '#dbeafe' }}>
@@ -18497,20 +20302,34 @@ export default function GalitCRMPrototype() {
                     </div>
                     <div>
                       <div className="text-sm font-bold text-slate-800">מוכנים להתחיל תהליך מול {selectedCustomer.name}?</div>
-                      <div className="text-xs text-slate-400">תיפתח משימת פנייה חדשה שתלווה את הטיפול בלקוח שלב-אחר-שלב</div>
+                      <div className="text-xs text-slate-400">{openTask ? 'ללקוח זה כבר יש משימה פתוחה — אפשר להמשיך אותה או לפתוח חדשה' : 'תיפתח משימת פנייה חדשה שתלווה את הטיפול בלקוח שלב-אחר-שלב'}</div>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => startCustomerProcess(selectedCustomer)}
-                    className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition-all hover:scale-105"
-                    style={{ background: '#3b82f6' }}
-                  >
-                    <PlayCircle className="h-4 w-4" />
-                    התחל תהליך
-                  </button>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => startCustomerProcess(selectedCustomer)}
+                      className="flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition-all hover:scale-105"
+                      style={{ background: '#3b82f6' }}
+                    >
+                      <PlayCircle className="h-4 w-4" />
+                      התחל תהליך
+                    </button>
+                    {openTask && (
+                      <button
+                        type="button"
+                        onClick={() => { setPendingExpandTaskId(openTask.id); navigateSafely('tasks'); }}
+                        className="flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition-all hover:scale-105"
+                        style={{ background: '#16a34a' }}
+                      >
+                        <PlayCircle className="h-4 w-4" />
+                        המשך תהליך
+                      </button>
+                    )}
+                  </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Banner: newly created task ready */}
               {newlyCreatedTaskId && workspaceTab === 'card' && (

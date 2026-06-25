@@ -14,6 +14,14 @@ export class UsersController {
     return this.usersService.activeNow(req.user);
   }
 
+  /** שינוי סיסמה עצמי — כל משתמש מחובר משנה את הסיסמה של עצמו (לפי ה-JWT, לא לפי body). */
+  @Post('change-password')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  changePassword(@Body() body: any, @Req() req: any) {
+    return this.usersService.changeOwnPassword(req.user?.id, body?.currentPassword, body?.newPassword);
+  }
+
   @Post('transfer-data')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'MANAGER')
@@ -101,6 +109,38 @@ export class UsersController {
   @Get(':id/signature-image')
   async getSignatureImage(@Param('id') id: string, @Req() req: any) {
     return this.usersService.getSignatureImage(id);
+  }
+
+  // ───────────── חתימות מרובות (תמונה + כותרת) ─────────────
+
+  /** רשימת החתימות של המשתמש */
+  @Get(':id/signatures')
+  listSignatures(@Param('id') id: string) {
+    return this.usersService.listSignatures(id);
+  }
+
+  /** הוספת חתימה. body: { title, dataBase64, mimeType } */
+  @Post(':id/signatures')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  addSignature(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.usersService.addSignature(id, body?.title, body?.dataBase64, body?.mimeType, req.user);
+  }
+
+  /** עדכון כותרת חתימה. body: { title } */
+  @Patch(':id/signatures/:sigId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  updateSignature(@Param('id') id: string, @Param('sigId') sigId: string, @Body() body: any, @Req() req: any) {
+    return this.usersService.updateSignature(id, sigId, { title: body?.title }, req.user);
+  }
+
+  /** מחיקת חתימה */
+  @Delete(':id/signatures/:sigId')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  deleteSignature(@Param('id') id: string, @Param('sigId') sigId: string, @Req() req: any) {
+    return this.usersService.deleteSignature(id, sigId, req.user);
   }
 
   @Patch(':id/presence')

@@ -179,14 +179,14 @@ export default function DevAssistantPage() {
     <div style={{ direction: 'rtl', minHeight: '100vh', background: '#f1f5f9', padding: '24px' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '28px' }}>
-        <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'linear-gradient(135deg, #7c3aed, #4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb, #2563eb)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         </div>
         <div>
           <h1 style={{ fontSize: '36px', fontWeight: 800, color: '#1e293b', margin: 0 }}>עוזר פיתוח</h1>
           <p style={{ fontSize: '20px', color: '#64748b', margin: 0 }}>ניהול משימות פיתוח מול Claude</p>
         </div>
-        <a href="/dashboard" style={{ marginRight: 'auto', fontSize: '20px', fontWeight: 700, color: '#7c3aed', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #7c3aed', background: 'white' }}>
+        <a href="/dashboard" style={{ marginRight: 'auto', fontSize: '20px', fontWeight: 700, color: '#2563eb', textDecoration: 'none', padding: '10px 24px', borderRadius: '12px', border: '2px solid #2563eb', background: 'white' }}>
           חזרה לדשבורד
         </a>
       </div>
@@ -194,8 +194,8 @@ export default function DevAssistantPage() {
       {/* Step 1: Task Input */}
       <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#ede9fe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: '22px', fontWeight: 800, color: '#7c3aed' }}>1</span>
+          <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: '22px', fontWeight: 800, color: '#2563eb' }}>1</span>
           </div>
           <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#1e293b', margin: 0 }}>מה המשימה?</h2>
         </div>
@@ -219,7 +219,7 @@ export default function DevAssistantPage() {
             color: '#1e293b',
             boxSizing: 'border-box',
           }}
-          onFocus={(e) => (e.target.style.borderColor = '#7c3aed')}
+          onFocus={(e) => (e.target.style.borderColor = '#2563eb')}
           onBlur={(e) => (e.target.style.borderColor = '#e2e8f0')}
         />
         <button
@@ -230,7 +230,7 @@ export default function DevAssistantPage() {
             padding: '16px 40px',
             borderRadius: '14px',
             border: 'none',
-            background: task.trim() ? 'linear-gradient(135deg, #7c3aed, #4f46e5)' : '#cbd5e1',
+            background: task.trim() ? 'linear-gradient(135deg, #2563eb, #2563eb)' : '#cbd5e1',
             color: 'white',
             fontSize: '24px',
             fontWeight: 800,
@@ -248,12 +248,12 @@ export default function DevAssistantPage() {
 
       {/* Step 1 Result */}
       {generatedInstruction && (
-        <div style={{ background: '#faf5ff', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '2px solid #c4b5fd' }}>
+        <div style={{ background: '#eff6ff', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '2px solid #93c5fd' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '24px', fontWeight: 800, color: '#7c3aed', margin: 0 }}>הוראה מוכנה להעתקה:</h3>
+            <h3 style={{ fontSize: '24px', fontWeight: 800, color: '#2563eb', margin: 0 }}>הוראה מוכנה להעתקה:</h3>
             <button
               onClick={() => copyToClipboard(generatedInstruction)}
-              style={{ padding: '10px 24px', borderRadius: '10px', border: '2px solid #7c3aed', background: 'white', color: '#7c3aed', fontSize: '20px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ padding: '10px 24px', borderRadius: '10px', border: '2px solid #2563eb', background: 'white', color: '#2563eb', fontSize: '20px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               העתק
@@ -269,7 +269,7 @@ export default function DevAssistantPage() {
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
             color: '#1e293b',
-            border: '1px solid #e9d5ff',
+            border: '1px solid #bfdbfe',
             margin: 0,
             fontFamily: 'inherit',
             direction: 'rtl',
@@ -317,7 +317,7 @@ export default function DevAssistantPage() {
       <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
           <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ fontSize: '22px', fontWeight: 800, color: '#3b82f6' }}>2</span>
+            <span style={{ fontSize: '22px', fontWeight: 800, color: '#2563eb' }}>2</span>
           </div>
           <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#1e293b', margin: 0 }}>הדבק כאן את תשובת קלוד</h2>
         </div>
@@ -341,7 +341,7 @@ export default function DevAssistantPage() {
             color: '#1e293b',
             boxSizing: 'border-box',
           }}
-          onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
+          onFocus={(e) => (e.target.style.borderColor = '#2563eb')}
           onBlur={(e) => (e.target.style.borderColor = '#e2e8f0')}
         />
 
@@ -388,7 +388,7 @@ export default function DevAssistantPage() {
             padding: '16px 40px',
             borderRadius: '14px',
             border: 'none',
-            background: claudeResponse.trim() ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : '#cbd5e1',
+            background: claudeResponse.trim() ? 'linear-gradient(135deg, #2563eb, #2563eb)' : '#cbd5e1',
             color: 'white',
             fontSize: '24px',
             fontWeight: 800,
@@ -411,7 +411,7 @@ export default function DevAssistantPage() {
             <h3 style={{ fontSize: '24px', fontWeight: 800, color: '#2563eb', margin: 0 }}>הוראת תיקון מוכנה:</h3>
             <button
               onClick={() => copyToClipboard(fixInstruction)}
-              style={{ padding: '10px 24px', borderRadius: '10px', border: '2px solid #3b82f6', background: 'white', color: '#3b82f6', fontSize: '20px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
+              style={{ padding: '10px 24px', borderRadius: '10px', border: '2px solid #2563eb', background: 'white', color: '#2563eb', fontSize: '20px', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
               העתק
@@ -437,14 +437,14 @@ export default function DevAssistantPage() {
         </div>
       )}
       {/* Dev Agent Section */}
-      <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '2px solid #10b981', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+      <div style={{ background: 'white', borderRadius: '20px', padding: '28px', marginBottom: '20px', border: '2px solid #22c55e', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-          <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'linear-gradient(135deg, #059669, #10b981)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'linear-gradient(135deg, #16a34a, #22c55e)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></svg>
           </div>
           <h2 style={{ fontSize: '28px', fontWeight: 800, color: '#1e293b', margin: 0 }}>סוכן פיתוח אוטומטי</h2>
           {agentStatus === 'running' && (
-            <span style={{ fontSize: '20px', fontWeight: 700, color: '#3b82f6', marginRight: '8px' }}>
+            <span style={{ fontSize: '20px', fontWeight: 700, color: '#2563eb', marginRight: '8px' }}>
               הסוכן עובד... ({agentElapsed}s)
             </span>
           )}
@@ -462,7 +462,7 @@ export default function DevAssistantPage() {
               padding: '16px 40px',
               borderRadius: '14px',
               border: 'none',
-              background: !task.trim() || agentStatus === 'running' ? '#cbd5e1' : 'linear-gradient(135deg, #059669, #10b981)',
+              background: !task.trim() || agentStatus === 'running' ? '#cbd5e1' : 'linear-gradient(135deg, #16a34a, #22c55e)',
               color: 'white',
               fontSize: '24px',
               fontWeight: 800,
@@ -486,9 +486,9 @@ export default function DevAssistantPage() {
             style={{
               padding: '16px 40px',
               borderRadius: '14px',
-              border: '2px solid #059669',
+              border: '2px solid #16a34a',
               background: !task.trim() || agentStatus === 'running' ? '#f1f5f9' : 'white',
-              color: !task.trim() || agentStatus === 'running' ? '#94a3b8' : '#059669',
+              color: !task.trim() || agentStatus === 'running' ? '#94a3b8' : '#16a34a',
               fontSize: '24px',
               fontWeight: 800,
               cursor: !task.trim() || agentStatus === 'running' ? 'not-allowed' : 'pointer',
@@ -600,7 +600,7 @@ export default function DevAssistantPage() {
             alignItems: 'center',
             gap: '16px',
           }}>
-            <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#3b82f6', animation: 'agent-pulse 1.5s ease-in-out infinite' }} />
+            <div style={{ width: '16px', height: '16px', borderRadius: '50%', background: '#2563eb', animation: 'agent-pulse 1.5s ease-in-out infinite' }} />
             <span style={{ fontSize: '24px', fontWeight: 700, color: '#1d4ed8' }}>
               הסוכן עובד... ({agentElapsed} שניות)
             </span>

@@ -272,7 +272,7 @@ export function FollowupImportPanel({
 
   return (
     <div className="space-y-6" dir="rtl">
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-5 shadow-sm">
+      <div className="rounded-2xl border border-green-200 bg-green-50/40 p-5 shadow-sm">
         <h3 className="text-lg font-bold text-slate-900">ייבוא Followup (SQL / CSV / XLSX)</h3>
         {isAdmin ? (
           <p className="mt-1 text-sm text-slate-600">
@@ -426,7 +426,7 @@ export function FollowupImportPanel({
       {lastRun != null && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h4 className="text-base font-bold text-slate-900">סיכום ייבוא אחרון</h4>
-          <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-900 p-3 text-xs text-emerald-100">
+          <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-900 p-3 text-xs text-green-100">
             {JSON.stringify(lastRun, null, 2)}
           </pre>
         </div>
@@ -461,7 +461,7 @@ export function FollowupImportPanel({
                     className={cn(
                       'px-2 py-2 font-medium',
                       j.status === 'FAILED' && 'text-red-600',
-                      j.status === 'COMPLETED' && 'text-emerald-700',
+                      j.status === 'COMPLETED' && 'text-green-700',
                     )}
                   >
                     {j.status}

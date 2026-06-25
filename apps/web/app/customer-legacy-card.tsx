@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, apiUrl } from './lib/api-base';
 import { parseApiErrorResponse } from './lib/api-error';
+import { SignedQuotesSection } from './signed-quotes-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -833,6 +834,7 @@ type LowerTabKey =
   | 'relations'
   | 'documents'
   | 'quotes'
+  | 'signedQuotes'
   | 'additionalData'
   | 'moreDetails'
   | 'externalData';
@@ -844,6 +846,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'relations', label: 'קשרים' },
   { key: 'documents', label: 'מסמכים' },
   { key: 'quotes', label: 'הצעות מחיר' },
+  { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
 ];
 
 function formatLegacyDate(v: unknown): string {
@@ -944,10 +947,12 @@ export function CustomerLegacyCard({
   const [customerQuotesError, setCustomerQuotesError] = useState('');
   const lowerTabsVisible = useMemo(() => {
     if (showCustomerQuotesTab) return LOWER_TABS;
-    return LOWER_TABS.filter((t) => t.key !== 'quotes');
+    return LOWER_TABS.filter((t) => t.key !== 'quotes' && t.key !== 'signedQuotes');
   }, [showCustomerQuotesTab]);
   useEffect(() => {
-    if (!showCustomerQuotesTab && activeLowerTab === 'quotes') setActiveLowerTab('contacts');
+    if (!showCustomerQuotesTab && (activeLowerTab === 'quotes' || activeLowerTab === 'signedQuotes')) {
+      setActiveLowerTab('contacts');
+    }
   }, [showCustomerQuotesTab, activeLowerTab]);
   const [savingCustomer, setSavingCustomer] = useState(false);
   const saveMainInFlightRef = useRef(false);
@@ -1009,17 +1014,23 @@ export function CustomerLegacyCard({
     const isPrivateType = customerForm.type === 'PRIVATE';
     const hasOtherContacts = pendingContacts.some(c => c.id !== AUTO_CONTACT_ID);
     if (isPrivateType && !hasOtherContacts) {
-      const autoContact: CustomerLegacyContact = {
-        id: AUTO_CONTACT_ID,
-        fullName: (customerForm.name || '').trim(),
-        phone: (customerForm.phone || '').trim() || undefined,
-        mobile: (customerForm.phone2 || '').trim() || undefined,
-        email: (customerForm.email || '').trim() || undefined,
-        isPrimary: true,
-        isActive: true,
-        notes: null,
-      };
-      setPendingContacts(prev => [...prev.filter(c => c.id !== AUTO_CONTACT_ID), autoContact]);
+      setPendingContacts(prev => {
+        const existing = prev.find(c => c.id === AUTO_CONTACT_ID);
+        // Merge — prefer the customer-form value, but never wipe a value the user
+        // typed directly into the auto contact card when the form field is empty.
+        const autoContact: CustomerLegacyContact = {
+          ...(existing ?? {}),
+          id: AUTO_CONTACT_ID,
+          fullName: (customerForm.name || '').trim() || existing?.fullName || '',
+          phone: (customerForm.phone || '').trim() || existing?.phone || undefined,
+          mobile: (customerForm.phone2 || '').trim() || existing?.mobile || undefined,
+          email: (customerForm.email || '').trim() || existing?.email || undefined,
+          isPrimary: true,
+          isActive: true,
+          notes: existing?.notes ?? null,
+        };
+        return [...prev.filter(c => c.id !== AUTO_CONTACT_ID), autoContact];
+      });
     } else if (!isPrivateType && pendingContacts.some(c => c.id === AUTO_CONTACT_ID)) {
       setPendingContacts(prev => prev.filter(c => c.id !== AUTO_CONTACT_ID));
     }
@@ -1336,6 +1347,12 @@ export function CustomerLegacyCard({
       /* For new customers: at least one contact required */
       if (isNewMode && allContacts.length === 0) {
         setLegacyMsg('חובה להוסיף לפחות איש קשר אחד לפני שמירה.');
+        setActiveLowerTab('contacts');
+        return;
+      }
+      /* לקוח שאינו פרטי — חובה איש קשר (גם בעריכת לקוח קיים, לא רק ביצירה) */
+      if (!isPrivate && !contactNameVal) {
+        setLegacyMsg('לא ניתן להמשיך בלי להוסיף איש קשר.');
         setActiveLowerTab('contacts');
         return;
       }
@@ -1764,7 +1781,7 @@ export function CustomerLegacyCard({
      ══════════════════════════════════════════════════ */
   if (isNewMode) {
     const mInput =
-      'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-emerald-400 focus:ring-[3px] focus:ring-emerald-100';
+      'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-green-400 focus:ring-[3px] focus:ring-green-100';
     const mLabel = 'block text-[13px] font-semibold text-black mb-1.5';
     const locationIcon = (
       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -2019,7 +2036,7 @@ export function CustomerLegacyCard({
                       },
                     ]);
                   }}
-                  className="h-[36px] rounded-xl flex items-center gap-1.5 px-4 text-[13px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-all"
+                  className="h-[36px] rounded-xl flex items-center gap-1.5 px-4 text-[13px] font-semibold text-green-700 bg-green-50 border border-green-200 hover:bg-green-100 transition-all"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   הוסף איש קשר
@@ -2041,7 +2058,7 @@ export function CustomerLegacyCard({
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-[13px] font-semibold text-black">
                       איש קשר {idx + 1}
-                      {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-emerald-600">(ראשי)</span>}
+                      {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-green-600">(ראשי)</span>}
                     </span>
                     <button
                       type="button"
@@ -3658,6 +3675,13 @@ export function CustomerLegacyCard({
           </div>
         )}
 
+        {activeLowerTab === 'signedQuotes' && (
+          <div className="space-y-3" dir="rtl">
+            <div className="text-lg font-bold text-black">הצעות מחיר חתומות</div>
+            <SignedQuotesSection customerId={customer?.id ?? null} currentUser={currentUser} />
+          </div>
+        )}
+
         {activeLowerTab === 'quotes' && (
           <div className="space-y-3" dir="rtl">
             <div className="text-lg font-bold text-black">הצעות מחיר</div>
@@ -3718,7 +3742,7 @@ export function CustomerLegacyCard({
                               {(row.latestDocFileName || row.lastMergedDocPath) ? (
                                 <button
                                   type="button"
-                                  className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                                  className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
                                   onClick={async () => {
                                     try {
                                       const r = await apiFetch(apiUrl(`/quotes/${row.id}/merged-doc`), { authUser: currentUser });
@@ -3792,7 +3816,15 @@ export function CustomerLegacyCard({
                                     className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
                                     onClick={() => {
                                       const ph = (row.phoneSummary || '').replace(/\D/g, '');
-                                      const msg = encodeURIComponent(`הצעת מחיר ${row.quoteNumber || row.id.slice(0, 8)} - ${row.customerName || ''}`);
+                                      const firstName = (row.customerName || '').trim().split(/\s+/)[0] || '';
+                                      const quoteRef = row.quoteNumber || row.id.slice(0, 8);
+                                      const msg = encodeURIComponent(
+                                        `${firstName ? `שלום ${firstName},` : 'שלום רב,'}\n` +
+                                        `מצורפת הצעת המחיר (מס' ${quoteRef}) שהכנו עבורך ב"גלית – החברה לאיכות הסביבה".\n` +
+                                        `ההצעה מרכזת את כל פרטי העבודה בצורה ברורה ושקופה.\n` +
+                                        `נשמח שתעיין בה בנוחות, ואנחנו זמינים לכל שאלה או הבהרה.\n` +
+                                        `אשמח לעמוד לרשותך לכל שאלה.`
+                                      );
                                       window.open(`https://wa.me/${ph}?text=${msg}`, '_blank');
                                     }}
                                   >

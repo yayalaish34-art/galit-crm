@@ -58,7 +58,7 @@ const DIALOG: React.CSSProperties = {
 };
 
 const HEADER: React.CSSProperties = {
-  background: '#2d6ea3',
+  background: '#2563eb',
   color: '#fff',
   padding: '5px 10px',
   display: 'flex',
@@ -198,7 +198,7 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
               <button
                 type="button"
                 onClick={() => setMode('create')}
-                style={{ height: 28, padding: '0 10px', background: '#2d6ea3', color: '#fff', border: 'none', borderRadius: 3, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, whiteSpace: 'nowrap' }}
+                style={{ height: 28, padding: '0 10px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 3, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, whiteSpace: 'nowrap' }}
               >
                 <Plus size={12} />
                 לקוח חדש
@@ -219,7 +219,7 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
               {!loading && customers.length > 0 && (
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: '#2d6ea3', color: '#fff', position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr style={{ background: '#2563eb', color: '#fff', position: 'sticky', top: 0, zIndex: 1 }}>
                       {['שם לקוח', 'טלפון', 'מייל', 'עיר'].map((h) => (
                         <th key={h} style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 'normal', fontSize: 11, borderLeft: '1px solid #4a88c0', whiteSpace: 'nowrap' }}>{h}</th>
                       ))}
@@ -293,7 +293,7 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
                 type="button"
                 onClick={handleCreate}
                 disabled={saving}
-                style={{ height: 28, padding: '0 16px', background: saving ? '#7aabcf' : '#2d6ea3', color: '#fff', border: 'none', fontSize: 12, cursor: saving ? 'default' : 'pointer', borderRadius: 3, fontWeight: 500 }}
+                style={{ height: 28, padding: '0 16px', background: saving ? '#7aabcf' : '#2563eb', color: '#fff', border: 'none', fontSize: 12, cursor: saving ? 'default' : 'pointer', borderRadius: 3, fontWeight: 500 }}
               >
                 {saving ? 'שומר...' : 'שמור לקוח'}
               </button>

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { LeadsModule } from './leads/leads.module';
@@ -24,9 +25,10 @@ import { DevAgentModule } from './dev-agent/dev-agent.module';
 import { PublicModule } from './public/public.module';
 import { MicrosoftModule } from './microsoft/microsoft.module';
 import { AiMailModule } from './ai-mail/ai-mail.module';
+import { IncomingLeadsModule } from './incoming-leads/incoming-leads.module';
 
 @Module({
-  imports: [AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule],
   controllers: [AppController],
   providers: [AppService],
 })

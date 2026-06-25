@@ -377,6 +377,22 @@ export function getServiceName(id: string): string {
   return findServiceById(id)?.name ?? id;
 }
 
+/**
+ * Find the parent subgroup id for a leaf service SKU/id, if it lives inside a
+ * subServices group (e.g. "10096" → "radiation_shielding"). Returns null for
+ * top-level leaf services that aren't nested in a group.
+ */
+export function getSubgroupIdForSku(skuOrId: string): string | null {
+  for (const cat of SERVICE_CATEGORIES) {
+    for (const svc of cat.services) {
+      if (svc.subServices?.some((s) => s.id === skuOrId || s.sku === skuOrId)) {
+        return svc.id;
+      }
+    }
+  }
+  return null;
+}
+
 /** Get the category name by category id. */
 export function getCategoryName(id: string): string {
   return SERVICE_CATEGORIES.find((c) => c.id === id)?.name ?? id;

@@ -280,7 +280,7 @@ export function InteractionNewScreen({
             חזרה
           </button>
         )}
-        <button type="button" className="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white hover:bg-emerald-700">שמור</button>
+        <button type="button" className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700">שמור</button>
         <div className="flex-1" />
         <span className="text-xs text-slate-500">פנייה / התקשרות</span>
         {form.code && <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">#{form.code}</span>}

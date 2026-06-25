@@ -46,7 +46,7 @@ const DIALOG: React.CSSProperties = {
 };
 
 const HEADER: React.CSSProperties = {
-  background: '#2d6ea3',
+  background: '#2563eb',
   color: '#fff',
   padding: '5px 10px',
   display: 'flex',
