@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post,
 import { QuotesService } from './quotes.service';
 import { QuoteMailService } from './quote-mail.service';
 import { PdfConvertService } from './pdf-convert.service';
+import { QuoteSignatureService } from './quote-signature.service';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { Response } from 'express';
@@ -16,6 +17,7 @@ export class QuotesController {
     private readonly quotesService: QuotesService,
     private readonly quoteMailService: QuoteMailService,
     private readonly pdfConvert: PdfConvertService,
+    private readonly signatureService: QuoteSignatureService,
   ) {}
 
   /** המרת DOCX (base64) ל-PDF: Microsoft Graph (Word) אם המשתמש מחובר, אחרת CloudConvert. body: { dataBase64, fileName } */
@@ -126,6 +128,7 @@ export class QuotesController {
       cc?: string[];
       includeSignature?: boolean;
       signatureId?: string;
+      preferOnedrive?: boolean;
     },
     @Req() req: any,
   ) {
@@ -140,12 +143,33 @@ export class QuotesController {
       cc: body.cc,
       includeSignature: body.includeSignature,
       signatureId: body.signatureId,
+      preferOnedrive: body.preferOnedrive,
     });
   }
 
+  /**
+   * POST /quotes/:id/request-signature
+   * מכין את ההצעה לחתימת לקוח דיגיטלית (ממיר ל-PDF, מייצר טוקן) ומחזיר את הטוקן
+   * + פרטי הלקוח. הקישור עצמו נבנה בצד הלקוח: `${origin}/sign/${token}`.
+   */
+  @Post(':id/request-signature')
+  requestSignature(@Param('id') id: string, @Req() req: any) {
+    return this.signatureService.requestSignature(id, req.user?.id);
+  }
+
   @Post(':id/save-merged-doc')
-  saveMergedDoc(@Param('id') id: string, @Body() body: { base64Data: string; fileName: string }) {
-    return this.quotesService.saveMergedDoc(id, body.base64Data, body.fileName);
+  saveMergedDoc(@Param('id') id: string, @Body() body: { base64Data: string; fileName: string; mimeType?: string }) {
+    return this.quotesService.saveMergedDoc(id, body.base64Data, body.fileName, body.mimeType);
+  }
+
+  /**
+   * POST /quotes/:id/onedrive-edit
+   * פותח את המסמך הממוזג לעריכה ב-Word דרך OneDrive (שמירה-חזרה אוטומטית).
+   * מחזיר { webUrl, itemId, reused } — הפרונט פותח את webUrl ב-Word.
+   */
+  @Post(':id/onedrive-edit')
+  openInOneDrive(@Param('id') id: string, @Req() req: any) {
+    return this.quotesService.openInOneDrive(id, req.user?.id);
   }
 
   @Patch(':id')

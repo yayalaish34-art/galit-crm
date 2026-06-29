@@ -74,8 +74,16 @@ export class PdfConvertService {
         xml = xml.replace(fieldRe, (field) => {
           if (!/<w:instrText[^>]*>\s*DATE/.test(field)) return field; // רק שדות DATE (PAGE נשאר דינמי)
           const date = field.includes('\\h') ? heb : greg; // \h = לוח עברי
-          const rPrM = field.match(/<w:rPr>[\s\S]*?<\/w:rPr>\s*<w:t/);
-          const rPr = rPrM ? rPrM[0].replace(/\s*<w:t$/, '') : '';
+          // עיצוב (rPr) לטקסט הסטטי — חייב להילקח מ"ריצת התוצאה" של השדה (אחרי fldChar
+          // separate), ולא מריצת ה-begin. עיגון על ה-<w:rPr> הראשון בשדה (כפי שהיה) גרר
+          // את כל פנים השדה — fldChar begin, ה-instrText (קוד "DATE \@ ..."), ו-separate —
+          // אל תוך ההחלפה, והשמיט את ה-end, כך שנותר שדה לא-סגור והקוד הודפס כטקסט גלוי
+          // (למשל dddd dd MMMM yyyy בכותרת ה-PDF). חיתוך מ-separate ואילך מבטיח שנלכד רק
+          // עיצוב ריצת התוצאה.
+          const sepIdx = field.indexOf('fldCharType="separate"');
+          const afterSep = sepIdx >= 0 ? field.slice(sepIdx) : '';
+          const rPrM = afterSep.match(/<w:rPr>[\s\S]*?<\/w:rPr>(?=\s*<w:t[ >])/);
+          const rPr = rPrM ? rPrM[0] : '';
           froze++;
           return `<w:r>${rPr}<w:t xml:space="preserve">${esc(date)}</w:t></w:r>`;
         });

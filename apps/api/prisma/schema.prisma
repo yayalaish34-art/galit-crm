@@ -581,6 +581,9 @@ model Lead {
   nextFollowUpDate DateTime?
   leadStatus     LeadStatus  @default(NEW)
 
+  /// אם הלקוח הגיע דרך חברת צד-שלישי / מפנה (הדס, גינדי וכו') — שם החברה
+  referralCompany String?
+
   customerId     String?
   customer       Customer?   @relation(fields: [customerId], references: [id])
 
@@ -782,6 +785,13 @@ model Quote {
   lastEmailedAt             DateTime?
   lastEmailedTo             String?
 
+  /// OneDrive — מסמך DOCX ניתן-לעריכה ב-Word עם שמירה-חזרה אוטומטית.
+  /// onedriveItemId: מזהה הפריט ב-OneDrive; onedriveWebUrl: כתובת פתיחה ב-Word;
+  /// onedriveOwnerId: המשתמש שב-OneDrive שלו הקובץ מאוחסן (נדרש למשיכת הגרסה בזמן שליחה).
+  onedriveItemId            String?
+  onedriveWebUrl            String?
+  onedriveOwnerId           String?
+
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]
   quoteDocuments  QuoteDocument[]
@@ -822,6 +832,9 @@ model Task {
 
   /// אם מקורו של ה-task בליד נכנס מהמייל — מזהה ה-IncomingLead (לסידור-ראשון ולטופס המיוחד)
   incomingLeadId       String?
+
+  /// הערות כלליות על התהליך/הלקוח לאורך הזרימה — מערך JSON של { text, at } (הכי חדש בראש)
+  processNotes         String?
 
   attachments TaskAttachment[]
 

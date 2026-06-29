@@ -4,6 +4,8 @@ import { apiUrl, getApiBaseUrl, apiFetch } from '../lib/api-base';
 import { parseApiErrorResponse } from '../lib/api-error';
 import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
+import { ProducedReportsSection } from '../produced-reports-section';
+import { SendReportModal } from '../send-report-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
 import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
 import { OrderNewScreen, OrderOldStyleToolbar } from '../orders/new/order-new-screen';
@@ -24,6 +26,7 @@ import {
   Bell,
   Search,
   Plus,
+  StickyNote,
   CheckCircle2,
   Clock3,
   AlertTriangle,
@@ -187,6 +190,7 @@ type Lead = {
   city?: string;
   address?: string;
   source: string;
+  referralCompany?: string | null;
   utm_source?: string;
   utm_medium?: string;
   utm_campaign?: string;
@@ -582,6 +586,8 @@ type Task = {
   createdAt?: string;
   /** מזהה IncomingLead אם ה-task מקורו בליד נכנס מהמייל (לסידור-ראשון ולטופס המיוחד) */
   incomingLeadId?: string | null;
+  /** הערות כלליות על התהליך/הלקוח לאורך הזרימה — מחרוזת JSON של { text, at } (הכי חדש בראש) */
+  processNotes?: string | null;
 };
 
 type Customer = {
@@ -1977,6 +1983,7 @@ function PipelinePage({
           city: lead.city ?? undefined,
           address: lead.address ?? undefined,
           source: lead.source || '',
+          referralCompany: lead.referralCompany ?? undefined,
           utm_source: lead.utm_source ?? undefined,
           utm_medium: lead.utm_medium ?? undefined,
           utm_campaign: lead.utm_campaign ?? undefined,
@@ -4269,6 +4276,8 @@ type FeedbackCustomer = {
   lastDoneAt: string;
   lastService: string;
   doneTasksCount: number;
+  /** מתי נשלחה בקשת המשוב האחרונה (ידני או אוטומטי) — null אם טרם נשלח. */
+  feedbackRequestedAt: string | null;
 };
 
 /** סיבות הסיווג "לא רלוונטי" — משותף לפופאפ המשימה ולסקשן "לקוחות שסווגו כלא רלוונטי". */
@@ -4299,6 +4308,11 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
   const [compose, setCompose] = useState<{ row: FeedbackCustomer; subject: string; message: string } | null>(null);
   const [composeState, setComposeState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [sentIds, setSentIds] = useState<Record<string, boolean>>({});
+
+  // ── סינון רשימת בקשות המשוב: טווח תאריכי סיום העבודה + הצגת מי שטרם נשלח אליו משוב ──
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [onlyNotSent, setOnlyNotSent] = useState(false);
 
   // ── הגדרות אוטומציה + SMS ──
   const [fb, setFb] = useState<FbAutomation | null>(null);
@@ -4467,6 +4481,41 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
     try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return ''; }
   };
 
+  // לקוח נחשב "נשלח אליו משוב" אם נשלח בסשן הנוכחי או שיש חותמת feedbackRequestedAt מהשרת.
+  const isFeedbackSent = useCallback(
+    (row: FeedbackCustomer) => Boolean(sentIds[row.id]) || Boolean(row.feedbackRequestedAt),
+    [sentIds],
+  );
+
+  const filtersActive = Boolean(fromDate || toDate || onlyNotSent);
+
+  // סינון לפי טווח תאריכי סיום העבודה (lastDoneAt) ולפי "טרם נשלח משוב".
+  const filteredRows = useMemo(() => {
+    const fromTs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
+    const toTs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+    return rows.filter((row) => {
+      if (onlyNotSent && isFeedbackSent(row)) return false;
+      if (fromTs !== null || toTs !== null) {
+        const t = row.lastDoneAt ? new Date(row.lastDoneAt).getTime() : NaN;
+        if (Number.isNaN(t)) return false;
+        if (fromTs !== null && t < fromTs) return false;
+        if (toTs !== null && t > toTs) return false;
+      }
+      return true;
+    });
+  }, [rows, fromDate, toDate, onlyNotSent, isFeedbackSent]);
+
+  // קיצור: קובע טווח של N הימים האחרונים (לפי שעון מקומי).
+  const setPresetDays = (days: number) => {
+    const ymd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    setToDate(ymd(now));
+    setFromDate(ymd(new Date(now.getTime() - days * 86400000)));
+  };
+
+  const clearFilters = () => { setFromDate(''); setToDate(''); setOnlyNotSent(false); };
+
   const inputCls = 'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400';
   const labelCls = 'mb-1 block text-[11px] font-bold text-slate-500';
   const hourOptions = Array.from({ length: 24 }, (_, h) => h);
@@ -4520,15 +4569,54 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" /> לקוחות עם עבודות שהסתיימו
               </CardTitle>
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">{rows.length} לקוחות</span>
+              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                {filtersActive ? `${filteredRows.length} מתוך ${rows.length}` : `${rows.length} לקוחות`}
+              </span>
             </CardHeader>
             <CardContent className="p-0">
+              {rows.length > 0 ? (
+                <div className="flex flex-wrap items-end gap-x-4 gap-y-3 border-b border-slate-100 px-5 py-4">
+                  <div className="flex items-center gap-1.5 self-center text-slate-500">
+                    <Filter className="h-4 w-4" /> <span className="text-xs font-bold">סינון</span>
+                  </div>
+                  <div>
+                    <label className={labelCls}>מתאריך (סיום העבודה)</label>
+                    <input type="date" value={fromDate} max={toDate || undefined} onChange={(e) => setFromDate(e.target.value)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>עד תאריך</label>
+                    <input type="date" value={toDate} min={fromDate || undefined} onChange={(e) => setToDate(e.target.value)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-400" />
+                  </div>
+                  <div className="flex items-center gap-1.5 self-center">
+                    {[{ label: '7 ימים', days: 7 }, { label: '30 ימים', days: 30 }, { label: '90 ימים', days: 90 }].map((p) => (
+                      <button key={p.days} type="button" onClick={() => setPresetDays(p.days)}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-600 transition hover:bg-slate-100">
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex cursor-pointer select-none items-center gap-2 self-center rounded-xl bg-emerald-50 px-3 py-2">
+                    <input type="checkbox" className="h-4 w-4 accent-emerald-600" checked={onlyNotSent} onChange={(e) => setOnlyNotSent(e.target.checked)} />
+                    <span className="text-xs font-bold text-emerald-700">הצג רק כאלה שטרם נשלח אליהם משוב</span>
+                  </label>
+                  {filtersActive ? (
+                    <button type="button" onClick={clearFilters}
+                      className="flex items-center gap-1 self-center text-xs font-bold text-slate-400 transition hover:text-slate-600">
+                      <X className="h-3.5 w-3.5" /> נקה סינון
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {rows.length === 0 ? (
                 <div className="py-12 text-center text-sm text-slate-400">אין עדיין לקוחות עם משימות שהסתיימו</div>
+              ) : filteredRows.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-400">אין לקוחות שתואמים את הסינון</div>
               ) : (
                 <div className="divide-y divide-slate-100">
-                  {rows.map((row) => {
-                    const sent = sentIds[row.id];
+                  {filteredRows.map((row) => {
+                    const sent = isFeedbackSent(row);
                     return (
                       <div key={row.id} className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
                         <div className="min-w-0 flex-1">
@@ -4538,7 +4626,12 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
                               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{row.doneTasksCount} עבודות</span>
                             ) : null}
                             {sent ? (
-                              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">נשלח משוב</span>
+                              <span
+                                className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                                title={row.feedbackRequestedAt ? `נשלחה בקשת משוב ב-${fmtDate(row.feedbackRequestedAt)}` : 'נשלחה בקשת משוב'}
+                              >
+                                נשלח משוב{row.feedbackRequestedAt ? ` · ${fmtDate(row.feedbackRequestedAt)}` : ''}
+                              </span>
                             ) : null}
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
@@ -13733,6 +13826,9 @@ function TasksPage({
     }
   }, [extSetManualStepOverride]);
 
+  /* שלב הביצוע: מזהה המשימה שעבורה פתוח טופס "צרף דוח ושלח במייל" */
+  const [reportModalTaskId, setReportModalTaskId] = useState<string | null>(null);
+
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
   const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
   const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
@@ -13892,6 +13988,9 @@ function TasksPage({
   /* ── טאב פעיל בכרטיס מאמן המכירות (שלב "שיחת מכירה") ובשלב "פולואו אפ" — לפי מזהה משימה ── */
   const [callCoachTab, setCallCoachTab] = useState<Record<string, 'service' | 'objections' | 'closings'>>({});
   const [followupTab, setFollowupTab] = useState<Record<string, 'service' | 'objections' | 'closings'>>({});
+  /* ── הערות על התהליך/הלקוח (פר-משימה) — טיוטה + מצב שמירה ── */
+  const [processNoteDraft, setProcessNoteDraft] = useState<Record<string, string>>({});
+  const [processNoteBusy, setProcessNoteBusy] = useState<Record<string, boolean>>({});
   /* ── מסמכים מצורפים למשימה (למשל קובץ הצעת מחיר ממוזג) ── */
   const [taskAttachments, setTaskAttachments] = useState<Record<string, { id: string; fileName: string; mimeType: string; createdAt: string }[]>>({});
   const [attachmentDownloading, setAttachmentDownloading] = useState<Record<string, boolean>>({});
@@ -14026,6 +14125,8 @@ function TasksPage({
   type TaskContact = { id: string; fullName: string; phone: string; email: string; roleTitle: string; isPrimary: boolean };
   const [taskContactsMap, setTaskContactsMap] = useState<Record<string, TaskContact[]>>({});
   const taskContactsCounter = useRef<Record<string, number>>({});
+  // הודעת שגיאה לכרטיס הלקוח (לדוגמה: חובת איש קשר עבור חברה/קבלן/מוסד)
+  const [ccCardError, setCcCardError] = useState<Record<string, string>>({});
   // ── Stage persistence: sync manualStepOverride ↔ DB ──
   const dbStagesRef = useRef<Record<string, number>>({});
   const dbStagesInitRef = useRef(false);
@@ -14140,6 +14241,7 @@ function TasksPage({
       address: linkedLead?.address || linkedCustomer?.address || '',
       role: '',
       leadSource: linkedLead?.source || linkedCustomer?.leadSource || (leadPrefill ? 'אתר' : ''),
+      referralCompany: linkedLead?.referralCompany || '',
       companySize: '',
       inquiryDate: new Date().toISOString().slice(0, 10),
       customerType: linkedLead?.company ? 'עסקי' : (linkedCustomer ? (linkedCustomer.type === 'PRIVATE' ? 'פרטי' : 'עסקי') : 'פרטי'),
@@ -14930,6 +15032,39 @@ function TasksPage({
     } catch { void onReloadTasks?.(); }
   };
 
+  /* ── הערות על התהליך/הלקוח: מאוחסנות ב-Task.processNotes כמערך JSON של { text, at } (הכי חדש בראש) ── */
+  const parseProcessNotes = (raw?: string | null): { text: string; at: string }[] => {
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((n) => n && typeof n.text === 'string' && n.text.trim())
+          .map((n) => ({ text: String(n.text), at: String(n.at || '') }))
+          .sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
+      }
+    } catch {
+      // legacy / plain text — show as a single note
+      if (raw.trim()) return [{ text: raw.trim(), at: '' }];
+    }
+    return [];
+  };
+
+  const addProcessNote = async (taskId: string) => {
+    const text = (processNoteDraft[taskId] || '').trim();
+    if (!text) return;
+    setProcessNoteBusy((p) => ({ ...p, [taskId]: true }));
+    const task = tasks.find((t) => t.id === taskId);
+    const existing = parseProcessNotes(task?.processNotes);
+    const next = [{ text, at: new Date().toISOString() }, ...existing];
+    try {
+      await updateTaskField(taskId, { processNotes: JSON.stringify(next) });
+      setProcessNoteDraft((p) => ({ ...p, [taskId]: '' }));
+    } finally {
+      setProcessNoteBusy((p) => ({ ...p, [taskId]: false }));
+    }
+  };
+
   const deleteTask = async (taskId: string) => {
     // Optimistic removal so UI responds immediately
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
@@ -15532,7 +15667,6 @@ function TasksPage({
 
   /* ── quick filter config ── */
   const filterBtns: { key: string; label: string; icon: React.ElementType; count?: number }[] = [
-    { key: 'all', label: 'הכל', icon: ClipboardList },
     { key: 'today', label: 'היום', icon: Calendar, count: kpiToday },
     { key: 'overdue', label: 'באיחור', icon: AlertCircle, count: kpiOverdue },
     { key: 'week', label: 'השבוע', icon: CalendarDays, count: kpiWeek },
@@ -15878,8 +16012,7 @@ function TasksPage({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  // יציאה משלב "ביצוע" (step 5) → המשימה הושלמה ונעלמת מהרשימה
-                                  if ((manualStepOverride[t.id] ?? detectStep(t)) === 5) void updateTaskField(t.id, { status: 'DONE' });
+                                  // סגירת הפאנל בלבד — המשימה מסומנת DONE רק כששולחים את הדוח במייל (שלב הביצוע).
                                   setExpandedTaskId(null);
                                 }}
                                 className="flex items-center justify-center gap-1 rounded-lg font-bold text-white transition hover:brightness-110 active:scale-95"
@@ -15980,7 +16113,7 @@ function TasksPage({
                           <div className="flex-1 flex min-h-0 overflow-hidden" style={{ direction: 'rtl' }}>
 
                             {/* RIGHT SIDEBAR: פרטי לקוח */}
-                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 196, direction: 'rtl', padding: 12 }}>
+                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 248, direction: 'rtl', padding: 12 }}>
                               <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {(() => {
@@ -15990,6 +16123,7 @@ function TasksPage({
                                     { icon: Phone, label: 'טלפון', value: contactPhone },
                                     { icon: Mail, label: 'אימייל', value: linkedLeadForHeader?.email || t.leadEmail || '' },
                                     { icon: Building2, label: 'חברה', value: t.leadCompany || linkedLeadForHeader?.company || '' },
+                                    { icon: UserPlus, label: 'הגיע דרך', value: linkedLeadForHeader?.referralCompany || '' },
                                     { icon: MapPin, label: 'עיר', value: linkedLeadForHeader?.city || '' },
                                     { icon: Home, label: 'כתובת', value: linkedLeadForHeader?.address || '' },
                                     { icon: ClipboardList, label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
@@ -16050,6 +16184,55 @@ function TasksPage({
                                   );
                                 })()}
                               </div>
+
+                              {/* ── הערות על התהליך/הלקוח — מתחת לנתוני הלקוח, לאורך כל הזרימה ── */}
+                              {(() => {
+                                const notes = parseProcessNotes(t.processNotes);
+                                const draft = processNoteDraft[t.id] || '';
+                                const busy = !!processNoteBusy[t.id];
+                                return (
+                                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                      <StickyNote style={{ width: 14, height: 14 }} />
+                                      הערות על התהליך
+                                    </div>
+                                    <textarea
+                                      value={draft}
+                                      onChange={(e) => setProcessNoteDraft((p) => ({ ...p, [t.id]: e.target.value }))}
+                                      onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); void addProcessNote(t.id); } }}
+                                      placeholder="הוסף הערה כללית על הלקוח / התהליך..."
+                                      rows={3}
+                                      style={{ width: '100%', resize: 'vertical', borderRadius: 12, border: '1px solid #e2e8f0', padding: '10px 12px', fontSize: 14, fontWeight: 600, color: '#334155', outline: 'none', lineHeight: 1.6 }}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => void addProcessNote(t.id)}
+                                      disabled={busy || !draft.trim()}
+                                      style={{ marginTop: 8, width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 12, background: draft.trim() ? '#2563eb' : '#cbd5e1', color: '#fff', padding: '10px 12px', fontSize: 14, fontWeight: 800, border: 'none', cursor: draft.trim() ? 'pointer' : 'default' }}
+                                    >
+                                      {busy ? <Loader2 style={{ width: 15, height: 15 }} className="animate-spin" /> : <Plus style={{ width: 15, height: 15 }} />}
+                                      הוסף הערה
+                                    </button>
+                                    {notes.length > 0 && (
+                                      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                        {notes.map((n, i) => {
+                                          const when = n.at ? new Date(n.at) : null;
+                                          const header = when && !isNaN(when.getTime())
+                                            ? `${when.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${when.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`
+                                            : 'הערה';
+                                          return (
+                                            <div key={i} style={{ borderRadius: 12, background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 12px' }}>
+                                              <div style={{ fontSize: 12, fontWeight: 800, color: '#b45309', marginBottom: 4 }}>{header}</div>
+                                              <div style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{n.text}</div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+
                               {(taskAttachments[t.id] || []).length > 0 && (
                                 <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
                                   <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -16185,12 +16368,15 @@ function TasksPage({
                             const ccContacts0 = taskContactsMap[t.id] || [];
                             const isPrivate0 = (fd.customerType || '') === 'PRIVATE' || (fd.customerType || '') === 'לקוח פרטי';
                             const hasValidContact0 = ccContacts0.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
-                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && (isPrivate0 || hasValidContact0));
+                            // הכפתור פעיל כשיש שם וטלפון. אכיפת איש-הקשר עבור חברה/קבלן/מוסד
+                            // נעשית בלחיצה עצמה כדי שנוכל להציג הודעת שגיאה מפורשת.
+                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim());
                             const saveCustomerCard = async () => {
                               if (!isPrivate0 && !hasValidContact0) {
-                                alert('חובה להוסיף לפחות איש קשר אחד עבור סיווג לקוח זה');
+                                setCcCardError((p) => ({ ...p, [t.id]: 'חובה להוסיף לפחות איש קשר אחד עבור חברה / קבלן / מוסד. הוסיפו איש קשר ומלאו שם או טלפון.' }));
                                 return;
                               }
+                              setCcCardError((p) => ({ ...p, [t.id]: '' }));
                               const saveFullName = derivedFullName;
                               // Auto-add self-contact for PRIVATE with no explicit contacts
                               if (isPrivate0 && ccContacts0.length === 0) {
@@ -16211,6 +16397,7 @@ function TasksPage({
                                       city: fd.city,
                                       address: fd.address,
                                       source: fd.leadSource || undefined,
+                                      referralCompany: (fd.referralCompany || '').trim() || null,
                                       serviceType: fd.serviceType || undefined,
                                       notes: fd.notes || fd.internalNotes || undefined,
                                     }),
@@ -16302,6 +16489,7 @@ function TasksPage({
                               return [...src].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
                             })();
                             const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'אחר'];
+                            const CC_REFERRAL_COMPANIES = ['הדס', 'גינדי'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
                             const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
                             const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
@@ -16312,12 +16500,16 @@ function TasksPage({
                             const ccContacts = ccContacts0;
                             const isPrivate = isPrivate0;
                             const addContact = () => {
+                              setCcCardError((p) => ({ ...p, [t.id]: '' }));
                               taskContactsCounter.current[t.id] = (taskContactsCounter.current[t.id] || 0) + 1;
                               const newId = `pending-${t.id}-${taskContactsCounter.current[t.id]}`;
                               setTaskContactsMap((p) => ({ ...p, [t.id]: [...(p[t.id] || []), { id: newId, fullName: '', phone: '', email: '', roleTitle: '', isPrimary: (p[t.id] || []).length === 0 }] }));
                             };
                             const removeContact = (cid: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).filter((c) => c.id !== cid) }));
-                            const updateContact = (cid: string, field: string, val: string) => setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).map((c) => c.id === cid ? { ...c, [field]: val } : c) }));
+                            const updateContact = (cid: string, field: string, val: string) => {
+                              setCcCardError((p) => ({ ...p, [t.id]: '' }));
+                              setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).map((c) => c.id === cid ? { ...c, [field]: val } : c) }));
+                            };
                             // Auto-show contact row for non-private when none exist yet — prefill from the linked customer's contact details if available
                             if (!isPrivate && ccContacts.length === 0 && !taskContactsCounter.current[t.id]) {
                               taskContactsCounter.current[t.id] = 1;
@@ -16552,6 +16744,27 @@ function TasksPage({
                                         </select>
                                       </div>
                                     </div>
+                                    {/* Row 3.5: הגיע דרך חברת צד-שלישי / מפנה (הדס, גינדי וכו') */}
+                                    <div className="grid grid-cols-2 gap-4">
+                                      <div>
+                                        <label className={ccLbl}>הגיע דרך חברת צד-שלישי?</label>
+                                        <select
+                                          className={ccSel}
+                                          value={CC_REFERRAL_COMPANIES.includes((fd.referralCompany || '').trim()) ? (fd.referralCompany || '').trim() : ((fd.referralCompany || '') ? '__other__' : '')}
+                                          onChange={(e) => setF('referralCompany', e.target.value === '__other__' ? ' ' : e.target.value)}
+                                        >
+                                          <option value="">לא / הגיע ישירות</option>
+                                          {CC_REFERRAL_COMPANIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                                          <option value="__other__">אחר...</option>
+                                        </select>
+                                      </div>
+                                      {!!(fd.referralCompany || '') && !CC_REFERRAL_COMPANIES.includes((fd.referralCompany || '').trim()) && (
+                                        <div>
+                                          <label className={ccLbl}>שם החברה המפנה</label>
+                                          <input className={ccInp} placeholder="הקלד שם חברה" value={(fd.referralCompany || '').trim() === '' ? '' : fd.referralCompany} onChange={(e) => setF('referralCompany', e.target.value)} />
+                                        </div>
+                                      )}
+                                    </div>
                                     {/* Row 4: עיר + כתובת */}
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
@@ -16639,13 +16852,27 @@ function TasksPage({
                                           </div>
                                         </div>
                                       ))}
+                                      {/* כפתור הוספת איש קשר נוסף */}
+                                      <button
+                                        type="button"
+                                        onClick={addContact}
+                                        className="w-full flex items-center justify-center gap-2 h-[46px] rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 text-[13px] font-bold text-blue-600 hover:bg-blue-50 hover:border-blue-400 transition-all"
+                                      >
+                                        <UserPlus className="h-4 w-4" /> הוסף איש קשר
+                                      </button>
                                     </div>
                                   </div>
                                   {/* ── footer ── */}
-                                  <div className="flex items-center gap-3 px-7 py-4 bg-white" style={{ borderTop: '1px solid #E8EFF6' }}>
-                                    <button onClick={saveCustomerCard} disabled={!canSaveCard} className="flex-1 h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
+                                  <div className="px-7 py-4 bg-white space-y-3" style={{ borderTop: '1px solid #E8EFF6' }}>
+                                    {!!ccCardError[t.id] && (
+                                      <div className="flex items-center gap-2 rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-[13px] font-bold text-red-700">
+                                        <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                                        {ccCardError[t.id]}
+                                      </div>
+                                    )}
+                                    <button onClick={saveCustomerCard} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
-                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : (!isPrivate && ccContacts.length === 0) ? 'יש להוסיף איש קשר' : 'שמור והמשך לשלב הבא'}
+                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : 'שמור והמשך לשלב הבא'}
                                     </button>
                                   </div>
                                 </div>
@@ -17040,6 +17267,7 @@ function TasksPage({
                                       serviceType: fd.serviceType,
                                       service: fd.serviceType,
                                       source: fd.leadSource || undefined,
+                                      referralCompany: (fd.referralCompany || '').trim() || null,
                                       notes: fd.callSummary ? `[סיכום שיחה] ${fd.callSummary}` : undefined,
                                     }),
                                   });
@@ -17816,19 +18044,57 @@ function TasksPage({
                                         {durationOptions.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
                                         <option value="custom">אחר (ידני)…</option>
                                       </select>
-                                      {isManualDuration && (
-                                        <div className="mt-2 flex items-center gap-2">
-                                          <input
-                                            type="number"
-                                            min={1}
-                                            className={fieldBox}
-                                            value={durationMin}
-                                            placeholder="משך בדקות"
-                                            onChange={(e) => updateCoordForm(t.id, { durationMin: Math.max(1, Number(e.target.value) || 0) })}
-                                          />
-                                          <span className="text-[12px] font-bold text-slate-500 whitespace-nowrap">דקות</span>
-                                        </div>
-                                      )}
+                                      {isManualDuration && (() => {
+                                        const dDays = Math.floor(durationMin / 1440);
+                                        const dHours = Math.floor((durationMin % 1440) / 60);
+                                        const dMins = durationMin % 60;
+                                        const setParts = (parts: { days?: number; hours?: number; mins?: number }) => {
+                                          const days = parts.days ?? dDays;
+                                          const hours = parts.hours ?? dHours;
+                                          const mins = parts.mins ?? dMins;
+                                          const total = days * 1440 + hours * 60 + mins;
+                                          updateCoordForm(t.id, { durationMin: Math.max(1, total) });
+                                        };
+                                        return (
+                                          <div className="mt-2 grid grid-cols-3 gap-2">
+                                            <div className="flex items-center gap-1.5">
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                className={fieldBox}
+                                                value={dDays}
+                                                placeholder="0"
+                                                onChange={(e) => setParts({ days: Math.max(0, Number(e.target.value) || 0) })}
+                                              />
+                                              <span className="text-[12px] font-bold text-slate-500 whitespace-nowrap">ימים</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                max={23}
+                                                className={fieldBox}
+                                                value={dHours}
+                                                placeholder="0"
+                                                onChange={(e) => setParts({ hours: Math.max(0, Number(e.target.value) || 0) })}
+                                              />
+                                              <span className="text-[12px] font-bold text-slate-500 whitespace-nowrap">שעות</span>
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                              <input
+                                                type="number"
+                                                min={0}
+                                                max={59}
+                                                className={fieldBox}
+                                                value={dMins}
+                                                placeholder="0"
+                                                onChange={(e) => setParts({ mins: Math.max(0, Number(e.target.value) || 0) })}
+                                              />
+                                              <span className="text-[12px] font-bold text-slate-500 whitespace-nowrap">דקות</span>
+                                            </div>
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
 
@@ -17917,7 +18183,41 @@ function TasksPage({
                                 </div>
                               </div>
                             );
-                          })() : (
+                          })() : currentStep === 5 ? (
+                          /* ── שלב ביצוע: צירוף הדוח ושליחתו ללקוח במייל (שליחה → המשימה DONE) ── */
+                          <div className="px-6 py-6 space-y-5" style={{ direction: 'rtl' }}>
+                            <div className="text-center">
+                              <div className="text-xl font-extrabold text-slate-800 mb-1">שליחת הדוח ללקוח</div>
+                              <div className="text-sm text-slate-500">צרף את הדוח שהופק ושלח אותו ללקוח במייל — בשליחה המשימה תיסגר אוטומטית.</div>
+                            </div>
+                            <ProducedReportsSection customerId={(t.customerId as string | undefined) ?? null} currentUser={currentUser} />
+                            <button
+                              type="button"
+                              onClick={() => setReportModalTaskId(t.id)}
+                              className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01]"
+                              style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
+                            >
+                              <Mail className="h-5 w-5" /> צרף דוח ושלח במייל
+                            </button>
+                            {reportModalTaskId === t.id && (
+                              <SendReportModal
+                                open
+                                task={{
+                                  id: t.id,
+                                  customerId: (t.customerId as string | undefined) ?? null,
+                                  customerName: t.customerName,
+                                  leadName: t.leadName,
+                                  projectName: t.projectName,
+                                  type: taskTypeLabel(t.type || ''),
+                                }}
+                                currentUser={currentUser}
+                                defaultEmail={((customers.find((c) => c.id === t.customerId) as any)?.email as string | undefined) || t.leadEmail || ''}
+                                onClose={() => setReportModalTaskId(null)}
+                                onSent={async () => { setReportModalTaskId(null); await updateTaskField(t.id, { status: 'DONE' }); setExpandedTaskId(null); }}
+                              />
+                            )}
+                          </div>
+                          ) : (
                           <div className="px-8 py-10 flex flex-col items-center justify-center text-center" style={{ direction: 'rtl' }}>
                             <div className="flex items-center justify-center rounded-2xl mb-4" style={{ width: 56, height: 56, background: '#f0fdf4' }}>
                               <CheckCircle2 className="h-8 w-8" style={{ color: '#16a34a' }} />
@@ -17932,7 +18232,6 @@ function TasksPage({
                             >
                               <CheckCircle2 className="h-5 w-5" /> סגור משימה
                             </button>
-                            <div className="mt-12 text-base font-bold text-slate-600">שירות הפקת דוחות אוטומטי בקרוב....</div>
                           </div>
                           )}
 
@@ -18374,8 +18673,8 @@ function LoginPage({
   onLogin: (email: string, password: string) => void;
   error: string;
 }) {
-  const [email, setEmail] = useState('admin@galit.local');
-  const [password, setPassword] = useState('1234');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4" dir="rtl">
@@ -18968,6 +19267,7 @@ export default function GalitCRMPrototype() {
         currentStage: t.currentStage ?? null,
         currentStageChangedAt: t.currentStageChangedAt ?? null,
         incomingLeadId: t.incomingLeadId ?? null,
+        processNotes: t.processNotes ?? null,
         createdAt: t.createdAt ?? undefined,
       }));
       setTasks(normalized);

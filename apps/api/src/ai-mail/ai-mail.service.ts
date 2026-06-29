@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import PizZip from 'pizzip';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface DraftContext {
@@ -8,6 +9,10 @@ export interface DraftContext {
   contactName?: string;
   serviceName?: string;
   quoteNumber?: string;
+  /** שם הפרויקט (לניסוח מייל דוח) */
+  projectName?: string;
+  /** שם הדוח המצורף (לניסוח מייל דוח) */
+  reportName?: string;
 
   // ── פרטי המקרה שהמשתמש ממלא (שאלון) ──
   location?: string;        // מיקום מדויק
@@ -49,11 +54,13 @@ export class AiMailService {
 1. פנייה: "שלום [שם פרטי]," — השתמש בשם הפרטי בלבד שנמסר לך (לא שם משפחה!). אם אין שם — "שלום רב,".
 2. משפט פתיחה: "מצורפת הצעת מחיר מס' [מספר] עבור [תיאור קצר של העבודה במיקום]."
 3. 1-2 משפטים המתארים מה כוללת העבודה (לפי הפרטים שנמסרו — מיקום, סוג הבדיקה/העבודה, תוצרים כמו דוח יישום/הגשה לרשויות).
-4. שורות הנתונים (יוזרקו על ידי המערכת — אל תכתוב אותן בעצמך! המערכת מוסיפה: סה"כ לתשלום, תנאי תשלום, תוקף ההצעה). אתה יכול לכתוב את "משך ביצוע משוער" אם נמסר לך.
-5. משפט סיום: "לאישור ההצעה, נא להעביר אלינו את ההצעה חתומה ומאושרת." ואז "נשמח לעמוד לרשותך לכל שאלה."
+4. פסקה קצרה (משפט עד שניים) המדגישה את המקצועיות והליווי: שצוות החברה עומד לרשות הלקוח לאורך כל התהליך ומקפיד על שירות מקצועי, אמין ויסודי. נסח בצורה כללית בלבד — בלי להמציא פרטים, נתונים או הבטחות ספציפיות.
+5. שורות הנתונים (יוזרקו על ידי המערכת — אל תכתוב אותן בעצמך! המערכת מוסיפה: סה"כ לתשלום, תנאי תשלום, תוקף ההצעה). אתה יכול לכתוב את "משך ביצוע משוער" אם נמסר לך.
+6. משפט סיום: "לאישור ההצעה, נא להעביר אלינו את ההצעה חתומה ומאושרת." ואז "נשמח לעמוד לרשותך לכל שאלה."
 
 כללים מחייבים:
 - אל תכתוב סכומים, תנאי תשלום, או תוקף — המערכת מוסיפה אותם. אתה כותב רק נוסח מילולי.
+- אם סופקו "פריטי ההצעה" או "תוכן מסמך ההצעה" — בסס עליהם את תיאור העבודה והשירות (סעיפים 2-3), והשתמש רק במידע שמופיע בהם.
 - אל תמציא פרטים שלא נמסרו (מיקום, סוג בדיקה, תאריכים, מספרי מפרט).
 - אל תוסיף חתימה ("בברכה" / שם) — היא מתווספת בנפרד.
 - השתמש בדיוק בשם הלקוח, איש הקשר והמספר שנמסרו.
@@ -105,6 +112,8 @@ export class AiMailService {
 העבודה כוללת אספקה והתקנת מיגון לקירות, כולל חפיפות ופחת, וכן הנפקת דוח יישום מיגון להגשה לרשויות ולבנייה ירוקה.
 משך ביצוע משוער: עד 7 ימי עסקים, בתיאום עם המזמין.
 
+צוות החברה עומד לרשותכם לאורך כל התהליך, ואנו מקפידים על שירות מקצועי, אמין ויסודי בכל שלב.
+
 לאישור ההצעה, נא להעביר אלינו את ההצעה חתומה ומאושרת.
 נשמח לעמוד לרשותך לכל שאלה.`,
   });
@@ -118,6 +127,10 @@ export class AiMailService {
     // ── שליפת נתונים אמיתיים מההצעה (סכום / תנאי תשלום / מספר) ──
     const facts = await this.resolveFacts(ctx);
 
+    // ── תוכן ההצעה (פריטי שורה + טקסט המסמך הממוזג) — המקור שממנו ה-AI גוזר את תיאור העבודה,
+    //    במקום שאלון שהמשתמש ממלא ידנית. נשלח כטקסט בלבד (לא הקובץ עצמו). ──
+    const quoteContent = await this.gatherQuoteContent(ctx.quoteId);
+
     // הפנייה במייל היא בשם הפרטי בלבד — לוקחים את המילה הראשונה מהשם המלא.
     const firstName = this.firstNameOf(ctx.contactName);
 
@@ -130,6 +143,8 @@ export class AiMailService {
       ctx.inspectionType ? `סוג העבודה / הבדיקה: ${ctx.inspectionType}` : '',
       ctx.duration ? `משך ביצוע: ${ctx.duration}` : '',
       ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
+      quoteContent.itemsText ? `פריטי ההצעה (בסס עליהם את תיאור העבודה):\n${quoteContent.itemsText}` : '',
+      quoteContent.docText ? `תוכן מסמך ההצעה:\n${quoteContent.docText}` : '',
     ].filter(Boolean).join('\n');
 
     const isWa = ctx.channel === 'whatsapp';
@@ -202,6 +217,103 @@ export class AiMailService {
     return { subject: isWa ? '' : aiSubject, body, facts };
   }
 
+  // ── ניסוח מייל ללוויית "דוח" שהופק (לא הצעת מחיר) ──
+  private readonly REPORT_SYSTEM = `אתה מנסח מיילים בעברית עבור "גלית – החברה לאיכות הסביבה", המספקת בדיקות ושירותים סביבתיים (קרינה, רעש, אוויר, אסבסט, ראדון ועוד).
+המשימה: לנסח מייל מקצועי, קצר ומכובד, המלווה דוח שהופק עבור הלקוח ומצורף למייל.
+
+מבנה הגוף (לפי הסדר):
+1. פנייה: "שלום [שם פרטי]," בשם הפרטי בלבד (אם אין שם — "שלום רב,").
+2. משפט פתיחה: "מצורף הדוח שהופק עבורכם בנושא [השירות/הפרויקט]." — לפי הפרטים שנמסרו.
+3. 1-2 משפטים קצרים: הדוח כולל את ממצאי/תוצרי העבודה, ושנשמח לעמוד לרשות הלקוח לכל שאלה או הבהרה.
+4. משפט סיום מכובד: "נשמח לעמוד לרשותכם לכל שאלה." או נוסח דומה.
+
+כללים מחייבים:
+- אל תמציא פרטים שלא נמסרו (ממצאים, מספרים, תאריכים).
+- אל תוסיף חתימה ("בברכה" / שם) — היא מתווספת בנפרד.
+- נושא בפורמט: "דוח [השירות/הפרויקט] – [שם הלקוח]".
+- החזר JSON תקין בלבד עם "subject" ו-"body" (טקסט רגיל עם שורות חדשות).`;
+
+  private readonly REPORT_EXAMPLE_USER = `פרטי הדוח:
+לקוח: אקספו תל אביב
+שם פרטי לפנייה: דיאנה
+שירות/פרויקט: מדידת קרינה אלקטרומגנטית במתחם הכניסה
+שם הדוח: דוח מדידות קרינה.pdf`;
+
+  private readonly REPORT_EXAMPLE_ASSISTANT = JSON.stringify({
+    subject: 'דוח מדידת קרינה אלקטרומגנטית – אקספו תל אביב',
+    body: `שלום דיאנה,
+
+מצורף הדוח שהופק עבורכם בנושא מדידת קרינה אלקטרומגנטית במתחם הכניסה.
+הדוח כולל את ממצאי הבדיקה והתוצרים שסוכמו, ונשמח ללוות אתכם בכל המשך.
+נשמח לעמוד לרשותכם לכל שאלה או הבהרה.`,
+  });
+
+  /** ניסוח (או שיפור) מייל ללוויית דוח שהופק — נושא + גוף. בלי שליפת/הזרקת נתוני הצעה. */
+  async generateReportDraft(ctx: DraftContext): Promise<DraftResult> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new BadRequestException('ניסוח AI אינו מוגדר בשרת — חסר OPENAI_API_KEY');
+    }
+
+    const firstName = this.firstNameOf(ctx.contactName);
+    const serviceOrProject = ctx.projectName?.trim() || ctx.serviceName?.trim() || '';
+    const contextLines = [
+      ctx.customerName ? `לקוח: ${ctx.customerName}` : '',
+      firstName ? `שם פרטי לפנייה (השתמש בזה בלבד בפנייה "שלום [שם]"): ${firstName}` : '',
+      serviceOrProject ? `שירות/פרויקט: ${serviceOrProject}` : '',
+      ctx.reportName ? `שם הדוח: ${ctx.reportName}` : '',
+      ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
+    ].filter(Boolean).join('\n');
+
+    const messages: any[] = [
+      { role: 'system', content: this.REPORT_SYSTEM },
+      { role: 'user', content: this.REPORT_EXAMPLE_USER },
+      { role: 'assistant', content: this.REPORT_EXAMPLE_ASSISTANT },
+    ];
+    let userPrompt = `פרטי הדוח:\n${contextLines || '(אין פרטים נוספים)'}\n\nנסח נושא וגוף מייל בדיוק כמו בדוגמה.`;
+    if (ctx.previousSubject || ctx.previousBody) {
+      messages.push({
+        role: 'assistant',
+        content: JSON.stringify({ subject: ctx.previousSubject || '', body: ctx.previousBody || '' }),
+      });
+      userPrompt = `זהו הניסוח הקודם. ${ctx.instruction ? 'בקשת השינוי: ' + ctx.instruction : 'שפר אותו.'}\n\nפרטי הדוח:\n${contextLines || '(אין פרטים נוספים)'}\n\nהחזר גרסה מעודכנת באותו פורמט.`;
+    } else if (ctx.instruction) {
+      userPrompt += `\n\nהנחיה נוספת: ${ctx.instruction}`;
+    }
+    messages.push({ role: 'user', content: userPrompt });
+
+    let res: Response;
+    try {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-4o', messages, temperature: 0.4, response_format: { type: 'json_object' } }),
+      });
+    } catch (e: any) {
+      this.logger.error(`OpenAI request failed: ${e?.message}`);
+      throw new BadRequestException('פנייה ל-AI נכשלה — נסה שוב');
+    }
+    if (!res.ok) {
+      const detail = await res.text();
+      this.logger.error(`OpenAI ${res.status}: ${detail}`);
+      throw new BadRequestException('יצירת הניסוח נכשלה');
+    }
+    const data = (await res.json()) as any;
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new BadRequestException('לא התקבל ניסוח מה-AI');
+
+    let aiSubject = ctx.previousSubject || '';
+    let aiBody = '';
+    try {
+      const parsed = JSON.parse(content);
+      aiSubject = String(parsed.subject || '').trim();
+      aiBody = String(parsed.body || '').trim();
+    } catch {
+      aiBody = String(content).trim();
+    }
+    return { subject: aiSubject, body: aiBody };
+  }
+
   /** שליפת מספר/סכום/תנאי תשלום מההצעה + חישוב תוקף = חודש מהיום. */
   private async resolveFacts(ctx: DraftContext): Promise<DraftResult['facts']> {
     const facts: DraftResult['facts'] = { quoteNumber: ctx.quoteNumber };
@@ -219,6 +331,82 @@ export class AiMailService {
     // תוקף = חודש מהיום (מחושב בשרת — לא תלוי בדפדפן)
     facts.validTo = this.oneMonthFromNow();
     return facts;
+  }
+
+  /**
+   * אוסף את "תוכן ההצעה" כטקסט (לא הקובץ עצמו): תיאורי פריטי השורה מה-DB +
+   * הטקסט של המסמך הממוזג האחרון (אם הוא DOCX). זה מחליף את השאלון הידני — ה-AI
+   * גוזר את תיאור העבודה מהתוכן האמיתי של ההצעה. הכל best-effort: בכישלון מחזיר ריק.
+   */
+  private async gatherQuoteContent(quoteId?: string): Promise<{ itemsText: string; docText: string }> {
+    const result = { itemsText: '', docText: '' };
+    if (!quoteId) return result;
+
+    // פריטי שורה (lineItemsJson) — תיאור + כמות.
+    try {
+      const q: any = await this.prisma.quote
+        .findUnique({ where: { id: quoteId }, select: { lineItemsJson: true } })
+        .catch(() => null);
+      const items = Array.isArray(q?.lineItemsJson) ? q.lineItemsJson : [];
+      result.itemsText = items
+        .map((it: any) => {
+          const desc = String(it?.description || '').trim();
+          if (!desc) return '';
+          const qty = it?.qty != null && String(it.qty).trim() ? ` (כמות: ${it.qty})` : '';
+          return `- ${desc}${qty}`;
+        })
+        .filter(Boolean)
+        .join('\n');
+    } catch (e: any) {
+      this.logger.warn(`gatherQuoteContent items failed: ${e?.message || e}`);
+    }
+
+    // טקסט המסמך הממוזג האחרון — רק אם זה DOCX (PDF איננו ניתן לחילוץ כאן).
+    try {
+      const doc: any = await (this.prisma as any).quoteDocument
+        .findFirst({
+          where: { quoteId },
+          orderBy: { createdAt: 'desc' },
+          select: { data: true, mimeType: true, fileName: true },
+        })
+        .catch(() => null);
+      const mime = String(doc?.mimeType || '');
+      const isDocx = /word|officedocument/i.test(mime) || /\.docx$/i.test(String(doc?.fileName || ''));
+      if (doc?.data && isDocx) {
+        result.docText = this.extractDocxText(Buffer.from(doc.data));
+      }
+    } catch (e: any) {
+      this.logger.warn(`gatherQuoteContent docx failed: ${e?.message || e}`);
+    }
+
+    return result;
+  }
+
+  /** מחלץ טקסט גולמי מ-DOCX (word/document.xml) — פסקאות מופרדות בשורה חדשה. מוגבל באורך לפרומפט. */
+  private extractDocxText(docx: Buffer): string {
+    try {
+      const zip = new PizZip(docx);
+      const f = zip.file('word/document.xml');
+      if (!f) return '';
+      let xml = f.asText();
+      xml = xml.replace(/<\/w:p>/g, '\n'); // סוף פסקה → שורה חדשה
+      xml = xml.replace(/<w:tab\b[^>]*\/>/g, ' '); // טאב → רווח
+      const text = xml
+        .replace(/<[^>]+>/g, '') // הסרת כל התגים
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .join('\n');
+      return text.slice(0, 6000); // תקרה לפרומפט — מספיק לתיאור העבודה
+    } catch (e: any) {
+      this.logger.warn(`extractDocxText failed: ${e?.message || e}`);
+      return '';
+    }
   }
 
   /**

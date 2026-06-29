@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument = require('pdfkit');
@@ -70,7 +71,12 @@ const QUOTE_WRITABLE_FIELDS = new Set([
 
 @Injectable()
 export class QuotesService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(QuotesService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly graphFiles: GraphFilesService,
+  ) {}
 
   private sanitizeQuoteInput(data: any) {
     if (!data || typeof data !== 'object') return {};
@@ -506,9 +512,15 @@ export class QuotesService {
     return doc ?? null;
   }
 
-  async saveMergedDoc(id: string, base64Data: string, fileName: string) {
+  async saveMergedDoc(id: string, base64Data: string, fileName: string, mimeType?: string) {
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const quote = await this.prisma.quote.findUnique({ where: { id } });
     if (!quote) throw new NotFoundException('Quote not found');
+
+    // PDF סופי שיוצא מ-Word דסקטופ (Save as PDF) — נשמר ונשלח כמות-שהוא, בלי המרת שרת,
+    // כדי לשמר את נאמנות הכותרת (VML/תיבות-טקסט) שמנוע ה-render של השרת מקלקל.
+    const isPdf = /pdf/i.test(mimeType || '') || /\.pdf$/i.test(fileName);
+    const resolvedMime = isPdf ? 'application/pdf' : (mimeType || DOCX_MIME);
 
     const quotesDir = path.join(process.cwd(), 'storage', 'quotes');
     if (!fs.existsSync(quotesDir)) fs.mkdirSync(quotesDir, { recursive: true });
@@ -526,15 +538,110 @@ export class QuotesService {
         fileName: safeName,
         filePath: relPath,
         data: Uint8Array.from(buffer),
-        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        documentType: 'MERGED_DOCX',
-        documentDescription: 'מסמך ממוזג',
+        mimeType: resolvedMime,
+        documentType: isPdf ? 'MERGED_PDF' : 'MERGED_DOCX',
+        documentDescription: isPdf ? 'PDF סופי (Word)' : 'מסמך ממוזג',
       },
     });
+
+    // PDF סופי: לא נוגעים ב-DOCX הקנוני ולא ב-OneDrive — הוא משמש רק לשליחה המיידית,
+    // וה-DOCX לעריכה נשאר זמין כפי שהיה.
+    if (isPdf) {
+      return quote;
+    }
+
+    // מיזוג DOCX חדש מחליף את הגרסה הקנונית → מבטלים הפניית OneDrive ישנה כך ש"ערוך ב-Word"
+    // הבא יעלה את התוכן הממוזג העדכני (guarded — אם העמודות עדיין לא הוגרו, נתעלם).
+    try {
+      await (this.prisma.quote.update as any)({
+        where: { id },
+        data: { onedriveItemId: null, onedriveWebUrl: null, onedriveOwnerId: null },
+      });
+    } catch {
+      /* עמודות OneDrive עדיין לא קיימות ב-DB */
+    }
 
     return this.prisma.quote.update({
       where: { id },
       data: { lastMergedDocPath: relPath },
     });
+  }
+
+  /** הפניית ה-OneDrive השמורה להצעה (null אם אין / אם העמודות עדיין לא הוגרו ב-DB). */
+  async getOnedriveRef(
+    id: string,
+  ): Promise<{ itemId: string; webUrl: string | null; ownerId: string } | null> {
+    try {
+      const ref: any = await (this.prisma.quote.findUnique as any)({
+        where: { id },
+        select: { onedriveItemId: true, onedriveWebUrl: true, onedriveOwnerId: true },
+      });
+      if (ref?.onedriveItemId && ref?.onedriveOwnerId) {
+        return { itemId: ref.onedriveItemId, webUrl: ref.onedriveWebUrl ?? null, ownerId: ref.onedriveOwnerId };
+      }
+    } catch {
+      // עמודות OneDrive עדיין לא קיימות ב-DB (לפני הרצת המיגרציה) — נתעלם בשקט.
+    }
+    return null;
+  }
+
+  /**
+   * פותח את ההצעה לעריכה ב-Word דרך OneDrive — מחזיר webUrl לפתיחה.
+   *
+   * אם כבר קיים קובץ פעיל ב-OneDrive → מחזיר אותו (לא מעלים מחדש, כדי לא לדרוס עריכות).
+   * אחרת → מעלה את המסמך הממוזג האחרון ל-OneDrive ושומר את ההפניה.
+   * מרגע זה והלאה, שליחת המייל מושכת את הגרסה העדכנית מ-OneDrive.
+   */
+  async openInOneDrive(id: string, userId: string): Promise<{ webUrl: string; itemId: string; reused: boolean }> {
+    if (!userId) throw new BadRequestException('משתמש לא מזוהה — יש להתחבר מחדש');
+    const quote = await this.prisma.quote.findUnique({ where: { id } });
+    if (!quote) throw new NotFoundException('Quote not found');
+
+    // קובץ פעיל קיים ושייך למשתמש הנוכחי? נחזיר אותו (שמירה על העריכות שכבר נעשו).
+    const existing = await this.getOnedriveRef(id);
+    if (existing && existing.ownerId === userId) {
+      try {
+        const item = await this.graphFiles.getItem(existing.ownerId, existing.itemId);
+        if (item) return { webUrl: item.webUrl, itemId: item.itemId, reused: true };
+      } catch (e: any) {
+        this.logger.warn(`OneDrive getItem failed (${id}), will re-upload: ${e?.message || e}`);
+      }
+    }
+
+    // אחרת — מעלים את המסמך הממוזג האחרון. שם דטרמיניסטי וייחודי-להצעה (כולל מזהה קצר),
+    // כדי שטיוטות ללא מספר הצעה לא ידרסו זו את זו ב-OneDrive.
+    const latest = await this.getLatestMergedDocument(id);
+    let bytes: Buffer | null = null;
+    if (latest?.data) {
+      bytes = Buffer.from(latest.data);
+    } else {
+      const relPath = latest?.filePath || (quote as any).lastMergedDocPath || null;
+      if (relPath) {
+        const abs = path.resolve(process.cwd(), relPath);
+        if (fs.existsSync(abs)) bytes = fs.readFileSync(abs);
+      }
+    }
+    if (!bytes) {
+      throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
+    }
+    const fileName = `הצעת מחיר ${quote.quoteNumber ? quote.quoteNumber + ' ' : ''}${id.slice(0, 8)}`.trim();
+
+    const uploaded = await this.graphFiles.uploadEditable(userId, fileName, bytes);
+
+    // שמירת ההפניה (guarded — אם העמודות עדיין לא הוגרו, לא נפיל את הבקשה).
+    try {
+      await (this.prisma.quote.update as any)({
+        where: { id },
+        data: {
+          onedriveItemId: uploaded.itemId,
+          onedriveWebUrl: uploaded.webUrl,
+          onedriveOwnerId: userId,
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(`Saving OneDrive ref failed (run migration?) for ${id}: ${e?.message || e}`);
+    }
+
+    return { webUrl: uploaded.webUrl, itemId: uploaded.itemId, reused: false };
   }
 }

@@ -891,6 +891,10 @@ export function QuoteNewScreen({
   const [taskLookupChecked, setTaskLookupChecked] = useState<boolean>(!taskId);
   const [draftReady, setDraftReady] = useState<boolean>(false);
   const [lastMergedDocPath, setLastMergedDocPath] = useState<string | null>(null);
+  // OneDrive — עריכה ב-Word עם שמירה-חזרה אוטומטית: webUrl לפתיחה + דגל "פעיל".
+  const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
+  const [onedriveActive, setOnedriveActive] = useState(false);
+  const [onedriveBusy, setOnedriveBusy] = useState(false);
   useEffect(() => {
     if (!taskId) return;
     const fromUrl =
@@ -1033,6 +1037,11 @@ export function QuoteNewScreen({
         if (typeof q.lastMergedDocPath === 'string' && q.lastMergedDocPath) {
           setLastMergedDocPath(q.lastMergedDocPath);
         }
+        // שחזור מצב OneDrive — אם להצעה כבר יש קובץ ניתן-לעריכה ב-Word.
+        if (typeof q.onedriveWebUrl === 'string' && q.onedriveWebUrl) {
+          setOnedriveWebUrl(q.onedriveWebUrl);
+          setOnedriveActive(true);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -1100,40 +1109,43 @@ export function QuoteNewScreen({
     setNewPaymentTermLabel('');
   }
 
-  // יצירת/שיפור נושא ותוכן עם AI (OpenAI דרך השרת)
-  async function generateAiDraft() {
+  // ניסוח נושא+גוף המייל עם AI (OpenAI דרך השרת) — נקרא אוטומטית בשמירה.
+  // לא נשלח קובץ: השרת מחלץ את תוכן ההצעה (פריטי שורה + טקסט המסמך הממוזג) ומנסח ממנו.
+  // התוצאה נשמרת ב-aiDraft לפי quoteId, כך שחלון השליחה מציג אותה מוכנה (מתעדכן אוטומטית).
+  async function generateEmailDraft(quoteId?: string | null, opts?: { force?: boolean; instruction?: string }) {
+    const qid = quoteId || quoteIdRef.current;
+    if (!qid) return;
+    const instruction = opts?.instruction?.trim();
+    const force = opts?.force || !!instruction; // רענון/בקשת-שינוי מפורשת גוברת על "עריכה ידנית"
+    if (!force && emailDraftEditedRef.current) return; // מכבד עריכה ידנית קיימת
+    if (draftInFlightRef.current) return; // ניסוח כבר רץ
+    draftInFlightRef.current = true;
     setAiBusy(true);
-    const prevSubject = emailForm.subject;
-    const prevBody = emailForm.body;
+    setStatusMsg(instruction ? '✨ מעדכן…' : '✨ מנסח מייל…');
     try {
       const r = await apiFetch(apiUrl('/ai-mail/quote-draft'), {
         method: 'POST',
         authUser: getSessionUser(),
         body: JSON.stringify({
-          quoteId: emailForm.quoteId || undefined, // לשליפת סכום/תנאי תשלום/מספר אוטומטית
+          quoteId: qid, // השרת שולף סכום/תנאי תשלום/מספר + פריטים + טקסט המסמך
           customerName: customer || '',
           contactName: contact || '',
-          serviceName: emailForm.serviceName || reference || '',
+          serviceName: (reference || quoteNo || '').trim(),
           quoteNumber: (reference || quoteNo || '').trim(),
-          // שאלון פרטי המקרה
-          location: aiForm.location.trim() || undefined,
-          inspectionType: aiForm.inspectionType.trim() || undefined,
-          duration: aiForm.duration.trim() || undefined,
-          extraDetails: aiForm.extraDetails.trim() || undefined,
-          instruction: aiInstruction.trim() || undefined,
-          // כולל את הגרסה הקודמת לשיפור איטרטיבי
-          previousSubject: (prevSubject || '').trim() || undefined,
-          previousBody: (prevBody || '').trim() || undefined,
+          // בקשת שינוי איטרטיבית: שולחים את הגרסה הנוכחית + ההנחיה
+          instruction: instruction || undefined,
+          previousSubject: instruction ? (emailForm.subject || '').trim() || undefined : undefined,
+          previousBody: instruction ? (emailForm.body || '').trim() || undefined : undefined,
         }),
       });
       if (r.ok) {
         const d = await r.json();
-        setEmailForm((p) => ({
-          ...p,
-          subject: d.subject || p.subject,
-          body: d.body || p.body,
-        }));
-        // הצגת הנתונים שהשרת שיבץ אוטומטית
+        const subject = d.subject || '';
+        const body = d.body || '';
+        emailDraftEditedRef.current = false; // התוכן הטרי מה-AI הוא הבסיס
+        setAiDraft({ quoteId: qid, subject, body });
+        // עדכון חי של חלון השליחה אם הוא פתוח על אותה הצעה
+        setEmailForm((p) => (p.quoteId === qid ? { ...p, subject: subject || p.subject, body: body || p.body } : p));
         if (d.facts) {
           const f = d.facts;
           const noteParts = [
@@ -1144,9 +1156,8 @@ export function QuoteNewScreen({
           ].filter(Boolean);
           setAiFactsNote(noteParts.length ? '✓ שובץ אוטומטית: ' + noteParts.join(' · ') : '');
         }
-        setAiInstruction('');
-        setAiPanelOpen(false);
-        setEmailHasDraft(true); // יש ניסוח — הצג preview
+        setStatusMsg('✓ נוסח המייל מוכן');
+        setTimeout(() => setStatusMsg(''), 4000);
       } else {
         const e = await r.json().catch(() => null);
         setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
@@ -1156,6 +1167,7 @@ export function QuoteNewScreen({
       setStatusMsg('שגיאה בפנייה ל-AI');
       setTimeout(() => setStatusMsg(''), 4000);
     } finally {
+      draftInFlightRef.current = false;
       setAiBusy(false);
     }
   }
@@ -1225,6 +1237,8 @@ export function QuoteNewScreen({
           attachmentId: f.attId || undefined,
           // כל הקבצים שיצורפו (הראשי + הנוספים) — כל DOCX יומר ל-PDF בצד השרת בזמן השליחה.
           attachmentIds: [f.attId, ...emailExtraAttIds].filter(Boolean),
+          // אם ההצעה נערכה ב-Word (OneDrive) — השרת ימשוך את הגרסה העדכנית משם.
+          preferOnedrive: onedriveActive || undefined,
           docUrl: f.docLink,
           customerName: customer || '',
         }),
@@ -1248,6 +1262,43 @@ export function QuoteNewScreen({
       setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
       setTimeout(() => setStatusMsg(''), 7000);
     }
+  }
+
+  // מייצר קישור חתימה ציבורי להצעה — הלקוח פותח אותו, רואה את ה-PDF וחותם באצבע
+  async function requestSignatureLink() {
+    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה לחתימה'); return; }
+    setSignBusy(true); setSignLink(''); setSignCopied(false); setStatusMsg('מכין קישור לחתימה…');
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${emailForm.quoteId}/request-signature`), {
+        method: 'POST',
+        authUser: getSessionUser(),
+      });
+      if (!r.ok) {
+        let msg = 'יצירת קישור החתימה נכשלה';
+        try { const e = await r.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message[0] : e.message; } catch { /* ignore */ }
+        setStatusMsg(msg);
+        return;
+      }
+      const d = await r.json();
+      setSignLink(`${window.location.origin}/sign/${d.token}`);
+      setSignPhone(String(d.customerPhone || '').replace(/\D/g, ''));
+      setStatusMsg('');
+    } catch {
+      setStatusMsg('יצירת קישור החתימה נכשלה');
+    } finally {
+      setSignBusy(false);
+    }
+  }
+
+  // פותח את הקישור בוואטסאפ של הלקוח (אם יש מספר), אחרת בורר נמען
+  function shareSignViaWhatsApp() {
+    const msg = `שלום, הצעת המחיר מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${signLink}`;
+    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
+    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+  }
+
+  async function copySignLink() {
+    try { await navigator.clipboard.writeText(signLink); setSignCopied(true); setTimeout(() => setSignCopied(false), 2000); } catch { /* ignore */ }
   }
 
   // תחזית
@@ -1301,13 +1352,24 @@ export function QuoteNewScreen({
   const [emailAttBusy, setEmailAttBusy] = useState(false);
   const [emailHasDraft, setEmailHasDraft] = useState(false); // האם כבר נוצר/קיים ניסוח להצגה ב-preview
   const [editingField, setEditingField] = useState<null | 'subject' | 'body'>(null); // עריכה inline
+  // ── שליחה לחתימה דיגיטלית: קישור ציבורי שהלקוח פותח כדי לחתום על ההצעה ──
+  const [signBusy, setSignBusy] = useState(false);
+  const [signLink, setSignLink] = useState('');
+  const [signPhone, setSignPhone] = useState('');
+  const [signCopied, setSignCopied] = useState(false);
   // AI ניסוח
   const [aiBusy, setAiBusy] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
-  // שאלון פרטי המקרה ל-AI
+  // שאלון פרטי המקרה ל-AI (נשאר עבור ניסוח וואטסאפ; שאלון המייל הוסר — הניסוח אוטומטי בשמירה)
   const [aiForm, setAiForm] = useState({ location: '', inspectionType: '', duration: '', extraDetails: '' });
   const [aiFactsNote, setAiFactsNote] = useState(''); // הצגת הנתונים שהשרת שיבץ
+  // ניסוח המייל נוצר אוטומטית בשמירה ונשמר כאן (לפי quoteId), כך שחלון השליחה מציג אותו מוכן.
+  const [aiDraft, setAiDraft] = useState<{ quoteId: string; subject: string; body: string } | null>(null);
+  // האם המשתמש ערך ידנית את נושא/גוף המייל — אם כן, שמירה חוזרת לא תדרוס את העריכה.
+  const emailDraftEditedRef = useRef(false);
+  // מונע קריאות AI מקבילות (closure של aiBusy מתיישן).
+  const draftInFlightRef = useRef(false);
 
   // ── וואטסאפ: ניסוח AI קצר (בלי נושא) → שליחה ב-wa.me למספר הלקוח ──
   const [waOpen, setWaOpen] = useState(false);
@@ -1563,6 +1625,57 @@ export function QuoteNewScreen({
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       /* silent */
+    }
+  }
+
+  /* ── עריכה ב-Word דרך OneDrive (שמירה-חזרה אוטומטית) ──
+   * מעלה את המסמך הממוזג ל-OneDrive (פעם אחת) ופותח אותו ב-Word *של המחשב* (לא Word Online).
+   * חשוב: Word Online לא שומר נאמנות לתמונות צפות/מעוגנות (לוגו, חתימה) ודוחף אותן לראש העמוד —
+   * לכן פותחים ב-Word דסקטופ דרך פרוטוקול ms-word, ששומר על הפריסה במדויק ועדיין שומר לענן. */
+  function buildDesktopWordUrl(webUrl: string): string {
+    // ms-word:ofe|u|<URL> = "Open For Edit". מסירים פרמטרי query (?web=1 וכו') שמכריחים דפדפן.
+    const clean = webUrl.split('?')[0];
+    return `ms-word:ofe|u|${clean}`;
+  }
+  function openInDesktopWord(webUrl: string) {
+    // הפעלת ה-protocol handler דרך עוגן זמני — כך הדף הנוכחי לא מנווט/נסגר.
+    const a = document.createElement('a');
+    a.href = buildDesktopWordUrl(webUrl);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  async function handleEditInWord() {
+    const id = quoteIdRef.current;
+    if (!id) { setStatusMsg('שגיאה: יש לשמור ולמזג את ההצעה לפני עריכה ב-Word'); return; }
+    const user = getSessionUser();
+    if (!user) return;
+    setOnedriveBusy(true);
+    setStatusMsg('פותח ב-Word…');
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${id}/onedrive-edit`), { authUser: user, method: 'POST' });
+      if (!r.ok) {
+        let msg = 'פתיחה ב-Word נכשלה — ודא שחשבון ה-Outlook מחובר';
+        try { const e = await r.json(); msg = e?.message || msg; } catch { /* ignore */ }
+        setStatusMsg(`שגיאה: ${msg}`);
+        return;
+      }
+      const data = await r.json();
+      if (data?.webUrl) {
+        setOnedriveWebUrl(data.webUrl);
+        setOnedriveActive(true);
+        // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה). אם Word לא מותקן —
+        // אפשר לפתוח בדפדפן מהקישור בחלון השליחה (לא מומלץ — פוגע בפריסת תמונות).
+        openInDesktopWord(data.webUrl);
+        setStatusMsg('נפתח ב-Word במחשב — השינויים יישמרו אוטומטית, ובשליחה תצא הגרסה העדכנית');
+        setTimeout(() => setStatusMsg(''), 8000);
+      } else {
+        setStatusMsg('שגיאה: לא התקבלה כתובת פתיחה');
+      }
+    } catch {
+      setStatusMsg('שגיאה: פתיחה ב-Word נכשלה');
+    } finally {
+      setOnedriveBusy(false);
     }
   }
 
@@ -2154,6 +2267,8 @@ export function QuoteNewScreen({
       a.click();
       document.body.removeChild(a);
       setMergedFiles((prev) => [...prev, { name: fileName, url }]);
+      // מיזוג חדש מחליף את הגרסה הקנונית — מבטלים את מצב OneDrive הישן.
+      setOnedriveActive(false); setOnedriveWebUrl(null);
       setTimeout(() => URL.revokeObjectURL(url), 300000); // keep alive 5 min for re-download
 
       // ── Persist the merged file to task attachment and/or quote record ──
@@ -2207,6 +2322,8 @@ export function QuoteNewScreen({
     const url = URL.createObjectURL(file);
     const fileName = file.name;
     setMergedFiles((prev) => [...prev, { name: fileName, url }]);
+    // מיזוג חדש מחליף את הגרסה הקנונית — מבטלים את מצב OneDrive הישן.
+    setOnedriveActive(false); setOnedriveWebUrl(null);
     setTimeout(() => URL.revokeObjectURL(url), 300000);
     const currentQuoteId = quoteIdRef.current;
     if (user && (taskId || currentQuoteId)) {
@@ -2264,19 +2381,28 @@ export function QuoteNewScreen({
         if (created?.id) newId = created.id;
         onAttachmentSaved?.();
       }
+      const isPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(fileName);
       const currentQuoteId = quoteIdRef.current || emailForm.quoteId;
       if (currentQuoteId) {
         await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
           authUser: user,
           method: 'POST',
-          body: JSON.stringify({ base64Data: dataBase64, fileName }),
+          body: JSON.stringify({ base64Data: dataBase64, fileName, mimeType: file.type || undefined }),
         });
       }
+      // קובץ ידני (DOCX ערוך או PDF סופי מ-Word) גובר על OneDrive — מבטלים את מצב OneDrive.
+      setOnedriveActive(false); setOnedriveWebUrl(null);
       if (newId) {
+        // יש משימה → נשלח דרך ה-TaskAttachment (עם ה-mime הנכון; PDF נשלח כמות-שהוא).
         setLastMergedAttachmentId(newId);
         setEmailAttachments((prev) => [{ id: newId, fileName, createdAt: new Date().toISOString() }, ...prev.filter((a) => a.id !== newId)]);
         setEmailForm((p) => ({ ...p, attId: newId }));
-        setStatusMsg('הגרסה הערוכה צורפה — היא זו שתישלח');
+        setStatusMsg(isPdf ? 'ה-PDF צורף — הוא יישלח בדיוק כפי שהוא (נאמנות מלאה)' : 'הגרסה הערוכה צורפה — היא זו שתישלח');
+        setTimeout(() => setStatusMsg(''), 4000);
+      } else if (currentQuoteId) {
+        // אין משימה → נשלח דרך ה-QuoteDocument האחרון שנשמר; מנקים בחירת קובץ ספציפי.
+        setEmailForm((p) => ({ ...p, attId: '' }));
+        setStatusMsg(isPdf ? 'ה-PDF צורף — הוא יישלח בדיוק כפי שהוא (נאמנות מלאה)' : 'הגרסה צורפה — היא זו שתישלח');
         setTimeout(() => setStatusMsg(''), 4000);
       } else {
         setStatusMsg('צירוף הקובץ נכשל');
@@ -2447,13 +2573,25 @@ export function QuoteNewScreen({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => doSave({ advanceStage: false })}>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => { const id = await doSave({ advanceStage: false }); if (id) void generateEmailDraft(id); }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
             <span className="text-[10px] text-gray-500">שמור</span>
           </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!savedOnce || !canMerge} title={!savedOnce ? 'יש לשמור את ההצעה לפני המיזוג' : (!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined)} onClick={() => handleMergeClick()}>
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
+          </button>
+          <button
+            type="button"
+            className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={onedriveBusy || !(mergedFiles.length > 0 || !!lastMergedDocPath || !!lastMergedAttachmentId || onedriveActive)}
+            title={!(mergedFiles.length > 0 || !!lastMergedDocPath || !!lastMergedAttachmentId || onedriveActive) ? 'יש לבצע מיזוג לפני עריכה ב-Word' : 'ערוך ב-Word — השינויים יישמרו אוטומטית ובשליחה תצא הגרסה העדכנית'}
+            onClick={() => handleEditInWord()}
+          >
+            <span className={`h-10 w-10 rounded-full border flex items-center justify-center ${onedriveActive ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-gray-200 bg-white text-blue-500 hover:bg-blue-50 hover:text-blue-600'}`}>
+              {onedriveBusy ? <RefreshCw size={18} className="animate-spin" /> : <Pencil size={18} />}
+            </span>
+            <span className="text-[10px] text-gray-500">{onedriveActive ? 'פתח ב-Word' : 'ערוך ב-Word'}</span>
           </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={!savedOnce || isBusy} title={!savedOnce ? 'יש לשמור את ההצעה לפני שליחה במייל' : undefined} onClick={async () => {
             const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
@@ -2501,17 +2639,19 @@ export function QuoteNewScreen({
               sigImg = `data:${sigList[0].imageType || 'image/png'};base64,${sigList[0].dataBase64}`;
             }
             setEmailSignatures(sigList);
-            // ערכי ברירת מחדל
-            const defSubject = `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
-            const defBody = `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
+            // אם כבר קיים ניסוח AI שנוצר בשמירה עבור ההצעה הזו — מציגים אותו; אחרת נוסח ברירת מחדל,
+            // ומפעילים ניסוח אוטומטי שיעדכן את החלון חי כשיחזור.
+            const draftReady = !!aiDraft && aiDraft.quoteId === id;
+            const defSubject = draftReady ? aiDraft!.subject : `הצעת מחיר${ref ? ' ' + ref : ''}${customer ? ' - ' + customer : ''}`;
+            const defBody = draftReady ? aiDraft!.body : `שלום ${contact || customer || ''},\n\nמצורפת הצעת המחיר${ref ? ' ' + ref : ''}.\nנשמח לעמוד לרשותך לכל שאלה.`;
             setEmailHasSignature(hasSig);
             setEmailSigImage(sigImg);
-            setEmailHasDraft(false); // מתחילים מהשאלון, ה-preview יופיע אחרי generate
+            setEmailHasDraft(true); // השאלון הוסר — תמיד מציגים את ה-preview
             setEditingField(null);
             setAiInstruction('');
             setAiPanelOpen(false);
-            setAiForm({ location: '', inspectionType: '', duration: '', extraDetails: '' });
-            setAiFactsNote('');
+            emailDraftEditedRef.current = false; // טקסט טרי שנטען לחלון
+            if (!draftReady) setAiFactsNote('');
             setEmailForm({
               toList: to ? [to] : [],
               toInput: '',
@@ -2528,6 +2668,7 @@ export function QuoteNewScreen({
             });
             setEmailExtraAttIds([]); // איפוס קבצים נוספים בכל פתיחה של חלון השליחה
             setEmailModalOpen(true);
+            if (!draftReady) void generateEmailDraft(id); // אין ניסוח עדיין — מנסחים עכשיו (יתעדכן חי)
           }}>
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><Mail size={18} /></span>
             <span className="text-[10px] text-gray-500">שלח במייל</span>
@@ -3017,58 +3158,20 @@ export function QuoteNewScreen({
                 </div>
               </div>
 
-              {/* ── שלב 1: שאלון AI (מוצג עד שיש ניסוח) ── */}
-              {!emailHasDraft && (
-                <div className="rounded-2xl border-2 border-blue-200 bg-blue-50/60 p-5">
-                  <div className="mb-1 text-base font-bold text-blue-800">✨ ניסוח חכם (AI)</div>
-                  <div className="mb-4 text-sm text-blue-600">מלא את פרטי המקרה והמערכת תנסח עבורך נושא ותוכן מקצועיים.</div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-700">מיקום מדויק</label>
-                      <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                        value={aiForm.location} onChange={(e) => setAiForm((p) => ({ ...p, location: e.target.value }))}
-                        placeholder="מבנה משרדים, נתיבות" />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-sm font-medium text-blue-700">משך ביצוע משוער</label>
-                      <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                        value={aiForm.duration} onChange={(e) => setAiForm((p) => ({ ...p, duration: e.target.value }))}
-                        placeholder="עד 5 ימי עסקים" />
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <label className="mb-1 block text-sm font-medium text-blue-700">אופן / סוג העבודה</label>
-                    <input className="h-11 w-full rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                      value={aiForm.inspectionType} onChange={(e) => setAiForm((p) => ({ ...p, inspectionType: e.target.value }))}
-                      placeholder="מיגון קרינה לקירות ולתקרה + דוח יישום" />
-                  </div>
-                  <div className="mt-3">
-                    <label className="mb-1 block text-sm font-medium text-blue-700">הערות נוספות <span className="font-normal text-blue-400">(אופציונלי)</span></label>
-                    <textarea rows={2} className="w-full rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 resize-y"
-                      value={aiForm.extraDetails} onChange={(e) => setAiForm((p) => ({ ...p, extraDetails: e.target.value }))}
-                      placeholder="כל פרט שיעזור לנסח…" />
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <button type="button" disabled={aiBusy} className="rounded-xl bg-blue-600 px-7 py-3 text-base font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-                      onClick={() => generateAiDraft()}>
-                      {aiBusy ? '✨ מנסח…' : '✨ נסח לי מייל'}
-                    </button>
-                    <button type="button" disabled={aiBusy} className="text-sm text-gray-500 underline hover:text-gray-700"
-                      onClick={() => { setEmailHasDraft(true); }}>
-                      דלג — כתוב ידנית
-                    </button>
-                  </div>
-                  <div className="mt-2 text-sm text-blue-600">סה"כ, תנאי תשלום ותוקף משובצים אוטומטית מההצעה.</div>
-                </div>
-              )}
-
-              {/* ── שלב 2: PREVIEW מושקע של המייל (אחרי ניסוח) ── */}
+              {/* ── PREVIEW מושקע של המייל — הניסוח נוצר אוטומטית בשמירה (שאלון ה-AI הוסר) ── */}
               {emailHasDraft && (
                 <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
                   {/* כותרת ה-preview */}
                   <div className="flex items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-l from-blue-50 to-white px-5 py-3">
                     <span className="text-sm font-bold text-gray-700">👁️ תצוגה מקדימה של המייל</span>
-                    {aiBusy && <span className="text-sm text-blue-600">✨ מעדכן…</span>}
+                    {aiBusy ? (
+                      <span className="text-sm text-blue-600">✨ מנסח…</span>
+                    ) : (
+                      <button type="button" className="text-sm font-medium text-blue-600 underline hover:text-blue-800"
+                        onClick={() => void generateEmailDraft(emailForm.quoteId, { force: true })}>
+                        ✨ נסח מחדש
+                      </button>
+                    )}
                   </div>
 
                   {/* גוף ה-preview — נראה כמו מייל אמיתי */}
@@ -3076,7 +3179,7 @@ export function QuoteNewScreen({
                     {/* נושא — לחיצה לעריכה */}
                     {editingField === 'subject' ? (
                       <input autoFocus className="mb-4 w-full rounded-lg border-2 border-blue-300 px-3 py-2 text-lg font-bold outline-none"
-                        value={emailForm.subject} onChange={(e) => setEmailForm((p) => ({ ...p, subject: e.target.value }))}
+                        value={emailForm.subject} onChange={(e) => { emailDraftEditedRef.current = true; setEmailForm((p) => ({ ...p, subject: e.target.value })); }}
                         onBlur={() => setEditingField(null)}
                         onKeyDown={(e) => { if (e.key === 'Enter') setEditingField(null); }} />
                     ) : (
@@ -3093,7 +3196,7 @@ export function QuoteNewScreen({
                     {/* תוכן — לחיצה לעריכה */}
                     {editingField === 'body' ? (
                       <textarea autoFocus rows={12} className="w-full rounded-lg border-2 border-blue-300 px-3 py-2 text-base leading-relaxed outline-none resize-y"
-                        value={emailForm.body} onChange={(e) => setEmailForm((p) => ({ ...p, body: e.target.value }))}
+                        value={emailForm.body} onChange={(e) => { emailDraftEditedRef.current = true; setEmailForm((p) => ({ ...p, body: e.target.value })); }}
                         onBlur={() => setEditingField(null)} />
                     ) : (
                       <div className="group cursor-text rounded-lg px-2 py-1 -mx-2 hover:bg-blue-50" onClick={() => setEditingField('body')} title="לחץ לעריכה">
@@ -3169,6 +3272,22 @@ export function QuoteNewScreen({
                     )}
                     {/* ── קובץ ההצעה שיישלח: בחירה + העלאת גרסה ערוכה ── */}
                     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+                      {onedriveActive && (
+                        <div className="mb-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-800">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base leading-none">📝</span>
+                            <span className="flex-1">הקובץ נערך ב-<strong>Word</strong>. <strong className="text-emerald-700">לכותרת מושלמת:</strong> ב-Word עשה <strong>Save as PDF</strong> והעלה למטה — אחרת השרת ימיר ועלול להזיז את הכותרת.</span>
+                            {onedriveWebUrl && (
+                              <button type="button" onClick={() => openInDesktopWord(onedriveWebUrl)} className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1 font-semibold text-white hover:bg-blue-700">פתח ב-Word (מחשב)</button>
+                            )}
+                          </div>
+                          {onedriveWebUrl && (
+                            <div className="mt-1 pr-6 text-[11px] text-blue-500">
+                              לא נפתח? <a href={onedriveWebUrl} target="_blank" rel="noopener noreferrer" className="underline">פתח בדפדפן</a> — שים לב: עריכה בדפדפן עלולה להזיז תמונות לראש העמוד.
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2.5">
                         <label className="text-sm font-medium text-gray-700 shrink-0">📎 קובץ שיישלח:</label>
                         {emailAttachments.length > 1 ? (
@@ -3190,14 +3309,16 @@ export function QuoteNewScreen({
                       <label className={`mt-2 flex items-center justify-center gap-2 rounded-lg border border-dashed border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 cursor-pointer ${emailAttBusy ? 'opacity-50 pointer-events-none' : ''}`}>
                         <input
                           type="file"
-                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                           className="hidden"
                           disabled={emailAttBusy}
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadEditedQuoteFile(f); e.currentTarget.value = ''; }}
                         />
-                        {emailAttBusy ? 'מצרף…' : '⬆️ העלה גרסה ערוכה (תחליף את הקובץ שיישלח)'}
+                        {emailAttBusy ? 'מצרף…' : '⬆️ העלה גרסה ערוכה (DOCX או PDF)'}
                       </label>
-                      <div className="mt-1 text-[11px] text-gray-400">ערכת את הקובץ שירד? העלה אותו כאן — הגרסה הזו תצורף במקום המקורית.</div>
+                      <div className="mt-1 text-[11px] text-gray-500">
+                        <strong className="text-emerald-700">לנאמנות מלאה של הכותרת:</strong> ב-Word עשה <strong>File → Save as PDF</strong> והעלה את ה-PDF כאן — הוא יישלח בדיוק כפי שהוא, בלי המרת שרת שמזיזה תמונות. (DOCX שמועלה כאן עדיין יומר ל-PDF בשרת.)
+                      </div>
 
                       {/* ── קבצים נוספים: יישלחו בנוסף לקובץ הראשי, וכל DOCX יומר ל-PDF ── */}
                       {emailExtraAttIds.length > 0 && (
@@ -3230,17 +3351,13 @@ export function QuoteNewScreen({
                         <input className="h-11 flex-1 rounded-xl border border-blue-200 bg-white px-3 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                           value={aiInstruction} onChange={(e) => setAiInstruction(e.target.value)}
                           placeholder="'יותר קצר', 'תוסיף שזמינים השבוע'…"
-                          onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim() && !aiBusy) generateAiDraft(); }} />
+                          onKeyDown={(e) => { if (e.key === 'Enter' && aiInstruction.trim() && !aiBusy) { const ins = aiInstruction; setAiInstruction(''); void generateEmailDraft(emailForm.quoteId, { instruction: ins }); } }} />
                         <button type="button" disabled={aiBusy || !aiInstruction.trim()} className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
-                          onClick={() => generateAiDraft()}>
+                          onClick={() => { const ins = aiInstruction; setAiInstruction(''); void generateEmailDraft(emailForm.quoteId, { instruction: ins }); }}>
                           {aiBusy ? 'מעדכן…' : 'עדכן'}
                         </button>
                       </div>
                     </div>
-                    <button type="button" disabled={aiBusy} className="text-sm text-gray-500 underline hover:text-gray-700"
-                      onClick={() => { setEmailHasDraft(false); setEditingField(null); }}>
-                      ↻ חזרה לשאלון
-                    </button>
                   </div>
                 </div>
               )}
@@ -3248,9 +3365,34 @@ export function QuoteNewScreen({
 
             {statusMsg && <div className="mt-4 text-base font-medium text-gray-600">{statusMsg}</div>}
 
+            {/* ── קישור חתימה דיגיטלית: נוצר בלחיצה על "שלח לחתימה" ── */}
+            {signLink && (
+              <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <div className="mb-1.5 text-sm font-bold text-emerald-800">🖊️ קישור לחתימת הלקוח מוכן</div>
+                <div className="mb-2.5 text-[12px] text-emerald-700">שלח את הקישור ללקוח — הוא יפתח את ההצעה בנייד, יחתום באצבע, וההצעה החתומה תישמר אוטומטית אצל הלקוח.</div>
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                  <input readOnly dir="ltr" value={signLink} className="flex-1 min-w-0 truncate bg-transparent text-xs text-slate-600 outline-none" onFocus={(e) => e.currentTarget.select()} />
+                  <button type="button" onClick={copySignLink} className="shrink-0 rounded-md bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 hover:bg-slate-200">
+                    {signCopied ? 'הועתק ✓' : 'העתק'}
+                  </button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button type="button" onClick={shareSignViaWhatsApp} className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-xs font-bold text-white hover:brightness-110">
+                    💬 שלח ב-WhatsApp
+                  </button>
+                  <a href={signLink} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100">
+                    👁️ תצוגה מקדימה
+                  </a>
+                </div>
+              </div>
+            )}
+
             <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
               {!emailHasDraft && <span className="me-auto text-sm text-gray-400">נסח או דלג לכתיבה ידנית כדי לשלוח</span>}
-              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => setEmailModalOpen(false)}>ביטול</button>
+              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => { setSignLink(''); setEmailModalOpen(false); }}>ביטול</button>
+              <button type="button" disabled={signBusy || emailSending || !emailForm.quoteId} className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-3 text-base font-bold text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-50" onClick={requestSignatureLink} title="צור קישור שהלקוח חותם עליו מהנייד">
+                {signBusy ? 'מכין…' : '🖊️ שלח לחתימה'}
+              </button>
               <button type="button" disabled={emailSending || !emailHasDraft || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-blue-500 px-10 py-3 text-base font-bold text-white hover:bg-blue-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
                 {emailSending ? 'שולח…' : '✉️ שלח'}
               </button>

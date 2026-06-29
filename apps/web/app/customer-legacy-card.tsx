@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, apiUrl } from './lib/api-base';
 import { parseApiErrorResponse } from './lib/api-error';
 import { SignedQuotesSection } from './signed-quotes-section';
+import { ProducedReportsSection } from './produced-reports-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -835,6 +836,7 @@ type LowerTabKey =
   | 'documents'
   | 'quotes'
   | 'signedQuotes'
+  | 'producedReports'
   | 'additionalData'
   | 'moreDetails'
   | 'externalData';
@@ -845,6 +847,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
   { key: 'documents', label: 'מסמכים' },
+  { key: 'producedReports', label: 'דוחות שהופקו' },
   { key: 'quotes', label: 'הצעות מחיר' },
   { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
 ];
@@ -3672,6 +3675,13 @@ export function CustomerLegacyCard({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeLowerTab === 'producedReports' && (
+          <div className="space-y-3" dir="rtl">
+            <div className="text-lg font-bold text-black">דוחות שהופקו</div>
+            <ProducedReportsSection customerId={customer?.id ?? null} currentUser={currentUser} />
           </div>
         )}
 

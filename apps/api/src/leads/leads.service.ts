@@ -331,6 +331,7 @@ export class LeadsService {
     setIf('utm_content', data.utm_content ?? undefined);
     setIf('utm_term', data.utm_term ?? undefined);
     setIf('serviceType', serviceType);
+    if ('referralCompany' in data) setIf('referralCompany', data.referralCompany ?? null);
     if (leadStatus) setIf('leadStatus', leadStatus);
     if (followUp1Date) setIf('followUp1Date', followUp1Date);
     if (followUp2Date) setIf('followUp2Date', followUp2Date);

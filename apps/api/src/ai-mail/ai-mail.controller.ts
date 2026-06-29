@@ -14,4 +14,10 @@ export class AiMailController {
   draft(@Body() body: DraftContext) {
     return this.aiMail.generateDraft(body || {});
   }
+
+  /** POST /ai-mail/report-draft — generate (or refine) a report-accompanying email. */
+  @Post('report-draft')
+  reportDraft(@Body() body: DraftContext) {
+    return this.aiMail.generateReportDraft(body || {});
+  }
 }

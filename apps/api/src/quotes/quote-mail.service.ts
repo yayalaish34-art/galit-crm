@@ -5,6 +5,7 @@ import * as path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 
 @Injectable()
@@ -16,6 +17,7 @@ export class QuoteMailService {
     private readonly prisma: PrismaService,
     private readonly msAuth: MicrosoftAuthService,
     private readonly graphMail: GraphMailService,
+    private readonly graphFiles: GraphFilesService,
     private readonly pdfConvert: PdfConvertService,
   ) {
     const host = process.env.SMTP_HOST;
@@ -57,6 +59,8 @@ export class QuoteMailService {
       includeSignature?: boolean;
       /** מזהה החתימה הנבחרת (UserSignature). אם לא צוין — חתימת ברירת המחדל הישנה. */
       signatureId?: string;
+      /** משוך את הגרסה העדכנית מ-OneDrive (הקובץ שנערך ב-Word) במקום העותק השמור. */
+      preferOnedrive?: boolean;
     },
   ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
     // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
@@ -82,22 +86,45 @@ export class QuoteMailService {
       throw new BadRequestException('הצעת מחיר לא נמצאה');
     }
 
-    // ── Resolve the document(s) to send: task-attachment(s) → latest QuoteDocument → disk fallback ──
+    // ── Resolve the document(s) to send. סדר עדיפות: ──
+    //   0) OneDrive (כשהמשתמש ערך ב-Word) — הגרסה העדכנית והקנונית.
+    //   1) task-attachment(s) שנבחרו במפורש.
+    //   2) ה-QuoteDocument האחרון (bytes ב-DB).
+    //   3) קובץ מהדיסק (fallback לרשומות ישנות).
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const docs: { content: Buffer; fileName: string; mime: string }[] = [];
+    const quoteNumberForName = quote.quoteNumber || quote.importLegacyId || '';
+    const baseDocName = `הצעת מחיר${quoteNumberForName ? ' ' + quoteNumberForName : ''}`;
 
-    // תמיכה בכמה קבצים: attachmentIds (רבים) או attachmentId (בודד — תאימות לאחור).
+    // 0) OneDrive — אם המשתמש ערך ב-Word, מושכים את הגרסה העדכנית ישירות משם.
+    if (opts?.preferOnedrive) {
+      const ref = await this.getOnedriveRefSafe(quoteId);
+      if (ref) {
+        try {
+          const fresh = await this.graphFiles.downloadContent(ref.ownerId, ref.itemId);
+          docs.push({ content: fresh, fileName: `${baseDocName}.docx`, mime: DOCX_MIME });
+        } catch (e: any) {
+          this.logger.warn(`OneDrive pull failed for quote ${quoteId} — falling back to stored copy: ${e?.message || e}`);
+        }
+      }
+    }
+
+    // 1) תמיכה בכמה קבצים: attachmentIds (רבים) או attachmentId (בודד — תאימות לאחור).
     const attachmentIds = (opts?.attachmentIds?.length ? opts.attachmentIds : opts?.attachmentId ? [opts.attachmentId] : [])
       .filter((x): x is string => !!x);
-    for (const attId of attachmentIds) {
-      const att = await this.prisma.taskAttachment.findUnique({ where: { id: attId } });
-      if (att) {
-        docs.push({ content: Buffer.from(att.data), fileName: att.fileName, mime: att.mimeType || DOCX_MIME });
+    if (docs.length === 0) {
+      for (const attId of attachmentIds) {
+        const att = await this.prisma.taskAttachment.findUnique({ where: { id: attId } });
+        if (att) {
+          docs.push({ content: Buffer.from(att.data), fileName: att.fileName, mime: att.mimeType || DOCX_MIME });
+        }
       }
     }
     // Fallback: DB-stored bytes from the latest QuoteDocument (survives deploys), then disk path.
+    // משתמשים ב-mimeType השמור — כך PDF שהועלה (Word→PDF) נשלח כמות-שהוא בלי המרה.
     if (docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
-      docs.push({ content: Buffer.from(quote.quoteDocuments[0].data), fileName: quote.quoteDocuments[0].fileName, mime: DOCX_MIME });
+      const qd = quote.quoteDocuments[0];
+      docs.push({ content: Buffer.from(qd.data), fileName: qd.fileName, mime: qd.mimeType || DOCX_MIME });
     }
     if (docs.length === 0) {
       let relPath: string | null = null;
@@ -274,6 +301,24 @@ ${signatureHtml}
     }
 
     return { success: true, sentTo: recipientEmail, fileName: finalFileName, via };
+  }
+
+  /** קורא את הפניית ה-OneDrive של ההצעה (guarded — מחזיר null אם העמודות לא הוגרו ב-DB). */
+  private async getOnedriveRefSafe(
+    quoteId: string,
+  ): Promise<{ itemId: string; ownerId: string } | null> {
+    try {
+      const ref: any = await (this.prisma.quote.findUnique as any)({
+        where: { id: quoteId },
+        select: { onedriveItemId: true, onedriveOwnerId: true },
+      });
+      if (ref?.onedriveItemId && ref?.onedriveOwnerId) {
+        return { itemId: ref.onedriveItemId, ownerId: ref.onedriveOwnerId };
+      }
+    } catch {
+      // עמודות OneDrive עדיין לא קיימות ב-DB (לפני הרצת המיגרציה).
+    }
+    return null;
   }
 
   /**

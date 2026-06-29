@@ -105,7 +105,7 @@ export class FeedbackService {
           updatedAt: true,
           title: true,
           productName: true,
-          customer: { select: { id: true, name: true, email: true, phone: true, contactName: true, city: true } },
+          customer: { select: { id: true, name: true, email: true, phone: true, contactName: true, city: true, feedbackRequestedAt: true } },
         },
         orderBy: { updatedAt: 'desc' },
       });
@@ -130,6 +130,7 @@ export class FeedbackService {
           lastDoneAt: t.updatedAt.toISOString(),
           lastService: t.productName || t.title || '',
           doneTasksCount: 1,
+          feedbackRequestedAt: c.feedbackRequestedAt?.toISOString() || null,
         });
       }
 
