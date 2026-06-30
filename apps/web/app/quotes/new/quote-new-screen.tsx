@@ -1724,6 +1724,50 @@ export function QuoteNewScreen({
     }
   }
 
+  /* ── סנכרון הגרסה הערוכה מ-Word (OneDrive) חזרה ל-DB ──
+   * Word שומר אוטומטית ל-OneDrive; כאן מושכים את הגרסה העדכנית ושומרים אותה ב-DB,
+   * כך שהמערכת לא תחזיק רק את המסמך הממוזג הראשוני. רץ אוטומטית כשחוזרים מ-Word ל-CRM. */
+  const syncingRef = useRef(false);
+  async function syncFromWord(opts?: { silent?: boolean }): Promise<boolean> {
+    const id = quoteIdRef.current;
+    if (!id || !onedriveActive || syncingRef.current) return false;
+    const user = getSessionUser();
+    if (!user) return false;
+    syncingRef.current = true;
+    if (!opts?.silent) setStatusMsg('מסנכרן את הגרסה מ-Word…');
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${id}/onedrive-sync`), { authUser: user, method: 'POST' });
+      if (r.ok) {
+        const d = await r.json().catch(() => null);
+        if (d?.synced) {
+          setStatusMsg('הגרסה מ-Word נשמרה במערכת ✓');
+          setTimeout(() => setStatusMsg(''), 5000);
+          return true;
+        }
+      }
+      if (!opts?.silent) setStatusMsg('');
+      return false;
+    } catch {
+      if (!opts?.silent) setStatusMsg('');
+      return false;
+    } finally {
+      syncingRef.current = false;
+    }
+  }
+
+  /* כשחוזרים מ-Word אל לשונית ה-CRM (הלשונית הופכת לגלויה) — מסנכרנים אוטומטית את הגרסה הערוכה ל-DB. */
+  useEffect(() => {
+    if (!onedriveActive) return;
+    const onVisible = () => { if (document.visibilityState === 'visible') void syncFromWord({ silent: true }); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onedriveActive]);
+
   /* ── Debounced autosave of the draft quote — keeps line items / DOCX link alive across page refreshes ── */
   useEffect(() => {
     if (!draftReady || !customerId) return;
@@ -2607,16 +2651,23 @@ export function QuoteNewScreen({
             <div className="text-[15px] font-bold text-gray-800">פתיחה ב-Word</div>
             <button type="button" onClick={() => setWordOpenPanel(null)} className="rounded-lg px-2 py-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
           </div>
-          <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-            סוג הקישור שהתקבל: <strong>{wordOpenPanel.kind}</strong>
+          <div className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+            ✓ עריכה ב-Word נשמרת אוטומטית, ומסתנכרנת חזרה למערכת כשחוזרים ללשונית הזו. אפשר גם לסנכרן ידנית למטה.
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void syncFromWord()}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+            >
+              סנכרן מ-Word עכשיו ⟳
+            </button>
             <button
               type="button"
               onClick={() => { if (wordOpenPanel.davUrl || wordOpenPanel.webUrl) openInDesktopWord(wordOpenPanel.davUrl || wordOpenPanel.webUrl); }}
               className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
             >
-              נסה שוב לפתוח ב-Word (מחשב)
+              פתח שוב ב-Word (מחשב)
             </button>
             {wordOpenPanel.webUrl && (
               <a href={wordOpenPanel.webUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">

@@ -567,6 +567,57 @@ export class QuotesService {
     });
   }
 
+  /**
+   * מושך את הגרסה העדכנית מ-OneDrive (אחרי עריכה ושמירה ב-Word) ושומר אותה ב-DB כמסמך הממוזג
+   * הקנוני — בלי לנתק את קישור העריכה, כדי שאפשר להמשיך לערוך. נקרא כשחוזרים מ-Word ל-CRM,
+   * וגם ידנית מהכפתור "סנכרן מ-Word". כך ה-DB מכיל תמיד את הגרסה הערוכה ולא רק את המסמך הממוזג הראשוני.
+   */
+  async syncFromOneDrive(id: string): Promise<{ synced: boolean; at?: string }> {
+    const ref = await this.getOnedriveRef(id);
+    if (!ref?.itemId || !ref.ownerId) return { synced: false };
+
+    let buffer: Buffer;
+    try {
+      buffer = await this.graphFiles.downloadContent(ref.ownerId, ref.itemId);
+    } catch (e: any) {
+      this.logger.warn(`OneDrive sync download failed (${id}): ${e?.message || e}`);
+      return { synced: false };
+    }
+    if (!buffer?.length) return { synced: false };
+
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const quotesDir = path.join(process.cwd(), 'storage', 'quotes');
+    try {
+      if (!fs.existsSync(quotesDir)) fs.mkdirSync(quotesDir, { recursive: true });
+    } catch { /* disk best-effort — ה-DB הוא מקור האמת */ }
+    const safeName = `quote-${id.slice(0, 8)}.docx`;
+    const diskName = `${id}-${safeName}`;
+    try { fs.writeFileSync(path.join(quotesDir, diskName), buffer); } catch { /* ignore */ }
+    const relPath = `storage/quotes/${diskName}`;
+
+    const docData = {
+      fileName: safeName,
+      filePath: relPath,
+      data: Uint8Array.from(buffer),
+      mimeType: DOCX_MIME,
+      documentType: 'MERGED_DOCX',
+      documentDescription: 'גרסה ערוכה מ-Word (סונכרן אוטומטית)',
+    };
+
+    // מעדכנים את ה-DOCX הממוזג האחרון במקום (לא מנפחים את הטבלה בכל סנכרון); אחרת יוצרים חדש.
+    const existingDoc: any = await (this.prisma.quoteDocument as any)
+      .findFirst({ where: { quoteId: id, documentType: 'MERGED_DOCX' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+      .catch(() => null);
+    if (existingDoc?.id) {
+      await (this.prisma.quoteDocument.update as any)({ where: { id: existingDoc.id }, data: docData }).catch(() => null);
+    } else {
+      await (this.prisma.quoteDocument.create as any)({ data: { quoteId: id, ...docData } }).catch(() => null);
+    }
+    await this.prisma.quote.update({ where: { id }, data: { lastMergedDocPath: relPath } }).catch(() => null);
+
+    return { synced: true, at: new Date().toISOString() };
+  }
+
   /** הפניית ה-OneDrive השמורה להצעה (null אם אין / אם העמודות עדיין לא הוגרו ב-DB). */
   async getOnedriveRef(
     id: string,

@@ -178,6 +178,15 @@ export class QuotesController {
     return this.quotesService.openInOneDrive(id, req.user?.id);
   }
 
+  /**
+   * POST /quotes/:id/onedrive-sync
+   * מושך את הגרסה הערוכה האחרונה מ-OneDrive ושומר אותה ב-DB (נקרא כשחוזרים מ-Word ל-CRM / ידנית).
+   */
+  @Post(':id/onedrive-sync')
+  onedriveSync(@Param('id') id: string) {
+    return this.quotesService.syncFromOneDrive(id);
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any, @Req() req: any) {
     return this.quotesService.update(id, body, req.user);
