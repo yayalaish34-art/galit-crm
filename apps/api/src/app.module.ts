@@ -18,6 +18,7 @@ import { SettingsModule } from './settings/settings.module';
 import { QuoteItemCatalogModule } from './quote-item-catalog/quote-item-catalog.module';
 import { QuoteTemplatesModule } from './quote-templates/quote-templates.module';
 import { CustomerClassificationsModule } from './customer-classifications/customer-classifications.module';
+import { LeadSourcesModule } from './lead-sources/lead-sources.module';
 import { FollowupImportModule } from './followup-import/followup-import.module';
 import { AuthModule } from './auth/auth.module';
 import { PaymentTermsModule } from './payment-terms/payment-terms.module';
@@ -28,7 +29,7 @@ import { AiMailModule } from './ai-mail/ai-mail.module';
 import { IncomingLeadsModule } from './incoming-leads/incoming-leads.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule],
   controllers: [AppController],
   providers: [AppService],
 })

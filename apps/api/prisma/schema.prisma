@@ -199,6 +199,15 @@ model CustomerClassification {
   createdAt DateTime @default(now())
 }
 
+/// מקורות הגעה ("מקור הגעה") הניתנים-לעריכה — נוספים דרך "אחר" בטופס פתיחת פנייה ונשמרים לתמיד.
+model LeadSource {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  isPreset  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
 model Customer {
   id          String         @id @default(uuid())
   /// מזהה מהמערכת המיובאת (לקישור בין לידים/דוחות/פרויקטים)

@@ -13886,6 +13886,32 @@ function TasksPage({
   const [searchQ, setSearchQ] = useState('');
   const [quickFilter, setQuickFilter] = useState<string>('all');
   const [onlyMine, setOnlyMine] = useState(true);
+
+  // ── מקורות הגעה ("מקור הגעה") — נטענים מה-DB; ניתן להוסיף חדש דרך "אחר" וזה נשמר לכל הלקוחות לתמיד ──
+  const LEAD_SOURCE_DEFAULTS = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי'];
+  const [leadSources, setLeadSources] = useState<string[]>([]);
+  const [newLeadSourceText, setNewLeadSourceText] = useState('');
+  const reloadLeadSources = useCallback(async () => {
+    try {
+      const res = await apiFetch(apiUrl('/lead-sources'), { authUser: currentUser });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setLeadSources(data.map((x: any) => String(x.name)).filter(Boolean));
+    } catch { /* נשתמש בברירות מחדל מקומיות */ }
+  }, [currentUser]);
+  useEffect(() => { void reloadLeadSources(); }, [reloadLeadSources]);
+  const addLeadSource = useCallback(async (name: string): Promise<boolean> => {
+    const value = (name || '').trim();
+    if (!value) return false;
+    try {
+      const res = await apiFetch(apiUrl('/lead-sources'), {
+        method: 'POST', authUser: currentUser, body: JSON.stringify({ name: value }),
+      });
+      if (!res.ok) return false;
+      await reloadLeadSources();
+      return true;
+    } catch { return false; }
+  }, [currentUser, reloadLeadSources]);
   /* ── expandedTaskId: parent is the single source of truth ──
    * Local state is ONLY used as fallback when parent props are not provided.
    * When parent IS provided, we read/write directly to parent — no local copy. */
@@ -16649,7 +16675,8 @@ function TasksPage({
                                 : [...src, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3 }];
                               return [...withSupplier].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
                             })();
-                            const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי', 'אחר'];
+                            // רשימת מקורות ההגעה מגיעה מה-DB (עם נפילה לברירות מחדל), ו"אחר" תמיד אחרון לצורך הוספה.
+                            const CC_LEAD_SOURCES = [...(leadSources.length ? leadSources : LEAD_SOURCE_DEFAULTS), 'אחר'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
                             const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
                             const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
@@ -16903,12 +16930,34 @@ function TasksPage({
                                           {CC_LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                                         </select>
                                         {fd.leadSource === 'אחר' && (
-                                          <input
-                                            className={`${ccInp} mt-2`}
-                                            placeholder="שם חברת התיווך"
-                                            value={fd.referralCompany || ''}
-                                            onChange={(e) => setF('referralCompany', e.target.value)}
-                                          />
+                                          <div className="mt-2 flex items-center gap-2">
+                                            <input
+                                              className={ccInp}
+                                              placeholder="הקלד מקור הגעה חדש והוסף לרשימה"
+                                              value={newLeadSourceText}
+                                              onChange={(e) => setNewLeadSourceText(e.target.value)}
+                                              onKeyDown={async (e) => {
+                                                if (e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  const name = newLeadSourceText.trim();
+                                                  if (!name) return;
+                                                  if (await addLeadSource(name)) { setF('leadSource', name); setNewLeadSourceText(''); }
+                                                }
+                                              }}
+                                            />
+                                            <button
+                                              type="button"
+                                              title="הוסף מקור הגעה לרשימה הקבועה (לכל הלקוחות)"
+                                              onClick={async () => {
+                                                const name = newLeadSourceText.trim();
+                                                if (!name) return;
+                                                if (await addLeadSource(name)) { setF('leadSource', name); setNewLeadSourceText(''); }
+                                              }}
+                                              className="flex h-[50px] w-[50px] flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white transition-colors hover:bg-blue-700"
+                                            >
+                                              <Plus className="h-5 w-5" />
+                                            </button>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
