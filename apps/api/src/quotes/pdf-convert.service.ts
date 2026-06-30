@@ -63,15 +63,26 @@ export class PdfConvertService {
       if (!heb && !greg) return docx;
       const zip = new PizZip(docx);
       // שדה שלם: ריצת begin … ריצת end (שדות אינם מקוננים). עיגון מדויק של ריצת ה-begin.
+      // הלוקאהדים הם קריטיים: ה-<w:rPr> של ריצת ה-begin אסור לו לחצות גבול של ריצה/פסקה/
+      // תיבת-טקסט (w:r/w:p/w:pict/w:drawing/w:txbxContent), אחרת הרגקס "מגלגל" אחורה ובולע
+      // את עטיפת תיבת-הטקסט (כשהתאריך יושב בתוך textbox בכותרת) — ההחלפה אז מוחקת תגי-פתיחה
+      // מבניים, ה-DOCX יוצא פגום, וההמרה ל-PDF נכשלת ב-Word (Graph 406) וב-LibreOffice כאחד.
+      // גם פנים השדה אסור לו לחצות </w:txbxContent>.
       const fieldRe =
-        /<w:r\b[^>]*>(?:<w:rPr>[\s\S]*?<\/w:rPr>)?\s*<w:fldChar w:fldCharType="begin"\s*\/>\s*<\/w:r>[\s\S]*?<w:fldChar w:fldCharType="end"\s*\/>\s*<\/w:r>/g;
+        /<w:r\b[^>]*>(?:<w:rPr>(?:(?!<\/?w:(?:r|p|pict|drawing|txbxContent)\b)[\s\S])*?<\/w:rPr>)?\s*<w:fldChar w:fldCharType="begin"\s*\/>\s*<\/w:r>(?:(?!<\/w:txbxContent>)[\s\S])*?<w:fldChar w:fldCharType="end"\s*\/>\s*<\/w:r>/g;
       const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      // רשת ביטחון: "הקפאה" מחליפה ריצת-שדה בריצה בודדת — היא לעולם לא אמורה לשנות את מספר
+      // התגיות המבניות. אם המספר השתנה, הרגקס בלע מבנה (textbox/טבלה) → נחזיר את החלק המקורי
+      // (התאריך לא יוקפא שם, אבל ה-DOCX יישאר תקין ויומר ל-PDF). הגנה כפולה על התיקון ברגקס.
+      const STRUCT = ['<w:pict', '<w:drawing', '<w:txbxContent>', '</w:txbxContent>', '<w:tbl>', '</w:tbl>', '<w:tc>', '</w:tc>', '<w:p>', '<w:p ', '</w:p>'];
+      const structSig = (s: string) => STRUCT.map((t) => s.split(t).length).join(',');
       let froze = 0;
       for (const name of Object.keys(zip.files)) {
         if (!/^word\/(header\d*|footer\d*|document)\.xml$/.test(name)) continue;
-        let xml = zip.file(name)!.asText();
-        if (!xml.includes('DATE')) continue;
-        xml = xml.replace(fieldRe, (field) => {
+        const orig = zip.file(name)!.asText();
+        if (!orig.includes('DATE')) continue;
+        let localFroze = 0;
+        const xml = orig.replace(fieldRe, (field) => {
           if (!/<w:instrText[^>]*>\s*DATE/.test(field)) return field; // רק שדות DATE (PAGE נשאר דינמי)
           const date = field.includes('\\h') ? heb : greg; // \h = לוח עברי
           // עיצוב (rPr) לטקסט הסטטי — חייב להילקח מ"ריצת התוצאה" של השדה (אחרי fldChar
@@ -84,10 +95,17 @@ export class PdfConvertService {
           const afterSep = sepIdx >= 0 ? field.slice(sepIdx) : '';
           const rPrM = afterSep.match(/<w:rPr>[\s\S]*?<\/w:rPr>(?=\s*<w:t[ >])/);
           const rPr = rPrM ? rPrM[0] : '';
-          froze++;
+          localFroze++;
           return `<w:r>${rPr}<w:t xml:space="preserve">${esc(date)}</w:t></w:r>`;
         });
-        zip.file(name, xml);
+        if (structSig(xml) !== structSig(orig)) {
+          this.logger.warn(`freezeDocxDates: structural change in ${name} — keeping original (dates not frozen there)`);
+          continue;
+        }
+        if (localFroze) {
+          zip.file(name, xml);
+          froze += localFroze;
+        }
       }
       if (!froze) return docx;
       this.logger.log(`Froze ${froze} DATE field(s) to Hebrew before PDF conversion`);
