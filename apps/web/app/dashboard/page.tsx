@@ -3668,7 +3668,6 @@ function ManagerDashboard({
   const [error, setError] = useState('');
   void customers;
   void navigateSafely;
-  void onOpenCustomerById;
   void onOpenProjectById;
 
   const load = async () => {
@@ -3690,6 +3689,54 @@ function ManagerDashboard({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
+
+  // ── סקשנים בדשבורד: לקוחות שנשלח אליהם משוב + לקוחות שסומנו כלא רלוונטי ──
+  // טווח ברירת מחדל: שבוע אחרון; ניתן לעבור לחודש אחרון. המתג משפיע על שני הסקשנים.
+  const [rangeDays, setRangeDays] = useState<7 | 30>(7);
+  const [fbRows, setFbRows] = useState<FeedbackCustomer[]>([]);
+  const [nrRows, setNrRows] = useState<NotRelevantCustomer[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [fbRes, nrRes] = await Promise.all([
+          apiFetch(apiUrl('/feedback/customers'), { authUser: currentUser }),
+          apiFetch(apiUrl('/customers/not-relevant'), { authUser: currentUser }),
+        ]);
+        if (!alive) return;
+        if (fbRes.ok) { const d = await fbRes.json(); setFbRows(Array.isArray(d) ? d : []); }
+        if (nrRes.ok) { const d = await nrRes.json(); setNrRows(Array.isArray(d) ? d : []); }
+      } catch { /* השארה ריקה — לא מפיל את הדשבורד */ }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.id, currentUser.role]);
+
+  // משוב: רק לקוחות שעבודתם הסתיימה ונשלח אליהם משוב (feedbackRequestedAt), בטווח שנבחר.
+  const feedbackSentRows = useMemo(() => {
+    const cutoff = Date.now() - rangeDays * 86400000;
+    return fbRows.filter((r) => {
+      if (!r.feedbackRequestedAt) return false;
+      const t = new Date(r.feedbackRequestedAt).getTime();
+      return !Number.isNaN(t) && t >= cutoff;
+    });
+  }, [fbRows, rangeDays]);
+
+  // לא רלוונטי: לקוחות שסומנו, לפי תאריך הסימון (notRelevantAt), בטווח שנבחר.
+  const notRelevantRecent = useMemo(() => {
+    const cutoff = Date.now() - rangeDays * 86400000;
+    return nrRows.filter((r) => {
+      if (!r.notRelevantAt) return false;
+      const t = new Date(r.notRelevantAt).getTime();
+      return !Number.isNaN(t) && t >= cutoff;
+    });
+  }, [nrRows, rangeDays]);
+
+  const fmtDayHe = (iso: string | null | undefined) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return '—'; }
+  };
 
   const refresh = () => load();
 
@@ -3764,19 +3811,6 @@ function ManagerDashboard({
     { name: 'חינוך', value: 16, color: '#86efac' },
     { name: 'אחר', value: 14, color: '#d1d5db' },
   ];
-
-  const urgentTasksRows = [
-    ...data.alerts.agingDeals.slice(0, 2).map((x) => ({
-      task: `מעקב עסקה: ${x.deal}`,
-      client: x.rep,
-      due: `בעוד ${Math.max(1, 21 - x.ageDays)} ימים`,
-    })),
-    ...data.alerts.inactiveLeads.slice(0, 3).map((x) => ({
-      task: `שיחת המשך לליד: ${x.leadName}`,
-      client: x.rep,
-      due: `בעוד ${Math.max(1, 10 - x.inactiveDays)} ימים`,
-    })),
-  ].slice(0, 5);
 
   const incomingLeadsFeed = (data.recentLeadsTaken ?? []).slice(0, 8);
   const relativeTimeHe = (iso: string) => {
@@ -3863,43 +3897,86 @@ function ManagerDashboard({
           </Card>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[1.35fr_0.8fr_1fr]">
+        {/* ── מתג טווח תאריכים (שבוע/חודש אחרון) — משפיע על שני הסקשנים שמתחת ── */}
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-slate-800">פעילות אחרונה</h2>
+          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+            <button type="button" onClick={() => setRangeDays(7)} className={cn('rounded-xl px-4 py-1.5 text-sm font-semibold transition', rangeDays === 7 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>שבוע אחרון</button>
+            <button type="button" onClick={() => setRangeDays(30)} className={cn('rounded-xl px-4 py-1.5 text-sm font-semibold transition', rangeDays === 30 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>חודש אחרון</button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          {/* ── לקוחות שנשלח אליהם משוב ── */}
           <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xl font-bold text-slate-900">משימות דחופות</CardTitle>
+              <CardTitle className="flex items-center justify-between gap-2 text-xl font-bold text-slate-900">
+                <span className="flex items-center gap-2"><Star className="h-5 w-5 text-amber-500" /> לקוחות שנשלח אליהם משוב</span>
+                <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-extrabold text-amber-700">{feedbackSentRows.length}</span>
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-green-50">
-                    <TableHead>משימה</TableHead>
-                    <TableHead>לקוח</TableHead>
-                    <TableHead>תאריך יעד</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {urgentTasksRows.map((row, idx) => (
-                    <TableRow key={`${row.task}-${idx}`} className="hover:bg-slate-50">
-                      <TableCell className="font-medium">{row.task}</TableCell>
-                      <TableCell>{row.client}</TableCell>
-                      <TableCell>{row.due}</TableCell>
+              {feedbackSentRows.length === 0 ? (
+                <div className="py-10 text-center text-sm text-slate-400">אין לקוחות שנשלח אליהם משוב בטווח שנבחר</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-amber-50">
+                      <TableHead>לקוח</TableHead>
+                      <TableHead>סיום העבודה</TableHead>
+                      <TableHead>נשלח משוב</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {feedbackSentRows.map((r) => (
+                      <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onOpenCustomerById(r.id)}>
+                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell>{fmtDayHe(r.lastDoneAt)}</TableCell>
+                        <TableCell>{fmtDayHe(r.feedbackRequestedAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
 
+          {/* ── לקוחות שסומנו כלא רלוונטי ── */}
           <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
-              <CardTitle className="text-xl font-bold text-slate-900">השפעה סביבתית (CO2 שנחסך)</CardTitle>
+              <CardTitle className="flex items-center justify-between gap-2 text-xl font-bold text-slate-900">
+                <span className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-rose-500" /> לקוחות שסומנו כלא רלוונטי</span>
+                <span className="rounded-full bg-rose-100 px-3 py-1 text-sm font-extrabold text-rose-700">{notRelevantRecent.length}</span>
+              </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center justify-center py-10">
-              <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-4xl">🌳</div>
-              <div className="text-4xl font-black text-green-700">1,200 טון</div>
-              <div className="mt-2 text-sm text-slate-500">חיסכון מצטבר בפרויקטים פעילים</div>
+            <CardContent className="p-0">
+              {notRelevantRecent.length === 0 ? (
+                <div className="py-10 text-center text-sm text-slate-400">אין לקוחות שסומנו כלא רלוונטי בטווח שנבחר</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-rose-50">
+                      <TableHead>לקוח</TableHead>
+                      <TableHead>תאריך סימון</TableHead>
+                      <TableHead>סיבה</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {notRelevantRecent.map((r) => (
+                      <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onOpenCustomerById(r.id)}>
+                        <TableCell className="font-medium">{r.name}</TableCell>
+                        <TableCell>{fmtDayHe(r.notRelevantAt)}</TableCell>
+                        <TableCell className="text-slate-600">{r.notRelevantReason === 'אחר' && r.notRelevantNote ? r.notRelevantNote : (r.notRelevantReason || '—')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
+        </div>
+
+        <div className="grid gap-4">
 
           <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
