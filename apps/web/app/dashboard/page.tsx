@@ -5754,9 +5754,9 @@ function LeadsPage({
       CONTACTED: 'bg-blue-50/70',
       FU_1: 'bg-blue-50/70',
       FU_2: 'bg-blue-50/70',
-      QUOTE_SENT: 'bg-green-50/70',
-      NEGOTIATION: 'bg-green-100/60',
-      WON: 'bg-green-50/70',
+      QUOTE_SENT: 'bg-green-100/70',
+      NEGOTIATION: 'bg-green-200/60',
+      WON: 'bg-green-100/70',
       LOST: 'bg-slate-100/60',
       NOT_RELEVANT: 'bg-slate-100/50',
     };
@@ -5770,9 +5770,9 @@ function LeadsPage({
       CONTACTED: 'bg-blue-500 text-white',
       FU_1: 'bg-blue-500 text-white',
       FU_2: 'bg-blue-600 text-white',
-      QUOTE_SENT: 'bg-green-600 text-white',
-      NEGOTIATION: 'bg-green-700 text-white',
-      WON: 'bg-green-600 text-white',
+      QUOTE_SENT: 'bg-green-700 text-white',
+      NEGOTIATION: 'bg-green-800 text-white',
+      WON: 'bg-green-700 text-white',
       LOST: 'bg-slate-400 text-white',
       NOT_RELEVANT: 'bg-slate-400 text-white',
     };
@@ -5913,13 +5913,13 @@ function LeadsPage({
           {[
             { key: 'mine', label: 'רק שלי', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700', isMine: true },
             { key: 'new', label: 'חדשים Today', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
-            { key: 'untouched15', label: 'לא טופל 15 דק\'', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700' },
+            { key: 'untouched15', label: 'לא טופל 15 דק\'', color: 'bg-red-700', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-300', textColor: 'text-red-800' },
             { key: 'src_facebook', label: 'פייסבוק', color: 'bg-blue-700', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-800' },
             { key: 'src_google', label: 'גוגל', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'src_site', label: 'אתר', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
             { key: 'svc_radiation', label: 'קרינה', color: 'bg-amber-600', hoverBg: 'hover:bg-amber-50', borderColor: 'border-amber-200', textColor: 'text-amber-700' },
             { key: 'svc_radon', label: 'ראדון', color: 'bg-blue-600', hoverBg: 'hover:bg-blue-50', borderColor: 'border-blue-200', textColor: 'text-blue-700' },
-            { key: 'hot', label: 'חם', color: 'bg-red-600', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-200', textColor: 'text-red-700', icon: 'flame' },
+            { key: 'hot', label: 'חם', color: 'bg-red-700', hoverBg: 'hover:bg-red-50', borderColor: 'border-red-300', textColor: 'text-red-800', icon: 'flame' },
           ].map((chip) => {
             const isActive = chip.isMine ? onlyMine : quickFilter === chip.key;
             return (
@@ -15757,6 +15757,9 @@ function TasksPage({
     }, 120);
   };
 
+  /* ── זיהוי גלית (אחראית הכספים) — לה בלבד מוצגת כרטיסיית "לקוחות תיווך" ── */
+  const isGalit = (currentUser?.name || '').includes('גלית');
+
   /* ── quick filter config ── */
   const filterBtns: { key: string; label: string; icon: React.ElementType; count?: number }[] = [
     { key: 'today', label: 'היום', icon: Calendar, count: kpiToday },
@@ -15768,6 +15771,7 @@ function TasksPage({
     { key: 'customers', label: 'לקוחות', icon: Users },
     { key: 'recentCustomers', label: '10 לקוחות אחרונים', icon: History },
     { key: 'quotes', label: 'הצעות מחיר', icon: FileText },
+    ...(isGalit ? [{ key: 'brokerage', label: 'לקוחות תיווך', icon: Building2 }] : []),
   ];
 
   /* ── progress steps for arrow ── */
@@ -15905,7 +15909,67 @@ function TasksPage({
         </div>
       </div>
 
+      {/* ═══ לקוחות תיווך — מוצג רק לגלית (אחראית הכספים) ═══ */}
+      {quickFilter === 'brokerage' && (() => {
+        const isBrokerageSrc = (src?: string | null) => ['הדס', 'גינדי', 'אחר'].includes((src || '').trim());
+        const brokerLabel = (src?: string | null, ref?: string | null) =>
+          (src || '').trim() === 'אחר' ? ((ref || '').trim() || 'אחר') : (src || '').trim();
+        const rows = [
+          ...leads
+            .filter((l) => isBrokerageSrc(l.source) && !l.customerId)
+            .map((l) => ({ key: 'lead-' + l.id, kind: 'lead' as const, name: l.fullName || l.name || '-', phone: l.phone || '', broker: brokerLabel(l.source, l.referralCompany), raw: l as Lead })),
+          ...customers
+            .filter((c) => isBrokerageSrc((c as any).leadSource))
+            .map((c) => ({ key: 'cust-' + c.id, kind: 'customer' as const, name: c.name || '-', phone: c.phone || '', broker: brokerLabel((c as any).leadSource, (c as any).referralCompany), raw: c as Customer })),
+        ].sort((a, b) => a.broker.localeCompare(b.broker, 'he'));
+        return (
+          <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
+            <table className="w-full text-sm" dir="rtl">
+              <thead>
+                <tr className="border-b border-slate-100 text-right" style={{ background: '#f8fafb' }}>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500">שם</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500">חברת תיווך / מקור</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 hidden md:table-cell">טלפון</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 hidden md:table-cell">סוג</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr><td colSpan={4} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center gap-2">
+                      <Building2 className="h-10 w-10 text-slate-300" />
+                      <span>אין לקוחות מחברות תיווך להצגה</span>
+                    </div>
+                  </td></tr>
+                )}
+                {rows.map((r) => (
+                  <tr
+                    key={r.key}
+                    className="border-b border-slate-50 cursor-pointer transition-all duration-100 hover:bg-slate-50/80"
+                    onClick={() => r.kind === 'lead' ? onOpenLead?.(r.raw as Lead) : onOpenCustomer?.(r.raw as Customer)}
+                  >
+                    <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
+                        <Building2 className="h-3.5 w-3.5" />{r.broker}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      {r.phone ? <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{r.phone}</a> : <span className="text-xs text-slate-400">-</span>}
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="text-xs text-slate-500">{r.kind === 'lead' ? 'ליד' : 'לקוח'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
       {/* ═══ TASKS TABLE ═══ */}
+      {quickFilter !== 'brokerage' && (
       <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
         <table className="w-full text-sm" dir="rtl">
           <thead>
@@ -15939,6 +16003,7 @@ function TasksPage({
               const p = (t.priority || 'MEDIUM').toUpperCase();
               const isDone = s === 'DONE' || s === 'CANCELLED';
               const isOverdue = t.dueDate && new Date(t.dueDate) < today && !isDone;
+              const isNewLead = t.incomingLeadId && (manualStepOverride[t.id] ?? detectStep(t)) === 0 && !isDone;
               const leadParsed = t.incomingLeadId ? parseLeadBody(t.description) : null;
               const contactName = t.leadName || t.customerName || leadParsed?.fullName || '';
               const contactPhone = t.leadPhone || leadParsed?.phone || '';
@@ -15949,7 +16014,7 @@ function TasksPage({
               return (
                 <React.Fragment key={t.id}>
                   <tr
-                    className={`border-b border-slate-50 cursor-pointer transition-all duration-100 ${isDone ? 'opacity-60' : ''} ${isOverdue ? 'bg-red-50/40' : 'hover:bg-slate-50/80'} ${isExpanded ? 'bg-slate-50' : ''}`}
+                    className={`border-b border-slate-50 cursor-pointer transition-all duration-100 ${isDone ? 'opacity-60' : ''} ${isOverdue ? 'bg-red-50/40' : isNewLead ? 'bg-green-50/60 hover:bg-green-50' : 'hover:bg-slate-50/80'} ${isExpanded ? 'bg-slate-50' : ''}`}
                     onClick={() => toggleExpand(t.id)}
                   >
                     {/* # */}
@@ -16837,6 +16902,14 @@ function TasksPage({
                                           <option value="">בחר מקור...</option>
                                           {CC_LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
                                         </select>
+                                        {fd.leadSource === 'אחר' && (
+                                          <input
+                                            className={`${ccInp} mt-2`}
+                                            placeholder="שם חברת התיווך"
+                                            value={fd.referralCompany || ''}
+                                            onChange={(e) => setF('referralCompany', e.target.value)}
+                                          />
+                                        )}
                                       </div>
                                     </div>
                                     {/* Row 4: עיר + כתובת */}
@@ -18349,6 +18422,7 @@ function TasksPage({
           </tbody>
         </table>
       </div>
+      )}
 
       {/* ═══ פופ-אפ "שליחת משוב" — נפתח בסוף הזרימה אחרי שליחת הדוח ═══ */}
       <ScheduleFeedbackModal
