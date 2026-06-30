@@ -15981,7 +15981,7 @@ function TasksPage({
                     const isPrivateGate = (fdGate.customerType || '') === 'PRIVATE' || (fdGate.customerType || '') === 'לקוח פרטי';
                     const ccContactsGate = taskContactsMap[t.id] || [];
                     const hasValidContactGate = ccContactsGate.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
-                    const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && (isPrivateGate || hasValidContactGate));
+                    const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && fdGate.city?.trim() && fdGate.address?.trim() && (isPrivateGate || hasValidContactGate));
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
                       <td colSpan={10} className="p-0">
@@ -16370,7 +16370,7 @@ function TasksPage({
                             const hasValidContact0 = ccContacts0.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
                             // הכפתור פעיל כשיש שם וטלפון. אכיפת איש-הקשר עבור חברה/קבלן/מוסד
                             // נעשית בלחיצה עצמה כדי שנוכל להציג הודעת שגיאה מפורשת.
-                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim());
+                            const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && fd.city?.trim() && fd.address?.trim());
                             const saveCustomerCard = async () => {
                               if (!isPrivate0 && !hasValidContact0) {
                                 setCcCardError((p) => ({ ...p, [t.id]: 'חובה להוסיף לפחות איש קשר אחד עבור חברה / קבלן / מוסד. הוסיפו איש קשר ומלאו שם או טלפון.' }));
@@ -16488,8 +16488,7 @@ function TasksPage({
                                   ];
                               return [...src].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
                             })();
-                            const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'אחר'];
-                            const CC_REFERRAL_COMPANIES = ['הדס', 'גינדי'];
+                            const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי', 'אחר'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
                             const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
                             const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
@@ -16744,31 +16743,10 @@ function TasksPage({
                                         </select>
                                       </div>
                                     </div>
-                                    {/* Row 3.5: הגיע דרך חברת צד-שלישי / מפנה (הדס, גינדי וכו') */}
-                                    <div className="grid grid-cols-2 gap-4">
-                                      <div>
-                                        <label className={ccLbl}>הגיע דרך חברת צד-שלישי?</label>
-                                        <select
-                                          className={ccSel}
-                                          value={CC_REFERRAL_COMPANIES.includes((fd.referralCompany || '').trim()) ? (fd.referralCompany || '').trim() : ((fd.referralCompany || '') ? '__other__' : '')}
-                                          onChange={(e) => setF('referralCompany', e.target.value === '__other__' ? ' ' : e.target.value)}
-                                        >
-                                          <option value="">לא / הגיע ישירות</option>
-                                          {CC_REFERRAL_COMPANIES.map((s) => <option key={s} value={s}>{s}</option>)}
-                                          <option value="__other__">אחר...</option>
-                                        </select>
-                                      </div>
-                                      {!!(fd.referralCompany || '') && !CC_REFERRAL_COMPANIES.includes((fd.referralCompany || '').trim()) && (
-                                        <div>
-                                          <label className={ccLbl}>שם החברה המפנה</label>
-                                          <input className={ccInp} placeholder="הקלד שם חברה" value={(fd.referralCompany || '').trim() === '' ? '' : fd.referralCompany} onChange={(e) => setF('referralCompany', e.target.value)} />
-                                        </div>
-                                      )}
-                                    </div>
                                     {/* Row 4: עיר + כתובת */}
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
-                                        <label className={ccLbl}>עיר</label>
+                                        <label className={ccLbl}>עיר *</label>
                                         <CitySearchInput
                                           value={fd.city}
                                           onChange={(v) => setF('city', v)}
@@ -16778,7 +16756,7 @@ function TasksPage({
                                         />
                                       </div>
                                       <div>
-                                        <label className={ccLbl}>כתובת מלאה</label>
+                                        <label className={ccLbl}>כתובת מלאה *</label>
                                         <div className="relative">
                                           <input className={ccInpIcon} placeholder="רחוב, מספר בית..." value={fd.address} onChange={(e) => setF('address', e.target.value)} />
                                           <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300" />
@@ -16872,7 +16850,7 @@ function TasksPage({
                                     )}
                                     <button onClick={saveCustomerCard} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
-                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : 'שמור והמשך לשלב הבא'}
+                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : (!fd.city?.trim() || !fd.address?.trim() ? 'יש למלא עיר וכתובת' : 'שמור והמשך לשלב הבא')}
                                     </button>
                                   </div>
                                 </div>
@@ -17931,9 +17909,13 @@ function TasksPage({
                                 }
                                 const data = await r.json();
                                 setCoordResult((p) => ({ ...p, [t.id]: data }));
-                                // נקבעה פגישה ב-Outlook → המשימה הושלמה. שומרים status=DONE
-                                // (השדה הקנוני ל"הושלם") כך שהמשימה יוצאת מרשימת המשימות הפעילות.
-                                void updateTaskField(t.id, { status: 'DONE' });
+                                // נקבעה פגישה ב-Outlook → שלב התיאום הסתיים. מקדמים את המשימה
+                                // לשלב הבא (ביצוע) — בלי לסמן DONE (שהיה מקפיץ אותה לשלב האחרון/סגור).
+                                // type=FIELD_WORK → detectStep מחזיר 5 (ביצוע). status נשאר פעיל.
+                                void updateTaskField(t.id, { type: 'FIELD_WORK' });
+                                // חזרה לרשימת המשימות (כפי שהיה) — המשימה תופיע כעת בשלב "ביצוע".
+                                setManualStepOverride((prev) => { const n = { ...prev }; delete n[t.id]; return n; });
+                                setExpandedTaskId(null);
                               } catch {
                                 setCoordError((p) => ({ ...p, [t.id]: 'שגיאת רשת — נסו שוב' }));
                               } finally {
@@ -18119,7 +18101,7 @@ function TasksPage({
                                 <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
                                   <div className="flex items-center gap-2 mb-3">
                                     <Users className="h-5 w-5 text-blue-500" />
-                                    <div className="text-base font-extrabold text-slate-800">מי מוזמן לפגישה?</div>
+                                    <div className="text-base font-extrabold text-slate-800">מי מבצע את הבדיקה?</div>
                                   </div>
                                   <div className="text-[12px] text-slate-400 font-semibold mb-3">
                                     כל מי שמסומן יקבל הזמנה ל-Outlook, והפגישה תופיע ביומן שלו.
