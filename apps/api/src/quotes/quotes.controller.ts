@@ -83,6 +83,10 @@ export class QuotesController {
   async getMergedDoc(@Param('id') id: string, @Res() res: Response) {
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
+    // משיכה-בקריאה: לפני ההגשה מסנכרנים את הגרסה הערוכה האחרונה מ-OneDrive (אם קיימת),
+    // כך שהמסמך שמורידים בכרטיס הלקוח תמיד מעודכן — בלי תלות באירועי focus בצד הלקוח.
+    await this.quotesService.syncFromOneDrive(id).catch(() => null);
+
     // Prefer the DB-stored bytes (survive deploys); fall back to disk for legacy rows.
     const doc = await this.quotesService.getLatestMergedDocument(id);
     if (doc?.data) {

@@ -877,6 +877,7 @@ type CustomerQuoteListRow = {
   phoneSummary?: string | null;
   contactEmail?: string | null;
   latestDocFileName?: string | null;
+  latestDocAt?: string | null;
 };
 
 export function CustomerLegacyCard({
@@ -1155,6 +1156,11 @@ export function CustomerLegacyCard({
           latestDocFileName: (() => {
             const docs = q.quoteDocuments as Array<Record<string, unknown>> | undefined;
             if (docs && docs.length > 0) return (docs[0].fileName as string | null) ?? null;
+            return null;
+          })(),
+          latestDocAt: (() => {
+            const docs = q.quoteDocuments as Array<Record<string, unknown>> | undefined;
+            if (docs && docs.length > 0) return ((docs[0].updatedAt as string | null) ?? (docs[0].createdAt as string | null)) ?? null;
             return null;
           })(),
         })),
@@ -3755,27 +3761,34 @@ export function CustomerLegacyCard({
                             <td className="px-3 py-2 whitespace-nowrap">{validDisp}</td>
                             <td className="px-3 py-2 whitespace-nowrap">
                               {(row.latestDocFileName || row.lastMergedDocPath) ? (
-                                <button
-                                  type="button"
-                                  className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
-                                  onClick={async () => {
-                                    try {
-                                      const r = await apiFetch(apiUrl(`/quotes/${row.id}/merged-doc`), { authUser: currentUser });
-                                      if (!r.ok) { alert('המסמך לא נמצא'); return; }
-                                      const blob = await r.blob();
-                                      const url = URL.createObjectURL(blob);
-                                      const a = document.createElement('a');
-                                      a.href = url;
-                                      a.download = row.latestDocFileName || `הצעה_${row.quoteNumber || row.id.slice(0,8)}.docx`;
-                                      document.body.appendChild(a);
-                                      a.click();
-                                      document.body.removeChild(a);
-                                      setTimeout(() => URL.revokeObjectURL(url), 5000);
-                                    } catch { alert('שגיאה בהורדת המסמך'); }
-                                  }}
-                                >
-                                  פתח מסמך
-                                </button>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <button
+                                    type="button"
+                                    className="rounded-md border border-green-200 bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+                                    onClick={async () => {
+                                      try {
+                                        const r = await apiFetch(apiUrl(`/quotes/${row.id}/merged-doc`), { authUser: currentUser });
+                                        if (!r.ok) { alert('המסמך לא נמצא'); return; }
+                                        const blob = await r.blob();
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = row.latestDocFileName || `הצעה_${row.quoteNumber || row.id.slice(0,8)}.docx`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                      } catch { alert('שגיאה בהורדת המסמך'); }
+                                    }}
+                                  >
+                                    פתח מסמך
+                                  </button>
+                                  {row.latestDocAt && !Number.isNaN(new Date(row.latestDocAt).getTime()) && (
+                                    <span className="text-[10px] text-slate-400" title="עודכן לאחרונה">
+                                      עודכן {new Date(row.latestDocAt).toLocaleDateString('he-IL')} {new Date(row.latestDocAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  )}
+                                </div>
                               ) : (
                                 <span className="text-xs text-slate-400">—</span>
                               )}
