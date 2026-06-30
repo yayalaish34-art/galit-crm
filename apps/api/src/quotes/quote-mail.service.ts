@@ -7,6 +7,7 @@ import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
+import { CompanyProfileService } from './company-profile.service';
 
 @Injectable()
 export class QuoteMailService {
@@ -19,6 +20,7 @@ export class QuoteMailService {
     private readonly graphMail: GraphMailService,
     private readonly graphFiles: GraphFilesService,
     private readonly pdfConvert: PdfConvertService,
+    private readonly companyProfile: CompanyProfileService,
   ) {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -61,6 +63,17 @@ export class QuoteMailService {
       signatureId?: string;
       /** משוך את הגרסה העדכנית מ-OneDrive (הקובץ שנערך ב-Word) במקום העותק השמור. */
       preferOnedrive?: boolean;
+      /**
+       * קישור לעמוד הצפייה/חתימה (/sign). אם סופק — לא מצרפים קובץ למייל,
+       * אלא משבצים כפתור "צפייה בהצעת מחיר" שמפנה לקישור.
+       */
+      viewUrl?: string;
+      /**
+       * כתובת הבסיס הציבורית של ה-API (למשל https://api.example.up.railway.app) —
+       * לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות". מקור: PUBLIC_API_URL או ה-host
+       * של הבקשה. אם ריק — הכפתור לא יוצג.
+       */
+      publicApiBaseUrl?: string;
     },
   ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
     // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
@@ -93,11 +106,13 @@ export class QuoteMailService {
     //   3) קובץ מהדיסק (fallback לרשומות ישנות).
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const docs: { content: Buffer; fileName: string; mime: string }[] = [];
+    // מצב קישור: לא מצרפים קובץ — שולחים כפתור "צפייה בהצעת מחיר" לעמוד /sign.
+    const linkMode = !!opts?.viewUrl;
     const quoteNumberForName = quote.quoteNumber || quote.importLegacyId || '';
     const baseDocName = `הצעת מחיר${quoteNumberForName ? ' ' + quoteNumberForName : ''}`;
 
     // 0) OneDrive — אם המשתמש ערך ב-Word, מושכים את הגרסה העדכנית ישירות משם.
-    if (opts?.preferOnedrive) {
+    if (!linkMode && opts?.preferOnedrive) {
       const ref = await this.getOnedriveRefSafe(quoteId);
       if (ref) {
         try {
@@ -112,7 +127,7 @@ export class QuoteMailService {
     // 1) תמיכה בכמה קבצים: attachmentIds (רבים) או attachmentId (בודד — תאימות לאחור).
     const attachmentIds = (opts?.attachmentIds?.length ? opts.attachmentIds : opts?.attachmentId ? [opts.attachmentId] : [])
       .filter((x): x is string => !!x);
-    if (docs.length === 0) {
+    if (!linkMode && docs.length === 0) {
       for (const attId of attachmentIds) {
         const att = await this.prisma.taskAttachment.findUnique({ where: { id: attId } });
         if (att) {
@@ -122,11 +137,11 @@ export class QuoteMailService {
     }
     // Fallback: DB-stored bytes from the latest QuoteDocument (survives deploys), then disk path.
     // משתמשים ב-mimeType השמור — כך PDF שהועלה (Word→PDF) נשלח כמות-שהוא בלי המרה.
-    if (docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
+    if (!linkMode && docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
       const qd = quote.quoteDocuments[0];
       docs.push({ content: Buffer.from(qd.data), fileName: qd.fileName, mime: qd.mimeType || DOCX_MIME });
     }
-    if (docs.length === 0) {
+    if (!linkMode && docs.length === 0) {
       let relPath: string | null = null;
       let diskName: string | null = null;
       if (quote.quoteDocuments?.length > 0) {
@@ -176,8 +191,18 @@ export class QuoteMailService {
       opts?.subject?.trim() ||
       `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
 
-    // הקובץ מצורף ישירות למייל — אין צורך בכפתור הורדה/קישור (הוסר למניעת כפילות).
-    const linkBlock = '';
+    // במצב קישור: כפתור "צפייה בהצעת מחיר" שמפנה לעמוד /sign (במקום קובץ מצורף).
+    const linkBlock = opts?.viewUrl
+      ? `<div style="margin:22px 0;"><a href="${opts.viewUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" target="_blank" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 30px;border-radius:10px;">צפייה בהצעת מחיר</a></div>`
+      : '';
+
+    // כפתור קבוע "הפרופיל שלנו + רישיונות" — מצביע ל-PDF המתארח ב-API.
+    // מוודאים שה-PDF קיים/עדכני (best-effort, לא חוסם את השליחה אם נכשל).
+    await this.companyProfile.ensurePdf(opts?.userId);
+    const apiBase = (process.env.PUBLIC_API_URL || opts?.publicApiBaseUrl || '').replace(/\/+$/, '');
+    const profileButton = apiBase
+      ? `<div style="margin:14px 0;"><a href="${apiBase}/public/company-profile.pdf" target="_blank" style="display:inline-block;background:#2f5c32;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 24px;border-radius:10px;">📄 הפרופיל שלנו + רישיונות</a></div>`
+      : '';
 
     // Resolve the per-user signature (text + optional image, if requested).
     // The image is sent as an INLINE attachment (CID) because Outlook blocks
@@ -227,15 +252,19 @@ export class QuoteMailService {
     }
 
     // Body: custom text (converted to HTML) if provided, else the default template.
+    const defaultIntro = linkMode
+      ? `<p>הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''} מוכנה לצפייה ולחתימה — לחצו על הכפתור שלהלן.</p>`
+      : `<p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''}.</p>`;
     const bodyHtml = opts?.body?.trim()
       ? `<div>${this.toHtml(opts.body)}</div>${linkBlock}`
       : `<p>שלום${custName ? ' ' + custName : ''},</p>
-<p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''}.</p>
+${defaultIntro}
 ${linkBlock}
 <p>בברכה,<br>גלית – החברה לאיכות הסביבה</p>`;
 
     const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111111;line-height:1.6;">
 ${bodyHtml}
+${profileButton}
 ${signatureHtml}
 </div>`;
 
@@ -294,6 +323,9 @@ ${signatureHtml}
         data: {
           lastEmailedAt: new Date(),
           lastEmailedTo: recipientEmail,
+          // שומרים את תוכן המייל ששלחנו עם ההצעה — ממנו ננסח בהמשך את מייל הדוח (שלב 7).
+          lastEmailSubject: opts?.subject?.trim() || subject,
+          lastEmailBody: opts?.body?.trim() || null,
         },
       });
     } catch (_e) {

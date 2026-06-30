@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 export interface DraftContext {
   /** ההצעה שעבורה מנסחים — לשליפת סכום/תנאי תשלום/מספר אוטומטית */
   quoteId?: string;
+  /** הלקוח (לניסוח מייל דוח — לשליפת מייל הצעת המחיר האחרון שנשלח כהקשר) */
+  customerId?: string;
   customerName?: string;
   contactName?: string;
   serviceName?: string;
@@ -219,16 +221,21 @@ export class AiMailService {
 
   // ── ניסוח מייל ללוויית "דוח" שהופק (לא הצעת מחיר) ──
   private readonly REPORT_SYSTEM = `אתה מנסח מיילים בעברית עבור "גלית – החברה לאיכות הסביבה", המספקת בדיקות ושירותים סביבתיים (קרינה, רעש, אוויר, אסבסט, ראדון ועוד).
-המשימה: לנסח מייל מקצועי, קצר ומכובד, המלווה דוח שהופק עבור הלקוח ומצורף למייל.
+המשימה: לנסח מייל רשמי, מקצועי ומכובד, המלווה את הדוח המפורט שהופק עבור הלקוח לאחר שהעבודה הסתיימה, ומצורף למייל.
+ההקשר: בעבר נשלחה ללקוח הצעת מחיר עבור שירות מסוים, העבודה בוצעה, וכעת אנו שולחים את הדוח המסכם.
 
 מבנה הגוף (לפי הסדר):
 1. פנייה: "שלום [שם פרטי]," בשם הפרטי בלבד (אם אין שם — "שלום רב,").
-2. משפט פתיחה: "מצורף הדוח שהופק עבורכם בנושא [השירות/הפרויקט]." — לפי הפרטים שנמסרו.
-3. 1-2 משפטים קצרים: הדוח כולל את ממצאי/תוצרי העבודה, ושנשמח לעמוד לרשות הלקוח לכל שאלה או הבהרה.
-4. משפט סיום מכובד: "נשמח לעמוד לרשותכם לכל שאלה." או נוסח דומה.
+2. משפט פתיחה רשמי שמודיע שעבודת [השירות/הפרויקט] הושלמה, ושמצורף הדוח המפורט המסכם אותה.
+3. 1-2 משפטים המתארים בקצרה את מהות הדוח: הוא מרכז את ממצאי/תוצרי הבדיקה והעבודה שבוצעה, בהתאם לשירות שהוזמן.
+4. משפט שמדגיש שצוות החברה זמין לכל שאלה, הבהרה או הסבר לגבי הדוח וממצאיו.
+5. משפט סיום מכובד: "נשמח לעמוד לרשותכם לכל שאלה." או נוסח דומה.
 
 כללים מחייבים:
-- אל תמציא פרטים שלא נמסרו (ממצאים, מספרים, תאריכים).
+- הטון חייב להישמע רשמי ומקצועי — זהו מסמך מסכם של עבודה שהסתיימה, לא הצעה.
+- אם סופק "מייל הצעת המחיר המקורי" — בסס עליו את תיאור השירות/העבודה כדי לשמור על עקביות, אך אל תעתיק אותו; נסח מחדש כמייל המלווה דוח שהושלם.
+- אל תמציא פרטים שלא נמסרו (ממצאים ספציפיים, מספרים, סכומים, תאריכים).
+- אל תכלול סכומים, תנאי תשלום או תוקף — אלה שייכים להצעה, לא לדוח.
 - אל תוסיף חתימה ("בברכה" / שם) — היא מתווספת בנפרד.
 - נושא בפורמט: "דוח [השירות/הפרויקט] – [שם הלקוח]".
 - החזר JSON תקין בלבד עם "subject" ו-"body" (טקסט רגיל עם שורות חדשות).`;
@@ -256,13 +263,22 @@ export class AiMailService {
     }
 
     const firstName = this.firstNameOf(ctx.contactName);
-    const serviceOrProject = ctx.projectName?.trim() || ctx.serviceName?.trim() || '';
+
+    // ── הקשר: מייל הצעת המחיר המקורי שנשלח ללקוח — ממנו גוזרים את תיאור השירות
+    //    כדי לשמור עקביות בין ההצעה לדוח. best-effort: בכישלון מתעלמים. ──
+    const quoteEmail = await this.resolveQuoteEmail(ctx);
+    const serviceOrProject =
+      ctx.projectName?.trim() || ctx.serviceName?.trim() || quoteEmail?.service?.trim() || '';
+
     const contextLines = [
       ctx.customerName ? `לקוח: ${ctx.customerName}` : '',
       firstName ? `שם פרטי לפנייה (השתמש בזה בלבד בפנייה "שלום [שם]"): ${firstName}` : '',
       serviceOrProject ? `שירות/פרויקט: ${serviceOrProject}` : '',
       ctx.reportName ? `שם הדוח: ${ctx.reportName}` : '',
       ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
+      quoteEmail?.subject || quoteEmail?.body
+        ? `מייל הצעת המחיר המקורי שנשלח ללקוח (בסס עליו את תיאור השירות, אך נסח מחדש כמייל המלווה דוח שהושלם):\nנושא: ${quoteEmail.subject || '(ללא)'}\nתוכן:\n${quoteEmail.body || '(ללא)'}`
+        : '',
     ].filter(Boolean).join('\n');
 
     const messages: any[] = [
@@ -312,6 +328,34 @@ export class AiMailService {
       aiBody = String(content).trim();
     }
     return { subject: aiSubject, body: aiBody };
+  }
+
+  /**
+   * שולף את מייל הצעת המחיר האחרון שנשלח — לפי quoteId אם נמסר, אחרת ההצעה האחרונה
+   * של הלקוח שיש לה גוף-מייל שמור. משמש כהקשר לניסוח מייל הדוח. best-effort: בכישלון null.
+   */
+  private async resolveQuoteEmail(
+    ctx: DraftContext,
+  ): Promise<{ subject?: string; body?: string; service?: string } | null> {
+    try {
+      const select = { lastEmailSubject: true, lastEmailBody: true, service: true } as const;
+      let q: any = null;
+      if (ctx.quoteId) {
+        q = await (this.prisma.quote.findUnique as any)({ where: { id: ctx.quoteId }, select }).catch(() => null);
+      }
+      if ((!q || (!q.lastEmailBody && !q.lastEmailSubject)) && ctx.customerId) {
+        q = await (this.prisma.quote.findFirst as any)({
+          where: { customerId: ctx.customerId, lastEmailBody: { not: null } },
+          orderBy: { lastEmailedAt: 'desc' },
+          select,
+        }).catch(() => null);
+      }
+      if (!q) return null;
+      return { subject: q.lastEmailSubject || '', body: q.lastEmailBody || '', service: q.service || '' };
+    } catch (e: any) {
+      this.logger.warn(`resolveQuoteEmail failed: ${e?.message || e}`);
+      return null;
+    }
   }
 
   /** שליפת מספר/סכום/תנאי תשלום מההצעה + חישוב תוקף = חודש מהיום. */

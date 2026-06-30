@@ -592,7 +592,7 @@ export class QuotesService {
    * אחרת → מעלה את המסמך הממוזג האחרון ל-OneDrive ושומר את ההפניה.
    * מרגע זה והלאה, שליחת המייל מושכת את הגרסה העדכנית מ-OneDrive.
    */
-  async openInOneDrive(id: string, userId: string): Promise<{ webUrl: string; itemId: string; reused: boolean }> {
+  async openInOneDrive(id: string, userId: string): Promise<{ webUrl: string; webDavUrl: string; itemId: string; reused: boolean }> {
     if (!userId) throw new BadRequestException('משתמש לא מזוהה — יש להתחבר מחדש');
     const quote = await this.prisma.quote.findUnique({ where: { id } });
     if (!quote) throw new NotFoundException('Quote not found');
@@ -602,7 +602,7 @@ export class QuotesService {
     if (existing && existing.ownerId === userId) {
       try {
         const item = await this.graphFiles.getItem(existing.ownerId, existing.itemId);
-        if (item) return { webUrl: item.webUrl, itemId: item.itemId, reused: true };
+        if (item) return { webUrl: item.webUrl, webDavUrl: item.webDavUrl, itemId: item.itemId, reused: true };
       } catch (e: any) {
         this.logger.warn(`OneDrive getItem failed (${id}), will re-upload: ${e?.message || e}`);
       }
@@ -642,6 +642,6 @@ export class QuotesService {
       this.logger.warn(`Saving OneDrive ref failed (run migration?) for ${id}: ${e?.message || e}`);
     }
 
-    return { webUrl: uploaded.webUrl, itemId: uploaded.itemId, reused: false };
+    return { webUrl: uploaded.webUrl, webDavUrl: uploaded.webDavUrl, itemId: uploaded.itemId, reused: false };
   }
 }

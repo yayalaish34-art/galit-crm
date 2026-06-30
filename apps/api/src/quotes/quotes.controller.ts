@@ -129,6 +129,8 @@ export class QuotesController {
       includeSignature?: boolean;
       signatureId?: string;
       preferOnedrive?: boolean;
+      /** קישור לעמוד הצפייה/חתימה (/sign). אם סופק — לא מצרפים קובץ, אלא כפתור "צפייה בהצעת מחיר". */
+      viewUrl?: string;
     },
     @Req() req: any,
   ) {
@@ -144,6 +146,10 @@ export class QuotesController {
       includeSignature: body.includeSignature,
       signatureId: body.signatureId,
       preferOnedrive: body.preferOnedrive,
+      viewUrl: body.viewUrl,
+      // ה-host של הבקשה = הדומיין הציבורי של ה-API (Railway תמיד https חיצונית).
+      // משמש לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות". PUBLIC_API_URL גובר אם הוגדר.
+      publicApiBaseUrl: req?.headers?.host ? `https://${req.headers.host}` : undefined,
     });
   }
 
@@ -165,7 +171,7 @@ export class QuotesController {
   /**
    * POST /quotes/:id/onedrive-edit
    * פותח את המסמך הממוזג לעריכה ב-Word דרך OneDrive (שמירה-חזרה אוטומטית).
-   * מחזיר { webUrl, itemId, reused } — הפרונט פותח את webUrl ב-Word.
+   * מחזיר { webUrl, webDavUrl, itemId, reused } — הפרונט פותח את webDavUrl ב-Word דסקטופ.
    */
   @Post(':id/onedrive-edit')
   openInOneDrive(@Param('id') id: string, @Req() req: any) {

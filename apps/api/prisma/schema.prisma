@@ -784,6 +784,9 @@ model Quote {
   /// מעקב שליחת מייל אחרונה
   lastEmailedAt             DateTime?
   lastEmailedTo             String?
+  /// תוכן מייל הצעת המחיר האחרון שנשלח — נשמר כדי לנסח ממנו את מייל הדוח בשלב 7
+  lastEmailSubject          String?
+  lastEmailBody             String?   @db.Text
 
   /// OneDrive — מסמך DOCX ניתן-לעריכה ב-Word עם שמירה-חזרה אוטומטית.
   /// onedriveItemId: מזהה הפריט ב-OneDrive; onedriveWebUrl: כתובת פתיחה ב-Word;

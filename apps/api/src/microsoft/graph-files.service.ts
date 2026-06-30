@@ -34,7 +34,7 @@ export class GraphFilesService {
     userId: string,
     fileName: string,
     docx: Buffer,
-  ): Promise<{ itemId: string; webUrl: string; name: string }> {
+  ): Promise<{ itemId: string; webUrl: string; webDavUrl: string; name: string }> {
     const token = await this.auth.getAccessToken(userId);
     const safe =
       (fileName.replace(/\.docx$/i, '') || 'quote').replace(/[^A-Za-z0-9._\-א-ת ]+/g, '_').trim().slice(0, 120) ||
@@ -52,17 +52,18 @@ export class GraphFilesService {
     }
     const item: any = await res.json();
     if (!item?.id) throw new Error('OneDrive upload: missing item id');
-    return { itemId: item.id, webUrl: item.webUrl, name: item.name };
+    // webDavUrl = הנתיב הישיר לקובץ ש-Word דסקטופ פותח (ms-word:ofe). webUrl הוא דף תצוגה (Doc.aspx).
+    return { itemId: item.id, webUrl: item.webUrl, webDavUrl: item.webDavUrl, name: item.name };
   }
 
-  /** מטא-דאטה של פריט (כולל webUrl + תאריך שינוי אחרון). מחזיר null אם הפריט נמחק/לא נמצא. */
+  /** מטא-דאטה של פריט (כולל webUrl/webDavUrl + תאריך שינוי אחרון). מחזיר null אם הפריט נמחק/לא נמצא. */
   async getItem(
     userId: string,
     itemId: string,
-  ): Promise<{ itemId: string; webUrl: string; name: string; lastModified: string } | null> {
+  ): Promise<{ itemId: string; webUrl: string; webDavUrl: string; name: string; lastModified: string } | null> {
     const token = await this.auth.getAccessToken(userId);
     const res = await fetch(
-      `${GRAPH}/me/drive/items/${itemId}?$select=id,name,webUrl,lastModifiedDateTime`,
+      `${GRAPH}/me/drive/items/${itemId}?$select=id,name,webUrl,webDavUrl,lastModifiedDateTime`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     if (res.status === 404) return null;
@@ -71,7 +72,7 @@ export class GraphFilesService {
       throw new Error(`OneDrive getItem failed: ${res.status} ${t.slice(0, 200)}`);
     }
     const item: any = await res.json();
-    return { itemId: item.id, webUrl: item.webUrl, name: item.name, lastModified: item.lastModifiedDateTime };
+    return { itemId: item.id, webUrl: item.webUrl, webDavUrl: item.webDavUrl, name: item.name, lastModified: item.lastModifiedDateTime };
   }
 
   /**

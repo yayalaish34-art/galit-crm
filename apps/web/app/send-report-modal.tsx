@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Mail, Upload, Loader2, FileText, Sparkles, X } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
 
@@ -57,9 +57,11 @@ export function SendReportModal({
 }) {
   const customerId = task.customerId || null;
   const inputRef = useRef<HTMLInputElement>(null);
+  const autoDraftedRef = useRef(false); // ניסוח אוטומטי פעם אחת בפתיחת הטופס
 
   const [attached, setAttached] = useState<AttachedReport | null>(null);
   const [attaching, setAttaching] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
 
   const [toList, setToList] = useState<string[]>([]);
   const [toInput, setToInput] = useState('');
@@ -170,6 +172,25 @@ export function SendReportModal({
     setStatus('');
   };
 
+  // קבלת קובץ מגרירה (drag & drop) — בדיקת סוג ואז העלאה אוטומטית כמו בלחיצה
+  const acceptDropped = (file: File) => {
+    const okExt = /\.(pdf|docx?)$/i.test(file.name);
+    const okMime = /pdf|wordprocessingml|msword/i.test(file.type);
+    if (!okExt && !okMime) {
+      setErr('ניתן לצרף קובץ PDF או Word בלבד');
+      return;
+    }
+    void onPick(file);
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (attaching) return;
+    const file = e.dataTransfer.files?.[0];
+    if (file) acceptDropped(file);
+  };
+
   const draft = async (instruction?: string) => {
     setAiBusy(true);
     setErr('');
@@ -178,6 +199,7 @@ export function SendReportModal({
         method: 'POST',
         authUser: currentUser as never,
         body: JSON.stringify({
+          customerId: customerId || undefined,
           customerName: task.customerName || '',
           contactName: task.leadName || task.customerName || '',
           projectName: task.projectName || '',
@@ -201,6 +223,15 @@ export function SendReportModal({
       setAiBusy(false);
     }
   };
+
+  // ניסוח אוטומטי בפתיחה — ה-AI מנסח נושא+תוכן מתוך מייל הצעת המחיר שנשלח, פעם אחת.
+  useEffect(() => {
+    if (!open) { autoDraftedRef.current = false; return; }
+    if (autoDraftedRef.current) return;
+    autoDraftedRef.current = true;
+    void draft();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const allTo = toInput.includes('@') ? [...toList, toInput.trim()] : toList;
   const canSend = !!attached && allTo.length > 0 && !sending;
@@ -300,12 +331,22 @@ export function SendReportModal({
               </div>
             ) : (
               <label
-                className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-indigo-300 bg-white px-3 py-3 text-sm font-semibold text-indigo-700 hover:bg-indigo-50 ${
-                  attaching ? 'pointer-events-none opacity-50' : ''
-                }`}
+                onDragOver={(e) => { e.preventDefault(); if (!attaching) setDragOver(true); }}
+                onDragLeave={(e) => { e.preventDefault(); setDragOver(false); }}
+                onDrop={onDrop}
+                className={`flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-3 py-5 text-sm font-semibold transition-colors ${
+                  dragOver
+                    ? 'border-indigo-500 bg-indigo-100 text-indigo-800 ring-2 ring-indigo-200'
+                    : 'border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50'
+                } ${attaching ? 'pointer-events-none opacity-50' : ''}`}
               >
-                {attaching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {attaching ? 'מצרף…' : 'צרף דוח (PDF / Word)'}
+                <div className="flex items-center gap-2">
+                  {attaching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {attaching ? 'מצרף…' : dragOver ? 'שחרר כדי להעלות' : 'צרף דוח (PDF / Word)'}
+                </div>
+                {!attaching && !dragOver && (
+                  <span className="text-[11px] font-normal text-slate-400">גרור לכאן קובץ או לחץ לבחירה</span>
+                )}
                 <input
                   ref={inputRef}
                   type="file"
@@ -394,7 +435,7 @@ export function SendReportModal({
               className="w-full rounded-xl border border-gray-300 px-3 py-2.5 text-base outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              placeholder="נושא המייל"
+              placeholder={aiBusy && !subject ? '✨ מנסח…' : 'נושא המייל'}
             />
           </div>
 
@@ -406,7 +447,7 @@ export function SendReportModal({
               className="w-full resize-y rounded-xl border border-gray-300 px-3 py-2.5 text-base leading-relaxed outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="כתוב את תוכן המייל, או לחץ ׳נסח לי מייל׳"
+              placeholder={aiBusy && !body ? '✨ מנסח מייל אוטומטית מתוך הצעת המחיר…' : 'כתוב את תוכן המייל, או לחץ ׳נסח לי מייל׳'}
             />
           </div>
 

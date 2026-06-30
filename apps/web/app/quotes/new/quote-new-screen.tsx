@@ -1218,6 +1218,15 @@ export function QuoteNewScreen({
     const to = allTo[0]?.trim() || '';
     if (!to) { setStatusMsg('חסר נמען'); return; }
     setEmailSending(true);
+    // במקום לצרף קובץ — מצרפים כפתור "צפייה בהצעת מחיר" שמפנה לעמוד /sign.
+    // יוצרים את הקישור (או משתמשים בקיים אם כבר נוצר ב"שלח לחתימה").
+    setStatusMsg('מכין קישור לצפייה…');
+    let viewUrl = signLink;
+    if (!viewUrl) {
+      const res = await createSignLink();
+      viewUrl = res.url;
+      if (!viewUrl) { setEmailSending(false); setStatusMsg(res.error || 'יצירת קישור הצפייה נכשלה'); return; }
+    }
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
@@ -1234,12 +1243,8 @@ export function QuoteNewScreen({
           messageBody: f.body,
           includeSignature: f.includeSignature,
           signatureId: f.signatureId || undefined,
-          attachmentId: f.attId || undefined,
-          // כל הקבצים שיצורפו (הראשי + הנוספים) — כל DOCX יומר ל-PDF בצד השרת בזמן השליחה.
-          attachmentIds: [f.attId, ...emailExtraAttIds].filter(Boolean),
-          // אם ההצעה נערכה ב-Word (OneDrive) — השרת ימשוך את הגרסה העדכנית משם.
-          preferOnedrive: onedriveActive || undefined,
-          docUrl: f.docLink,
+          // קישור הצפייה/חתימה במקום קובץ מצורף.
+          viewUrl,
           customerName: customer || '',
         }),
       });
@@ -1254,7 +1259,7 @@ export function QuoteNewScreen({
     } else {
       // נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web (כשהשרת לא הצליח)
       const subject = f.subject;
-      const body = `${f.body}${f.docLink ? '\n\nקישור להורדה:\n' + f.docLink : ''}`;
+      const body = `${f.body}${viewUrl ? '\n\nצפייה בהצעת מחיר:\n' + viewUrl : ''}`;
       const ccParam = ccList.length ? `&cc=${encodeURIComponent(ccList.join(','))}` : '';
       const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       window.open(owaUrl, '_blank');
@@ -1264,10 +1269,10 @@ export function QuoteNewScreen({
     }
   }
 
-  // מייצר קישור חתימה ציבורי להצעה — הלקוח פותח אותו, רואה את ה-PDF וחותם באצבע
-  async function requestSignatureLink() {
-    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה לחתימה'); return; }
-    setSignBusy(true); setSignLink(''); setSignCopied(false); setStatusMsg('מכין קישור לחתימה…');
+  // ליבה: יוצר בקשת חתימה ומחזיר את קישור ה-/sign (גם מעדכן state). מחזיר '' בכישלון.
+  // מחזיר { url, error } כדי שהקורא יציג את הסיבה האמיתית לכשל (PDF/לקוח/מיזוג) ולא הודעה כללית.
+  async function createSignLink(): Promise<{ url: string; error: string }> {
+    if (!emailForm.quoteId) return { url: '', error: 'יש לשמור את ההצעה לפני יצירת קישור הצפייה' };
     try {
       const r = await apiFetch(apiUrl(`/quotes/${emailForm.quoteId}/request-signature`), {
         method: 'POST',
@@ -1276,15 +1281,25 @@ export function QuoteNewScreen({
       if (!r.ok) {
         let msg = 'יצירת קישור החתימה נכשלה';
         try { const e = await r.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message[0] : e.message; } catch { /* ignore */ }
-        setStatusMsg(msg);
-        return;
+        return { url: '', error: msg };
       }
       const d = await r.json();
-      setSignLink(`${window.location.origin}/sign/${d.token}`);
+      const url = `${window.location.origin}/sign/${d.token}`;
+      setSignLink(url);
       setSignPhone(String(d.customerPhone || '').replace(/\D/g, ''));
-      setStatusMsg('');
+      return { url, error: '' };
     } catch {
-      setStatusMsg('יצירת קישור החתימה נכשלה');
+      return { url: '', error: 'יצירת קישור החתימה נכשלה — בעיית תקשורת עם השרת' };
+    }
+  }
+
+  // מייצר קישור חתימה ציבורי להצעה — הלקוח פותח אותו, רואה את ההצעה וחותם באצבע
+  async function requestSignatureLink() {
+    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה לחתימה'); return; }
+    setSignBusy(true); setSignLink(''); setSignCopied(false); setStatusMsg('מכין קישור לחתימה…');
+    try {
+      const { url, error } = await createSignLink();
+      setStatusMsg(url ? '' : (error || 'יצירת קישור החתימה נכשלה'));
     } finally {
       setSignBusy(false);
     }
@@ -1632,10 +1647,11 @@ export function QuoteNewScreen({
    * מעלה את המסמך הממוזג ל-OneDrive (פעם אחת) ופותח אותו ב-Word *של המחשב* (לא Word Online).
    * חשוב: Word Online לא שומר נאמנות לתמונות צפות/מעוגנות (לוגו, חתימה) ודוחף אותן לראש העמוד —
    * לכן פותחים ב-Word דסקטופ דרך פרוטוקול ms-word, ששומר על הפריסה במדויק ועדיין שומר לענן. */
-  function buildDesktopWordUrl(webUrl: string): string {
-    // ms-word:ofe|u|<URL> = "Open For Edit". מסירים פרמטרי query (?web=1 וכו') שמכריחים דפדפן.
-    const clean = webUrl.split('?')[0];
-    return `ms-word:ofe|u|${clean}`;
+  function buildDesktopWordUrl(fileUrl: string): string {
+    // ms-word:ofe|u|<URL> = "Open For Edit". חייבים את הנתיב הישיר לקובץ (webDavUrl),
+    // לא את דף התצוגה של SharePoint (_layouts/15/Doc.aspx?sourcedoc=...) — שם זהות הקובץ
+    // נמצאת ב-query, וחיתוך ה-query שובר אותה ("Office אינו מזהה את הפקודה"). לכן לא חותכים כאן.
+    return `ms-word:ofe|u|${fileUrl}`;
   }
   function openInDesktopWord(webUrl: string) {
     // הפעלת ה-protocol handler דרך עוגן זמני — כך הדף הנוכחי לא מנווט/נסגר.
@@ -1661,12 +1677,13 @@ export function QuoteNewScreen({
         return;
       }
       const data = await r.json();
-      if (data?.webUrl) {
-        setOnedriveWebUrl(data.webUrl);
+      if (data?.webUrl || data?.webDavUrl) {
+        // webUrl = קישור תצוגה בדפדפן (fallback בחלון השליחה). webDavUrl = נתיב ישיר לפתיחה ב-Word דסקטופ.
+        setOnedriveWebUrl(data.webUrl || data.webDavUrl);
         setOnedriveActive(true);
         // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה). אם Word לא מותקן —
         // אפשר לפתוח בדפדפן מהקישור בחלון השליחה (לא מומלץ — פוגע בפריסת תמונות).
-        openInDesktopWord(data.webUrl);
+        openInDesktopWord(data.webDavUrl || data.webUrl);
         setStatusMsg('נפתח ב-Word במחשב — השינויים יישמרו אוטומטית, ובשליחה תצא הגרסה העדכנית');
         setTimeout(() => setStatusMsg(''), 8000);
       } else {
@@ -2174,9 +2191,9 @@ export function QuoteNewScreen({
         code: li.code || li.sku || '',
         name: li.description || li.code || li.sku || '',
         quantity: String(qty),
-        unitPrice: fmtMoney(price) + ' ₪',
+        unitPrice: fmtMoney(price),
         discountPct: disc > 0 ? disc + '%' : '0%',
-        lineTotal: fmtMoney(lineTotal) + ' ₪',
+        lineTotal: fmtMoney(lineTotal),
       };
     });
 
@@ -2226,13 +2243,13 @@ export function QuoteNewScreen({
       contactEmail: contactEmailMerged,
       salesRepName: salesRep || '',
       approverName: contactNameMerged,
-      subtotal: fmtMoney(sub) + ' ₪',
+      subtotal: fmtMoney(sub),
       discountPercent: discPct > 0 ? String(discPct) : '0',
-      subtotalAfterDiscount: fmtMoney(afterDiscountVal) + ' ₪',
-      vatAmount: fmtMoney(vatVal) + ' ₪',
-      totalAmount: fmtMoney(totalVal) + ' ₪',
-      vat: fmtMoney(vatVal) + ' ₪',
-      total: fmtMoney(totalVal) + ' ₪',
+      subtotalAfterDiscount: fmtMoney(afterDiscountVal),
+      vatAmount: fmtMoney(vatVal),
+      totalAmount: fmtMoney(totalVal),
+      vat: fmtMoney(vatVal),
+      total: fmtMoney(totalVal),
       paymentTerms: paymentTerms || '',
       validityDate: paymentValidityDate
         ? new Date(paymentValidityDate).toLocaleDateString('he-IL')
@@ -3224,18 +3241,14 @@ export function QuoteNewScreen({
                       </div>
                     )}
 
-                    {/* קבצים מצורפים */}
-                    <div className="mt-5 flex flex-wrap gap-2 border-t border-gray-100 pt-4">
-                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" title={emailAttachments.find((a) => a.id === emailForm.attId)?.fileName || ''}>
-                        📄 {emailAttachments.find((a) => a.id === emailForm.attId)?.fileName || 'הצעת מחיר.docx'}
+                    {/* כפתור "צפייה בהצעת מחיר" — נשלח במקום קובץ מצורף, מפנה לעמוד הצפייה/חתימה */}
+                    <div className="mt-5 border-t border-gray-100 pt-4">
+                      <span className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white" style={{ background: '#2563eb' }}>
+                        📄 צפייה בהצעת מחיר
                       </span>
-                      {emailExtraAttIds.map((eid) => (
-                        <span key={eid} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700" title={emailAttachments.find((a) => a.id === eid)?.fileName || ''}>
-                          📄 {emailAttachments.find((a) => a.id === eid)?.fileName || 'קובץ'}
-                        </span>
-                      ))}
+                      <div className="mt-2 text-[11px] text-gray-400">הלקוח יקבל כפתור שמוביל לעמוד צפייה וחתימה בהצעה (במקום קובץ מצורף).</div>
                       {emailForm.includeSignature && emailSigImage && (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                        <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                           🖼️ חתימה (תמונה)
                         </span>
                       )}
@@ -3270,7 +3283,8 @@ export function QuoteNewScreen({
                         </select>
                       </div>
                     )}
-                    {/* ── קובץ ההצעה שיישלח: בחירה + העלאת גרסה ערוכה ── */}
+                    {/* קובץ ההצעה הוסר — נשלח כפתור "צפייה בהצעת מחיר" במקום קובץ מצורף (אין צורך בקובץ) */}
+                    {false && (
                     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
                       {onedriveActive && (
                         <div className="mb-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-800">
@@ -3278,12 +3292,12 @@ export function QuoteNewScreen({
                             <span className="text-base leading-none">📝</span>
                             <span className="flex-1">הקובץ נערך ב-<strong>Word</strong>. <strong className="text-emerald-700">לכותרת מושלמת:</strong> ב-Word עשה <strong>Save as PDF</strong> והעלה למטה — אחרת השרת ימיר ועלול להזיז את הכותרת.</span>
                             {onedriveWebUrl && (
-                              <button type="button" onClick={() => openInDesktopWord(onedriveWebUrl)} className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1 font-semibold text-white hover:bg-blue-700">פתח ב-Word (מחשב)</button>
+                              <button type="button" onClick={() => openInDesktopWord(onedriveWebUrl!)} className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1 font-semibold text-white hover:bg-blue-700">פתח ב-Word (מחשב)</button>
                             )}
                           </div>
                           {onedriveWebUrl && (
                             <div className="mt-1 pr-6 text-[11px] text-blue-500">
-                              לא נפתח? <a href={onedriveWebUrl} target="_blank" rel="noopener noreferrer" className="underline">פתח בדפדפן</a> — שים לב: עריכה בדפדפן עלולה להזיז תמונות לראש העמוד.
+                              לא נפתח? <a href={onedriveWebUrl!} target="_blank" rel="noopener noreferrer" className="underline">פתח בדפדפן</a> — שים לב: עריכה בדפדפן עלולה להזיז תמונות לראש העמוד.
                             </div>
                           )}
                         </div>
@@ -3344,6 +3358,7 @@ export function QuoteNewScreen({
                         {emailAttBusy ? 'מצרף…' : '➕ הוסף קובץ (יישלח בנוסף — יומר ל-PDF)'}
                       </label>
                     </div>
+                    )}
                     {/* בקשת שינוי מ-AI */}
                     <div>
                       <label className="mb-1 block text-sm font-semibold text-blue-700">✨ בקש מ-AI לשנות</label>

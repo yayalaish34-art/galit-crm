@@ -5,6 +5,8 @@ import * as path from 'path';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfConvertService } from './pdf-convert.service';
+import { GraphMailService } from '../microsoft/graph-mail.service';
+import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -61,6 +63,8 @@ export class QuoteSignatureService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly pdfConvert: PdfConvertService,
+    private readonly graphMail: GraphMailService,
+    private readonly msAuth: MicrosoftAuthService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────
@@ -224,7 +228,87 @@ export class QuoteSignatureService {
       },
     });
 
+    // שליחת ההצעה החתומה חזרה לאיש המכירות ששלח לחתימה (Outlook שלו).
+    // best-effort — לעולם לא מפיל את החתימה (היא כבר נשמרה בכרטיס הלקוח).
+    await this.notifySignedToRequester(quote, meta, signedPdf, cleanSigner, signedAt);
+
     return { success: true as const };
+  }
+
+  /**
+   * מודיע לאיש המכירות ששלח לחתימה (meta.requestedById) שההצעה נחתמה, ומצרף את
+   * ה-PDF החתום. נשלח מתיבת ה-Outlook שלו אל עצמו. best-effort: כל כשל (לא מחובר
+   * ל-Outlook / אין מייל / Graph נכשל) נרשם בלוג בלבד ולא משפיע על תהליך החתימה.
+   */
+  private async notifySignedToRequester(
+    quote: any,
+    meta: SignatureMeta,
+    signedPdf: Buffer,
+    signer: SignerInfo,
+    signedAt: Date,
+  ): Promise<void> {
+    const requesterId = meta.requestedById;
+    if (!requesterId) {
+      this.logger.log('signed: no requestedById — skipping back-to-sender email');
+      return;
+    }
+    try {
+      const connected = (await this.msAuth.getStatus(requesterId)).connected;
+      if (!connected) {
+        this.logger.warn(`signed: requester ${requesterId} not connected to Outlook — skipping notify`);
+        return;
+      }
+      const user = await this.prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { email: true, name: true },
+      });
+      if (!user?.email) {
+        this.logger.warn(`signed: requester ${requesterId} has no email — skipping notify`);
+        return;
+      }
+
+      const quoteNumber = quote.quoteNumber || quote.importLegacyId || '';
+      const customerName = quote.customer?.name || '';
+      const p2 = (v: number) => String(v).padStart(2, '0');
+      const when = `${p2(signedAt.getDate())}/${p2(signedAt.getMonth() + 1)}/${signedAt.getFullYear()} ${p2(signedAt.getHours())}:${p2(signedAt.getMinutes())}`;
+      const esc = (s: string) =>
+        String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      const rows: [string, string][] = [
+        ['הצעה', quoteNumber],
+        ['לקוח', customerName],
+        ['חתם/ה', signer.fullName || ''],
+      ];
+      if (signer.companyName) rows.push(['חברה', signer.companyName]);
+      if (signer.role) rows.push(['תפקיד', signer.role]);
+      if (signer.idNumber) rows.push(['ת.ז', signer.idNumber]);
+      rows.push(['נחתם בתאריך', when]);
+
+      const rowsHtml = rows
+        .map(
+          ([k, v]) =>
+            `<tr><td style="padding:3px 14px 3px 0;color:#64748b;">${esc(k)}</td><td style="padding:3px 0;font-weight:600;color:#0f172a;">${esc(v || '—')}</td></tr>`,
+        )
+        .join('');
+
+      const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111;line-height:1.6;">
+<p style="font-size:16px;font-weight:700;color:#16a34a;">✔ הצעת מחיר${quoteNumber ? ' ' + esc(quoteNumber) : ''} נחתמה דיגיטלית על ידי הלקוח</p>
+<table style="border-collapse:collapse;margin:8px 0 14px;">${rowsHtml}</table>
+<p>ההצעה החתומה מצורפת למייל זה, ונשמרה אוטומטית בכרטיס הלקוח (סקשן "הצעת מחיר חתומה").</p>
+<p style="color:#64748b;">גלית – החברה לאיכות הסביבה</p>
+</div>`;
+
+      const fileName = `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''} - חתומה.pdf`;
+      await this.graphMail.sendMailAsUser(requesterId, {
+        to: user.email,
+        subject: `✔ הצעה${quoteNumber ? ' ' + quoteNumber : ''} נחתמה${customerName ? ' — ' + customerName : ''}`,
+        html,
+        attachments: [{ name: fileName, contentType: 'application/pdf', content: signedPdf }],
+      });
+      this.logger.log(`signed quote ${quote.id} emailed back to requester ${user.email}`);
+    } catch (e: any) {
+      this.logger.warn(`notifySignedToRequester failed: ${e?.message || e}`);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────
