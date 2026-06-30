@@ -53,7 +53,34 @@ export class GraphFilesService {
     const item: any = await res.json();
     if (!item?.id) throw new Error('OneDrive upload: missing item id');
     // webDavUrl = הנתיב הישיר לקובץ ש-Word דסקטופ פותח (ms-word:ofe). webUrl הוא דף תצוגה (Doc.aspx).
-    return { itemId: item.id, webUrl: item.webUrl, webDavUrl: item.webDavUrl, name: item.name };
+    // תגובת ה-PUT לרוב לא כוללת webDavUrl (SharePoint/OneDrive-Business) — בלעדיו "ערוך בוורד" נופל
+    // לכתובת Doc.aspx ש-Word לא יכול לפתוח. לכן מושכים את הפריט, ואם עדיין ריק — בונים נתיב ישיר.
+    let webDavUrl: string = item.webDavUrl || '';
+    if (!webDavUrl) {
+      try {
+        const got = await this.getItem(userId, item.id);
+        webDavUrl = got?.webDavUrl || '';
+      } catch { /* ignore — ניפול ל-derive */ }
+    }
+    if (!webDavUrl) webDavUrl = this.deriveWebDavUrl({ webUrl: item.webUrl, name: item.name });
+    return { itemId: item.id, webUrl: item.webUrl, webDavUrl, name: item.name };
+  }
+
+  /**
+   * בונה נתיב WebDAV ישיר לקובץ מתוך כתובת ה-Doc.aspx (כשה-Graph לא מחזיר webDavUrl).
+   * ב-OneDrive-for-Business הנתיב הוא: {אתר אישי}/Documents/{תיקייה}/{שם קובץ}.
+   */
+  private deriveWebDavUrl(item: { webDavUrl?: string | null; webUrl?: string | null; name?: string | null }): string {
+    if (item.webDavUrl) return item.webDavUrl;
+    const webUrl = item.webUrl || '';
+    const name = item.name || '';
+    if (webUrl && name && webUrl.includes('/_layouts/')) {
+      const base = webUrl.split('/_layouts/')[0].replace(/\/+$/, '');
+      if (/sharepoint\.com/.test(base)) {
+        return `${base}/Documents/${GraphFilesService.FOLDER}/${name}`;
+      }
+    }
+    return '';
   }
 
   /** מטא-דאטה של פריט (כולל webUrl/webDavUrl + תאריך שינוי אחרון). מחזיר null אם הפריט נמחק/לא נמצא. */
@@ -72,7 +99,8 @@ export class GraphFilesService {
       throw new Error(`OneDrive getItem failed: ${res.status} ${t.slice(0, 200)}`);
     }
     const item: any = await res.json();
-    return { itemId: item.id, webUrl: item.webUrl, webDavUrl: item.webDavUrl, name: item.name, lastModified: item.lastModifiedDateTime };
+    const webDavUrl: string = item.webDavUrl || this.deriveWebDavUrl({ webUrl: item.webUrl, name: item.name });
+    return { itemId: item.id, webUrl: item.webUrl, webDavUrl, name: item.name, lastModified: item.lastModifiedDateTime };
   }
 
   /**
