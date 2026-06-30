@@ -40,6 +40,19 @@ export class FeedbackController {
     return this.feedback.sendFeedbackEmail(req.user, body || {});
   }
 
+  /**
+   * תזמון בקשת משוב אוטומטית ללקוח (בעוד X דקות) — זמין לכל העובדים,
+   * נפתח אחרי שליחת הדוח בסוף הזרימה. השליחה בפועל מתבצעת ע"י ה-cron.
+   */
+  @Post('schedule')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  schedule(
+    @Req() req: any,
+    @Body() body: { customerId?: string; delayMinutes?: number; channel?: 'email' | 'sms' },
+  ) {
+    return this.feedback.scheduleFeedback(req.user, body || {});
+  }
+
   // ── הגדרות אוטומציה + SMS ──
 
   @Get('settings')

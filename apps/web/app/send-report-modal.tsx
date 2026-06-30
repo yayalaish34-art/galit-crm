@@ -53,7 +53,7 @@ export function SendReportModal({
   task: TaskLike;
   currentUser: { id?: string; name?: string } & Record<string, unknown>;
   defaultEmail?: string;
-  onSent: () => void;
+  onSent: (info: { paymentStatus: 'paid' | 'unpaid' | null }) => void;
 }) {
   const customerId = task.customerId || null;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -81,11 +81,15 @@ export function SendReportModal({
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
 
+  // שאלת תשלום לפני השליחה — לא חובה, רק תזכורת לוודא שהלקוח שילם.
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | null>(null);
+
   // אתחול בעת פתיחה
   useEffect(() => {
     if (!open) return;
     setErr('');
     setStatus('');
+    setPaymentStatus(null);
     setToList(defaultEmail && defaultEmail.includes('@') ? [defaultEmail.trim()] : []);
     // טעינת חתימות המשתמש
     const uid = currentUser?.id;
@@ -271,7 +275,7 @@ export function SendReportModal({
       });
       if (r.ok) {
         setStatus('נשלח ✓');
-        onSent();
+        onSent({ paymentStatus });
       } else {
         let msg = 'שליחת הדוח נכשלה';
         try {
@@ -362,6 +366,42 @@ export function SendReportModal({
             )}
             {customerId && (
               <div className="mt-1 text-[11px] text-slate-400">הדוח נשמר אוטומטית ב"דוחות שהופקו" בכרטיס הלקוח.</div>
+            )}
+          </div>
+
+          {/* ── בדיקת תשלום לפני שליחה (לא חובה — רק תזכורת) ── */}
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+            <label className="mb-2 block text-sm font-semibold text-amber-900">
+              האם התקבל תשלום מהלקוח? <span className="font-normal text-amber-600">(לא חובה — רק לוודא)</span>
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentStatus((p) => (p === 'paid' ? null : 'paid'))}
+                className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
+                  paymentStatus === 'paid'
+                    ? 'border-emerald-500 bg-emerald-500 text-white'
+                    : 'border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50'
+                }`}
+              >
+                ✅ שולם
+              </button>
+              <button
+                type="button"
+                onClick={() => setPaymentStatus((p) => (p === 'unpaid' ? null : 'unpaid'))}
+                className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
+                  paymentStatus === 'unpaid'
+                    ? 'border-red-500 bg-red-500 text-white'
+                    : 'border-red-200 bg-white text-red-700 hover:bg-red-50'
+                }`}
+              >
+                ⏳ טרם שולם
+              </button>
+            </div>
+            {paymentStatus === 'unpaid' && (
+              <div className="mt-2 text-[12px] font-medium text-red-700">
+                שים לב: הלקוח עדיין לא שילם — אפשר לשלוח את הדוח בכל זאת.
+              </div>
             )}
           </div>
 

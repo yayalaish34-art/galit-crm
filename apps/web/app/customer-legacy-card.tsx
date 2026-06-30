@@ -817,6 +817,7 @@ const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
   COMPANY: 'חברה / קבלן',
   PUBLIC: 'רשות / מוסד',
   PRIVATE: 'לקוח פרטי',
+  SUPPLIER: 'ספק',
 };
 
 function resolveCustomerTypeLabel(type: string, labelMap: Record<string, string>) {
@@ -1277,7 +1278,11 @@ export function CustomerLegacyCard({
           { id: 'preset-public',  code: 'PUBLIC',  labelHe: 'רשות / מוסד',  sortOrder: 1, isPreset: true },
           { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי',    sortOrder: 2, isPreset: true },
         ];
-    return [...source].sort((a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he'));
+    // ודא שסיווג "ספק" תמיד זמין — מתנהג כמו חברה / מוסד (דורש איש קשר), לא כמו לקוח פרטי.
+    const withSupplier = source.some((c: any) => c.code === 'SUPPLIER')
+      ? source
+      : [...source, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3, isPreset: true }];
+    return [...withSupplier].sort((a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he'));
   }, [classifications]);
 
   const sectionShell = 'rounded-3xl border border-white/65 overflow-hidden';

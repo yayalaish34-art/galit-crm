@@ -895,6 +895,8 @@ export function QuoteNewScreen({
   const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
   const [onedriveActive, setOnedriveActive] = useState(false);
   const [onedriveBusy, setOnedriveBusy] = useState(false);
+  // פאנל אבחון/גיבוי שנפתח אחרי "ערוך בוורד" — מציג את הקישורים בפועל ופתיחה בדפדפן.
+  const [wordOpenPanel, setWordOpenPanel] = useState<{ davUrl: string; webUrl: string; cmd: string; kind: string } | null>(null);
   useEffect(() => {
     if (!taskId) return;
     const fromUrl =
@@ -1651,15 +1653,29 @@ export function QuoteNewScreen({
     // ms-word:ofe|u|<URL> = "Open For Edit". חייבים את הנתיב הישיר לקובץ (webDavUrl),
     // לא את דף התצוגה של SharePoint (_layouts/15/Doc.aspx?sourcedoc=...) — שם זהות הקובץ
     // נמצאת ב-query, וחיתוך ה-query שובר אותה ("Office אינו מזהה את הפקודה"). לכן לא חותכים כאן.
-    return `ms-word:ofe|u|${fileUrl}`;
+    // הקישור הפנימי חייב להיות מקודד (רווחים/עברית) אחרת Word לא מזהה את הפקודה.
+    // אם כבר מקודד (אין רווחים/תווים לא-ASCII) — לא מקודדים שוב כדי לא לשבור %20 קיימים.
+    const needsEncoding = / |[^\x00-\x7f]/.test(fileUrl);
+    const inner = needsEncoding ? encodeURI(fileUrl) : fileUrl;
+    return `ms-word:ofe|u|${inner}`;
   }
   function openInDesktopWord(webUrl: string) {
-    // הפעלת ה-protocol handler דרך עוגן זמני — כך הדף הנוכחי לא מנווט/נסגר.
-    const a = document.createElement('a');
-    a.href = buildDesktopWordUrl(webUrl);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const url = buildDesktopWordUrl(webUrl);
+    // חשוב: לא משתמשים ב-<a href>/anchor — דפדפנים מודרניים (Chromium עדכני) מקודדים את
+    // תווי ה-"|" של הפקודה (ms-word:ofe|u|) ל-%7C, ואז Word לא מזהה את הפקודה.
+    // הפעלה דרך iframe נסתר שומרת את ה-"|" כפי שהוא, ולא מנווטת/סוגרת את הדף הנוכחי.
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      const win = iframe.contentWindow;
+      if (win) win.location.href = url;
+      else window.location.href = url;
+      setTimeout(() => iframe.remove(), 2000);
+    } catch {
+      // נפילה אחרונה — הפעלה ישירה (עדיין שומרת את ה-| בלי קידוד anchor).
+      window.location.href = url;
+    }
   }
   async function handleEditInWord() {
     const id = quoteIdRef.current;
@@ -1681,11 +1697,23 @@ export function QuoteNewScreen({
         // webUrl = קישור תצוגה בדפדפן (fallback בחלון השליחה). webDavUrl = נתיב ישיר לפתיחה ב-Word דסקטופ.
         setOnedriveWebUrl(data.webUrl || data.webDavUrl);
         setOnedriveActive(true);
+        const desktopTarget = data.webDavUrl || data.webUrl;
+        const cmd = buildDesktopWordUrl(desktopTarget);
+        // ── אבחון: מה בדיוק נשלח ל-Word (לראות אם webDavUrl חסר / זו כתובת Doc.aspx / יש תווים בעייתיים) ──
+        // eslint-disable-next-line no-console
+        console.log('[ערוך בוורד] webDavUrl=', data.webDavUrl, ' | webUrl=', data.webUrl, ' | ms-word=', cmd);
+        // פאנל אבחון/גיבוי קבוע (לא נעלם) — מאפשר גם פתיחה בדפדפן וגם לראות את הקישור המדויק.
+        setWordOpenPanel({
+          davUrl: data.webDavUrl || '',
+          webUrl: data.webUrl || '',
+          cmd,
+          kind: data.webDavUrl ? 'webDavUrl (נתיב ישיר)' : 'webUrl (דף תצוגה — לרוב לא נפתח ב-Word!)',
+        });
         // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה). אם Word לא מותקן —
-        // אפשר לפתוח בדפדפן מהקישור בחלון השליחה (לא מומלץ — פוגע בפריסת תמונות).
-        openInDesktopWord(data.webDavUrl || data.webUrl);
-        setStatusMsg('נפתח ב-Word במחשב — השינויים יישמרו אוטומטית, ובשליחה תצא הגרסה העדכנית');
-        setTimeout(() => setStatusMsg(''), 8000);
+        // אפשר לפתוח בדפדפן מהקישור בפאנל.
+        openInDesktopWord(desktopTarget);
+        setStatusMsg('ניסיון פתיחה ב-Word — אם נכשל, ראי את הפאנל למטה');
+        setTimeout(() => setStatusMsg(''), 12000);
       } else {
         setStatusMsg('שגיאה: לא התקבלה כתובת פתיחה');
       }
@@ -2572,6 +2600,45 @@ export function QuoteNewScreen({
 
   return (
     <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
+      {/* ── פאנל "ערוך בוורד": אבחון + גיבוי פתיחה בדפדפן (קבוע עד סגירה) ── */}
+      {wordOpenPanel && (
+        <div className="fixed left-1/2 top-4 z-[10000] w-[min(640px,94vw)] -translate-x-1/2 rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl" dir="rtl">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-[15px] font-bold text-gray-800">פתיחה ב-Word</div>
+            <button type="button" onClick={() => setWordOpenPanel(null)} className="rounded-lg px-2 py-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
+          </div>
+          <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+            סוג הקישור שהתקבל: <strong>{wordOpenPanel.kind}</strong>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { if (wordOpenPanel.davUrl || wordOpenPanel.webUrl) openInDesktopWord(wordOpenPanel.davUrl || wordOpenPanel.webUrl); }}
+              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
+            >
+              נסה שוב לפתוח ב-Word (מחשב)
+            </button>
+            {wordOpenPanel.webUrl && (
+              <a href={wordOpenPanel.webUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">
+                פתח בדפדפן (Word Online) — תמיד עובד
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => { void navigator.clipboard?.writeText(`davUrl: ${wordOpenPanel.davUrl}\nwebUrl: ${wordOpenPanel.webUrl}\ncmd: ${wordOpenPanel.cmd}`); setStatusMsg('הקישורים הועתקו — הדביקי לצ׳אט'); setTimeout(() => setStatusMsg(''), 5000); }}
+              className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50"
+            >
+              העתק קישורים (לשליחה לתמיכה)
+            </button>
+          </div>
+          <textarea
+            readOnly
+            dir="ltr"
+            className="mt-2 h-20 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-2 text-[11px] text-gray-600"
+            value={`davUrl: ${wordOpenPanel.davUrl}\nwebUrl: ${wordOpenPanel.webUrl}\ncmd: ${wordOpenPanel.cmd}`}
+          />
+        </div>
+      )}
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-2">
@@ -2802,35 +2869,31 @@ export function QuoteNewScreen({
                           <div className="lg:col-span-2">
                             {(() => {
                               const catalogSvc = flattenAllServices().find((s) => s.sku === item.sku || s.id === item.sku);
-                              const minPrice = catalogSvc?.price && catalogSvc.price > 0 ? catalogSvc.price : null;
+                              // "מחיר ברירת מחדל" מהקטלוג — לתצוגה והתרעה בלבד; אפשר לקבוע מחיר נמוך יותר.
+                              const recommendedPrice = catalogSvc?.price && catalogSvc.price > 0 ? catalogSvc.price : null;
                               const enteredPrice = parseFloat(item.price) || 0;
-                              const isBelowMin = minPrice != null && enteredPrice > 0 && enteredPrice < minPrice;
+                              const isBelowRecommended = recommendedPrice != null && enteredPrice > 0 && enteredPrice < recommendedPrice;
                               return (
                                 <>
                                   <div className="text-sm font-medium text-gray-400 mb-0.5 flex items-center gap-1">
                                     מחיר ליחידה
-                                    {minPrice != null && <span className="text-[10px] text-gray-300">מינ׳ ₪{minPrice.toLocaleString('he-IL')}</span>}
+                                    {recommendedPrice != null && <span className="text-[10px] text-gray-300">ברירת מחדל ₪{recommendedPrice.toLocaleString('he-IL')}</span>}
                                   </div>
                                   <div className="relative">
                                     <input
                                       value={item.price}
                                       onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: e.target.value } : r))}
-                                      onBlur={() => {
-                                        if (minPrice != null) {
-                                          const entered = parseFloat(item.price) || 0;
-                                          if (entered > 0 && entered < minPrice) {
-                                            setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, price: String(minPrice) } : r));
-                                          }
-                                        }
-                                      }}
-                                      className={`h-11 w-full rounded-lg border bg-white pl-7 pr-3 text-base outline-none text-left transition-colors ${isBelowMin ? 'border-red-400 focus:border-red-500 bg-red-50' : 'border-gray-200 focus:border-blue-400'}`}
+                                      className={`h-11 w-full rounded-lg border bg-white pl-7 pr-3 text-base outline-none text-left transition-colors ${isBelowRecommended ? 'border-amber-400 focus:border-amber-500 bg-amber-50' : 'border-gray-200 focus:border-blue-400'}`}
                                       placeholder="0"
                                     />
                                     <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-sm">₪</span>
+                                    {/* התרעה לא-חוסמת: המחיר נמוך מברירת המחדל — מותר, רק לתשומת לב */}
+                                    {isBelowRecommended && (
+                                      <div className="absolute right-0 top-full z-20 mt-1 w-max max-w-[220px] rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 shadow-md">
+                                        ⚠️ מתחת למחיר ברירת המחדל (₪{recommendedPrice!.toLocaleString('he-IL')}) — אפשר להמשיך
+                                      </div>
+                                    )}
                                   </div>
-                                  {isBelowMin && (
-                                    <div className="text-[10px] text-red-500 mt-0.5">מחיר מינימלי: ₪{minPrice!.toLocaleString('he-IL')}</div>
-                                  )}
                                 </>
                               );
                             })()}

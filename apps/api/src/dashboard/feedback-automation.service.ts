@@ -34,6 +34,82 @@ export class FeedbackAutomationService {
     }
   }
 
+  /** בודק כל 5 דקות אם יש בקשות משוב מתוזמנות שהגיע מועדן ושולח אותן. */
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  async scheduledFeedbackTick() {
+    try {
+      await this.processScheduledFeedback();
+    } catch (e: any) {
+      this.logger.error(`scheduled feedback failed: ${e?.message}`);
+    }
+  }
+
+  /**
+   * מעבד את תור בקשות המשוב המתוזמנות: שולח את אלו שהגיע מועדן, משאיר את השאר.
+   * שליחה כושלת נשארת בתור עד 3 ניסיונות; משתמש ב-Outlook של אדמין מחובר.
+   */
+  async processScheduledFeedback() {
+    const jobs = await this.feedback.getScheduledFeedback();
+    if (!jobs.length) return { sent: 0, skipped: 0, remaining: 0 };
+
+    const now = Date.now();
+    const due = jobs.filter((j) => new Date(j.dueAt).getTime() <= now);
+    if (!due.length) return { sent: 0, skipped: 0, remaining: jobs.length };
+
+    const ids = Array.from(new Set(due.map((j) => j.customerId)));
+    const customers = await this.prisma.customer.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, name: true, email: true, phone: true, feedbackRequestedAt: true, feedbackOptOut: true },
+    });
+    const byId = new Map(customers.map((c) => [c.id, c]));
+    const senderId = await this.findSenderUserId();
+
+    // נשמרים: כל מה שטרם הגיע מועדו + עבודות שנכשלו ומקבלות ניסיון חוזר.
+    const stillPending = jobs.filter((j) => new Date(j.dueAt).getTime() > now);
+    let sent = 0;
+    let skipped = 0;
+
+    for (const job of due) {
+      const c = byId.get(job.customerId);
+      // לקוח נמחק / החריג עצמו / כבר נשלחה לו בקשת משוב → לא מתזמנים שוב.
+      if (!c || c.feedbackOptOut || c.feedbackRequestedAt) { skipped++; continue; }
+      try {
+        if (job.channel === 'sms') {
+          if (!c.phone) { skipped++; continue; }
+          const text = this.feedback.feedbackPlainText(c.name);
+          const res = await this.sms.sendSms(c.phone, text);
+          if (!res.ok) throw new Error('sms failed');
+          await this.prisma.customer.update({ where: { id: c.id }, data: { feedbackRequestedAt: new Date() } });
+        } else {
+          if (!c.email || !c.email.includes('@')) { skipped++; continue; }
+          if (!senderId) {
+            // אין אדמין עם Outlook מחובר כרגע — משאירים בתור לניסיון מאוחר יותר.
+            stillPending.push(job);
+            continue;
+          }
+          // sendFeedbackEmail עוטף, מוסיף כפתור דירוג וחותם feedbackRequestedAt.
+          await this.feedback.sendFeedbackEmail(
+            { id: senderId, role: 'ADMIN' },
+            { customerId: c.id, email: c.email, customerName: c.name },
+          );
+        }
+        sent++;
+      } catch (e: any) {
+        const attempts = (job.attempts || 0) + 1;
+        if (attempts < 3) {
+          stillPending.push({ ...job, attempts });
+        } else {
+          this.logger.warn(`scheduled feedback dropped for ${job.customerId}: ${e?.message}`);
+          skipped++;
+        }
+      }
+    }
+
+    await this.feedback.setScheduledFeedback(stillPending);
+    this.logger.log(`scheduled feedback: sent=${sent} skipped=${skipped} remaining=${stillPending.length}`);
+    return { sent, skipped, remaining: stillPending.length };
+  }
+
   /** מאתר משתמש אדמין עם חשבון Outlook מחובר — לשליחת מיילים אוטומטיים. */
   private async findSenderUserId(): Promise<string | null> {
     const u = await this.prisma.user

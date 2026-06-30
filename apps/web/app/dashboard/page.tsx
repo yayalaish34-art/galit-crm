@@ -6,6 +6,7 @@ import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { ProducedReportsSection } from '../produced-reports-section';
 import { SendReportModal } from '../send-report-modal';
+import { ScheduleFeedbackModal } from '../schedule-feedback-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
 import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
 import { OrderNewScreen, OrderOldStyleToolbar } from '../orders/new/order-new-screen';
@@ -155,6 +156,7 @@ const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
   COMPANY: 'חברה / קבלן',
   PUBLIC: 'רשות / מוסד',
   PRIVATE: 'לקוח פרטי',
+  SUPPLIER: 'ספק',
 };
 
 const REMINDER_QUICK_OPTIONS: { key: string; label: string; minutes?: number; days?: number }[] = [
@@ -2173,9 +2175,11 @@ function LeadProfile({
       COMPANY: 'חברה / קבלן',
       PUBLIC: 'רשות / מוסד',
       PRIVATE: 'לקוח פרטי',
+      SUPPLIER: 'ספק',
       'חברה / קבלן': 'חברה / קבלן',
       'רשות / מוסד': 'רשות / מוסד',
       'לקוח פרטי': 'לקוח פרטי',
+      'ספק': 'ספק',
     };
     return map[type] || type || '-';
   };
@@ -6706,6 +6710,7 @@ function CustomersPage({
     if (t === 'COMPANY' || t === 'חברה / קבלן') return 'COMPANY';
     if (t === 'PUBLIC' || t === 'רשות / מוסד') return 'PUBLIC';
     if (t === 'PRIVATE' || t === 'לקוח פרטי') return 'PRIVATE';
+    if (t === 'SUPPLIER' || t === 'ספק') return 'SUPPLIER';
     return t;
   };
 
@@ -6718,7 +6723,11 @@ function CustomersPage({
             { id: 'preset-public', code: 'PUBLIC', labelHe: 'רשות / מוסד', sortOrder: 1, isPreset: true },
             { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי', sortOrder: 2, isPreset: true },
           ];
-    return [...raw].sort(
+    // ודא שסיווג "ספק" תמיד זמין — מתנהג כמו חברה / מוסד (דורש איש קשר), לא כמו לקוח פרטי.
+    const withSupplier = raw.some((c: any) => c.code === 'SUPPLIER')
+      ? raw
+      : [...raw, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3, isPreset: true }];
+    return [...withSupplier].sort(
       (a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he'),
     );
   }, [classifications]);
@@ -6751,6 +6760,7 @@ function CustomersPage({
     if (label === 'חברה / קבלן') return 'COMPANY';
     if (label === 'רשות / מוסד') return 'PUBLIC';
     if (label === 'לקוח פרטי') return 'PRIVATE';
+    if (label === 'ספק') return 'SUPPLIER';
     return label;
   };
 
@@ -13829,6 +13839,11 @@ function TasksPage({
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח טופס "צרף דוח ושלח במייל" */
   const [reportModalTaskId, setReportModalTaskId] = useState<string | null>(null);
 
+  /* סוף הזרימה: פופ-אפ "שליחת משוב" שנפתח אחרי שליחת הדוח */
+  const [feedbackScheduleData, setFeedbackScheduleData] = useState<
+    { customerId: string | null; customerName: string; customerEmail: string } | null
+  >(null);
+
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
   const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
   const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
@@ -16486,7 +16501,11 @@ function TasksPage({
                                     { id: 'preset-public',  code: 'PUBLIC',  labelHe: 'רשות / מוסד',  sortOrder: 1 },
                                     { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי',    sortOrder: 2 },
                                   ];
-                              return [...src].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
+                              // ודא שסיווג "ספק" תמיד זמין — מתנהג כמו חברה / מוסד (דורש איש קשר), לא כמו לקוח פרטי.
+                              const withSupplier = src.some((c: any) => c.code === 'SUPPLIER')
+                                ? src
+                                : [...src, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3 }];
+                              return [...withSupplier].sort((a: any, b: any) => (a.sortOrder ?? 99) - (b.sortOrder ?? 99));
                             })();
                             const CC_LEAD_SOURCES = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי', 'אחר'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
@@ -18195,7 +18214,26 @@ function TasksPage({
                                 currentUser={currentUser}
                                 defaultEmail={((customers.find((c) => c.id === t.customerId) as any)?.email as string | undefined) || t.leadEmail || ''}
                                 onClose={() => setReportModalTaskId(null)}
-                                onSent={async () => { setReportModalTaskId(null); await updateTaskField(t.id, { status: 'DONE' }); setExpandedTaskId(null); }}
+                                onSent={async ({ paymentStatus }) => {
+                                  setReportModalTaskId(null);
+                                  // רישום סטטוס התשלום כהערת תהליך (לא חובה — נשמר רק אם נבחר)
+                                  if (paymentStatus) {
+                                    const existing = parseProcessNotes(t.processNotes);
+                                    const noteText = paymentStatus === 'paid' ? '💰 התקבל תשלום מהלקוח (לפני שליחת הדוח)' : '⏳ הדוח נשלח — טרם התקבל תשלום מהלקוח';
+                                    const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
+                                    await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
+                                  } else {
+                                    await updateTaskField(t.id, { status: 'DONE' });
+                                  }
+                                  // פתיחת פופ-אפ "שליחת משוב" בסוף הזרימה
+                                  const cust = customers.find((c) => c.id === t.customerId);
+                                  setFeedbackScheduleData({
+                                    customerId: (t.customerId as string | undefined) ?? null,
+                                    customerName: ((cust as any)?.name as string | undefined) || t.customerName || t.leadName || '',
+                                    customerEmail: ((cust as any)?.email as string | undefined) || t.leadEmail || '',
+                                  });
+                                  setExpandedTaskId(null);
+                                }}
                               />
                             )}
                           </div>
@@ -18234,6 +18272,16 @@ function TasksPage({
           </tbody>
         </table>
       </div>
+
+      {/* ═══ פופ-אפ "שליחת משוב" — נפתח בסוף הזרימה אחרי שליחת הדוח ═══ */}
+      <ScheduleFeedbackModal
+        open={!!feedbackScheduleData}
+        onClose={() => setFeedbackScheduleData(null)}
+        customerId={feedbackScheduleData?.customerId ?? null}
+        customerName={feedbackScheduleData?.customerName}
+        customerEmail={feedbackScheduleData?.customerEmail}
+        currentUser={currentUser}
+      />
 
       {/* ═══ NEW TASK MODAL ═══ */}
       <Modal open={open} onClose={() => setOpen(false)} title="משימה חדשה" maxWidth="max-w-2xl">

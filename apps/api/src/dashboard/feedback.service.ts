@@ -45,6 +45,18 @@ export interface FollowupAutomationConfig {
 
 export const FEEDBACK_AUTOMATION_KEY = 'automation.feedback';
 export const FOLLOWUP_AUTOMATION_KEY = 'automation.followup';
+/** תור בקשות משוב מתוזמנות (נשלחות ע"י cron בעוד X דקות) — נשמר ב-SystemSetting. */
+export const SCHEDULED_FEEDBACK_KEY = 'feedback.scheduled';
+
+/** עבודת משוב מתוזמנת בודדת בתור. */
+export interface ScheduledFeedbackJob {
+  customerId: string;
+  /** ISO — מתי לשלוח. */
+  dueAt: string;
+  channel: 'email' | 'sms';
+  /** מספר ניסיונות שליחה שנכשלו (נופל מהתור אחרי 3). */
+  attempts?: number;
+}
 
 const DEFAULT_FEEDBACK_AUTOMATION: FeedbackAutomationConfig = {
   enabled: false,
@@ -341,6 +353,62 @@ export class FeedbackService {
       update: { value: next as any },
     });
     return next;
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // תור בקשות משוב מתוזמנות (5 דק' / 30 דק' / שעה / 4 שעות) — נשלח ע"י cron
+  // ─────────────────────────────────────────────────────────────
+
+  /** התור הנוכחי של בקשות משוב מתוזמנות. */
+  async getScheduledFeedback(): Promise<ScheduledFeedbackJob[]> {
+    const row = await this.prisma.systemSetting
+      .findUnique({ where: { key: SCHEDULED_FEEDBACK_KEY } })
+      .catch(() => null);
+    const arr = row?.value as unknown;
+    return Array.isArray(arr) ? (arr as ScheduledFeedbackJob[]) : [];
+  }
+
+  /** שמירת התור (נקרא גם ע"י האוטומציה אחרי עיבוד). */
+  async setScheduledFeedback(jobs: ScheduledFeedbackJob[]) {
+    await this.prisma.systemSetting.upsert({
+      where: { key: SCHEDULED_FEEDBACK_KEY },
+      create: { key: SCHEDULED_FEEDBACK_KEY, value: jobs as any },
+      update: { value: jobs as any },
+    });
+  }
+
+  /**
+   * תזמון בקשת משוב ללקוח בעוד delayMinutes דקות. זמין לכל העובדים
+   * (השליחה עצמה מתבצעת ע"י ה-cron דרך ה-Outlook של אדמין מחובר).
+   */
+  async scheduleFeedback(
+    _user: { id?: string; role?: string } | undefined,
+    dto: { customerId?: string; delayMinutes?: number; channel?: 'email' | 'sms' },
+  ) {
+    const customerId = (dto.customerId || '').trim();
+    if (!customerId) throw new BadRequestException('חסר מזהה לקוח');
+    const minutes = Number(dto.delayMinutes);
+    if (!Number.isFinite(minutes) || minutes < 0) throw new BadRequestException('זמן תזמון לא תקין');
+
+    const customer = await this.prisma.customer
+      .findUnique({ where: { id: customerId }, select: { id: true, email: true, phone: true } })
+      .catch(() => null);
+    if (!customer) throw new BadRequestException('הלקוח לא נמצא');
+
+    const channel: 'email' | 'sms' = dto.channel === 'sms' ? 'sms' : 'email';
+    if (channel === 'email' && !(customer.email || '').includes('@')) {
+      throw new BadRequestException('ללקוח אין כתובת מייל תקינה — עדכן את פרטי הלקוח');
+    }
+    if (channel === 'sms' && !customer.phone) {
+      throw new BadRequestException('ללקוח אין מספר טלפון — עדכן את פרטי הלקוח');
+    }
+
+    const dueAt = new Date(Date.now() + minutes * 60000).toISOString();
+    // עבודה אחת ללקוח — תזמון חדש דורס קודם.
+    const jobs = (await this.getScheduledFeedback()).filter((j) => j.customerId !== customerId);
+    jobs.push({ customerId, dueAt, channel, attempts: 0 });
+    await this.setScheduledFeedback(jobs);
+    return { success: true as const, dueAt };
   }
 
   // ─────────────────────────────────────────────────────────────

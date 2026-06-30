@@ -610,7 +610,13 @@ export class QuotesService {
 
     // אחרת — מעלים את המסמך הממוזג האחרון. שם דטרמיניסטי וייחודי-להצעה (כולל מזהה קצר),
     // כדי שטיוטות ללא מספר הצעה לא ידרסו זו את זו ב-OneDrive.
-    const latest = await this.getLatestMergedDocument(id);
+    let latest: { data?: Buffer | Uint8Array | null; filePath?: string | null } | null = null;
+    try {
+      latest = await this.getLatestMergedDocument(id);
+    } catch (e: any) {
+      this.logger.error(`OneDrive: getLatestMergedDocument failed (${id}): ${e?.message || e}`);
+      throw new BadRequestException(`לא ניתן לטעון את המסמך הממוזג: ${e?.message || 'שגיאה לא ידועה'}`);
+    }
     let bytes: Buffer | null = null;
     if (latest?.data) {
       bytes = Buffer.from(latest.data);
@@ -626,7 +632,15 @@ export class QuotesService {
     }
     const fileName = `הצעת מחיר ${quote.quoteNumber ? quote.quoteNumber + ' ' : ''}${id.slice(0, 8)}`.trim();
 
-    const uploaded = await this.graphFiles.uploadEditable(userId, fileName, bytes);
+    let uploaded: { itemId: string; webUrl: string; webDavUrl: string; name: string };
+    try {
+      uploaded = await this.graphFiles.uploadEditable(userId, fileName, bytes);
+    } catch (e: any) {
+      // העלאה ל-OneDrive נכשלה (הרשאות Files.ReadWrite / מכסה / Graph) — מציגים את הסיבה האמיתית
+      // במקום "Internal server error", כדי שאפשר יהיה לאבחן.
+      this.logger.error(`OneDrive upload failed (${id}): ${e?.message || e}`);
+      throw new BadRequestException(`העלאת המסמך ל-OneDrive נכשלה: ${e?.message || 'שגיאה לא ידועה'} — ייתכן שצריך לחבר מחדש את Outlook (הרשאת קבצים)`);
+    }
 
     // שמירת ההפניה (guarded — אם העמודות עדיין לא הוגרו, לא נפיל את הבקשה).
     try {
