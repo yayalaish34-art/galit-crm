@@ -2396,8 +2396,13 @@ export function QuoteNewScreen({
 
       // ההמרה ל-PDF אינה מתבצעת כאן יותר — הקובץ נשמר כ-DOCX, וההמרה ל-PDF מתבצעת בצד השרת
       // בזמן השליחה בלבד ("שלח"). כך עורכים DOCX בקלות, וכל מה שנשלח ללקוח הוא PDF.
-      setStatusMsg('המסמך נוצר ונשמר');
-      setTimeout(() => setStatusMsg(''), 4000);
+      setStatusMsg('המסמך נוצר ונשמר — פותח ב-Word…');
+      // ── פתיחה אוטומטית ב-Word לעריכה מיד אחרי המיזוג (אין צורך בכפתור "ערוך בוורד" נפרד) ──
+      if (quoteIdRef.current) {
+        await handleEditInWord();
+      } else {
+        setTimeout(() => setStatusMsg(''), 4000);
+      }
     } catch (err) {
       console.error('DOCX merge error:', err);
       alert('שגיאה בהורדת קובץ Word');
@@ -2716,18 +2721,22 @@ export function QuoteNewScreen({
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
           </button>
-          <button
-            type="button"
-            className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            disabled={onedriveBusy || !(mergedFiles.length > 0 || !!lastMergedDocPath || !!lastMergedAttachmentId || onedriveActive)}
-            title={!(mergedFiles.length > 0 || !!lastMergedDocPath || !!lastMergedAttachmentId || onedriveActive) ? 'יש לבצע מיזוג לפני עריכה ב-Word' : 'ערוך ב-Word — השינויים יישמרו אוטומטית ובשליחה תצא הגרסה העדכנית'}
-            onClick={() => handleEditInWord()}
-          >
-            <span className={`h-10 w-10 rounded-full border flex items-center justify-center ${onedriveActive ? 'border-blue-300 bg-blue-50 text-blue-600' : 'border-gray-200 bg-white text-blue-500 hover:bg-blue-50 hover:text-blue-600'}`}>
-              {onedriveBusy ? <RefreshCw size={18} className="animate-spin" /> : <Pencil size={18} />}
-            </span>
-            <span className="text-[10px] text-gray-500">{onedriveActive ? 'פתח ב-Word' : 'ערוך ב-Word'}</span>
-          </button>
+          {/* כפתור "ערוך בוורד" הוסר — המיזוג פותח את המסמך אוטומטית ב-Word. */}
+          {/* אם המסמך כבר נפתח פעם (onedriveActive), נשאיר קיצור קטן לפתיחה חוזרת בלי מיזוג מחדש. */}
+          {onedriveActive && (
+            <button
+              type="button"
+              className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled={onedriveBusy}
+              title="פתח שוב ב-Word — השינויים יישמרו אוטומטית"
+              onClick={() => handleEditInWord()}
+            >
+              <span className="h-10 w-10 rounded-full border border-blue-300 bg-blue-50 text-blue-600 flex items-center justify-center">
+                {onedriveBusy ? <RefreshCw size={18} className="animate-spin" /> : <Pencil size={18} />}
+              </span>
+              <span className="text-[10px] text-gray-500">פתח שוב ב-Word</span>
+            </button>
+          )}
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={!savedOnce || isBusy} title={!savedOnce ? 'יש לשמור את ההצעה לפני שליחה במייל' : undefined} onClick={async () => {
             const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
             if (!id) { setStatusMsg('שמירת ההצעה נכשלה'); return; }
