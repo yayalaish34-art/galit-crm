@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save } from 'lucide-react';
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
-import { apiUrl, apiFetch } from '../../lib/api-base';
+import { apiUrl, apiFetch, type ApiAuthUser } from '../../lib/api-base';
 import {
   buildQuoteTemplateContext,
   mergeQuoteTemplateFull,
@@ -733,7 +733,9 @@ export function QuoteNewScreen({
   const [mergeTemplateLoading, setMergeTemplateLoading] = useState(false);
   const [mergedHtml, setMergedHtml] = useState('');
   const [wordDocHtml, setWordDocHtml] = useState('');
-  const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string }[]>([]);
+  // serverBacked=true → הקובץ הממוזג שנשמר בהצעה; הורדתו מושכת את הגרסה העדכנית מהשרת
+  // (שמסנכרן מ-OneDrive) ולא את ה-blob שנוצר בזמן המיזוג לפני העריכה ב-Word.
+  const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string; serverBacked?: boolean }[]>([]);
   const [lastMergedPublicUrl, setLastMergedPublicUrl] = useState('');
   const [lastMergedAttachmentId, setLastMergedAttachmentId] = useState('');
   const [orderSource, setOrderSource] = useState('');
@@ -896,7 +898,6 @@ export function QuoteNewScreen({
   const [onedriveActive, setOnedriveActive] = useState(false);
   const [onedriveBusy, setOnedriveBusy] = useState(false);
   // פאנל אבחון/גיבוי שנפתח אחרי "ערוך בוורד" — מציג את הקישורים בפועל ופתיחה בדפדפן.
-  const [wordOpenPanel, setWordOpenPanel] = useState<{ davUrl: string; webUrl: string; cmd: string; kind: string } | null>(null);
   useEffect(() => {
     if (!taskId) return;
     const fromUrl =
@@ -1334,6 +1335,7 @@ export function QuoteNewScreen({
   const [customerId, setCustomerId] = useState<string>('');
   const [quoteContactRows, setQuoteContactRows] = useState<QuoteContactRow[]>([]);
   const [customerContactId, setCustomerContactId] = useState('');
+  const [contactSaveState, setContactSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [isBusy, setIsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
   // True once the quote has been saved (or loaded as an existing saved quote) —
@@ -1623,7 +1625,7 @@ export function QuoteNewScreen({
   }
 
   /* ── Standalone mode: download the last generated DOCX stored on the quote record ── */
-  async function handleDownloadMergedDoc() {
+  async function handleDownloadMergedDoc(preferredName?: string) {
     if (!quoteId) return;
     const user = getSessionUser();
     if (!user) return;
@@ -1633,7 +1635,7 @@ export function QuoteNewScreen({
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const fallbackName = lastMergedDocPath ? lastMergedDocPath.split(/[\\/]/).pop() || 'quote.docx' : 'quote.docx';
+      const fallbackName = preferredName || (lastMergedDocPath ? lastMergedDocPath.split(/[\\/]/).pop() || 'quote.docx' : 'quote.docx');
       a.href = url;
       a.download = fallbackName;
       document.body.appendChild(a);
@@ -1702,17 +1704,9 @@ export function QuoteNewScreen({
         // ── אבחון: מה בדיוק נשלח ל-Word (לראות אם webDavUrl חסר / זו כתובת Doc.aspx / יש תווים בעייתיים) ──
         // eslint-disable-next-line no-console
         console.log('[ערוך בוורד] webDavUrl=', data.webDavUrl, ' | webUrl=', data.webUrl, ' | ms-word=', cmd);
-        // פאנל אבחון/גיבוי קבוע (לא נעלם) — מאפשר גם פתיחה בדפדפן וגם לראות את הקישור המדויק.
-        setWordOpenPanel({
-          davUrl: data.webDavUrl || '',
-          webUrl: data.webUrl || '',
-          cmd,
-          kind: data.webDavUrl ? 'webDavUrl (נתיב ישיר)' : 'webUrl (דף תצוגה — לרוב לא נפתח ב-Word!)',
-        });
-        // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה). אם Word לא מותקן —
-        // אפשר לפתוח בדפדפן מהקישור בפאנל.
+        // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה) — העריכה נשמרת ומסתנכרנת אוטומטית.
         openInDesktopWord(desktopTarget);
-        setStatusMsg('ניסיון פתיחה ב-Word — אם נכשל, ראי את הפאנל למטה');
+        setStatusMsg('נפתח ב-Word — העריכה נשמרת ומסתנכרנת אוטומטית');
         setTimeout(() => setStatusMsg(''), 12000);
       } else {
         setStatusMsg('שגיאה: לא התקבלה כתובת פתיחה');
@@ -1783,6 +1777,69 @@ export function QuoteNewScreen({
   ]);
 
   /* ── Save (POST new / PATCH existing) — returns saved id or null on failure ── */
+  /* ── Push edited טלפון/אימייל from "פרטי לקוח" back to the DB ──
+     Without this, edits made here only live on the quote's phoneSummary and never
+     reach the customer's contact record — so the customer's phone/email stayed stale. */
+  async function syncContactInfoToDb(user: ApiAuthUser): Promise<void> {
+    if (!customerId) return;
+    const phoneVal = phone.trim();
+    const emailVal = customerEmail.trim();
+    const row = customerContactId.trim()
+      ? quoteContactRows.find((r) => r.id === customerContactId)
+      : undefined;
+    if (row) {
+      // A contact is selected — update that CustomerContact record.
+      const patch: Record<string, string> = {};
+      const shownPhone = (row.phone || row.mobile).trim();
+      if (phoneVal !== shownPhone) {
+        // Write back into whichever field the shown value originated from.
+        if (row.phone.trim() || !row.mobile.trim()) patch.phone = phoneVal;
+        else patch.mobile = phoneVal;
+      }
+      if (emailVal.toLowerCase() !== row.email.trim().toLowerCase()) patch.email = emailVal;
+      if (Object.keys(patch).length === 0) return;
+      const res = await apiFetch(
+        apiUrl(`/customers/${encodeURIComponent(customerId)}/contacts/${encodeURIComponent(customerContactId)}`),
+        { method: 'PATCH', body: JSON.stringify(patch), authUser: user },
+      );
+      if (!res.ok) throw new Error(`contact PATCH failed (${res.status})`);
+      // Keep local rows in sync so the next save doesn't re-PATCH the same values.
+      setQuoteContactRows((prev) =>
+        prev.map((r) => (r.id === customerContactId ? { ...r, ...patch } : r)),
+      );
+    } else if (quoteContactRows.length === 0) {
+      // No contacts on this customer — update the customer record itself.
+      const patch: Record<string, string> = {};
+      if (phoneVal) patch.phone = phoneVal;
+      if (emailVal) patch.email = emailVal;
+      if (Object.keys(patch).length === 0) return;
+      const res = await apiFetch(apiUrl(`/customers/${encodeURIComponent(customerId)}`), {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+        authUser: user,
+      });
+      if (!res.ok) throw new Error(`customer PATCH failed (${res.status})`);
+    }
+  }
+
+  /* ── Explicit "שמור" button in the פרטי לקוח section ──
+     Pushes edited טלפון/אימייל straight to the customer's contact record in the DB,
+     with visible success/error feedback (unlike the silent sync during a full save). */
+  async function handleSaveContactInfo(): Promise<void> {
+    if (!customerId) { alert('נא לבחור לקוח לפני שמירת פרטי איש הקשר'); return; }
+    const user = getSessionUser();
+    if (!user) { alert('אין משתמש מחובר'); return; }
+    setContactSaveState('saving');
+    try {
+      await syncContactInfoToDb(user);
+      setContactSaveState('saved');
+      setTimeout(() => setContactSaveState('idle'), 2500);
+    } catch {
+      setContactSaveState('error');
+      setTimeout(() => setContactSaveState('idle'), 3500);
+    }
+  }
+
   async function doSave(opts?: { advanceStage?: boolean }): Promise<string | null> {
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
     if (customerContactId.trim() && !quoteContactRows.some((r) => r.id === customerContactId)) {
@@ -1822,6 +1879,9 @@ export function QuoteNewScreen({
         setQuoteId(savedId);
         setQuoteNo(String(saved.quoteNumber ?? quoteNo));
       }
+      // Propagate edited טלפון/אימייל back to the customer's contact/record.
+      // Non-fatal — the quote itself is already saved.
+      try { await syncContactInfoToDb(user); } catch { /* ignore */ }
       const syncPaymentTabFromServer = (q: Record<string, unknown>) => {
         if ('paymentTerms' in q) {
           const v = q.paymentTerms;
@@ -2355,7 +2415,7 @@ export function QuoteNewScreen({
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setMergedFiles((prev) => [...prev, { name: fileName, url }]);
+      setMergedFiles((prev) => [...prev, { name: fileName, url, serverBacked: !!quoteIdRef.current }]);
       // מיזוג חדש מחליף את הגרסה הקנונית — מבטלים את מצב OneDrive הישן.
       setOnedriveActive(false); setOnedriveWebUrl(null);
       setTimeout(() => URL.revokeObjectURL(url), 300000); // keep alive 5 min for re-download
@@ -2649,52 +2709,6 @@ export function QuoteNewScreen({
 
   return (
     <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
-      {/* ── פאנל "ערוך בוורד": אבחון + גיבוי פתיחה בדפדפן (קבוע עד סגירה) ── */}
-      {wordOpenPanel && (
-        <div className="fixed left-1/2 top-4 z-[10000] w-[min(640px,94vw)] -translate-x-1/2 rounded-2xl border border-blue-200 bg-white p-4 shadow-2xl" dir="rtl">
-          <div className="mb-2 flex items-center justify-between">
-            <div className="text-[15px] font-bold text-gray-800">פתיחה ב-Word</div>
-            <button type="button" onClick={() => setWordOpenPanel(null)} className="rounded-lg px-2 py-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700">✕</button>
-          </div>
-          <div className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
-            ✓ עריכה ב-Word נשמרת אוטומטית, ומסתנכרנת חזרה למערכת כשחוזרים ללשונית הזו. אפשר גם לסנכרן ידנית למטה.
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void syncFromWord()}
-              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
-            >
-              סנכרן מ-Word עכשיו ⟳
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (wordOpenPanel.davUrl || wordOpenPanel.webUrl) openInDesktopWord(wordOpenPanel.davUrl || wordOpenPanel.webUrl); }}
-              className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700"
-            >
-              פתח שוב ב-Word (מחשב)
-            </button>
-            {wordOpenPanel.webUrl && (
-              <a href={wordOpenPanel.webUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">
-                פתח בדפדפן (Word Online) — תמיד עובד
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={() => { void navigator.clipboard?.writeText(`davUrl: ${wordOpenPanel.davUrl}\nwebUrl: ${wordOpenPanel.webUrl}\ncmd: ${wordOpenPanel.cmd}`); setStatusMsg('הקישורים הועתקו — הדביקי לצ׳אט'); setTimeout(() => setStatusMsg(''), 5000); }}
-              className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50"
-            >
-              העתק קישורים (לשליחה לתמיכה)
-            </button>
-          </div>
-          <textarea
-            readOnly
-            dir="ltr"
-            className="mt-2 h-20 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 p-2 text-[11px] text-gray-600"
-            value={`davUrl: ${wordOpenPanel.davUrl}\nwebUrl: ${wordOpenPanel.webUrl}\ncmd: ${wordOpenPanel.cmd}`}
-          />
-        </div>
-      )}
       {/* ── Header ── */}
       <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-2">
@@ -2844,10 +2858,30 @@ export function QuoteNewScreen({
 
             {/* ── Customer Details ── */}
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
-              <h3 className="text-base font-bold text-gray-700 mb-2 flex items-center gap-2">
-                <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><SearchIcon size={12} /></span>
-                פרטי לקוח
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><SearchIcon size={12} /></span>
+                  פרטי לקוח
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleSaveContactInfo}
+                  disabled={!customerId || contactSaveState === 'saving'}
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                    contactSaveState === 'saved'
+                      ? 'bg-green-500 text-white'
+                      : contactSaveState === 'error'
+                        ? 'bg-red-500 text-white'
+                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                  }`}
+                  title="עדכון טלפון/אימייל איש הקשר במאגר הלקוחות"
+                >
+                  {contactSaveState === 'saving' ? 'שומר…'
+                    : contactSaveState === 'saved' ? '✓ נשמר'
+                    : contactSaveState === 'error' ? 'שגיאה — נסה שוב'
+                    : 'שמור'}
+                </button>
+              </div>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
                   <div className={lbl}>לקוח / חברה</div>
@@ -2995,11 +3029,21 @@ export function QuoteNewScreen({
                 </h3>
                 <div className="space-y-2">
                   {mergedFiles.map((f, i) => (
-                    <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
-                      <FileText size={15} className="text-green-600 flex-shrink-0" />
-                      <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
-                      <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
-                    </a>
+                    (f.serverBacked && quoteId) ? (
+                      /* קובץ ממוזג שנשמר בהצעה — מושכים את הגרסה העדכנית מהשרת (מסנכרן מ-OneDrive),
+                         כדי שאחרי עריכה ב-Word ההורדה תיתן את הגרסה המעודכנת ולא את ה-blob המקורי. */
+                      <button key={`s-${i}`} type="button" onClick={() => handleDownloadMergedDoc(f.name)} className="w-full flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors text-right" title={f.name}>
+                        <FileText size={15} className="text-green-600 flex-shrink-0" />
+                        <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
+                        <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
+                      </button>
+                    ) : (
+                      <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
+                        <FileText size={15} className="text-green-600 flex-shrink-0" />
+                        <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
+                        <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
+                      </a>
+                    )
                   ))}
                   {existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).map((att) => (
                     <button key={att.id} type="button" onClick={() => onDownloadAttachment?.(att)} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
@@ -3009,7 +3053,7 @@ export function QuoteNewScreen({
                     </button>
                   ))}
                   {mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
-                    <button type="button" onClick={handleDownloadMergedDoc} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
+                    <button type="button" onClick={() => handleDownloadMergedDoc()} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
                       <FileText size={15} className="text-slate-500 flex-shrink-0" />
                       <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
                       <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>

@@ -589,6 +589,29 @@ function replaceFirstLabelText(rowXml: string, newLabel: string): string {
 }
 
 /**
+ * מסיר את שורת "% הנחה {discountPercent}" מטבלת הסיכום — לשימוש כאשר יש הנחת-שורה אך אין
+ * הנחה כללית: זוג הטבלאות המלא ({#hasDiscount}) מרונדר כדי להציג את עמודת הנחת-השורה, אך
+ * שורת ההנחה הכללית מיותרת (הייתה מציגה "% הנחה: 0"). מסיר את ה-<w:tr> שמכיל את
+ * {discountPercent}. אם ה-placeholder לא קיים בתבנית — לא נוגע.
+ */
+export function removeSummaryDiscountRow(documentXml: string): string {
+  const ph = '{discountPercent}';
+  const idx = documentXml.indexOf(ph);
+  if (idx === -1) return documentXml;
+  const trStart = Math.max(
+    documentXml.lastIndexOf('<w:tr>', idx),
+    documentXml.lastIndexOf('<w:tr ', idx),
+  );
+  if (trStart === -1) return documentXml;
+  // ודא שה-placeholder באמת בתוך שורה זו (אין </w:tr> בין תחילת השורה ל-placeholder)
+  if (documentXml.slice(trStart, idx).includes('</w:tr>')) return documentXml;
+  const trEndMarker = documentXml.indexOf('</w:tr>', idx);
+  if (trEndMarker === -1) return documentXml;
+  const trEnd = trEndMarker + '</w:tr>'.length;
+  return documentXml.slice(0, trStart) + documentXml.slice(trEnd);
+}
+
+/**
  * נרמול payload מיזוג — מיפוי שמות שדות ישנים לקנוניים
  */
 export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<string, unknown> {
@@ -602,8 +625,8 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   if (!r.validUntil && r.validityDate) r.validUntil = r.validityDate;
   if (!r.contractSurveyNumber) r.contractSurveyNumber = '';
 
-  // דגל להצגה/הסתרה של שורת ההנחה בתבנית ({#hasDiscount}…{/hasDiscount})
-  r.hasDiscount = toNumber(pickStr(r, ['discountPercent'])) > 0;
+  // דגל הנחה כללית (שורת "% הנחה" בטבלת הסיכום)
+  r.hasGeneralDiscount = toNumber(pickStr(r, ['discountPercent'])) > 0;
 
   // Normalize items array
   const items = Array.isArray(r.items) ? r.items : [];
@@ -626,10 +649,15 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
     };
   });
 
-  // דגל להסרת עמודת "% הנחה לשורה" כשאף פריט לא כולל הנחת שורה
+  // דגל קיום הנחת-שורה (עמודת "% הנחה לשורה")
   r.hasLineDiscount = (r.items as Array<Record<string, unknown>>).some(
     (it) => toNumber(pickStr(it, ['lineDiscountPercent', 'discountPct', 'discount'])) > 0,
   );
+
+  // דגל התבנית ({#hasDiscount}): מציג את זוג הטבלאות ה"מלא" (עמודת הנחת-שורה + שורת הנחה
+  // כללית) כאשר קיימת הנחה כלשהי — כללית או לשורה. ההתאמה לכל מקרה (הסרת עמודה/שורה מיותרת)
+  // נעשית ב-mergeTemplate לפני ה-render. כך הנחת-שורה מוצגת גם בלי הנחה כללית, ולהפך.
+  r.hasDiscount = r.hasGeneralDiscount === true || r.hasLineDiscount === true;
 
   // Recipient block canonical lines
   const customerName = pickStr(r, ['customerName']).trim();
@@ -694,14 +722,27 @@ export class DocxMergeService {
         let pre = preFile.asText();
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
         pre = ensureCityPlaceholderInBookmark(pre);
-        // אין מחיקת עמודת "% הנחה לשורה": המבנה החדש מכיל שני זוגות טבלאות —
-        // זוג ההנחה ({#hasDiscount}) כבר כולל את עמודת ההנחה, וזוג ללא-הנחה
-        // ({^hasDiscount}) כבר בלעדיה. docxtemplater בוחר את הזוג הנכון לפי
-        // hasDiscount, כך שאין צורך (ואסור) למחוק עמודה דינמית — זה היה מסיר
-        // את העמודה גם מזוג ההנחה ומשאיר אותה לא עקבית.
-        // הזרקת שורת הנחה לטבלת הסיכום כשיש הנחה כללית והשורה חסרה בתבנית
-        if (normalized.hasDiscount === true) {
-          pre = ensureDiscountRowInSummary(pre);
+        // ── התאמת זוג טבלאות ההנחה למצב ההנחות בפועל ──
+        // זוג הטבלאות המלא ({#hasDiscount}) כולל גם עמודת "% הנחה לשורה" וגם שורת "% הנחה"
+        // כללית, ומרונדר כאשר קיימת הנחה כלשהי (normalized.hasDiscount = כללית || לשורה).
+        // כאן מסירים את החלק המיותר כדי שכל אחד מ-4 המצבים יוצג נכון:
+        //   • הנחה כללית בלבד  → הסרת עמודת הנחת-השורה (הייתה מציגה 0% בכל השורות)
+        //   • הנחת-שורה בלבד   → הסרת שורת ההנחה הכללית (הייתה מציגה "% הנחה: 0")
+        //   • שתיהן / אף אחת  → ללא שינוי (אף אחת → מרונדר זוג ה-{^hasDiscount} ממילא)
+        const hasGeneralDiscount = normalized.hasGeneralDiscount === true;
+        const hasLineDiscount = normalized.hasLineDiscount === true;
+        if (hasGeneralDiscount || hasLineDiscount) {
+          if (hasGeneralDiscount) {
+            // הנחה כללית — ודא קיום שורת "הנחה" בטבלת הסיכום (לתבניות ישנות שחסרות אותה)
+            pre = ensureDiscountRowInSummary(pre);
+          } else {
+            // הנחת-שורה בלבד — הסר את שורת ההנחה הכללית המיותרת
+            pre = removeSummaryDiscountRow(pre);
+          }
+          if (!hasLineDiscount) {
+            // אין הנחת-שורה — הסר את עמודת "% הנחה לשורה" מזוג הטבלאות המלא
+            pre = removeTableColumnByPlaceholder(pre, '{lineDiscountPercent}');
+          }
         }
         zip.file('word/document.xml', pre);
       }

@@ -58,10 +58,14 @@ export class TasksController {
     return this.tasksService.addAttachment(id, body.fileName, body.mimeType, data);
   }
 
-  /** הורדת קובץ מצורף */
+  /** הורדת קובץ מצורף (עם משיכה-בקריאה של הגרסה הערוכה מ-OneDrive לקובצי DOCX של הצעות) */
   @Get(':id/attachments/:attachmentId')
-  async downloadAttachment(@Param('attachmentId') attachmentId: string, @Res() res: Response) {
-    const attachment = await this.tasksService.getAttachment(attachmentId);
+  async downloadAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @Res() res: Response,
+  ) {
+    const attachment = await this.tasksService.getAttachmentForDownload(id, attachmentId);
     if (!attachment) throw new NotFoundException('Attachment not found');
     res.setHeader('Content-Type', attachment.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(attachment.fileName)}"`);

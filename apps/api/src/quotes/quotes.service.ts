@@ -615,7 +615,45 @@ export class QuotesService {
     }
     await this.prisma.quote.update({ where: { id }, data: { lastMergedDocPath: relPath } }).catch(() => null);
 
+    // ── שמירת הגרסה הערוכה גם על הקובץ המצורף למשימה המקושרת ──
+    // "קבצים שנוצרו" במשימה מציג את הקובץ המצורף (TaskAttachment) שנוצר במיזוג עם המסמך
+    // *לפני* העריכה, והוא אינו מתעדכן לעולם. בלי העדכון הזה, סגירה+פתיחה-מחדש של המשימה
+    // מציגה את המסמך המקורי במקום הגרסה שנערכה ב-Word. מעדכנים כאן (best-effort).
+    await this.refreshLinkedTaskAttachmentDocx(id, buffer).catch(() => null);
+
     return { synced: true, at: new Date().toISOString() };
+  }
+
+  /**
+   * מעדכן את התוכן של הקובץ המצורף (DOCX) העדכני ביותר של המשימה המקושרת להצעה,
+   * כך שרשימת "קבצים שנוצרו" במשימה תציג תמיד את הגרסה הערוכה ולא את המסמך שלפני העריכה.
+   * המשימה מזוהה דרך quote.linkedEntityId (נקבע כ-taskId בעת יצירת ההצעה מתוך משימה).
+   * שם הקובץ נשמר כפי שהוא (השם הידידותי שהמשתמש מזהה) — רק הבייטים מוחלפים.
+   * best-effort: כל שגיאה נבלעת כדי לא להפיל את הסנכרון.
+   */
+  async refreshLinkedTaskAttachmentDocx(quoteId: string, buffer: Buffer): Promise<void> {
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const quote = await this.prisma.quote
+      .findUnique({ where: { id: quoteId }, select: { linkedEntityId: true } })
+      .catch(() => null);
+    const taskId = quote?.linkedEntityId;
+    if (!taskId) return;
+
+    const att = await this.prisma.taskAttachment
+      .findFirst({
+        where: {
+          taskId,
+          OR: [{ mimeType: DOCX_MIME }, { fileName: { endsWith: '.docx' } }],
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (!att?.id) return;
+
+    await this.prisma.taskAttachment
+      .update({ where: { id: att.id }, data: { data: Uint8Array.from(buffer) } })
+      .catch(() => null);
   }
 
   /** הפניית ה-OneDrive השמורה להצעה (null אם אין / אם העמודות עדיין לא הוגרו ב-DB). */

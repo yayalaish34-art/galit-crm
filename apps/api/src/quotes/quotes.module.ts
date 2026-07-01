@@ -16,6 +16,7 @@ import { MicrosoftModule } from '../microsoft/microsoft.module';
   imports: [PrismaModule, MicrosoftModule],
   controllers: [QuotesController, QuoteSignatureController, ReportMailController, CompanyProfileController],
   providers: [QuotesService, QuoteMailService, PdfConvertService, QuoteSignatureService, ReportMailService, CompanyProfileService],
+  exports: [QuotesService],
 })
 export class QuotesModule {}
 

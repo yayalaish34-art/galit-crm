@@ -3,6 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { getApiBaseUrl } from '../../lib/api-base';
+import PdfPreview from './pdf-preview';
+
+/** אימות תקינות ת"ז ישראלית לפי ספרת הביקורת (אלגוריתם משרד הפנים). */
+function isValidIsraeliId(value: string): boolean {
+  const id = (value || '').trim();
+  if (!/^\d{5,9}$/.test(id)) return false;
+  const padded = id.padStart(9, '0');
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    let n = Number(padded[i]) * ((i % 2) + 1);
+    if (n > 9) n -= 9;
+    sum += n;
+  }
+  return sum % 10 === 0;
+}
 
 type Meta = {
   quoteNumber: string;
@@ -45,9 +60,10 @@ export default function SignQuotePage() {
   const [role, setRole] = useState('');
   const [agreed, setAgreed] = useState(false);
 
+  const idValid = isValidIsraeliId(idNumber);
   const fieldsValid = isBusiness
-    ? !!(companyName.trim() && fullName.trim() && role.trim() && idNumber.trim())
-    : !!(fullName.trim() && idNumber.trim());
+    ? !!(companyName.trim() && fullName.trim() && role.trim()) && idValid
+    : !!fullName.trim() && idValid;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
@@ -278,13 +294,13 @@ export default function SignQuotePage() {
         {phase === 'already' && (
           <div className="rounded-2xl bg-white p-8 text-center shadow-sm">
             <div className="text-4xl">✅</div>
-            <div className="mt-3 text-lg font-bold text-emerald-700">ההצעה כבר נחתמה</div>
+            <div className="mt-3 text-lg font-bold text-emerald-700">ההזמנה כבר נחתמה</div>
             <div className="mt-1 text-sm text-slate-500">
               תודה{meta?.customerName ? `, ${meta.customerName}` : ''}! קיבלנו את חתימתך.
             </div>
             <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
               className="mt-5 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:brightness-110">
-              צפה בהצעה החתומה
+              צפה בהזמנה החתומה
             </a>
           </div>
         )}
@@ -294,11 +310,11 @@ export default function SignQuotePage() {
             <div className="text-4xl">🎉</div>
             <div className="mt-3 text-lg font-bold text-emerald-700">החתימה נשלחה בהצלחה!</div>
             <div className="mt-1 text-sm text-slate-500">
-              תודה רבה{meta?.customerName ? `, ${meta.customerName}` : ''}. ההצעה נחתמה והתקבלה אצלנו.
+              תודה רבה{meta?.customerName ? `, ${meta.customerName}` : ''}. ההזמנה נחתמה והתקבלה אצלנו.
             </div>
             <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
               className="mt-5 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:brightness-110">
-              צפה בהצעה החתומה
+              צפה בהזמנה החתומה
             </a>
           </div>
         )}
@@ -314,14 +330,7 @@ export default function SignQuotePage() {
                   פתח במסך מלא
                 </a>
               </div>
-              <object data={pdfUrl} type="application/pdf" className="h-[460px] w-full bg-slate-50">
-                <div className="p-6 text-center text-sm text-slate-500">
-                  לא ניתן להציג את ה-PDF כאן.{' '}
-                  <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-emerald-600 underline">
-                    פתח את ההצעה
-                  </a>
-                </div>
-              </object>
+              <PdfPreview url={pdfUrl} className="h-[460px] w-full overflow-y-auto bg-slate-50" />
             </div>
 
             {/* פרטי החותם — לפי סיווג הלקוח */}
@@ -349,8 +358,15 @@ export default function SignQuotePage() {
                 )}
                 <label className="block">
                   <span className="mb-1 block text-xs font-semibold text-slate-500">ת.ז *</span>
-                  <input value={idNumber} onChange={(e) => setIdNumber(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" placeholder="מספר תעודת זהות"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white" />
+                  <input value={idNumber} onChange={(e) => setIdNumber(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" maxLength={9} placeholder="מספר תעודת זהות"
+                    className={`w-full rounded-xl border bg-slate-50 px-3 py-2.5 text-sm outline-none focus:bg-white ${
+                      idNumber && !idValid
+                        ? 'border-rose-300 focus:border-rose-400'
+                        : 'border-slate-200 focus:border-emerald-400'
+                    }`} />
+                  {idNumber && !idValid && (
+                    <span className="mt-1 block text-[11px] font-medium text-rose-500">מספר תעודת זהות אינו תקין</span>
+                  )}
                 </label>
               </div>
             </div>

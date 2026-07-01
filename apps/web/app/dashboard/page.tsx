@@ -43,6 +43,7 @@ import {
   Paperclip,
   FlaskConical,
   Settings,
+  Check,
   ChevronDown,
   ChevronRight,
   ChevronLeft,
@@ -3650,6 +3651,226 @@ type ManagerDashboardPayload = {
   }>;
 };
 
+/** שורה בטבלת "דוחות שנשלחו וסטטוס תשלום" — נגזרת מהערות התהליך של המשימה. */
+type ReportPayRow = {
+  taskId: string;
+  customerId: string | null;
+  name: string;
+  service: string;
+  sentAt: string;
+  paid: boolean;
+  paidAt: string | null;
+};
+
+/**
+ * ── דוחות שנשלחו + סטטוס תשלום (אדמין + גלית בלבד) ──
+ * מקור הנתונים: הערות התהליך (processNotes) של המשימות. כל שליחת דוח כותבת הערת-תשלום
+ * ('דוח נשלח — שולם' / 'טרם שולם'), כך שאפשר לגזור מכאן איזה דוחות שולמו ואיזה לא — בלי
+ * שינוי סכימה במסד הנתונים. "סמן כשולם" מוסיף הערה חדשה ('סומן כשולם'), וההערה האחרונה
+ * (לפי זמן) קובעת את הסטטוס הנוכחי. הרשימה נטענת עם scope=all כדי לכלול דוחות של כל העובדים.
+ */
+function ReportsPaymentsSection({
+  currentUser,
+  onOpenCustomerById,
+}: {
+  currentUser: AppUser;
+  onOpenCustomerById?: (id: string) => void;
+}) {
+  const [rows, setRows] = useState<ReportPayRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('unpaid');
+  const [rangeDays, setRangeDays] = useState<7 | 30 | 90 | 0>(30); // 0 = כל התאריכים
+  const [q, setQ] = useState('');
+
+  const parsePN = (raw?: string | null): { text: string; at: string }[] => {
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return arr
+          .filter((n) => n && typeof n.text === 'string' && n.text.trim())
+          .map((n) => ({ text: String(n.text), at: String(n.at || '') }));
+      }
+    } catch { /* legacy plain text — אין הערת תשלום */ }
+    return [];
+  };
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(apiUrl('/tasks?scope=all'), { authUser: currentUser });
+      const data = res.ok ? await res.json() : [];
+      // הערת-תשלום מזוהה רק אם היא קשורה לשליחת דוח ('דוח'+'שולם/תשלום') או סימון ידני ('סומן כשולם').
+      // כך הערות תהליך חופשיות שמזכירות "תשלום" אגב אורחא לא ייכנסו בטעות למעקב.
+      const isPayNote = (text: string) => (/דוח/.test(text) && /(שולם|תשלום)/.test(text)) || /סומן כשולם/.test(text);
+      const UNPAID = /טרם/; // 'טרם שולם' / 'טרם התקבל תשלום' → לא שולם
+      const list: ReportPayRow[] = [];
+      for (const t of Array.isArray(data) ? data : []) {
+        const notes = parsePN(t.processNotes);
+        const pay = notes.filter((n) => isPayNote(n.text));
+        if (!pay.length) continue; // אין דוח שנשלח עם רישום תשלום
+        const asc = [...pay].sort((a, b) => new Date(a.at || 0).getTime() - new Date(b.at || 0).getTime());
+        const latest = asc[asc.length - 1];
+        const paid = !UNPAID.test(latest.text);
+        list.push({
+          taskId: t.id,
+          customerId: t.customerId ?? null,
+          name: t.customer?.name || t.lead?.fullName || t.title || '—',
+          service: taskTypeLabelForTasks(t.type || ''),
+          sentAt: asc[0].at || t.updatedAt || '',
+          paid,
+          paidAt: paid ? latest.at : null,
+        });
+      }
+      list.sort((a, b) => new Date(b.sentAt || 0).getTime() - new Date(a.sentAt || 0).getTime());
+      setRows(list);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser.id]);
+
+  const markPaid = async (taskId: string) => {
+    setBusyId(taskId);
+    try {
+      // משיכת ההערות העדכניות כדי לא לדרוס הערות אחרות
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}`), { authUser: currentUser });
+      const t = res.ok ? await res.json() : null;
+      const existing = parsePN(t?.processNotes);
+      const nowIso = new Date().toISOString();
+      const next = [{ text: '💰 סומן כשולם', at: nowIso }, ...existing];
+      const patch = await apiFetch(apiUrl(`/tasks/${taskId}`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ processNotes: JSON.stringify(next) }),
+      });
+      if (patch.ok) {
+        setRows((prev) => prev.map((r) => (r.taskId === taskId ? { ...r, paid: true, paidAt: nowIso } : r)));
+      }
+    } catch {
+      /* ignore — נשאר לא-שולם */
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const fmtDay = (iso: string | null | undefined) => {
+    if (!iso) return '—';
+    try { return new Date(iso).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return '—'; }
+  };
+
+  const unpaidCount = rows.filter((r) => !r.paid).length;
+  const paidCount = rows.filter((r) => r.paid).length;
+
+  const cutoff = rangeDays ? Date.now() - rangeDays * 86400000 : 0;
+  const filtered = rows.filter((r) => {
+    if (statusFilter === 'paid' && !r.paid) return false;
+    if (statusFilter === 'unpaid' && r.paid) return false;
+    if (cutoff && new Date(r.sentAt || 0).getTime() < cutoff) return false;
+    if (q.trim() && !r.name.toLowerCase().includes(q.trim().toLowerCase())) return false;
+    return true;
+  });
+
+  const seg = (active: boolean) =>
+    cn('rounded-xl px-3.5 py-1.5 text-sm font-semibold transition', active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700');
+
+  return (
+    <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-xl font-bold text-slate-900">
+          <span className="flex items-center gap-2"><FileCheck className="h-5 w-5 text-emerald-600" /> דוחות שנשלחו — סטטוס תשלום</span>
+          <span className="flex items-center gap-2">
+            <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-extrabold text-red-700">{unpaidCount} טרם שולם</span>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-sm font-extrabold text-emerald-700">{paidCount} שולם</span>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {/* ── סרגל סינון: סטטוס · טווח זמן · חיפוש ── */}
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1">
+          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+            <button type="button" className={seg(statusFilter === 'unpaid')} onClick={() => setStatusFilter('unpaid')}>טרם שולם</button>
+            <button type="button" className={seg(statusFilter === 'paid')} onClick={() => setStatusFilter('paid')}>שולם</button>
+            <button type="button" className={seg(statusFilter === 'all')} onClick={() => setStatusFilter('all')}>הכל</button>
+          </div>
+          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+            <button type="button" className={seg(rangeDays === 7)} onClick={() => setRangeDays(7)}>7 ימים</button>
+            <button type="button" className={seg(rangeDays === 30)} onClick={() => setRangeDays(30)}>30 יום</button>
+            <button type="button" className={seg(rangeDays === 90)} onClick={() => setRangeDays(90)}>90 יום</button>
+            <button type="button" className={seg(rangeDays === 0)} onClick={() => setRangeDays(0)}>הכל</button>
+          </div>
+          <div className="relative min-w-[160px] flex-1">
+            <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="חיפוש לפי שם לקוח…"
+              className="w-full rounded-xl border border-slate-200 bg-white py-2 pr-9 pl-3 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-10 text-center text-sm text-slate-400">טוען דוחות…</div>
+        ) : filtered.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">אין דוחות התואמים לסינון</div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-emerald-50">
+                <TableHead>לקוח</TableHead>
+                <TableHead>שירות</TableHead>
+                <TableHead>תאריך שליחה</TableHead>
+                <TableHead>סטטוס</TableHead>
+                <TableHead className="text-left">פעולה</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((r) => (
+                <TableRow
+                  key={r.taskId}
+                  className={cn('hover:bg-slate-50', r.customerId && onOpenCustomerById ? 'cursor-pointer' : '')}
+                  onClick={() => { if (r.customerId && onOpenCustomerById) onOpenCustomerById(r.customerId); }}
+                >
+                  <TableCell className="font-medium">{r.name}</TableCell>
+                  <TableCell className="text-slate-600">{r.service}</TableCell>
+                  <TableCell>{fmtDay(r.sentAt)}</TableCell>
+                  <TableCell>
+                    {r.paid ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> שולם</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700"><Clock3 className="h-3.5 w-3.5" /> טרם שולם</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-left">
+                    {!r.paid && (
+                      <button
+                        type="button"
+                        disabled={busyId === r.taskId}
+                        onClick={(e) => { e.stopPropagation(); void markPaid(r.taskId); }}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-emerald-600 disabled:opacity-50"
+                      >
+                        <Check className="h-3.5 w-3.5" /> {busyId === r.taskId ? 'מעדכן…' : 'סמן כשולם'}
+                      </button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ManagerDashboard({
   currentUser,
   customers,
@@ -3690,38 +3911,23 @@ function ManagerDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
 
-  // ── סקשנים בדשבורד: לקוחות שנשלח אליהם משוב + לקוחות שסומנו כלא רלוונטי ──
-  // טווח ברירת מחדל: שבוע אחרון; ניתן לעבור לחודש אחרון. המתג משפיע על שני הסקשנים.
+  // ── סקשן בדשבורד: לקוחות שסומנו כלא רלוונטי ──
+  // טווח ברירת מחדל: שבוע אחרון; ניתן לעבור לחודש אחרון.
   const [rangeDays, setRangeDays] = useState<7 | 30>(7);
-  const [fbRows, setFbRows] = useState<FeedbackCustomer[]>([]);
   const [nrRows, setNrRows] = useState<NotRelevantCustomer[]>([]);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [fbRes, nrRes] = await Promise.all([
-          apiFetch(apiUrl('/feedback/customers'), { authUser: currentUser }),
-          apiFetch(apiUrl('/customers/not-relevant'), { authUser: currentUser }),
-        ]);
+        const nrRes = await apiFetch(apiUrl('/customers/not-relevant'), { authUser: currentUser });
         if (!alive) return;
-        if (fbRes.ok) { const d = await fbRes.json(); setFbRows(Array.isArray(d) ? d : []); }
         if (nrRes.ok) { const d = await nrRes.json(); setNrRows(Array.isArray(d) ? d : []); }
       } catch { /* השארה ריקה — לא מפיל את הדשבורד */ }
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
-
-  // משוב: רק לקוחות שעבודתם הסתיימה ונשלח אליהם משוב (feedbackRequestedAt), בטווח שנבחר.
-  const feedbackSentRows = useMemo(() => {
-    const cutoff = Date.now() - rangeDays * 86400000;
-    return fbRows.filter((r) => {
-      if (!r.feedbackRequestedAt) return false;
-      const t = new Date(r.feedbackRequestedAt).getTime();
-      return !Number.isNaN(t) && t >= cutoff;
-    });
-  }, [fbRows, rangeDays]);
 
   // לא רלוונטי: לקוחות שסומנו, לפי תאריך הסימון (notRelevantAt), בטווח שנבחר.
   const notRelevantRecent = useMemo(() => {
@@ -3812,18 +4018,6 @@ function ManagerDashboard({
     { name: 'אחר', value: 14, color: '#d1d5db' },
   ];
 
-  const incomingLeadsFeed = (data.recentLeadsTaken ?? []).slice(0, 8);
-  const relativeTimeHe = (iso: string) => {
-    const diffMs = Date.now() - new Date(iso).getTime();
-    const mins = Math.round(diffMs / 60000);
-    if (mins < 1) return 'הרגע';
-    if (mins < 60) return `לפני ${mins} ד׳`;
-    const hrs = Math.round(mins / 60);
-    if (hrs < 24) return `לפני ${hrs} ש׳`;
-    const days = Math.round(hrs / 24);
-    return `לפני ${days} ימים`;
-  };
-
   return (
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-6" dir="rtl">
       <div className="space-y-6">
@@ -3906,41 +4100,10 @@ function ManagerDashboard({
           </div>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-2">
-          {/* ── לקוחות שנשלח אליהם משוב ── */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between gap-2 text-xl font-bold text-slate-900">
-                <span className="flex items-center gap-2"><Star className="h-5 w-5 text-amber-500" /> לקוחות שנשלח אליהם משוב</span>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-extrabold text-amber-700">{feedbackSentRows.length}</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {feedbackSentRows.length === 0 ? (
-                <div className="py-10 text-center text-sm text-slate-400">אין לקוחות שנשלח אליהם משוב בטווח שנבחר</div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-amber-50">
-                      <TableHead>לקוח</TableHead>
-                      <TableHead>סיום העבודה</TableHead>
-                      <TableHead>נשלח משוב</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {feedbackSentRows.map((r) => (
-                      <TableRow key={r.id} className="cursor-pointer hover:bg-slate-50" onClick={() => onOpenCustomerById(r.id)}>
-                        <TableCell className="font-medium">{r.name}</TableCell>
-                        <TableCell>{fmtDayHe(r.lastDoneAt)}</TableCell>
-                        <TableCell>{fmtDayHe(r.feedbackRequestedAt)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
+        {/* ── דוחות שנשלחו + סטטוס תשלום (מחליף את סקשן "המשוב") ── */}
+        <ReportsPaymentsSection currentUser={currentUser} onOpenCustomerById={onOpenCustomerById} />
 
+        <div className="grid gap-4">
           {/* ── לקוחות שסומנו כלא רלוונטי ── */}
           <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
@@ -3971,42 +4134,6 @@ function ManagerDashboard({
                     ))}
                   </TableBody>
                 </Table>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4">
-
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
-                <UserPlus className="h-5 w-5 text-green-600" /> לידים נכנסים — מי לקח כל ליד
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2.5">
-              {incomingLeadsFeed.length === 0 ? (
-                <div className="py-8 text-center text-sm text-slate-400">אין לידים נכנסים עדיין</div>
-              ) : (
-                incomingLeadsFeed.map((row) => (
-                  <div key={row.id} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-bold text-slate-800">{row.name}</div>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500">
-                        <span className="truncate">{row.serviceType !== '—' ? row.serviceType : row.source}</span>
-                        <span className="text-slate-300">·</span>
-                        <span className="flex-shrink-0">{relativeTimeHe(row.createdAt)}</span>
-                      </div>
-                    </div>
-                    {row.assignedUserName ? (
-                      <span className="flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
-                        <UserCircle2 className="h-3.5 w-3.5" /> {row.assignedUserName}
-                      </span>
-                    ) : (
-                      <span className="flex-shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-700">טרם נלקח</span>
-                    )}
-                  </div>
-                ))
               )}
             </CardContent>
           </Card>
@@ -4184,8 +4311,13 @@ function DashboardPage({
     [tasks, currentUser.id],
   );
 
+  // גלית (אחראית הכספים) רואה בדשבורד שלה את מעקב הדוחות והתשלומים — כמו האדמין.
+  const isGalit = (currentUser.name || '').includes('גלית');
+
   return (
     <div className="space-y-6" dir="rtl">
+      {isGalit && <ReportsPaymentsSection currentUser={currentUser} />}
+
       {/* ── Hero ── */}
       <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-7 py-7 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
         <div className="pointer-events-none absolute -left-8 -top-10 h-44 w-44 rounded-full bg-white/10" />
@@ -14050,6 +14182,7 @@ function TasksPage({
   const [coordBusy, setCoordBusy] = useState<Record<string, boolean>>({});
   const [coordError, setCoordError] = useState<Record<string, string>>({});
   const [coordResult, setCoordResult] = useState<Record<string, { webLink: string | null; joinUrl: string | null; invited: string[] }>>({});
+  const [coordEmpDropdownOpen, setCoordEmpDropdownOpen] = useState<Record<string, boolean>>({});
   const updateCoordForm = useCallback((taskId: string, patch: Partial<CoordMeetingForm>) => {
     setCoordForms((prev) => ({ ...prev, [taskId]: { ...prev[taskId], ...patch } }));
   }, []);
@@ -18335,26 +18468,69 @@ function TasksPage({
                                     </div>
                                   </label>
 
-                                  {/* שאר העובדים */}
+                                  {/* שאר העובדים — בורר נפתח מרובה־בחירה */}
                                   <div className="text-[11px] font-bold text-slate-500 mb-2">עובדים נוספים</div>
                                   {otherEmployees.length === 0 ? (
                                     <div className="text-[12px] text-slate-400">אין עובדים נוספים זמינים.</div>
-                                  ) : (
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                      {otherEmployees.map((u) => {
-                                        const checked = employeeIds.includes(u.id);
-                                        return (
-                                          <label key={u.id} className={`flex items-center gap-2 rounded-xl border p-2.5 cursor-pointer transition-colors ${checked ? 'border-blue-300 bg-blue-50' : 'border-slate-200 hover:border-blue-200'}`}>
-                                            <input type="checkbox" className="h-4 w-4 accent-blue-600" checked={checked} onChange={() => toggleCoordEmployee(t.id, u.id, employeeIds)} />
-                                            <div className="flex-1 min-w-0">
-                                              <div className="text-[13px] font-bold text-slate-700 truncate">{u.name}</div>
-                                              <div className="text-[11px] text-slate-400 font-medium truncate">{u.email}</div>
+                                  ) : (() => {
+                                    const selectedEmployees = otherEmployees.filter((u) => employeeIds.includes(u.id));
+                                    const open = !!coordEmpDropdownOpen[t.id];
+                                    return (
+                                      <div className="relative">
+                                        {/* צ'יפים של הנבחרים */}
+                                        {selectedEmployees.length > 0 && (
+                                          <div className="flex flex-wrap gap-1.5 mb-2">
+                                            {selectedEmployees.map((u) => (
+                                              <span key={u.id} className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 pr-2.5 pl-1 py-1 text-[12px] font-bold text-blue-700">
+                                                {u.name}
+                                                <button type="button" onClick={() => toggleCoordEmployee(t.id, u.id, employeeIds)} className="rounded-full p-0.5 hover:bg-blue-100" aria-label={`הסר ${u.name}`}>
+                                                  <X className="h-3 w-3" />
+                                                </button>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {/* כפתור פתיחת הרשימה */}
+                                        <button
+                                          type="button"
+                                          onClick={() => setCoordEmpDropdownOpen((prev) => ({ ...prev, [t.id]: !prev[t.id] }))}
+                                          className={`w-full flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-right transition-colors ${open ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 hover:border-blue-200'}`}
+                                        >
+                                          <span className={`text-[13px] font-bold ${selectedEmployees.length > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                                            {selectedEmployees.length > 0 ? `${selectedEmployees.length} עובדים נבחרו — ניתן להוסיף עוד` : 'בחר עובד/ים להזמנה…'}
+                                          </span>
+                                          <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+                                        </button>
+                                        {/* פאנל נפתח */}
+                                        {open && (
+                                          <>
+                                            <div className="fixed inset-0 z-10" onClick={() => setCoordEmpDropdownOpen((prev) => ({ ...prev, [t.id]: false }))} />
+                                            <div className="absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+                                              {otherEmployees.map((u) => {
+                                                const checked = employeeIds.includes(u.id);
+                                                return (
+                                                  <button
+                                                    type="button"
+                                                    key={u.id}
+                                                    onClick={() => toggleCoordEmployee(t.id, u.id, employeeIds)}
+                                                    className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                                                  >
+                                                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-slate-300'}`}>
+                                                      {checked && <Check className="h-3 w-3 text-white" />}
+                                                    </span>
+                                                    <div className="flex-1 min-w-0">
+                                                      <div className="text-[13px] font-bold text-slate-700 truncate">{u.name}</div>
+                                                      <div className="text-[11px] text-slate-400 font-medium truncate">{u.email}</div>
+                                                    </div>
+                                                  </button>
+                                                );
+                                              })}
                                             </div>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
+                                          </>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
 
                                 {err && (
@@ -18415,15 +18591,15 @@ function TasksPage({
                                 onClose={() => setReportModalTaskId(null)}
                                 onSent={async ({ paymentStatus }) => {
                                   setReportModalTaskId(null);
-                                  // רישום סטטוס התשלום כהערת תהליך (לא חובה — נשמר רק אם נבחר)
-                                  if (paymentStatus) {
-                                    const existing = parseProcessNotes(t.processNotes);
-                                    const noteText = paymentStatus === 'paid' ? '💰 התקבל תשלום מהלקוח (לפני שליחת הדוח)' : '⏳ הדוח נשלח — טרם התקבל תשלום מהלקוח';
-                                    const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
-                                    await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
-                                  } else {
-                                    await updateTaskField(t.id, { status: 'DONE' });
-                                  }
+                                  // רישום שליחת הדוח + סטטוס התשלום כהערת תהליך. תמיד נשמרת הערה כדי
+                                  // שהדוח יופיע במעקב "דוחות שנשלחו — סטטוס תשלום" (אדמין/גלית). אם שאלת
+                                  // התשלום דולגה (paymentStatus=null) — נרשם כ"טרם שולם" לצורך מעקב גבייה.
+                                  const existing = parseProcessNotes(t.processNotes);
+                                  const noteText = paymentStatus === 'paid'
+                                    ? '💰 דוח נשלח — שולם'
+                                    : '⏳ דוח נשלח — טרם שולם';
+                                  const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
+                                  await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
                                   // פתיחת פופ-אפ "שליחת משוב" בסוף הזרימה
                                   const cust = customers.find((c) => c.id === t.customerId);
                                   setFeedbackScheduleData({

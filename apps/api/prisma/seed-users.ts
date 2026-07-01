@@ -653,8 +653,49 @@ async function main() {
     createdTasks += 1;
   }
 
+  // ── דוחות שנשלחו + סטטוס תשלום (נתוני הדגמה לדשבורד) ──
+  const reportPayTasksDemo = [
+    { title: 'SEED:דוח קרינה - יואב כהן', customerName: 'יואב כהן', daysAgo: 5, paid: true, paidDaysAgo: 2 },
+    { title: 'SEED:דוח אקוסטיקה - ענבל לוי', customerName: 'ענבל לוי', daysAgo: 12, paid: true, paidDaysAgo: 7 },
+    { title: 'SEED:דוח אקוסטי - קבוצת שקד הנדסה', customerName: 'קבוצת שקד הנדסה בע"מ', daysAgo: 20, paid: true, paidDaysAgo: 14 },
+    { title: 'SEED:דוח ראדון - לירון כהן', customerName: 'לירון כהן', daysAgo: 28, paid: true, paidDaysAgo: 22 },
+    { title: 'SEED:דוח אסבסט - אורן בנייה', customerName: 'אורן בנייה ויזמות', daysAgo: 8, paid: false, paidDaysAgo: 0 },
+    { title: 'SEED:דוח ליווי סביבתי - הדר ניהול', customerName: 'הדר ניהול פרויקטים', daysAgo: 15, paid: false, paidDaysAgo: 0 },
+    { title: 'SEED:דוח מיגון קרינה - אוסם הנדסה', customerName: 'אוסם הנדסה תשתיות', daysAgo: 22, paid: false, paidDaysAgo: 0 },
+    { title: 'SEED:דוח עובש - אחוזת כרמל', customerName: 'אחוזת כרמל ניהול', daysAgo: 3, paid: false, paidDaysAgo: 0 },
+    { title: 'SEED:דוח רעש - עיריית נס ציונה', customerName: 'עיריית נס ציונה', daysAgo: 35, paid: true, paidDaysAgo: 28 },
+    { title: 'SEED:דוח איכות אוויר - מרכז רפואי גליל ים', customerName: 'מרכז רפואי גליל ים', daysAgo: 18, paid: false, paidDaysAgo: 0 },
+  ] as const;
+
+  await prisma.task.deleteMany({ where: { title: { in: reportPayTasksDemo.map((t) => t.title) } } });
+
+  for (let i = 0; i < reportPayTasksDemo.length; i += 1) {
+    const t = reportPayTasksDemo[i];
+    const ownerId = pickAssignee(i);
+    if (!ownerId) continue;
+    const customerId = customerIdByName.get(t.customerName) ?? null;
+    const sentDate = new Date(now - t.daysAgo * 86400000).toISOString();
+    const notes: { text: string; at: string }[] = [];
+    if (t.paid && t.paidDaysAgo > 0) {
+      notes.push({ text: '💰 סומן כשולם', at: new Date(now - t.paidDaysAgo * 86400000).toISOString() });
+    }
+    notes.push({ text: '📄 דוח נשלח ללקוח — ' + (t.paid ? 'שולם ✅' : 'טרם שולם'), at: sentDate });
+    await prisma.task.create({
+      data: {
+        title: t.title,
+        status: t.paid ? ('DONE' as any) : ('OPEN' as any),
+        priority: 'MEDIUM' as any,
+        type: 'step7',
+        dueDate: new Date(now - t.daysAgo * 86400000),
+        ownerId,
+        customerId,
+        processNotes: JSON.stringify(notes),
+      },
+    });
+  }
+
   console.log(
-    `Seed completed successfully (customers created: ${createdCustomers}, leads created: ${createdLeads}, projects created: ${createdProjects}, quotes created: ${createdQuotes}, tasks created: ${createdTasks})`,
+    `Seed completed successfully (customers created: ${createdCustomers}, leads created: ${createdLeads}, projects created: ${createdProjects}, quotes created: ${createdQuotes}, tasks created: ${createdTasks}, report-pay tasks: ${reportPayTasksDemo.length})`,
   );
 }
 

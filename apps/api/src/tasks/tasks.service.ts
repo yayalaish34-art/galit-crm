@@ -1,9 +1,13 @@
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { QuotesService } from '../quotes/quotes.service';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly quotesService: QuotesService,
+  ) {}
 
   findAll({
     projectId,
@@ -136,6 +140,39 @@ export class TasksService {
 
   getAttachment(attachmentId: string) {
     return this.prisma.taskAttachment.findUnique({ where: { id: attachmentId } });
+  }
+
+  /**
+   * מחזיר קובץ מצורף להורדה, עם משיכה-בקריאה (pull-on-read) של הגרסה הערוכה מ-OneDrive.
+   * אם הקובץ הוא DOCX של הצעת מחיר שנפתחה לעריכה ב-Word (יש הפניית OneDrive למשימה),
+   * מסנכרן קודם את הגרסה העדכנית מ-OneDrive — הסנכרון מעדכן גם את הקובץ המצורף עצמו
+   * (refreshLinkedTaskAttachmentDocx) — ואז מגיש את הבייטים העדכניים. כך פתיחה-מחדש של
+   * המשימה והורדת הקובץ תמיד מחזירות את הגרסה שנערכה, ולא את המסמך שנוצר במיזוג לפני העריכה.
+   * best-effort: כשל בסנכרון לא חוסם את ההורדה — מוגש הקובץ השמור.
+   */
+  async getAttachmentForDownload(taskId: string, attachmentId: string) {
+    const att = await this.prisma.taskAttachment.findUnique({ where: { id: attachmentId } });
+    if (!att) return null;
+
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isDocx = att.mimeType === DOCX_MIME || /\.docx$/i.test(att.fileName || '');
+    if (!isDocx) return att;
+
+    // האם למשימה יש הצעה מקושרת עם קובץ פתוח-לעריכה ב-OneDrive? (העמודות עשויות שלא להתקיים
+    // עדיין לפני מיגרציה — לכן guarded ב-catch.)
+    const quote = await this.prisma.quote
+      .findFirst({
+        where: { linkedEntityId: taskId, onedriveItemId: { not: null } } as any,
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (!quote?.id) return att;
+
+    await this.quotesService.syncFromOneDrive(quote.id).catch(() => null);
+    const fresh = await this.prisma.taskAttachment
+      .findUnique({ where: { id: attachmentId } })
+      .catch(() => null);
+    return fresh ?? att;
   }
 
   async removeAttachment(attachmentId: string) {
