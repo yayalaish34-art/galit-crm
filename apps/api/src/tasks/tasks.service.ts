@@ -178,5 +178,70 @@ export class TasksService {
   async removeAttachment(attachmentId: string) {
     return this.prisma.taskAttachment.delete({ where: { id: attachmentId } });
   }
+
+  /** יצירה/עדכון רשומת TaskField לפגישה שתואמה בשלב 6.
+   *  ממפה רק עמודות שקיימות בטבלת TaskField בפועל, ומתרגם productName (קוד) → inspectionTypeId (uuid)
+   *  מתוך טבלת InspectionType. אם אין סוג-בדיקה תקין / זמנים / משך — לא כותב (עמודות NOT NULL). */
+  async upsertTaskField(taskId: string, data: {
+    productName?: string | null;
+    inspectionTypeId?: string | null;
+    family?: string | null;
+    appointmentTitle?: string | null;
+    scheduledStartAt?: string | null;
+    scheduledEndAt?: string | null;
+    durationMinutes?: number | null;
+    siteAddress?: string | null;
+    siteCity?: string | null;
+    fieldContactName?: string | null;
+    fieldContactPhone?: string | null;
+    navigationUrl?: string | null;
+    specialInstructions?: string | null;
+    updatedByUserId?: string | null;
+  }) {
+    const parsedStart = data.scheduledStartAt ? new Date(data.scheduledStartAt) : undefined;
+    const parsedEnd = data.scheduledEndAt ? new Date(data.scheduledEndAt) : undefined;
+
+    // inspectionTypeId הוא uuid NOT NULL עם FK ל-InspectionType. הפרונט מחזיק רק את הקוד (productName),
+    // אז מתרגמים כאן. InspectionType לא קיים ב-schema.prisma → שאילתת raw (פרמטרים מבוטחים).
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let inspectionTypeId = data.inspectionTypeId ?? undefined;
+    let family = data.family ?? undefined;
+    if ((!inspectionTypeId || !uuidRe.test(inspectionTypeId)) && data.productName) {
+      const rows = await this.prisma.$queryRaw<Array<{ id: string; family: string }>>`
+        SELECT id, family FROM "InspectionType"
+        WHERE code = ${data.productName} OR id::text = ${data.productName}
+        LIMIT 1`;
+      if (rows[0]) {
+        inspectionTypeId = rows[0].id;
+        family = family ?? rows[0].family;
+      }
+    }
+
+    // עמודות NOT NULL בטבלה — בלעדיהן אי-אפשר לכתוב. יוצאים בשקט (best-effort).
+    if (!inspectionTypeId || !parsedStart || !parsedEnd || data.durationMinutes == null) {
+      return null;
+    }
+
+    const payload = {
+      inspectionTypeId,
+      family: family ?? 'other',
+      appointmentTitle: data.appointmentTitle ?? null,
+      scheduledStartAt: parsedStart,
+      scheduledEndAt: parsedEnd,
+      durationMinutes: data.durationMinutes,
+      siteAddress: data.siteAddress ?? null,
+      siteCity: data.siteCity ?? null,
+      fieldContactName: data.fieldContactName ?? null,
+      fieldContactPhone: data.fieldContactPhone ?? null,
+      navigationUrl: data.navigationUrl ?? null,
+      specialInstructions: data.specialInstructions ?? null,
+      updatedByUserId: data.updatedByUserId ?? null,
+    };
+    return this.prisma.taskField.upsert({
+      where: { taskId },
+      update: payload,
+      create: { taskId, ...payload },
+    });
+  }
 }
 

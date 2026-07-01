@@ -115,6 +115,8 @@ type F = {
   typeCode: string;
   // פרטי לקוח
   customerName: string; customerId: string;
+  customerClassification: string;
+  companyname: string;
   contactName: string;  contactId: string;
   budgetCustomer: string; budgetCustomerId: string;
   phone: string;
@@ -149,6 +151,7 @@ function initForm(): F {
   return {
     code: '', reportDate: todayDmy(), typeCode: '',
     customerName: '', customerId: '',
+    customerClassification: '', companyname: '',
     contactName: '', contactId: '',
     budgetCustomer: '', budgetCustomerId: '',
     phone: '',
@@ -310,6 +313,31 @@ export function InteractionNewScreen({
               <option value="">—</option>
             </select>
           </div>
+          {/* סיווג לקוח */}
+          <div>
+            <label className={labelCls}>סיווג לקוח</label>
+            <select className={inputCls} value={form.customerClassification} onChange={set('customerClassification')}>
+              <option value="">— בחר סיווג —</option>
+              <option value="PRIVATE">לקוח פרטי</option>
+              <option value="COMPANY">חברה / עסק</option>
+              <option value="PUBLIC">גוף ציבורי</option>
+            </select>
+          </div>
+          {/* שם מוסד/חברה — מוצג רק כשהסיווג אינו "לקוח פרטי" */}
+          {form.customerClassification !== '' && form.customerClassification !== 'PRIVATE' && (
+            <div className="sm:col-span-2">
+              <label className={labelCls}>
+                שם המוסד / חברה <span className="text-red-500">*</span>
+              </label>
+              <input
+                className={inputCls}
+                value={form.companyname}
+                onChange={set('companyname')}
+                placeholder="שם המוסד או החברה"
+                required
+              />
+            </div>
+          )}
         </div>
       </div>
 

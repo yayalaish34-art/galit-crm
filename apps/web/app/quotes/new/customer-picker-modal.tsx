@@ -84,6 +84,8 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
   const [newPhone, setNewPhone] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newCity, setNewCity] = useState('');
+  const [newClassification, setNewClassification] = useState('');
+  const [newCompanyname, setNewCompanyname] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -111,7 +113,7 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
     setMode('search');
     setQ('');
     setSearchError('');
-    setNewName(''); setNewPhone(''); setNewEmail(''); setNewCity('');
+    setNewName(''); setNewPhone(''); setNewEmail(''); setNewCity(''); setNewClassification(''); setNewCompanyname('');
     setSaveError('');
     doSearch('');
   }, [open, doSearch]);
@@ -126,10 +128,13 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
   /* ── create new customer ── */
   async function handleCreate() {
     if (!newName.trim()) { setSaveError('שם לקוח הוא שדה חובה'); return; }
+    if (!newClassification) { setSaveError('סיווג לקוח הוא שדה חובה'); return; }
+    if (newClassification !== 'PRIVATE' && !newCompanyname.trim()) { setSaveError('שם המוסד / חברה הוא שדה חובה'); return; }
     setSaving(true);
     setSaveError('');
     try {
-      const body: Record<string, string> = { name: newName.trim() };
+      const body: Record<string, string> = { name: newName.trim(), type: newClassification };
+      if (newClassification !== 'PRIVATE' && newCompanyname.trim()) body.companyname = newCompanyname.trim();
       if (newPhone.trim()) body.phone = newPhone.trim();
       if (newEmail.trim()) body.email = newEmail.trim();
       if (newCity.trim()) body.city = newCity.trim();
@@ -253,27 +258,43 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
             <p style={{ fontSize: 12, color: '#555', marginBottom: 14, marginTop: 0 }}>
               מלא פרטי לקוח חדש. לאחר השמירה הלקוח יתווסף אוטומטית להצעה.
             </p>
-            {(
-              [
-                { label: 'שם לקוח', required: true, val: newName, set: setNewName, ph: 'שם מלא / חברה' },
-                { label: 'טלפון',   required: false, val: newPhone, set: setNewPhone, ph: '050-0000000' },
-                { label: 'מייל',    required: false, val: newEmail, set: setNewEmail, ph: 'example@company.com' },
-                { label: 'עיר',     required: false, val: newCity,  set: setNewCity,  ph: 'תל אביב, חיפה...' },
-              ] as { label: string; required: boolean; val: string; set: (v: string) => void; ph: string }[]
-            ).map(({ label, required, val, set, ph }) => (
-              <div key={label} style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  {label}{required && <span style={{ color: '#c00', marginRight: 2 }}>*</span>}
-                </span>
-                <input
-                  style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }}
-                  placeholder={ph}
-                  value={val}
-                  onChange={(e) => set(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-                />
+            {/* שם לקוח */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>שם לקוח<span style={{ color: '#c00', marginRight: 2 }}>*</span></span>
+              <input style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }} placeholder="שם מלא / חברה" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
+            </div>
+            {/* סיווג לקוח */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>סיווג לקוח<span style={{ color: '#c00', marginRight: 2 }}>*</span></span>
+              <select style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right', background: '#fff' }} value={newClassification} onChange={(e) => { setNewClassification(e.target.value); if (e.target.value === 'PRIVATE') setNewCompanyname(''); }}>
+                <option value="">— בחר סיווג —</option>
+                <option value="PRIVATE">לקוח פרטי</option>
+                <option value="COMPANY">חברה / עסק</option>
+                <option value="PUBLIC">גוף ציבורי</option>
+              </select>
+            </div>
+            {/* שם מוסד/חברה — מוצג כשהסיווג אינו "לקוח פרטי" */}
+            {newClassification !== '' && newClassification !== 'PRIVATE' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>שם המוסד / חברה<span style={{ color: '#c00', marginRight: 2 }}>*</span></span>
+                <input style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }} placeholder="שם המוסד או החברה" value={newCompanyname} onChange={(e) => setNewCompanyname(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
               </div>
-            ))}
+            )}
+            {/* טלפון */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>טלפון</span>
+              <input style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }} placeholder="050-0000000" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
+            </div>
+            {/* מייל */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>מייל</span>
+              <input style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }} placeholder="example@company.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
+            </div>
+            {/* עיר */}
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', columnGap: 10, alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: '#4b4b4b', textAlign: 'right', whiteSpace: 'nowrap' }}>עיר</span>
+              <input style={{ height: 26, border: '1px solid #b8b8b8', padding: '0 7px', fontSize: 12, outline: 'none', borderRadius: 2, textAlign: 'right' }} placeholder="תל אביב, חיפה..." value={newCity} onChange={(e) => setNewCity(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }} />
+            </div>
 
             {saveError && (
               <div style={{ fontSize: 12, color: '#c00', marginBottom: 10, padding: '4px 8px', background: '#fff0f0', border: '1px solid #fcc', borderRadius: 2 }}>

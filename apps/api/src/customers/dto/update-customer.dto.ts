@@ -14,6 +14,7 @@ import {
 /** Partial customer update — every field optional; service still whitelists before Prisma. */
 export class UpdateCustomerDto {
   @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsString() companyname?: string | null;
   @IsOptional() @IsString() type?: string;
   @IsOptional() @IsString() contactName?: string;
   @IsOptional() @IsString() phone?: string;

@@ -897,6 +897,16 @@ export function QuoteNewScreen({
   const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
   const [onedriveActive, setOnedriveActive] = useState(false);
   const [onedriveBusy, setOnedriveBusy] = useState(false);
+  // כתובת המייל של חשבון ה-Microsoft המחובר — מוצגת בהנחיה כשWord מבקש כניסה
+  const [msAccountEmail, setMsAccountEmail] = useState<string | null>(null);
+  useEffect(() => {
+    const u = getSessionUser();
+    if (!u) return;
+    apiFetch(apiUrl(`/users/${u.id}`), { authUser: u })
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => { if (data?.msEmail) setMsAccountEmail(data.msEmail); })
+      .catch(() => undefined);
+  }, []);
   // פאנל אבחון/גיבוי שנפתח אחרי "ערוך בוורד" — מציג את הקישורים בפועל ופתיחה בדפדפן.
   useEffect(() => {
     if (!taskId) return;
@@ -1013,12 +1023,16 @@ export function QuoteNewScreen({
         if (typeof q.orderSource === 'string') setOrderSource(q.orderSource);
         if (typeof q.phoneSummary === 'string') setPhone(q.phoneSummary);
         if (typeof q.addressSummary === 'string') setCustomerAddress(q.addressSummary);
-        // Get city/email from customer relation if available
         const custRel = q.customer as Record<string, unknown> | undefined;
         if (custRel) {
-          if (typeof custRel.city === 'string') setCustomerCity(custRel.city);
           if (typeof custRel.email === 'string') setCustomerEmail(custRel.email);
           if (!q.addressSummary && typeof custRel.address === 'string') setCustomerAddress(custRel.address);
+        }
+        // citySummary (saved per-quote) takes precedence over customer.city
+        if (typeof (q as any).citySummary === 'string' && (q as any).citySummary) {
+          setCustomerCity((q as any).citySummary);
+        } else if (custRel && typeof custRel.city === 'string') {
+          setCustomerCity(custRel.city);
         }
         if (typeof q.faxSummary === 'string') setFax(q.faxSummary);
         if (typeof q.accountingNumber === 'string') setAccountingNo(q.accountingNumber);
@@ -1552,6 +1566,7 @@ export function QuoteNewScreen({
       phoneSummary: phone || null,
       faxSummary: fax || null,
       addressSummary: customerAddress || null,
+      citySummary: customerCity || null,
       accountingNumber: accountingNo || null,
       companyRegNumber: companyNo || null,
       priceList: priceList || null,
@@ -1706,7 +1721,9 @@ export function QuoteNewScreen({
         console.log('[ערוך בוורד] webDavUrl=', data.webDavUrl, ' | webUrl=', data.webUrl, ' | ms-word=', cmd);
         // פתיחה ב-Word דסקטופ (נאמנות מלאה לתמונות/פריסה) — העריכה נשמרת ומסתנכרנת אוטומטית.
         openInDesktopWord(desktopTarget);
-        setStatusMsg('נפתח ב-Word — העריכה נשמרת ומסתנכרנת אוטומטית');
+        setStatusMsg(msAccountEmail
+          ? `נפתח ב-Word — אם מוצגת בקשת כניסה למיקרוסופט, הזן: ${msAccountEmail}`
+          : 'נפתח ב-Word — העריכה נשמרת ומסתנכרנת אוטומטית');
         setTimeout(() => setStatusMsg(''), 12000);
       } else {
         setStatusMsg('שגיאה: לא התקבלה כתובת פתיחה');

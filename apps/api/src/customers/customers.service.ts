@@ -70,6 +70,7 @@ export class CustomersService {
     const out: Prisma.CustomerUpdateInput = {};
 
     if (dto.name !== undefined) out.name = dto.name ?? '';
+    if (dto.companyname !== undefined) out.companyname = dto.companyname;
     if (dto.type !== undefined) out.type = dto.type ?? '';
     if (dto.contactName !== undefined) out.contactName = dto.contactName ?? '';
     if (dto.phone !== undefined) out.phone = dto.phone ?? '';

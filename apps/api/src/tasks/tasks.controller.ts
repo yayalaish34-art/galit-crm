@@ -78,5 +78,11 @@ export class TasksController {
     await this.tasksService.removeAttachment(attachmentId);
     return { ok: true };
   }
+
+  /** יצירה/עדכון נתוני שדה (פגישה מתואמת) — נשמר בעת לחיצה על "צור פגישה ב-Outlook" */
+  @Post(':id/field')
+  upsertField(@Param('id') id: string, @Body() body: any) {
+    return this.tasksService.upsertTaskField(id, body);
+  }
 }
 

@@ -47,6 +47,7 @@ const QUOTE_WRITABLE_FIELDS = new Set([
   'accountingNumber',
   'companyRegNumber',
   'addressSummary',
+  'citySummary',
   'phoneSummary',
   'faxSummary',
   'validityDays',

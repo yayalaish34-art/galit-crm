@@ -398,6 +398,17 @@ export function getCategoryName(id: string): string {
   return SERVICE_CATEGORIES.find((c) => c.id === id)?.name ?? id;
 }
 
+/** Get the category (family) id for a leaf service SKU/id. Returns undefined if not found. */
+export function getCategoryForSku(skuOrId: string): string | undefined {
+  for (const cat of SERVICE_CATEGORIES) {
+    for (const svc of cat.services) {
+      if (svc.id === skuOrId || svc.sku === skuOrId) return cat.id;
+      if (svc.subServices?.some((s) => s.id === skuOrId || s.sku === skuOrId)) return cat.id;
+    }
+  }
+  return undefined;
+}
+
 /** Format price as Israeli currency string, e.g. "₪1,200". */
 export function formatPrice(price: number): string {
   if (price === 0) return 'כלול';

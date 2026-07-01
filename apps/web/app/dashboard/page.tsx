@@ -19,7 +19,7 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
-import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku } from '../lib/service-categories';
+import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku, getCategoryForSku } from '../lib/service-categories';
 import {
   Users,
   FileText,
@@ -18260,6 +18260,29 @@ function TasksPage({
                                 }
                                 const data = await r.json();
                                 setCoordResult((p) => ({ ...p, [t.id]: data }));
+                                // שמירת נתוני הפגישה ב-TaskField (best-effort — לא חוסמת המשך).
+                                // שולחים רק שדות שתואמים לעמודות הטבלה בפועל. productName (קוד סוג הבדיקה)
+                                // מתורגם בשרת ל-inspectionTypeId (uuid) מתוך טבלת InspectionType.
+                                void apiFetch(apiUrl(`/tasks/${t.id}/field`), {
+                                  method: 'POST',
+                                  authUser: currentUser,
+                                  body: JSON.stringify({
+                                    productName: t.productName ?? null,
+                                    appointmentTitle: subject,
+                                    scheduledStartAt: startLocal,
+                                    scheduledEndAt: endLocal,
+                                    durationMinutes: durationMin,
+                                    siteAddress: location || null,
+                                    siteCity: lead?.city || null,
+                                    fieldContactName: contactName || null,
+                                    fieldContactPhone: t.leadPhone || lead?.phone || null,
+                                    navigationUrl: location
+                                      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`
+                                      : null,
+                                    specialInstructions: notes || null,
+                                    updatedByUserId: currentUser.id,
+                                  }),
+                                });
                                 // נקבעה פגישה ב-Outlook → שלב התיאום הסתיים. מקדמים את המשימה
                                 // לשלב הבא (ביצוע) — בלי לסמן DONE (שהיה מקפיץ אותה לשלב האחרון/סגור).
                                 // type=FIELD_WORK → detectStep מחזיר 5 (ביצוע). status נשאר פעיל.
