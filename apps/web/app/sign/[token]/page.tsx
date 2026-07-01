@@ -330,7 +330,7 @@ export default function SignQuotePage() {
                   פתח במסך מלא
                 </a>
               </div>
-              <PdfPreview url={pdfUrl} className="h-[460px] w-full overflow-y-auto bg-slate-50" />
+              <PdfPreview url={pdfUrl} className="w-full overflow-y-auto bg-slate-50" />
             </div>
 
             {/* פרטי החותם — לפי סיווג הלקוח */}
