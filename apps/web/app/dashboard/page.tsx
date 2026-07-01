@@ -16788,6 +16788,25 @@ function TasksPage({
                                     onCustomerCreated?.(createdCustomer);
                                   }
                                 } catch { /* silent */ }
+                              } else {
+                                /* ── לקוח כבר קיים: מעדכנים את הפרטים שנערכו (עיר/כתובת/טלפון/מייל/איש קשר) ──
+                                 * בלי זה כל שמירה חוזרת השאירה במסד רק את הנתונים הראשונים, ולכן העיר/כתובת
+                                 * לא עברו למיזוג הוורד גם אחרי שהלקוח עדכן אותם. */
+                                try {
+                                  await apiFetch(apiUrl(`/customers/${t.customerId}`), {
+                                    method: 'PATCH',
+                                    authUser: currentUser,
+                                    body: JSON.stringify({
+                                      contactName: saveFullName || undefined,
+                                      phone: fd.phone || '',
+                                      city: fd.city || '',
+                                      address: fd.address || null,
+                                      companyRegNumber: fd.companyRegNumber || null,
+                                      ...(fd.email?.trim() ? { email: fd.email.trim() } : {}),
+                                      ...(fd.company?.trim() ? { name: fd.company.trim() } : {}),
+                                    }),
+                                  });
+                                } catch { /* silent */ }
                               }
                               setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
                               setOpenCategoryId('__none__');
@@ -17201,7 +17220,19 @@ function TasksPage({
                                     )}
                                     <button onClick={saveCustomerCard} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
-                                      {!derivedFullName.trim() || !fd.phone?.trim() ? 'יש למלא שם וטלפון' : (!fd.city?.trim() || !fd.address?.trim() ? 'יש למלא עיר וכתובת' : 'שמור והמשך לשלב הבא')}
+                                      {(() => {
+                                        const noName = !derivedFullName.trim();
+                                        const noPhone = !fd.phone?.trim();
+                                        if (noName && noPhone) return 'יש למלא שם וטלפון';
+                                        if (noName) return 'יש למלא שם';
+                                        if (noPhone) return 'יש למלא טלפון';
+                                        const noCity = !fd.city?.trim();
+                                        const noAddr = !fd.address?.trim();
+                                        if (noCity && noAddr) return 'יש למלא עיר וכתובת';
+                                        if (noCity) return 'יש למלא עיר';
+                                        if (noAddr) return 'יש למלא כתובת';
+                                        return 'שמור והמשך לשלב הבא';
+                                      })()}
                                     </button>
                                   </div>
                                 </div>

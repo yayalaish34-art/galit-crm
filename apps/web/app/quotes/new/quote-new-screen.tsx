@@ -2471,6 +2471,11 @@ export function QuoteNewScreen({
         }
       }
 
+      // ── ניסוח מייל רק אחרי המיזוג ── עכשיו שהמסמך המלא נשמר להצעה, ל-AI יש את כל
+      // ההקשר (סכום/תנאי תשלום/פריטים + טקסט המסמך). לפני המיזוג לא מנסחים כדי לא
+      // לשלוח ל-AI בקשה חסרת הקשר.
+      if (currentQuoteId) void generateEmailDraft(currentQuoteId);
+
       // ההמרה ל-PDF אינה מתבצעת כאן יותר — הקובץ נשמר כ-DOCX, וההמרה ל-PDF מתבצעת בצד השרת
       // בזמן השליחה בלבד ("שלח"). כך עורכים DOCX בקלות, וכל מה שנשלח ללקוח הוא PDF.
       setStatusMsg('המסמך נוצר ונשמר — פותח ב-Word…');
@@ -2744,7 +2749,7 @@ export function QuoteNewScreen({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => { const id = await doSave({ advanceStage: false }); if (id) void generateEmailDraft(id); }}>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => { await doSave({ advanceStage: false }); }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
             <span className="text-[10px] text-gray-500">שמור</span>
           </button>
