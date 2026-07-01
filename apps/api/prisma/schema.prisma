@@ -213,6 +213,8 @@ model Customer {
   /// מזהה מהמערכת המיובאת (לקישור בין לידים/דוחות/פרויקטים)
   importLegacyId String?
   name        String
+  /// שם חברה / מוסד — חובה כשסיווג לקוח אינו PRIVATE
+  companyname String?
   /// סיווג לקוח: קוד מתוך CustomerClassification (למשל COMPANY / C_...)
   type        String
   contactName String
@@ -751,6 +753,7 @@ model Quote {
   accountingNumber        String?
   companyRegNumber        String?
   addressSummary          String?
+  citySummary             String?
   phoneSummary            String?
   faxSummary              String?
   validityDays            Int?
@@ -849,8 +852,58 @@ model Task {
   processNotes         String?
 
   attachments TaskAttachment[]
+  taskField   TaskField?
 
   @@index([incomingLeadId])
+}
+
+/// נתוני שדה לפגישה — מוזן בשלב תיאום פגישה בעת לחיצה על "צור פגישה ב-Outlook"
+model TaskField {
+  id                   String    @id @default(uuid())
+  taskId               String    @unique
+  task                 Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  inspectionTypeId     String?
+  family               String?
+
+  appointmentTitle     String?
+  scheduledStartAt     DateTime?
+  scheduledEndAt       DateTime?
+  durationMinutes      Int?
+
+  workerNotifiedAt     DateTime?
+
+  siteAddress          String?
+  siteCity             String?
+  fieldContactName     String?
+  fieldContactPhone    String?
+  navigationUrl        String?
+  specialInstructions  String?   @db.Text
+
+  fieldStatus          String    @default("ASSIGNED")
+  assignedAt           DateTime  @default(now())
+  confirmedAt          DateTime?
+  declinedAt           DateTime?
+  declinedReason       String?
+  departedAt           DateTime?
+  arrivedAt            DateTime?
+  finishedAt           DateTime?
+
+  fieldNotes           String?   @db.Text
+  problemType          String?
+  problemNote          String?   @db.Text
+  hasOpenProblem       Boolean   @default(false)
+
+  missingReportInfo    Boolean   @default(false)
+  missingReportInfoNote String?  @db.Text
+  managerNotifiedAt    DateTime?
+
+  updatedByUserId      String?
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@index([taskId])
 }
 
 /// קבצים מצורפים למשימה (למשל: מסמך הצעת מחיר ממוזג) — נשמרים ישירות ב-DB כך שיישארו זמינים תמיד
@@ -865,6 +918,7 @@ model TaskAttachment {
 
   @@index([taskId])
 }
+
 
 model Report {
   id          String      @id @default(uuid())
