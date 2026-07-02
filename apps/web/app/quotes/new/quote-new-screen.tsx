@@ -2765,6 +2765,10 @@ export function QuoteNewScreen({
           {statusMsg && (
             <span className={`mr-2 rounded-full px-3 py-1 text-sm font-semibold ${statusMsg.includes('שגיאה') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>{statusMsg}</span>
           )}
+          {/* גיבוי כש-Word דסקטופ לא מצליח לפתוח (בעיית זהות/הרשאות במחשב) — פתיחה ב-Word Online בדפדפן */}
+          {onedriveActive && onedriveWebUrl && (
+            <a href={onedriveWebUrl} target="_blank" rel="noopener noreferrer" className="mr-1 whitespace-nowrap text-xs font-semibold text-blue-600 underline hover:text-blue-700">לא נפתח ב-Word? פתח בדפדפן</a>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => { await doSave({ advanceStage: false }); }}>
