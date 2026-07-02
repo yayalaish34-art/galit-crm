@@ -773,9 +773,17 @@ export function QuoteNewScreen({
     setPaymentValidityDate(`${yyyy}-${mm}-${dd}`);
   }, [date, validityDays]);
 
-  /* ── Pre-fill from customer card context ── */
+  /* ── Pre-fill from customer card context ──
+   * חשוב: המילוי המקדים רץ *פעם אחת לכל לקוח* בלבד — לא בכל re-render של ההורה.
+   * ההורה (לוח המשימות) מעביר אובייקט prefillCustomer חדש בכל שמירה (onQuoteSaved),
+   * ובלי השמירה הזו כל לחיצה על "שמור" הייתה דורסת טלפון/מייל/כתובת שהמשתמש ערך
+   * ומחזירה אותם לערכים הישנים מכרטיס הלקוח. */
+  const prefilledCustomerIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!prefillCustomer) return;
+    const pid = prefillCustomer.id ?? '';
+    if (prefilledCustomerIdRef.current === pid) return; // כבר מולא עבור לקוח זה — לא דורסים עריכות
+    prefilledCustomerIdRef.current = pid;
     setCustomer(prefillCustomer.name);
     if (prefillCustomer.phone)           setPhone(prefillCustomer.phone);
     if (prefillCustomer.fax)             setFax(prefillCustomer.fax);
