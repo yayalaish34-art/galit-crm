@@ -16789,11 +16789,12 @@ function TasksPage({
                                   }
                                 } catch { /* silent */ }
                               } else {
-                                /* ── לקוח כבר קיים: מעדכנים את הפרטים שנערכו (עיר/כתובת/טלפון/מייל/איש קשר) ──
+                                /* ── לקוח כבר קיים: מעדכנים את הפרטים שנערכו (עיר/כתובת/טלפון/מייל/מהות/מקור) ──
                                  * בלי זה כל שמירה חוזרת השאירה במסד רק את הנתונים הראשונים, ולכן העיר/כתובת
-                                 * לא עברו למיזוג הוורד גם אחרי שהלקוח עדכן אותם. */
+                                 * לא עברו למיזוג הוורד גם אחרי שהלקוח עדכן אותם.
+                                 * שגיאה כאן נחשפת למשתמש ועוצרת קידום שלב — אחרת נראה כאילו נשמר אבל המסד לא עודכן. */
                                 try {
-                                  await apiFetch(apiUrl(`/customers/${t.customerId}`), {
+                                  const res = await apiFetch(apiUrl(`/customers/${t.customerId}`), {
                                     method: 'PATCH',
                                     authUser: currentUser,
                                     body: JSON.stringify({
@@ -16802,11 +16803,23 @@ function TasksPage({
                                       city: fd.city || '',
                                       address: fd.address || null,
                                       companyRegNumber: fd.companyRegNumber || null,
+                                      notes: fd.notes ?? undefined,
+                                      leadSource: fd.leadSource || undefined,
+                                      ...(fd.serviceType ? { services: [fd.serviceType] } : {}),
                                       ...(fd.email?.trim() ? { email: fd.email.trim() } : {}),
                                       ...(fd.company?.trim() ? { name: fd.company.trim() } : {}),
                                     }),
                                   });
-                                } catch { /* silent */ }
+                                  if (!res.ok) {
+                                    let msg = 'עדכון פרטי הלקוח נכשל — הנתונים לא נשמרו במסד. נסו שוב.';
+                                    try { const e = await res.json(); if (e?.message) msg = `עדכון הלקוח נכשל: ${e.message}`; } catch { /* keep default */ }
+                                    setCcCardError((p) => ({ ...p, [t.id]: msg }));
+                                    return; // לא מקדמים שלב אם השמירה נכשלה
+                                  }
+                                } catch {
+                                  setCcCardError((p) => ({ ...p, [t.id]: 'עדכון פרטי הלקוח נכשל (בעיית תקשורת) — הנתונים לא נשמרו. נסו שוב.' }));
+                                  return;
+                                }
                               }
                               setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
                               setOpenCategoryId('__none__');
