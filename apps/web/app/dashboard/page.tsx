@@ -17362,8 +17362,11 @@ function TasksPage({
                                         // openSubServiceId is explicit-only — no derived fallback (avoids back-button breaking)
                                         const activeSubGroup = activeCat.services.find((s) => s.id === openSubServiceId && !!s.subServices);
                                         const selectService = (svcId: string, svcName: string) => {
-                                          updateTaskField(t.id, { productName: svcId, status: 'IN_PROGRESS' });
-                                          setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 }));
+                                          // רק מסמנים את השירות הנבחר (productName) ומכינים את מאמן המכירות —
+                                          // *לא* קופצים אוטומטית לשלב "שיחת מכירה". גם לא משנים status ל-IN_PROGRESS,
+                                          // כי detectStep מחזיר אז שלב 2 והמשתמש היה "נזרק" מבחירת השירות מיד.
+                                          // ההתקדמות נעשית ידנית בכפתור "מעבר לשיחת מכירה" (מופעל כשיש productName).
+                                          updateTaskField(t.id, { productName: svcId });
                                           const custObj = customers.find((c) => c.id === t.customerId);
                                           const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
                                           const fixedServiceInfo = getServiceInfo(svcId, activeCat.id);

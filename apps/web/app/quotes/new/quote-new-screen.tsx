@@ -798,9 +798,15 @@ export function QuoteNewScreen({
     else if (cType === 'COMPANY') setPaymentTerms('שוטף +30');
   }, [prefillCustomer]);
 
-  /* ── Auto-add the service selected back in שלב הפנייה as the first line item ── */
+  // מוכרז כאן (לפני אפקט המילוי-המקדים של הפריט) כי האפקט תלוי בו כדי לרוץ רק אחרי טעינת ההצעה.
+  const [draftReady, setDraftReady] = useState<boolean>(false);
+
+  /* ── Auto-add the service selected back in שלב הפנייה as the first line item ──
+   * חשוב: רצים רק אחרי ש-draftReady=true (סיום טעינת ההצעה הקיימת). אחרת אפקט
+   * הטעינה האסינכרוני היה דורס את הפריט שהוזרק (setLineItems מ-lineItemsJson) ומציג
+   * "אין פריטים" למרות שנבחר שירות. */
   useEffect(() => {
-    if (!prefillServiceName) return;
+    if (!prefillServiceName || !draftReady) return;
     setLineItems((prev) => {
       if (prev.length > 0) return prev;
       const allSvcs = flattenAllServices();
@@ -812,7 +818,7 @@ export function QuoteNewScreen({
         price: svcMatch?.price != null ? String(svcMatch.price) : '',
       }];
     });
-  }, [prefillServiceName]);
+  }, [prefillServiceName, draftReady]);
 
   /* ── Default follow date: 3 days from today (only for new quotes) ── */
   useEffect(() => {
@@ -899,7 +905,6 @@ export function QuoteNewScreen({
   /* ── When embedded in a task workspace (no explicit quote id given), look up any draft quote already linked to this task ── */
   const [taskLinkedQuoteId, setTaskLinkedQuoteId] = useState<string | null>(null);
   const [taskLookupChecked, setTaskLookupChecked] = useState<boolean>(!taskId);
-  const [draftReady, setDraftReady] = useState<boolean>(false);
   const [lastMergedDocPath, setLastMergedDocPath] = useState<string | null>(null);
   // OneDrive — עריכה ב-Word עם שמירה-חזרה אוטומטית: webUrl לפתיחה + דגל "פעיל".
   const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
