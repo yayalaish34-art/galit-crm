@@ -16687,7 +16687,7 @@ function TasksPage({
                             // הכפתור פעיל כשיש שם וטלפון. אכיפת איש-הקשר עבור חברה/קבלן/מוסד
                             // נעשית בלחיצה עצמה כדי שנוכל להציג הודעת שגיאה מפורשת.
                             const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && fd.city?.trim() && fd.address?.trim());
-                            const saveCustomerCard = async () => {
+                            const saveCustomerCard = async (nextStep?: number) => {
                               if (!isPrivate0 && !hasValidContact0) {
                                 setCcCardError((p) => ({ ...p, [t.id]: 'חובה להוסיף לפחות איש קשר אחד עבור חברה / קבלן / מוסד. הוסיפו איש קשר ומלאו שם או טלפון.' }));
                                 return;
@@ -16807,7 +16807,9 @@ function TasksPage({
                                       leadSource: fd.leadSource || undefined,
                                       ...(fd.serviceType ? { services: [fd.serviceType] } : {}),
                                       ...(fd.email?.trim() ? { email: fd.email.trim() } : {}),
-                                      ...(fd.company?.trim() ? { name: fd.company.trim() } : {}),
+                                      // תמיד מעדכנים את שם הלקוח: לחברה — שם החברה; ללקוח פרטי — שם האדם.
+                                      // בלי זה עריכת שם של לקוח פרטי לא נשמרה כלל (name לא נשלח).
+                                      name: (!isPrivate0 && fd.company?.trim()) ? fd.company.trim() : (saveFullName || undefined),
                                     }),
                                   });
                                   if (!res.ok) {
@@ -16816,12 +16818,15 @@ function TasksPage({
                                     setCcCardError((p) => ({ ...p, [t.id]: msg }));
                                     return; // לא מקדמים שלב אם השמירה נכשלה
                                   }
+                                  // רענון מיידי של הלקוח במערך המקומי (customers) כדי ש-quotePrefillCust
+                                  // ישלוף את הנתונים החדשים — reloadTasks לבדו לא מרענן את customers.
+                                  try { const updated = await res.json(); if (updated?.id) onCustomerCreated?.(updated); } catch { /* לא קריטי — המסד עודכן */ }
                                 } catch {
                                   setCcCardError((p) => ({ ...p, [t.id]: 'עדכון פרטי הלקוח נכשל (בעיית תקשורת) — הנתונים לא נשמרו. נסו שוב.' }));
                                   return;
                                 }
                               }
-                              setManualStepOverride((prev) => ({ ...prev, [t.id]: 1 }));
+                              setManualStepOverride((prev) => ({ ...prev, [t.id]: typeof nextStep === 'number' ? nextStep : 1 }));
                               setOpenCategoryId('__none__');
                               await onReloadTasks?.();
                             };
@@ -17231,7 +17236,7 @@ function TasksPage({
                                         {ccCardError[t.id]}
                                       </div>
                                     )}
-                                    <button onClick={saveCustomerCard} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
+                                    <button onClick={() => saveCustomerCard()} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
                                       {(() => {
                                         const noName = !derivedFullName.trim();
@@ -21420,7 +21425,7 @@ export default function GalitCRMPrototype() {
               currentUser={currentUser}
               projects={projects}
               customers={customers}
-              onCustomerCreated={(c) => setCustomers((prev) => [...prev, c])}
+              onCustomerCreated={(c) => setCustomers((prev) => prev.some((x) => x.id === c.id) ? prev.map((x) => x.id === c.id ? { ...x, ...c } : x) : [...prev, c])}
               leads={effectiveLeads}
               users={users}
               quotes={quotes}

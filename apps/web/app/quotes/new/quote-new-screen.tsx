@@ -805,18 +805,32 @@ export function QuoteNewScreen({
    * חשוב: רצים רק אחרי ש-draftReady=true (סיום טעינת ההצעה הקיימת). אחרת אפקט
    * הטעינה האסינכרוני היה דורס את הפריט שהוזרק (setLineItems מ-lineItemsJson) ומציג
    * "אין פריטים" למרות שנבחר שירות. */
+  // עוקב אחרי שם השירות שכבר הוזרק, כדי שכשמשנים שירות בשלב "התאמת הפתרון" נחליף רק את
+  // שורת השירות ולא נדרוס שורות שהמשתמש הוסיף/ערך ידנית.
+  const prefilledServiceNameRef = useRef<string | null>(null);
   useEffect(() => {
     if (!prefillServiceName || !draftReady) return;
+    if (prefilledServiceNameRef.current === prefillServiceName) return; // כבר הוזרק בדיוק השירות הזה
+    const prevPrefill = prefilledServiceNameRef.current;
+    prefilledServiceNameRef.current = prefillServiceName;
+    const allSvcs = flattenAllServices();
+    const svcMatch = allSvcs.find((s) => s.name === prefillServiceName);
+    const svcSku = svcMatch?.sku ?? '';
+    const svcPrice = svcMatch?.price != null ? String(svcMatch.price) : '';
     setLineItems((prev) => {
-      if (prev.length > 0) return prev;
-      const allSvcs = flattenAllServices();
-      const svcMatch = allSvcs.find((s) => s.name === prefillServiceName);
-      return [{
-        ...newLineItem(),
-        description: prefillServiceName,
-        sku: svcMatch?.sku ?? '',
-        price: svcMatch?.price != null ? String(svcMatch.price) : '',
-      }];
+      // הצעה ריקה → מזריקים את השירות כפריט ראשון (התנהגות מקורית).
+      if (prev.length === 0) return [{ ...newLineItem(), description: prefillServiceName, sku: svcSku, price: svcPrice }];
+      // השירות שונה תוך כדי עבודה (היה prefill קודם): מחליפים רק את השורה של השירות הישן, שומרים כמות/מזהה.
+      if (prevPrefill && prevPrefill !== prefillServiceName) {
+        const idx = prev.findIndex((li) => li.description === prevPrefill);
+        return idx !== -1 ? prev.map((li, i) => (i === idx ? { ...li, description: prefillServiceName, sku: svcSku, price: svcPrice } : li)) : prev;
+      }
+      // ריצה ראשונה במאונט אך כבר יש שורות (שוחזרו מהטיוטה): מחליפים רק אם זו שורה בודדת של
+      // שירות מוכר *אחר* (auto-line ישן) — לא נוגעים בהצעה רב-שורתית או בתיאור ידני מותאם.
+      if (prev.length === 1 && allSvcs.some((s) => s.name === prev[0].description) && prev[0].description !== prefillServiceName) {
+        return [{ ...prev[0], description: prefillServiceName, sku: svcSku, price: svcPrice }];
+      }
+      return prev;
     });
   }, [prefillServiceName, draftReady]);
 
@@ -1035,17 +1049,19 @@ export function QuoteNewScreen({
         if (typeof q.priceList === 'string') setPriceList(q.priceList);
         if (typeof q.orderSource === 'string') setOrderSource(q.orderSource);
         if (typeof q.phoneSummary === 'string') setPhone(q.phoneSummary);
-        if (typeof q.addressSummary === 'string') setCustomerAddress(q.addressSummary);
         const custRel = q.customer as Record<string, unknown> | undefined;
         if (custRel) {
           if (typeof custRel.email === 'string') setCustomerEmail(custRel.email);
-          if (!q.addressSummary && typeof custRel.address === 'string') setCustomerAddress(custRel.address);
-        }
-        // citySummary (saved per-quote) takes precedence over customer.city
-        if (typeof (q as any).citySummary === 'string' && (q as any).citySummary) {
-          setCustomerCity((q as any).citySummary);
-        } else if (custRel && typeof custRel.city === 'string') {
-          setCustomerCity(custRel.city);
+          // עדיפות לרשומת הלקוח החיה (מקור האמת) על פני ה-summary השמור בהצעה — שהוא
+          // רק snapshot ישן. כך עריכת עיר/כתובת של הלקוח בשלב "פתיחת פנייה" מופיעה בהצעה.
+          // (טלפון נשאר מ-phoneSummary — יש לו עריכה ידנית פר-הצעה + אפקט סנכרון איש קשר.)
+          const relAddr = typeof custRel.address === 'string' ? custRel.address : '';
+          const relCity = typeof custRel.city === 'string' ? custRel.city : '';
+          setCustomerAddress(relAddr || (typeof q.addressSummary === 'string' ? q.addressSummary : ''));
+          setCustomerCity(relCity || (typeof (q as any).citySummary === 'string' ? (q as any).citySummary : ''));
+        } else {
+          if (typeof q.addressSummary === 'string') setCustomerAddress(q.addressSummary);
+          if (typeof (q as any).citySummary === 'string') setCustomerCity((q as any).citySummary);
         }
         if (typeof q.faxSummary === 'string') setFax(q.faxSummary);
         if (typeof q.accountingNumber === 'string') setAccountingNo(q.accountingNumber);
