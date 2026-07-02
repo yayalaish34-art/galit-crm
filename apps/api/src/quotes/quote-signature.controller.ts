@@ -22,6 +22,11 @@ export class QuoteSignatureController {
     const { buffer, fileName } = await this.signature.getPdf(token);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+    // אותה כתובת מגישה את הלא-חתום לפני החתימה ואת החתום אחריה — בלי זה דפדפני מובייל
+    // (בעיקר כרום באנדרואיד) מגישים מה-cache את העותק הלא-חתום גם אחרי החתימה.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.send(buffer);
   }
 

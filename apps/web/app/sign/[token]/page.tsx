@@ -46,6 +46,10 @@ export default function SignQuotePage() {
   const token = decodeURIComponent(String(params?.token || ''));
   const base = getApiBaseUrl();
   const pdfUrl = `${base}/public/sign/${encodeURIComponent(token)}/pdf`;
+  // כתובת נפרדת לצפייה אחרי חתימה: הלקוח כבר פתח את ה-PDF הלא-חתום מאותה כתובת,
+  // ודפדפני מובייל (כרום באנדרואיד) מגישים אותו מה-cache גם אחרי שהשרת מחזיק את החתום.
+  // פרמטר שאילתה שונה = מפתח cache שונה = מביא תמיד את הגרסה החתומה הטרייה.
+  const signedPdfUrl = `${pdfUrl}?signed=1&t=${Date.now()}`;
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -305,7 +309,7 @@ export default function SignQuotePage() {
             <div className="mt-1 text-sm text-slate-500">
               תודה{meta?.customerName ? `, ${meta.customerName}` : ''}! קיבלנו את חתימתך.
             </div>
-            <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
+            <a href={signedPdfUrl} target="_blank" rel="noopener noreferrer"
               className="mt-5 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:brightness-110">
               צפה בהזמנה החתומה
             </a>
@@ -319,7 +323,7 @@ export default function SignQuotePage() {
             <div className="mt-1 text-sm text-slate-500">
               תודה רבה{meta?.customerName ? `, ${meta.customerName}` : ''}. ההזמנה נחתמה והתקבלה אצלנו.
             </div>
-            <a href={pdfUrl} target="_blank" rel="noopener noreferrer"
+            <a href={signedPdfUrl} target="_blank" rel="noopener noreferrer"
               className="mt-5 inline-block rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:brightness-110">
               צפה בהזמנה החתומה
             </a>
