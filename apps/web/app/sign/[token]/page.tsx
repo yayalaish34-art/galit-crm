@@ -100,8 +100,15 @@ export default function SignQuotePage() {
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(rect.width * dpr);
-    canvas.height = Math.round(rect.height * dpr);
+    const targetW = Math.round(rect.width * dpr);
+    const targetH = Math.round(rect.height * dpr);
+    // חשוב לאנדרואיד: גלילה מציגה/מסתירה את סרגל הכתובת ומפעילה אירוע resize.
+    // הצבת canvas.width/height *מוחקת* את הבד — לכן משחזרים את מידות הבד רק אם הן
+    // באמת השתנו. במצב הרגיל הרוחב (w-full) והגובה (h-44) יציבים בגלילה אנכית,
+    // כך שהחתימה כבר לא נמחקת בכל גלילה קטנה.
+    if (canvas.width === targetW && canvas.height === targetH) return;
+    canvas.width = targetW;
+    canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.scale(dpr, dpr);
@@ -270,7 +277,7 @@ export default function SignQuotePage() {
   };
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gradient-to-b from-emerald-50 to-slate-100 px-4 py-6">
+    <div dir="rtl" className="min-h-screen bg-gradient-to-b from-emerald-50 to-slate-100 px-4 py-6" style={{ colorScheme: 'light' }}>
       <div className="mx-auto w-full max-w-2xl">
         {/* כותרת */}
         <div className="mb-4 rounded-3xl bg-gradient-to-l from-[#2f5c32] to-[#4ba647] px-6 py-5 text-white shadow-lg">
@@ -341,25 +348,25 @@ export default function SignQuotePage() {
                   <label className="block">
                     <span className="mb-1 block text-xs font-semibold text-slate-500">שם החברה *</span>
                     <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="שם החברה"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white" />
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-400 focus:bg-white" />
                   </label>
                 )}
                 <label className="block">
                   <span className="mb-1 block text-xs font-semibold text-slate-500">שם מלא *</span>
                   <input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="שם מלא"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white" />
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-400 focus:bg-white" />
                 </label>
                 {isBusiness && (
                   <label className="block">
                     <span className="mb-1 block text-xs font-semibold text-slate-500">תפקיד *</span>
                     <input value={role} onChange={(e) => setRole(e.target.value)} placeholder="תפקיד בחברה"
-                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-emerald-400 focus:bg-white" />
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none focus:border-emerald-400 focus:bg-white" />
                   </label>
                 )}
                 <label className="block">
                   <span className="mb-1 block text-xs font-semibold text-slate-500">ת.ז *</span>
                   <input value={idNumber} onChange={(e) => setIdNumber(e.target.value.replace(/[^\d]/g, ''))} inputMode="numeric" maxLength={9} placeholder="מספר תעודת זהות"
-                    className={`w-full rounded-xl border bg-slate-50 px-3 py-2.5 text-sm outline-none focus:bg-white ${
+                    className={`w-full rounded-xl border bg-slate-50 px-3 py-2.5 text-sm text-slate-900 placeholder-slate-400 outline-none focus:bg-white ${
                       idNumber && !idValid
                         ? 'border-rose-300 focus:border-rose-400'
                         : 'border-slate-200 focus:border-emerald-400'
