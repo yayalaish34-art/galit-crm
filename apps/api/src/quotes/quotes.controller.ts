@@ -135,6 +135,8 @@ export class QuotesController {
       preferOnedrive?: boolean;
       /** קישור לעמוד הצפייה/חתימה (/sign). אם סופק — לא מצרפים קובץ, אלא כפתור "צפייה בהצעת מחיר". */
       viewUrl?: string;
+      /** "שלח במייל" הפשוט: מצרפים את הפרופיל+רישיונות כ-PDF ומדכאים את הכפתור. */
+      attachProfilePdf?: boolean;
     },
     @Req() req: any,
   ) {
@@ -151,6 +153,7 @@ export class QuotesController {
       signatureId: body.signatureId,
       preferOnedrive: body.preferOnedrive,
       viewUrl: body.viewUrl,
+      attachProfilePdf: body.attachProfilePdf,
       // ה-host של הבקשה = הדומיין הציבורי של ה-API (Railway תמיד https חיצונית).
       // משמש לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות". PUBLIC_API_URL גובר אם הוגדר.
       publicApiBaseUrl: req?.headers?.host ? `https://${req.headers.host}` : undefined,
@@ -163,8 +166,16 @@ export class QuotesController {
    * + פרטי הלקוח. הקישור עצמו נבנה בצד הלקוח: `${origin}/sign/${token}`.
    */
   @Post(':id/request-signature')
-  requestSignature(@Param('id') id: string, @Req() req: any) {
-    return this.signatureService.requestSignature(id, req.user?.id);
+  requestSignature(
+    @Param('id') id: string,
+    @Body() body: { markRequested?: boolean } | undefined,
+    @Req() req: any,
+  ) {
+    // markRequested=false — יצירת קישור להורדת PDF (למשל "שלח בווצאפ" הפשוט) בלי לשנות
+    // את סטטוס החתימה של ההצעה ל-REQUESTED.
+    return this.signatureService.requestSignature(id, req.user?.id, {
+      markRequested: body?.markRequested,
+    });
   }
 
   @Post(':id/save-merged-doc')

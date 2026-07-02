@@ -75,7 +75,7 @@ export class QuoteSignatureService {
    * מכין הצעה לחתימה: ממיר ל-PDF, מייצר סוד וטוקן, ומסמן digitalSignatureStatus=REQUESTED.
    * מחזיר את הטוקן (הקישור עצמו נבנה בצד הלקוח מ-window.location.origin) + פרטי הלקוח.
    */
-  async requestSignature(quoteId: string, userId?: string) {
+  async requestSignature(quoteId: string, userId?: string, opts?: { markRequested?: boolean }) {
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
       include: {
@@ -118,16 +118,16 @@ export class QuoteSignatureService {
       marker,
     };
 
-    await this.prisma.quote.update({
-      where: { id: quoteId },
-      data: {
-        digitalSignatureStatus: 'REQUESTED',
-        signatureRequestedAt: new Date(),
-        signedAt: null,
-        signedPdfPath: null,
-        digitalCertificateMeta: meta as any,
-      },
-    });
+    // markRequested=false — רק שומרים את ה-PDF/טוקן (כדי ש-/public/sign/:token/pdf יגיש את
+    // ה-PDF), בלי לשנות את סטטוס החתימה. משמש להורדת PDF (למשל "שלח בווצאפ" הפשוט).
+    const updateData: any = { digitalCertificateMeta: meta as any };
+    if (opts?.markRequested !== false) {
+      updateData.digitalSignatureStatus = 'REQUESTED';
+      updateData.signatureRequestedAt = new Date();
+      updateData.signedAt = null;
+      updateData.signedPdfPath = null;
+    }
+    await this.prisma.quote.update({ where: { id: quoteId }, data: updateData });
 
     return {
       token: `${quoteId}~${secret}`,

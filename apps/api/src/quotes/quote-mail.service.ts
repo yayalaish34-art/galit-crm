@@ -74,6 +74,12 @@ export class QuoteMailService {
        * של הבקשה. אם ריק — הכפתור לא יוצג.
        */
       publicApiBaseUrl?: string;
+      /**
+       * מצב "שלח במייל" הפשוט: מצרפים את הפרופיל+רישיונות כקובץ PDF (במקום כפתור-קישור),
+       * ומדכאים את כפתור "הפרופיל שלנו + רישיונות". יחד עם היעדר viewUrl — ההצעה מצורפת
+       * כ-PDF וללא כפתורים.
+       */
+      attachProfilePdf?: boolean;
     },
   ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' | 'smtp' }> {
     // Prefer sending from the user's own Outlook (Graph); SMTP is the fallback.
@@ -196,13 +202,26 @@ export class QuoteMailService {
       ? `<div style="margin:22px 0;"><a href="${opts.viewUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" target="_blank" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 30px;border-radius:10px;">צפייה בהצעת מחיר</a></div>`
       : '';
 
-    // כפתור קבוע "הפרופיל שלנו + רישיונות" — מצביע ל-PDF המתארח ב-API.
+    // "הפרופיל שלנו + רישיונות": במצב "שלח במייל" הפשוט (attachProfilePdf) מצרפים אותו כקובץ
+    // PDF ומדכאים את הכפתור; אחרת (מצב חתימה/קישור) — כפתור-קישור ל-PDF המתארח ב-API.
     // מוודאים שה-PDF קיים/עדכני (best-effort, לא חוסם את השליחה אם נכשל).
     await this.companyProfile.ensurePdf(opts?.userId);
     const apiBase = (process.env.PUBLIC_API_URL || opts?.publicApiBaseUrl || '').replace(/\/+$/, '');
-    const profileButton = apiBase
-      ? `<div style="margin:14px 0;"><a href="${apiBase}/public/company-profile.pdf" target="_blank" style="display:inline-block;background:#2f5c32;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 24px;border-radius:10px;">📄 הפרופיל שלנו + רישיונות</a></div>`
-      : '';
+    let profileButton = '';
+    if (opts?.attachProfilePdf) {
+      try {
+        const prof = await this.companyProfile.getCachedPdf();
+        if (prof?.buffer?.length) {
+          docs.push({ content: prof.buffer, fileName: prof.fileName || 'הפרופיל שלנו + רישיונות.pdf', mime: 'application/pdf' });
+        }
+      } catch (e: any) {
+        this.logger.warn(`company profile PDF attach failed for quote ${quoteId}: ${e?.message || e}`);
+      }
+    } else {
+      profileButton = apiBase
+        ? `<div style="margin:14px 0;"><a href="${apiBase}/public/company-profile.pdf" target="_blank" style="display:inline-block;background:#2f5c32;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 24px;border-radius:10px;">📄 הפרופיל שלנו + רישיונות</a></div>`
+        : '';
+    }
 
     // Resolve the per-user signature (text + optional image, if requested).
     // The image is sent as an INLINE attachment (CID) because Outlook blocks

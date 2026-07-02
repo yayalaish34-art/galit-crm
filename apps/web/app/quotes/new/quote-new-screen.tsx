@@ -1315,27 +1315,108 @@ export function QuoteNewScreen({
     }
   }
 
+  // "שלח במייל" הפשוט — מצרף את ההצעה כ-PDF + את הפרופיל+רישיונות כ-PDF, בלי כפתורים ובלי חתימה.
+  async function sendQuoteEmailPlain() {
+    const f = emailForm;
+    const allTo = [...f.toList, ...(f.toInput.includes('@') ? [f.toInput.trim()] : [])];
+    const allCc = [...f.ccList, ...(f.ccInput.includes('@') ? [f.ccInput.trim()] : [])];
+    const to = allTo[0]?.trim() || '';
+    if (!to) { setStatusMsg('חסר נמען'); return; }
+    setEmailSending(true);
+    setStatusMsg('שולח…');
+    const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
+    const attIds = [f.attId, ...emailExtraAttIds].filter(Boolean);
+    let serverSent = false; let serverErr = '';
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${f.quoteId}/send-email`), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({
+          email: to,
+          cc: ccList,
+          subject: f.subject,
+          messageBody: f.body,
+          includeSignature: f.includeSignature,
+          signatureId: f.signatureId || undefined,
+          // בלי viewUrl → ההצעה מצורפת כקובץ (PDF). attachProfilePdf → הפרופיל+רישיונות מצורף אף הוא.
+          attachmentIds: attIds.length ? attIds : undefined,
+          attachProfilePdf: true,
+          preferOnedrive: onedriveActive,
+          customerName: customer || '',
+        }),
+      });
+      if (r.ok) serverSent = true;
+      else { try { const e = await r.json(); serverErr = e?.message || ''; } catch { /* ignore */ } }
+    } catch { /* network */ }
+    setEmailSending(false);
+    if (serverSent) {
+      setEmailModalOpen(false);
+      setStatusMsg(`מייל נשלח ל-${to} (הצעה + פרופיל מצורפים)`);
+      setTimeout(() => setStatusMsg(''), 5000);
+    } else {
+      setStatusMsg(serverErr ? `שליחת המייל נכשלה: ${serverErr}` : 'שליחת המייל נכשלה');
+      setTimeout(() => setStatusMsg(''), 7000);
+    }
+  }
+
+  // "שלח בווצאפ" הפשוט — פותח וואטסאפ עם קישור להורדת ה-PDF של ההצעה (בלי לשנות סטטוס חתימה).
+  async function sendQuoteWhatsAppPlain() {
+    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
+    setEmailSending(true);
+    setStatusMsg('מכין קובץ PDF…');
+    const { token, error } = await createSignLink({ markRequested: false });
+    setEmailSending(false);
+    if (!token) { setStatusMsg(error || 'הכנת קובץ ה-PDF נכשלה'); return; }
+    const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
+    const ref = (reference || quoteNo || '').trim();
+    const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה".\nלצפייה והורדה:\n${pdfUrl}`;
+    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
+    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+    setEmailModalOpen(false);
+    setStatusMsg('נפתח וואטסאפ עם קישור להורדת ההצעה');
+    setTimeout(() => setStatusMsg(''), 5000);
+  }
+
+  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ עם קישור לעמוד החתימה (/sign) שבו הלקוח חותם באצבע.
+  async function sendQuoteWhatsAppSign() {
+    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
+    setSignBusy(true);
+    setStatusMsg('מכין קישור לחתימה…');
+    const { url, error } = await createSignLink();
+    setSignBusy(false);
+    if (!url) { setStatusMsg(error || 'יצירת קישור החתימה נכשלה'); return; }
+    const ref = (reference || quoteNo || '').trim();
+    const msg = `שלום${contact ? ' ' + contact : ''}, הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${url}`;
+    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
+    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+    setStatusMsg('נפתח וואטסאפ עם קישור לחתימה');
+    setTimeout(() => setStatusMsg(''), 5000);
+  }
+
   // ליבה: יוצר בקשת חתימה ומחזיר את קישור ה-/sign (גם מעדכן state). מחזיר '' בכישלון.
   // מחזיר { url, error } כדי שהקורא יציג את הסיבה האמיתית לכשל (PDF/לקוח/מיזוג) ולא הודעה כללית.
-  async function createSignLink(): Promise<{ url: string; error: string }> {
-    if (!emailForm.quoteId) return { url: '', error: 'יש לשמור את ההצעה לפני יצירת קישור הצפייה' };
+  async function createSignLink(opts?: { markRequested?: boolean }): Promise<{ url: string; token: string; error: string }> {
+    if (!emailForm.quoteId) return { url: '', token: '', error: 'יש לשמור את ההצעה לפני יצירת קישור הצפייה' };
     try {
       const r = await apiFetch(apiUrl(`/quotes/${emailForm.quoteId}/request-signature`), {
         method: 'POST',
         authUser: getSessionUser(),
+        // markRequested=false → הכנת PDF להורדה בלי לשנות את סטטוס החתימה (למשל "שלח בווצאפ" הפשוט)
+        body: JSON.stringify({ markRequested: opts?.markRequested ?? true }),
       });
       if (!r.ok) {
         let msg = 'יצירת קישור החתימה נכשלה';
         try { const e = await r.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message[0] : e.message; } catch { /* ignore */ }
-        return { url: '', error: msg };
+        return { url: '', token: '', error: msg };
       }
       const d = await r.json();
       const url = `${window.location.origin}/sign/${d.token}`;
-      setSignLink(url);
+      // מציגים את תיבת "קישור לחתימה" רק במצב חתימה אמיתי (לא בהכנת PDF להורדה).
+      if (opts?.markRequested !== false) setSignLink(url);
       setSignPhone(String(d.customerPhone || '').replace(/\D/g, ''));
-      return { url, error: '' };
+      return { url, token: String(d.token || ''), error: '' };
     } catch {
-      return { url: '', error: 'יצירת קישור החתימה נכשלה — בעיית תקשורת עם השרת' };
+      return { url: '', token: '', error: 'יצירת קישור החתימה נכשלה — בעיית תקשורת עם השרת' };
     }
   }
 
@@ -3636,15 +3717,35 @@ export function QuoteNewScreen({
               </div>
             )}
 
-            <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
-              {!emailHasDraft && <span className="me-auto text-sm text-gray-400">נסח או דלג לכתיבה ידנית כדי לשלוח</span>}
-              <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-3 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => { setSignLink(''); setEmailModalOpen(false); }}>ביטול</button>
-              <button type="button" disabled={signBusy || emailSending || !emailForm.quoteId} className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-6 py-3 text-base font-bold text-emerald-700 hover:bg-emerald-100 transition-colors disabled:opacity-50" onClick={requestSignatureLink} title="צור קישור שהלקוח חותם עליו מהנייד">
-                {signBusy ? 'מכין…' : '🖊️ שלח לחתימה'}
-              </button>
-              <button type="button" disabled={emailSending || !emailHasDraft || (!emailForm.toList.length && !emailForm.toInput.includes('@'))} className="rounded-xl bg-blue-500 px-10 py-3 text-base font-bold text-white hover:bg-blue-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmail}>
-                {emailSending ? 'שולח…' : '✉️ שלח'}
-              </button>
+            <div className="mt-6 border-t border-gray-100 pt-5">
+              {!emailHasDraft && <div className="mb-3 text-sm text-gray-400">נסח או דלג לכתיבה ידנית כדי לשלוח</div>}
+              {(() => {
+                const noRecipient = !emailForm.toList.length && !emailForm.toInput.includes('@');
+                const busy = emailSending || signBusy;
+                const emailDisabled = busy || !emailHasDraft || noRecipient || !emailForm.quoteId;
+                const waDisabled = busy || !emailForm.quoteId;
+                return (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {/* שורה 1: שליחה רגילה (הצעה + פרופיל כקבצים מצורפים, בלי כפתורים ובלי חתימה) */}
+                    <button type="button" disabled={emailDisabled} className="flex items-center justify-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-base font-bold text-white hover:bg-blue-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmailPlain} title="שולח מייל עם ההצעה + הפרופיל והרישיונות כקבצים מצורפים (PDF)">
+                      <Mail size={18} /> שלח במייל
+                    </button>
+                    <button type="button" disabled={waDisabled} className="flex items-center justify-center gap-2 rounded-xl bg-green-500 px-6 py-3 text-base font-bold text-white hover:bg-green-600 transition-colors disabled:opacity-50" onClick={sendQuoteWhatsAppPlain} title="פותח וואטסאפ עם קישור להורדת ה-PDF של ההצעה">
+                      <MessageCircle size={18} /> שלח בוואטסאפ
+                    </button>
+                    {/* שורה 2: שליחה לחתימה (קישור לעמוד /sign שבו הלקוח חותם באצבע) */}
+                    <button type="button" disabled={emailDisabled} className="flex items-center justify-center gap-2 rounded-xl border-2 border-blue-300 bg-blue-50 px-6 py-3 text-base font-bold text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50" onClick={sendQuoteEmail} title="שולח מייל עם כפתור צפייה וחתימה בהצעה">
+                      <Mail size={18} /> 🖊️ שלח במייל עם חתימה
+                    </button>
+                    <button type="button" disabled={waDisabled} className="flex items-center justify-center gap-2 rounded-xl border-2 border-green-300 bg-green-50 px-6 py-3 text-base font-bold text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50" onClick={sendQuoteWhatsAppSign} title="פותח וואטסאפ עם קישור לחתימת הלקוח מהנייד">
+                      <MessageCircle size={18} /> 🖊️ שלח בוואטסאפ עם חתימה
+                    </button>
+                  </div>
+                );
+              })()}
+              <div className="mt-3 flex justify-end">
+                <button type="button" disabled={emailSending} className="rounded-xl border border-gray-300 bg-white px-6 py-2.5 text-base font-medium hover:bg-gray-50 transition-colors disabled:opacity-50" onClick={() => { setSignLink(''); setEmailModalOpen(false); }}>ביטול</button>
+              </div>
             </div>
           </div>
         </div>
