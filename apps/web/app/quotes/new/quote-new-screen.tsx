@@ -1476,7 +1476,9 @@ export function QuoteNewScreen({
   const appliedContactIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (quoteContactRows.length === 0) {
-      if (!customerContactId) setContact('');
+      // אין רשומות אנשי קשר — למשל לקוח פרטי, שבו האדם עצמו הוא איש הקשר.
+      // במקום להשאיר ריק ("אין אנשי קשר"), ממלאים אוטומטית את שם הלקוח (אם השדה ריק).
+      if (!customerContactId) setContact((prev) => (prev.trim() ? prev : (customer || '').trim()));
       appliedContactIdRef.current = null;
       return;
     }
@@ -1492,7 +1494,7 @@ export function QuoteNewScreen({
       appliedContactIdRef.current = null;
       setContact('');
     }
-  }, [customerContactId, quoteContactRows]);
+  }, [customerContactId, quoteContactRows, customer]);
 
   /* ── Sync customerId from prefillCustomer ── */
   useEffect(() => {
@@ -2946,7 +2948,7 @@ export function QuoteNewScreen({
                       {quoteContactRows.map((c) => <option key={c.id} value={c.id}>{c.fullName}{c.isPrimary ? ' (ראשי)' : ''}</option>)}
                     </select>
                   ) : (
-                    <input className={`${inp} bg-gray-50`} readOnly value={contact} placeholder="אין אנשי קשר" />
+                    <input className={inp} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="שם איש הקשר" />
                   )}
                 </div>
                 <div>
