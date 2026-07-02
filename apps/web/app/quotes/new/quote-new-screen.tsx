@@ -1461,17 +1461,27 @@ export function QuoteNewScreen({
     };
   }, [customerId, prefillContactId]);
 
+  /* מזהה איש-הקשר שכבר שוקף לשדות (טלפון/אימייל/שם). משמש כדי למלא את הפרטים
+   * *רק* כשמחליפים איש קשר בפועל — ולא בכל פעם ש-quoteContactRows מתרענן ברקע
+   * (למשל אחרי סנכרון/PATCH), מה שהיה דורס טלפון שהמשתמש בדיוק ערך ו"מחזיר" אותו
+   * למספר השמור. */
+  const appliedContactIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (quoteContactRows.length === 0) {
       if (!customerContactId) setContact('');
+      appliedContactIdRef.current = null;
       return;
     }
+    // אין שינוי באיש הקשר הנבחר — לא דורסים את מה שהמשתמש ערך ידנית.
+    if (customerContactId === appliedContactIdRef.current) return;
     const row = quoteContactRows.find((r) => r.id === customerContactId);
     if (row) {
+      appliedContactIdRef.current = customerContactId;
       setContact(row.fullName);
       if (row.email) setCustomerEmail(row.email);
       if (row.phone || row.mobile) setPhone(row.phone || row.mobile);
     } else if (!customerContactId) {
+      appliedContactIdRef.current = null;
       setContact('');
     }
   }, [customerContactId, quoteContactRows]);
