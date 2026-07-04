@@ -1274,7 +1274,8 @@ export function QuoteNewScreen({
     setStatusMsg('מכין קובץ לחתימה…');
     const { token, error: tokErr } = await ensureSignToken();
     if (!token) { setEmailSending(false); setStatusMsg(tokErr || 'הכנת הקובץ לחתימה נכשלה'); return; }
-    const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
+    // btn=1 → ה-PDF מוגש עם כפתור "לחץ כאן לחתימה" (תמונה) בעמוד האחרון.
+    const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
@@ -1320,18 +1321,25 @@ export function QuoteNewScreen({
   // ── טוקן חתימה משותף לסשן: לכל הצעה יש digitalCertificateMeta יחיד, וכל קריאה ל-request-signature
   // מגלגלת סוד חדש ומבטלת קישורים קודמים. לכן יוצרים טוקן פעם אחת ומשתמשים בו חוזר בכל ערוצי
   // השליחה — כדי שלא יבטלו זה את זה ("קישור החתימה אינו תקף"). מחזיר גם את טלפון הלקוח לוואטסאפ. ──
-  const signTokenRef = useRef<{ quoteId: string; token: string; phone: string } | null>(null);
-  async function ensureSignToken(): Promise<{ token: string; phone: string; error: string }> {
+  const signTokenRef = useRef<{ quoteId: string; token: string; phone: string; marked: boolean } | null>(null);
+  async function ensureSignToken(opts?: { markRequested?: boolean }): Promise<{ token: string; phone: string; error: string }> {
     const qid = emailForm.quoteId;
     if (!qid) return { token: '', phone: '', error: 'יש לשמור את ההצעה לפני שליחה' };
-    if (signTokenRef.current && signTokenRef.current.quoteId === qid) {
-      return { token: signTokenRef.current.token, phone: signTokenRef.current.phone, error: '' };
+    const mark = opts?.markRequested !== false;
+    const cached = signTokenRef.current;
+    // שימוש חוזר בטוקן מהסשן — אלא אם עכשיו צריך לסמן "נשלח לחתימה" וזה טרם נעשה.
+    // (השרת ממילא שומר על אותו סוד עד שנחתם, אז קישורים ישנים לא נפסלים.)
+    if (cached && cached.quoteId === qid && (!mark || cached.marked)) {
+      return { token: cached.token, phone: cached.phone, error: '' };
     }
     try {
       const r = await apiFetch(apiUrl(`/quotes/${qid}/request-signature`), {
         method: 'POST',
         authUser: getSessionUser(),
-        body: JSON.stringify({ webOrigin: typeof window !== 'undefined' ? window.location.origin : undefined }),
+        body: JSON.stringify({
+          markRequested: mark,
+          webOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
+        }),
       });
       if (!r.ok) {
         let msg = 'הכנת הקובץ לחתימה נכשלה';
@@ -1341,7 +1349,7 @@ export function QuoteNewScreen({
       const d = await r.json();
       const token = String(d.token || '');
       const phone = String(d.customerPhone || '').replace(/\D/g, '');
-      signTokenRef.current = { quoteId: qid, token, phone };
+      signTokenRef.current = { quoteId: qid, token, phone, marked: mark || (cached?.quoteId === qid && cached.marked) };
       setSignPhone(phone);
       return { token, phone, error: '' };
     } catch {
@@ -1409,7 +1417,8 @@ export function QuoteNewScreen({
     const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
     setEmailSending(true);
     setStatusMsg('מכין קובץ…');
-    const { token, phone, error } = await ensureSignToken();
+    // markRequested=false — PDF נקי להורדה (בלי כפתור חתימה) ובלי לסמן "נשלח לחתימה".
+    const { token, phone, error } = await ensureSignToken({ markRequested: false });
     setEmailSending(false);
     if (!token) { if (w) w.close(); setStatusMsg(error || 'הכנת הקובץ נכשלה'); setTimeout(() => setStatusMsg(''), 5000); return; }
     const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);

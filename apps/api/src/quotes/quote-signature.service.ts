@@ -3,14 +3,14 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, PDFArray } from 'pdf-lib';
-import fontkit from '@pdf-lib/fontkit';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
-import { HEBREW_FONT_BASE64 } from './hebrew-font';
+import { SIGN_BUTTON_PNG_BASE64 } from './sign-button-image';
 
-const HEBREW_FONT_BYTES = Buffer.from(HEBREW_FONT_BASE64, 'base64');
+/** כפתור "לחץ כאן לחתימה" כתמונה מוכנה — תמונה לא ניתנת להיפוך ע"י מציגי PDF (בניגוד לטקסט עברי). */
+const SIGN_BUTTON_PNG_BYTES = Buffer.from(SIGN_BUTTON_PNG_BASE64, 'base64');
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -44,8 +44,10 @@ interface SignatureMeta {
   signer?: SignerInfo;
   /** מיקום סימן החתימה שנמצא ב-PDF (אם הוטמע בתבנית) — לצריבה במקום הנכון. */
   marker?: SignMarker | null;
-  /** מלבן כפתור "לחץ לחתום" בעמוד האחרון [x1,y1,x2,y2] — כדי לכסות אותו בלבן במסמך החתום. */
+  /** מלבן כפתור "לחץ לחתום" [x1,y1,x2,y2] — רק ברשומות ישנות שבהן הכפתור נצרב לתוך ה-PDF השמור. */
   signButtonRect?: number[];
+  /** כתובת האתר (origin) לבניית קישור הכפתור "לחץ כאן לחתימה" בצריבה על-הדרך. */
+  webOrigin?: string | null;
 }
 
 /** מיקום הסימן ב-PDF: עמוד (0-based) + קואורדינטות pdf-lib (מקור בתחתית-שמאל). */
@@ -114,32 +116,27 @@ export class QuoteSignatureService {
       pdfBuffer = await this.coverMarker(pdfBuffer, marker);
     }
 
-    const secret = randomUUID().replace(/-/g, '');
+    // ── סוד יציב: כל עוד ההצעה לא נחתמה, משתמשים שוב באותו סוד. כך לחיצה שנייה על כפתור
+    // שליחה (או ערוץ אחר) לא מגלגלת סוד חדש ולא פוסלת קישורים שכבר נשלחו ללקוח
+    // ("קישור החתימה אינו תקף או שפג תוקפו"). ה-PDF עצמו כן מתרענן מהמסמך העדכני. ──
+    const existingMeta = (quote.digitalCertificateMeta as SignatureMeta | null) || null;
+    const secret =
+      existingMeta?.secret && quote.digitalSignatureStatus !== 'SIGNED'
+        ? existingMeta.secret
+        : randomUUID().replace(/-/g, '');
     const token = `${quoteId}~${secret}`;
     const baseName = fileName.replace(/\.(docx|pdf)$/i, '');
 
-    // ── כפתור "לחץ לחתום" מוטמע בעמוד האחרון של ה-PDF ──
-    // רק במצב חתימה (markRequested !== false) וכשידוע ה-origin של האתר. הלקוח פותח את ה-PDF,
-    // גולל לעמוד האחרון, לוחץ על הכפתור — ומגיע לטופס החתימה (/sign) שבו הוא ממלא שם/ת"ז/חתימה.
-    let signButtonRect: number[] | undefined;
-    if (opts?.markRequested !== false && opts?.webOrigin) {
-      try {
-        const signFormUrl = `${opts.webOrigin.replace(/\/+$/, '')}/sign/${token}#sign-form`;
-        const stamped = await this.stampSignButton(pdfBuffer, signFormUrl);
-        pdfBuffer = stamped.pdf;
-        signButtonRect = stamped.rect;
-      } catch (e: any) {
-        this.logger.warn(`stampSignButton failed for quote ${quoteId}: ${e?.message || e}`);
-      }
-    }
-
+    // ה-PDF נשמר תמיד *נקי* (בלי כפתור). כפתור "לחץ כאן לחתימה" נצרב על-הדרך בהגשה
+    // (GET /public/sign/:token/pdf?btn=1) — כך אותו טוקן משרת גם שליחה רגילה (PDF נקי)
+    // וגם שליחה לחתימה, והמסמך החתום הסופי נשאר נקי מעצם היותו מבוסס על המקור.
     const meta: SignatureMeta = {
       secret,
       unsignedPdfBase64: pdfBuffer.toString('base64'),
       fileName: `${baseName}.pdf`,
       requestedById: userId ?? null,
       marker,
-      signButtonRect,
+      webOrigin: opts?.webOrigin || existingMeta?.webOrigin || null,
     };
 
     // markRequested=false — רק שומרים את ה-PDF/טוקן (כדי ש-/public/sign/:token/pdf יגיש את
@@ -188,12 +185,23 @@ export class QuoteSignatureService {
     };
   }
 
-  /** ה-PDF להצגה בעמוד החתימה (החתום אם כבר נחתם, אחרת המקורי). */
-  async getPdf(token: string): Promise<{ buffer: Buffer; fileName: string }> {
+  /** ה-PDF להצגה בעמוד החתימה (החתום אם כבר נחתם, אחרת המקורי).
+   *  withButton=true (?btn=1) — צורב על-הדרך את כפתור "לחץ כאן לחתימה" בעמוד האחרון,
+   *  רק כל עוד ההצעה לא נחתמה. ה-PDF השמור נשאר תמיד נקי. */
+  async getPdf(token: string, opts?: { withButton?: boolean }): Promise<{ buffer: Buffer; fileName: string }> {
     const { meta } = await this.loadByToken(token);
     const b64 = meta.signedPdfBase64 || meta.unsignedPdfBase64;
     if (!b64) throw new NotFoundException('המסמך אינו זמין');
-    return { buffer: Buffer.from(b64, 'base64'), fileName: meta.fileName };
+    let buffer: Buffer = Buffer.from(b64, 'base64');
+    if (opts?.withButton && !meta.signedPdfBase64 && meta.webOrigin) {
+      try {
+        const signFormUrl = `${String(meta.webOrigin).replace(/\/+$/, '')}/sign/${token}#sign-form`;
+        buffer = await this.stampSignButton(buffer, signFormUrl);
+      } catch (e: any) {
+        this.logger.warn(`stampSignButton on-the-fly failed (${token.slice(0, 8)}…): ${e?.message || e}`);
+      }
+    }
+    return { buffer, fileName: meta.fileName };
   }
 
   /**
@@ -469,38 +477,24 @@ export class QuoteSignatureService {
    * אם נמצא סימן בתבנית — מסתיר אותו וצורב את הבלוק במרכזו; אחרת בתחתית-ימין של העמוד האחרון.
    * הבלוק נבנה בדפדפן (עברית) ולכן אין צורך בגופן עברי בשרת.
    */
-  /** הופך מחרוזת עברית לתצוגה נכונה ב-pdf-lib (שמצייר LTR ואינו עושה סידור bidi). */
-  private reverseForRtl(s: string): string {
-    return Array.from(s).reverse().join('');
-  }
-
   /**
-   * צורב כפתור לחיץ "לחץ כאן לחתימה" בתחתית-מרכז העמוד האחרון של ה-PDF, עם קישור (URI) לטופס
-   * החתימה. הטקסט העברי מוטמע דרך NotoSansHebrew (pdf-lib לא תומך עברית בגופנים המובנים).
-   * מחזיר את ה-PDF החדש ואת מלבן הכפתור (לכיסוי במסמך החתום).
+   * צורב כפתור לחיץ "לחץ כאן לחתימה" בתחתית-מרכז *העמוד האחרון* של ה-PDF, עם קישור (URI)
+   * לטופס החתימה. הכפתור הוא תמונת PNG מוכנה-מראש (אומתה ויזואלית שהעברית קריאה) —
+   * תמונה לא ניתנת להיפוך/סידור-מחדש ע"י אף מציג PDF, בניגוד לטקסט עברי מצויר.
    */
-  private async stampSignButton(pdf: Buffer, url: string): Promise<{ pdf: Buffer; rect: number[] }> {
+  private async stampSignButton(pdf: Buffer, url: string): Promise<Buffer> {
     const doc = await PDFDocument.load(pdf);
-    doc.registerFontkit(fontkit);
-    const font = await doc.embedFont(HEBREW_FONT_BYTES, { subset: true });
+    const png = await doc.embedPng(SIGN_BUTTON_PNG_BYTES);
     const pages = doc.getPages();
-    const page = pages[pages.length - 1];
+    const page = pages[pages.length - 1]; // תמיד העמוד האחרון
     const { width } = page.getSize();
 
-    const label = this.reverseForRtl('לחץ כאן לחתימה');
-    const fontSize = 18;
-    const padX = 30;
-    const padY = 14;
-    const textW = font.widthOfTextAtSize(label, fontSize);
-    const textH = font.heightAtSize(fontSize);
-    const bw = textW + padX * 2;
-    const bh = textH + padY * 2;
+    // התמונה רונדרה ב-3x — מציירים ברוחב 204pt (חד גם בזום).
+    const bw = 204;
+    const bh = bw * (png.height / png.width);
     const bx = (width - bw) / 2;
-    const by = 46; // מעל תחתית העמוד
-
-    // רקע ירוק (צבע גלית) + טקסט לבן ממורכז.
-    page.drawRectangle({ x: bx, y: by, width: bw, height: bh, color: rgb(0.184, 0.361, 0.196) });
-    page.drawText(label, { x: bx + padX, y: by + padY, size: fontSize, font, color: rgb(1, 1, 1) });
+    const by = 40; // מעל תחתית העמוד
+    page.drawImage(png, { x: bx, y: by, width: bw, height: bh });
 
     // אנוטציית קישור לחיצה מעל הכפתור.
     const rect = [bx, by, bx + bw, by + bh];
@@ -519,8 +513,7 @@ export class QuoteSignatureService {
       page.node.set(PDFName.of('Annots'), doc.context.obj([linkRef]));
     }
 
-    const out = await doc.save();
-    return { pdf: Buffer.from(out), rect };
+    return Buffer.from(await doc.save());
   }
 
   private async stampSignature(pdf: Buffer, sigPng: Buffer, marker?: SignMarker, coverRect?: number[]): Promise<Buffer> {
