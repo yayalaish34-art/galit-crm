@@ -1429,18 +1429,19 @@ export function QuoteNewScreen({
     setEmailModalOpen(false);
   }
 
-  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ מיד עם קישור לעמוד החתימה (/sign), הדף האמין שבו הלקוח חותם.
+  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ מיד עם קישור ל-PDF של ההצעה (btn=1), שבעמוד האחרון
+  // שלו מוטמע כפתור "לחץ כאן לחתימה" המוביל לטופס החתימה — כמו בזרימת המייל עם חתימה.
   async function sendQuoteWhatsAppSign() {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
     const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
     setSignBusy(true);
-    setStatusMsg('מכין קישור לחתימה…');
+    setStatusMsg('מכין קובץ לחתימה…');
     const { token, phone, error } = await ensureSignToken();
     setSignBusy(false);
-    if (!token) { if (w) w.close(); setStatusMsg(error || 'יצירת קישור החתימה נכשלה'); setTimeout(() => setStatusMsg(''), 5000); return; }
-    const signUrl = `${window.location.origin}/sign/${token}`;
+    if (!token) { if (w) w.close(); setStatusMsg(error || 'יצירת קובץ החתימה נכשלה'); setTimeout(() => setStatusMsg(''), 5000); return; }
+    const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
     const ref = (reference || quoteNo || '').trim();
-    const msg = `שלום${contact ? ' ' + contact : ''}, הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${signUrl}`;
+    const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" לחתימה.\nפתחו את הקובץ, גללו לעמוד האחרון ולחצו "לחץ כאן לחתימה":\n${pdfUrl}`;
     const url = waHref(phone, msg);
     if (w) w.location.href = url; else window.open(url, '_blank');
     setEmailModalOpen(false);
