@@ -1272,12 +1272,8 @@ export function QuoteNewScreen({
     // "עם חתימה": הכפתור במייל פותח ישירות את קובץ ה-PDF של ההצעה, שבעמוד האחרון שלו מוטמע
     // כפתור "לחץ כאן לחתימה" (URI) המוביל לטופס החתימה. מכינים את ה-PDF+טוקן ובונים קישור ישיר ל-PDF.
     setStatusMsg('מכין קובץ לחתימה…');
-    let token = (signLink && signLink.includes('/sign/')) ? (signLink.split('/sign/')[1] || '') : '';
-    if (!token) {
-      const res = await createSignLink();
-      if (!res.token) { setEmailSending(false); setStatusMsg(res.error || 'הכנת הקובץ לחתימה נכשלה'); return; }
-      token = res.token;
-    }
+    const { token, error: tokErr } = await ensureSignToken();
+    if (!token) { setEmailSending(false); setStatusMsg(tokErr || 'הכנת הקובץ לחתימה נכשלה'); return; }
     const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
@@ -1319,6 +1315,48 @@ export function QuoteNewScreen({
       setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
       setTimeout(() => setStatusMsg(''), 7000);
     }
+  }
+
+  // ── טוקן חתימה משותף לסשן: לכל הצעה יש digitalCertificateMeta יחיד, וכל קריאה ל-request-signature
+  // מגלגלת סוד חדש ומבטלת קישורים קודמים. לכן יוצרים טוקן פעם אחת ומשתמשים בו חוזר בכל ערוצי
+  // השליחה — כדי שלא יבטלו זה את זה ("קישור החתימה אינו תקף"). מחזיר גם את טלפון הלקוח לוואטסאפ. ──
+  const signTokenRef = useRef<{ quoteId: string; token: string; phone: string } | null>(null);
+  async function ensureSignToken(): Promise<{ token: string; phone: string; error: string }> {
+    const qid = emailForm.quoteId;
+    if (!qid) return { token: '', phone: '', error: 'יש לשמור את ההצעה לפני שליחה' };
+    if (signTokenRef.current && signTokenRef.current.quoteId === qid) {
+      return { token: signTokenRef.current.token, phone: signTokenRef.current.phone, error: '' };
+    }
+    try {
+      const r = await apiFetch(apiUrl(`/quotes/${qid}/request-signature`), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({ webOrigin: typeof window !== 'undefined' ? window.location.origin : undefined }),
+      });
+      if (!r.ok) {
+        let msg = 'הכנת הקובץ לחתימה נכשלה';
+        try { const e = await r.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message[0] : e.message; } catch { /* ignore */ }
+        return { token: '', phone: '', error: msg };
+      }
+      const d = await r.json();
+      const token = String(d.token || '');
+      const phone = String(d.customerPhone || '').replace(/\D/g, '');
+      signTokenRef.current = { quoteId: qid, token, phone };
+      setSignPhone(phone);
+      return { token, phone, error: '' };
+    } catch {
+      return { token: '', phone: '', error: 'הכנת הקובץ נכשלה — בעיית תקשורת עם השרת' };
+    }
+  }
+
+  // פותח וואטסאפ באופן אמין: פותחים חלון ריק *סינכרונית* בתוך ה-click (לפני ה-await) כדי לא
+  // להיחסם ע"י חוסם ה-popup, ומפנים אותו ל-wa.me אחרי הכנת הקישור.
+  function waHref(phone: string, text: string): string {
+    const wa = phone ? (phone.startsWith('0') ? `972${phone.slice(1)}` : phone) : '';
+    // עם מספר → פתיחת הצ'אט ישירות ב-WhatsApp Web; בלי מספר → בורר נמען.
+    return wa
+      ? `https://web.whatsapp.com/send?phone=${wa}&text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
   }
 
   // "שלח במייל" הפשוט — מצרף את ההצעה כ-PDF + את הפרופיל+רישיונות כ-PDF, בלי כפתורים ובלי חתימה.
@@ -1365,40 +1403,38 @@ export function QuoteNewScreen({
     }
   }
 
-  // "שלח בווצאפ" הפשוט — פותח וואטסאפ עם קישור להורדת ה-PDF של ההצעה (בלי לשנות סטטוס חתימה).
+  // "שלח בווצאפ" הפשוט — פותח וואטסאפ מיד עם קישור להורדת ה-PDF של ההצעה.
   async function sendQuoteWhatsAppPlain() {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
+    const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
     setEmailSending(true);
-    setStatusMsg('מכין קובץ PDF…');
-    const { token, error } = await createSignLink({ markRequested: false });
+    setStatusMsg('מכין קובץ…');
+    const { token, phone, error } = await ensureSignToken();
     setEmailSending(false);
-    if (!token) { setStatusMsg(error || 'הכנת קובץ ה-PDF נכשלה'); return; }
+    if (!token) { if (w) w.close(); setStatusMsg(error || 'הכנת הקובץ נכשלה'); setTimeout(() => setStatusMsg(''), 5000); return; }
     const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
     const ref = (reference || quoteNo || '').trim();
     const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה".\nלצפייה והורדה:\n${pdfUrl}`;
-    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
-    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+    const url = waHref(phone, msg);
+    if (w) w.location.href = url; else window.open(url, '_blank');
     setEmailModalOpen(false);
-    setStatusMsg('נפתח וואטסאפ עם קישור להורדת ההצעה');
-    setTimeout(() => setStatusMsg(''), 5000);
   }
 
-  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ עם קישור ל-PDF של ההצעה, שבעמוד האחרון שלו מוטמע
-  // כפתור "לחץ כאן לחתימה" המוביל לטופס החתימה.
+  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ מיד עם קישור לעמוד החתימה (/sign), הדף האמין שבו הלקוח חותם.
   async function sendQuoteWhatsAppSign() {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
+    const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
     setSignBusy(true);
-    setStatusMsg('מכין קובץ לחתימה…');
-    const { token, error } = await createSignLink();
+    setStatusMsg('מכין קישור לחתימה…');
+    const { token, phone, error } = await ensureSignToken();
     setSignBusy(false);
-    if (!token) { setStatusMsg(error || 'יצירת קובץ החתימה נכשלה'); return; }
-    const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
+    if (!token) { if (w) w.close(); setStatusMsg(error || 'יצירת קישור החתימה נכשלה'); setTimeout(() => setStatusMsg(''), 5000); return; }
+    const signUrl = `${window.location.origin}/sign/${token}`;
     const ref = (reference || quoteNo || '').trim();
-    const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" לחתימה.\nפתחו את הקובץ ולחצו "לחץ כאן לחתימה" בעמוד האחרון:\n${pdfUrl}`;
-    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
-    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
-    setStatusMsg('נפתח וואטסאפ עם קישור לחתימה');
-    setTimeout(() => setStatusMsg(''), 5000);
+    const msg = `שלום${contact ? ' ' + contact : ''}, הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${signUrl}`;
+    const url = waHref(phone, msg);
+    if (w) w.location.href = url; else window.open(url, '_blank');
+    setEmailModalOpen(false);
   }
 
   // ליבה: יוצר בקשת חתימה ומחזיר את קישור ה-/sign (גם מעדכן state). מחזיר '' בכישלון.
@@ -2985,6 +3021,7 @@ export function QuoteNewScreen({
               serviceName: (reference || '').trim(),
             });
             setEmailExtraAttIds([]); // איפוס קבצים נוספים בכל פתיחה של חלון השליחה
+            signTokenRef.current = null; // טוקן חתימה טרי לכל פתיחת חלון (משקף את הגרסה העדכנית)
             setEmailModalOpen(true);
             if (!draftReady) void generateEmailDraft(id); // אין ניסוח עדיין — מנסחים עכשיו (יתעדכן חי)
           }}>
