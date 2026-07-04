@@ -1187,7 +1187,12 @@ export function QuoteNewScreen({
       if (r.ok) {
         const d = await r.json();
         const subject = d.subject || '';
-        const body = d.body || '';
+        const rawBody = d.body || '';
+        // תמיד מוסיפים בסוף הגוף (מתחת לניסוח ה-AI) שורות על הקבצים המצורפים — אידמפוטנטי (בלי כפילות).
+        const ATTACH_NOTE = 'מצורפות\nתעודות הסמכה ופרופיל החברה';
+        const body = rawBody.includes('תעודות הסמכה ופרופיל החברה')
+          ? rawBody
+          : `${rawBody.replace(/\s+$/, '')}\n\n${ATTACH_NOTE}`;
         emailDraftEditedRef.current = false; // התוכן הטרי מה-AI הוא הבסיס
         setAiDraft({ quoteId: qid, subject, body });
         // עדכון חי של חלון השליחה אם הוא פתוח על אותה הצעה
@@ -1264,15 +1269,16 @@ export function QuoteNewScreen({
     const to = allTo[0]?.trim() || '';
     if (!to) { setStatusMsg('חסר נמען'); return; }
     setEmailSending(true);
-    // במקום לצרף קובץ — מצרפים כפתור "צפייה בהצעת מחיר" שמפנה לעמוד /sign.
-    // יוצרים את הקישור (או משתמשים בקיים אם כבר נוצר ב"שלח לחתימה").
-    setStatusMsg('מכין קישור לצפייה…');
-    let viewUrl = signLink;
-    if (!viewUrl) {
+    // "עם חתימה": הכפתור במייל פותח ישירות את קובץ ה-PDF של ההצעה, שבעמוד האחרון שלו מוטמע
+    // כפתור "לחץ כאן לחתימה" (URI) המוביל לטופס החתימה. מכינים את ה-PDF+טוקן ובונים קישור ישיר ל-PDF.
+    setStatusMsg('מכין קובץ לחתימה…');
+    let token = (signLink && signLink.includes('/sign/')) ? (signLink.split('/sign/')[1] || '') : '';
+    if (!token) {
       const res = await createSignLink();
-      viewUrl = res.url;
-      if (!viewUrl) { setEmailSending(false); setStatusMsg(res.error || 'יצירת קישור הצפייה נכשלה'); return; }
+      if (!res.token) { setEmailSending(false); setStatusMsg(res.error || 'הכנת הקובץ לחתימה נכשלה'); return; }
+      token = res.token;
     }
+    const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
@@ -1377,16 +1383,18 @@ export function QuoteNewScreen({
     setTimeout(() => setStatusMsg(''), 5000);
   }
 
-  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ עם קישור לעמוד החתימה (/sign) שבו הלקוח חותם באצבע.
+  // "שלח בווצאפ עם חתימה" — פותח וואטסאפ עם קישור ל-PDF של ההצעה, שבעמוד האחרון שלו מוטמע
+  // כפתור "לחץ כאן לחתימה" המוביל לטופס החתימה.
   async function sendQuoteWhatsAppSign() {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
     setSignBusy(true);
-    setStatusMsg('מכין קישור לחתימה…');
-    const { url, error } = await createSignLink();
+    setStatusMsg('מכין קובץ לחתימה…');
+    const { token, error } = await createSignLink();
     setSignBusy(false);
-    if (!url) { setStatusMsg(error || 'יצירת קישור החתימה נכשלה'); return; }
+    if (!token) { setStatusMsg(error || 'יצירת קובץ החתימה נכשלה'); return; }
+    const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
     const ref = (reference || quoteNo || '').trim();
-    const msg = `שלום${contact ? ' ' + contact : ''}, הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${url}`;
+    const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" לחתימה.\nפתחו את הקובץ ולחצו "לחץ כאן לחתימה" בעמוד האחרון:\n${pdfUrl}`;
     const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
     window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
     setStatusMsg('נפתח וואטסאפ עם קישור לחתימה');
@@ -1402,7 +1410,11 @@ export function QuoteNewScreen({
         method: 'POST',
         authUser: getSessionUser(),
         // markRequested=false → הכנת PDF להורדה בלי לשנות את סטטוס החתימה (למשל "שלח בווצאפ" הפשוט)
-        body: JSON.stringify({ markRequested: opts?.markRequested ?? true }),
+        // webOrigin → כדי שהשרת יטמיע ב-PDF את כפתור "לחץ כאן לחתימה" עם קישור לטופס.
+        body: JSON.stringify({
+          markRequested: opts?.markRequested ?? true,
+          webOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
+        }),
       });
       if (!r.ok) {
         let msg = 'יצירת קישור החתימה נכשלה';

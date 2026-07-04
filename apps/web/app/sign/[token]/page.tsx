@@ -98,6 +98,16 @@ export default function SignQuotePage() {
     return () => { alive = false; };
   }, [token, base]);
 
+  // כשמגיעים מכפתור "לחץ כאן לחתימה" שב-PDF (עם #sign-form) — גוללים לטופס אחרי שהוא מרונדר.
+  useEffect(() => {
+    if (phase !== 'ready' || typeof window === 'undefined') return;
+    if (window.location.hash !== '#sign-form') return;
+    const t = window.setTimeout(() => {
+      document.getElementById('sign-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [phase]);
+
   // ── הכנת הקנבס לרזולוציית המסך ──
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -344,8 +354,8 @@ export default function SignQuotePage() {
               <PdfPreview url={pdfUrl} className="w-full overflow-y-auto bg-slate-50" />
             </div>
 
-            {/* פרטי החותם — לפי סיווג הלקוח */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm">
+            {/* פרטי החותם — לפי סיווג הלקוח. id="sign-form" — יעד הגלילה מכפתור "לחץ כאן לחתימה" שב-PDF */}
+            <div id="sign-form" className="scroll-mt-4 rounded-2xl bg-white p-4 shadow-sm">
               <div className="mb-3 text-sm font-bold text-slate-700">📝 פרטי החותם</div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {isBusiness && (

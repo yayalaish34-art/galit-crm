@@ -168,13 +168,15 @@ export class QuotesController {
   @Post(':id/request-signature')
   requestSignature(
     @Param('id') id: string,
-    @Body() body: { markRequested?: boolean } | undefined,
+    @Body() body: { markRequested?: boolean; webOrigin?: string } | undefined,
     @Req() req: any,
   ) {
     // markRequested=false — יצירת קישור להורדת PDF (למשל "שלח בווצאפ" הפשוט) בלי לשנות
     // את סטטוס החתימה של ההצעה ל-REQUESTED.
+    // webOrigin — כתובת האתר (window.location.origin) לבניית הקישור של כפתור "לחץ כאן לחתימה" ב-PDF.
     return this.signatureService.requestSignature(id, req.user?.id, {
       markRequested: body?.markRequested,
+      webOrigin: body?.webOrigin,
     });
   }
 

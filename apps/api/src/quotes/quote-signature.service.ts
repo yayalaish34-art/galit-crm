@@ -2,11 +2,15 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, PDFArray } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
+import { HEBREW_FONT_BASE64 } from './hebrew-font';
+
+const HEBREW_FONT_BYTES = Buffer.from(HEBREW_FONT_BASE64, 'base64');
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -40,6 +44,8 @@ interface SignatureMeta {
   signer?: SignerInfo;
   /** מיקום סימן החתימה שנמצא ב-PDF (אם הוטמע בתבנית) — לצריבה במקום הנכון. */
   marker?: SignMarker | null;
+  /** מלבן כפתור "לחץ לחתום" בעמוד האחרון [x1,y1,x2,y2] — כדי לכסות אותו בלבן במסמך החתום. */
+  signButtonRect?: number[];
 }
 
 /** מיקום הסימן ב-PDF: עמוד (0-based) + קואורדינטות pdf-lib (מקור בתחתית-שמאל). */
@@ -75,7 +81,7 @@ export class QuoteSignatureService {
    * מכין הצעה לחתימה: ממיר ל-PDF, מייצר סוד וטוקן, ומסמן digitalSignatureStatus=REQUESTED.
    * מחזיר את הטוקן (הקישור עצמו נבנה בצד הלקוח מ-window.location.origin) + פרטי הלקוח.
    */
-  async requestSignature(quoteId: string, userId?: string, opts?: { markRequested?: boolean }) {
+  async requestSignature(quoteId: string, userId?: string, opts?: { markRequested?: boolean; webOrigin?: string }) {
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
       include: {
@@ -109,13 +115,31 @@ export class QuoteSignatureService {
     }
 
     const secret = randomUUID().replace(/-/g, '');
+    const token = `${quoteId}~${secret}`;
     const baseName = fileName.replace(/\.(docx|pdf)$/i, '');
+
+    // ── כפתור "לחץ לחתום" מוטמע בעמוד האחרון של ה-PDF ──
+    // רק במצב חתימה (markRequested !== false) וכשידוע ה-origin של האתר. הלקוח פותח את ה-PDF,
+    // גולל לעמוד האחרון, לוחץ על הכפתור — ומגיע לטופס החתימה (/sign) שבו הוא ממלא שם/ת"ז/חתימה.
+    let signButtonRect: number[] | undefined;
+    if (opts?.markRequested !== false && opts?.webOrigin) {
+      try {
+        const signFormUrl = `${opts.webOrigin.replace(/\/+$/, '')}/sign/${token}#sign-form`;
+        const stamped = await this.stampSignButton(pdfBuffer, signFormUrl);
+        pdfBuffer = stamped.pdf;
+        signButtonRect = stamped.rect;
+      } catch (e: any) {
+        this.logger.warn(`stampSignButton failed for quote ${quoteId}: ${e?.message || e}`);
+      }
+    }
+
     const meta: SignatureMeta = {
       secret,
       unsignedPdfBase64: pdfBuffer.toString('base64'),
       fileName: `${baseName}.pdf`,
       requestedById: userId ?? null,
       marker,
+      signButtonRect,
     };
 
     // markRequested=false — רק שומרים את ה-PDF/טוקן (כדי ש-/public/sign/:token/pdf יגיש את
@@ -130,7 +154,7 @@ export class QuoteSignatureService {
     await this.prisma.quote.update({ where: { id: quoteId }, data: updateData });
 
     return {
-      token: `${quoteId}~${secret}`,
+      token,
       quoteNumber: quote.quoteNumber || quote.importLegacyId || '',
       customerName: quote.customer?.name || '',
       customerEmail: quote.customer?.email || '',
@@ -192,6 +216,7 @@ export class QuoteSignatureService {
       Buffer.from(meta.unsignedPdfBase64, 'base64'),
       sigBytes,
       meta.marker || undefined,
+      meta.signButtonRect || undefined,
     );
     const signedAt = new Date();
 
@@ -444,12 +469,73 @@ export class QuoteSignatureService {
    * אם נמצא סימן בתבנית — מסתיר אותו וצורב את הבלוק במרכזו; אחרת בתחתית-ימין של העמוד האחרון.
    * הבלוק נבנה בדפדפן (עברית) ולכן אין צורך בגופן עברי בשרת.
    */
-  private async stampSignature(pdf: Buffer, sigPng: Buffer, marker?: SignMarker): Promise<Buffer> {
+  /** הופך מחרוזת עברית לתצוגה נכונה ב-pdf-lib (שמצייר LTR ואינו עושה סידור bidi). */
+  private reverseForRtl(s: string): string {
+    return Array.from(s).reverse().join('');
+  }
+
+  /**
+   * צורב כפתור לחיץ "לחץ כאן לחתימה" בתחתית-מרכז העמוד האחרון של ה-PDF, עם קישור (URI) לטופס
+   * החתימה. הטקסט העברי מוטמע דרך NotoSansHebrew (pdf-lib לא תומך עברית בגופנים המובנים).
+   * מחזיר את ה-PDF החדש ואת מלבן הכפתור (לכיסוי במסמך החתום).
+   */
+  private async stampSignButton(pdf: Buffer, url: string): Promise<{ pdf: Buffer; rect: number[] }> {
+    const doc = await PDFDocument.load(pdf);
+    doc.registerFontkit(fontkit);
+    const font = await doc.embedFont(HEBREW_FONT_BYTES, { subset: true });
+    const pages = doc.getPages();
+    const page = pages[pages.length - 1];
+    const { width } = page.getSize();
+
+    const label = this.reverseForRtl('לחץ כאן לחתימה');
+    const fontSize = 18;
+    const padX = 30;
+    const padY = 14;
+    const textW = font.widthOfTextAtSize(label, fontSize);
+    const textH = font.heightAtSize(fontSize);
+    const bw = textW + padX * 2;
+    const bh = textH + padY * 2;
+    const bx = (width - bw) / 2;
+    const by = 46; // מעל תחתית העמוד
+
+    // רקע ירוק (צבע גלית) + טקסט לבן ממורכז.
+    page.drawRectangle({ x: bx, y: by, width: bw, height: bh, color: rgb(0.184, 0.361, 0.196) });
+    page.drawText(label, { x: bx + padX, y: by + padY, size: fontSize, font, color: rgb(1, 1, 1) });
+
+    // אנוטציית קישור לחיצה מעל הכפתור.
+    const rect = [bx, by, bx + bw, by + bh];
+    const linkDict = doc.context.obj({
+      Type: 'Annot',
+      Subtype: 'Link',
+      Rect: rect,
+      Border: [0, 0, 0],
+      A: { Type: 'Action', S: 'URI', URI: PDFString.of(url) },
+    });
+    const linkRef = doc.context.register(linkDict);
+    const existing = page.node.Annots();
+    if (existing instanceof PDFArray) {
+      existing.push(linkRef);
+    } else {
+      page.node.set(PDFName.of('Annots'), doc.context.obj([linkRef]));
+    }
+
+    const out = await doc.save();
+    return { pdf: Buffer.from(out), rect };
+  }
+
+  private async stampSignature(pdf: Buffer, sigPng: Buffer, marker?: SignMarker, coverRect?: number[]): Promise<Buffer> {
     const pdfDoc = await PDFDocument.load(pdf);
     const png = await pdfDoc.embedPng(sigPng);
     const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const pages = pdfDoc.getPages();
     const ratio = png.width / png.height || 1.4; // width / height
+
+    // כיסוי כפתור "לחץ לחתום" (שהוטמע בעמוד האחרון) בלבן — כדי שלא יופיע במסמך החתום הסופי.
+    if (coverRect && coverRect.length === 4) {
+      const last = pages[pages.length - 1];
+      const [x1, y1, x2, y2] = coverRect;
+      last.drawRectangle({ x: x1, y: y1, width: x2 - x1, height: y2 - y1, color: rgb(1, 1, 1) });
+    }
 
     // ── מצב סימן-בתבנית: צריבה במקום שסומן ──
     if (marker && pages[marker.pageIndex]) {
