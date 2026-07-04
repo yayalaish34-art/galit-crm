@@ -561,6 +561,9 @@ export class QuotesService {
     } catch {
       /* עמודות OneDrive עדיין לא קיימות ב-DB */
     }
+    try {
+      await (this.prisma.quote.update as any)({ where: { id }, data: { onedriveAttachmentId: null } });
+    } catch { /* עמודה עדיין לא הוגרה */ }
 
     return this.prisma.quote.update({
       where: { id },
@@ -634,6 +637,20 @@ export class QuotesService {
    */
   async refreshLinkedTaskAttachmentDocx(quoteId: string, buffer: Buffer): Promise<void> {
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    // עריכה פר-קובץ: אם נשמר איזה קובץ מצורף נפתח ב-Word — מעדכנים אותו ישירות (ולא את
+    // ה-DOCX החדש ביותר של המשימה, שעלול להיות קובץ אחר לגמרי).
+    try {
+      const q: any = await (this.prisma.quote.findUnique as any)({
+        where: { id: quoteId },
+        select: { onedriveAttachmentId: true },
+      });
+      if (q?.onedriveAttachmentId) {
+        await this.prisma.taskAttachment
+          .update({ where: { id: q.onedriveAttachmentId }, data: { data: Uint8Array.from(buffer) } })
+          .catch(() => null);
+        return;
+      }
+    } catch { /* עמודה עדיין לא הוגרה — נופלים למנגנון הישן */ }
     const quote = await this.prisma.quote
       .findUnique({ where: { id: quoteId }, select: { linkedEntityId: true } })
       .catch(() => null);
@@ -660,14 +677,24 @@ export class QuotesService {
   /** הפניית ה-OneDrive השמורה להצעה (null אם אין / אם העמודות עדיין לא הוגרו ב-DB). */
   async getOnedriveRef(
     id: string,
-  ): Promise<{ itemId: string; webUrl: string | null; ownerId: string } | null> {
+  ): Promise<{ itemId: string; webUrl: string | null; ownerId: string; attachmentId: string | null } | null> {
     try {
       const ref: any = await (this.prisma.quote.findUnique as any)({
         where: { id },
         select: { onedriveItemId: true, onedriveWebUrl: true, onedriveOwnerId: true },
       });
       if (ref?.onedriveItemId && ref?.onedriveOwnerId) {
-        return { itemId: ref.onedriveItemId, webUrl: ref.onedriveWebUrl ?? null, ownerId: ref.onedriveOwnerId };
+        // onedriveAttachmentId נשלף בנפרד וב-guard משלו — כדי שלא להפיל את כל ההפניה
+        // בחלון שבין הדיפלוי להרצת המיגרציה של העמודה החדשה.
+        let attachmentId: string | null = null;
+        try {
+          const extra: any = await (this.prisma.quote.findUnique as any)({
+            where: { id },
+            select: { onedriveAttachmentId: true },
+          });
+          attachmentId = extra?.onedriveAttachmentId ?? null;
+        } catch { /* עמודה עדיין לא הוגרה */ }
+        return { itemId: ref.onedriveItemId, webUrl: ref.onedriveWebUrl ?? null, ownerId: ref.onedriveOwnerId, attachmentId };
       }
     } catch {
       // עמודות OneDrive עדיין לא קיימות ב-DB (לפני הרצת המיגרציה) — נתעלם בשקט.
@@ -682,14 +709,16 @@ export class QuotesService {
    * אחרת → מעלה את המסמך הממוזג האחרון ל-OneDrive ושומר את ההפניה.
    * מרגע זה והלאה, שליחת המייל מושכת את הגרסה העדכנית מ-OneDrive.
    */
-  async openInOneDrive(id: string, userId: string): Promise<{ webUrl: string; webDavUrl: string; itemId: string; reused: boolean }> {
+  async openInOneDrive(id: string, userId: string, attachmentId?: string): Promise<{ webUrl: string; webDavUrl: string; itemId: string; reused: boolean }> {
     if (!userId) throw new BadRequestException('משתמש לא מזוהה — יש להתחבר מחדש');
     const quote = await this.prisma.quote.findUnique({ where: { id } });
     if (!quote) throw new NotFoundException('Quote not found');
+    const requestedAtt = (attachmentId || '').trim() || null;
 
-    // קובץ פעיל קיים ושייך למשתמש הנוכחי? נחזיר אותו (שמירה על העריכות שכבר נעשו).
+    // קובץ פעיל קיים, שייך למשתמש הנוכחי *ומתאים לאותו קובץ מצורף*? נחזיר אותו
+    // (שמירה על העריכות שכבר נעשו). קובץ מצורף אחר → מעלים אותו בנפרד.
     const existing = await this.getOnedriveRef(id);
-    if (existing && existing.ownerId === userId) {
+    if (existing && existing.ownerId === userId && (existing.attachmentId ?? null) === requestedAtt) {
       try {
         const item = await this.graphFiles.getItem(existing.ownerId, existing.itemId);
         if (item) return { webUrl: item.webUrl, webDavUrl: item.webDavUrl, itemId: item.itemId, reused: true };
@@ -698,29 +727,39 @@ export class QuotesService {
       }
     }
 
-    // אחרת — מעלים את המסמך הממוזג האחרון. שם דטרמיניסטי וייחודי-להצעה (כולל מזהה קצר),
-    // כדי שטיוטות ללא מספר הצעה לא ידרסו זו את זו ב-OneDrive.
-    let latest: { data?: Buffer | Uint8Array | null; filePath?: string | null } | null = null;
-    try {
-      latest = await this.getLatestMergedDocument(id);
-    } catch (e: any) {
-      this.logger.error(`OneDrive: getLatestMergedDocument failed (${id}): ${e?.message || e}`);
-      throw new BadRequestException(`לא ניתן לטעון את המסמך הממוזג: ${e?.message || 'שגיאה לא ידועה'}`);
-    }
+    // בחירת הבייטים: קובץ מצורף ספציפי (עריכה פר-קובץ) או המסמך הממוזג האחרון.
     let bytes: Buffer | null = null;
-    if (latest?.data) {
-      bytes = Buffer.from(latest.data);
+    let fileName: string;
+    if (requestedAtt) {
+      const att = await this.prisma.taskAttachment.findUnique({ where: { id: requestedAtt } });
+      if (!att) throw new BadRequestException('הקובץ המצורף לא נמצא');
+      bytes = Buffer.from(att.data);
+      // שם ייחודי פר-קובץ (מזהה קצר) כדי שעריכת קבצים שונים לא תדרוס זה את זה ב-OneDrive.
+      const base = (att.fileName || 'מסמך').replace(/\.docx$/i, '').trim() || 'מסמך';
+      fileName = `${base} ${requestedAtt.slice(0, 6)}`;
     } else {
-      const relPath = latest?.filePath || (quote as any).lastMergedDocPath || null;
-      if (relPath) {
-        const abs = path.resolve(process.cwd(), relPath);
-        if (fs.existsSync(abs)) bytes = fs.readFileSync(abs);
+      // שם דטרמיניסטי וייחודי-להצעה (כולל מזהה קצר), כדי שטיוטות ללא מספר הצעה לא ידרסו זו את זו.
+      let latest: { data?: Buffer | Uint8Array | null; filePath?: string | null } | null = null;
+      try {
+        latest = await this.getLatestMergedDocument(id);
+      } catch (e: any) {
+        this.logger.error(`OneDrive: getLatestMergedDocument failed (${id}): ${e?.message || e}`);
+        throw new BadRequestException(`לא ניתן לטעון את המסמך הממוזג: ${e?.message || 'שגיאה לא ידועה'}`);
       }
+      if (latest?.data) {
+        bytes = Buffer.from(latest.data);
+      } else {
+        const relPath = latest?.filePath || (quote as any).lastMergedDocPath || null;
+        if (relPath) {
+          const abs = path.resolve(process.cwd(), relPath);
+          if (fs.existsSync(abs)) bytes = fs.readFileSync(abs);
+        }
+      }
+      if (!bytes) {
+        throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
+      }
+      fileName = `הצעת מחיר ${quote.quoteNumber ? quote.quoteNumber + ' ' : ''}${id.slice(0, 8)}`.trim();
     }
-    if (!bytes) {
-      throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
-    }
-    const fileName = `הצעת מחיר ${quote.quoteNumber ? quote.quoteNumber + ' ' : ''}${id.slice(0, 8)}`.trim();
 
     let uploaded: { itemId: string; webUrl: string; webDavUrl: string; name: string };
     try {
@@ -745,6 +784,10 @@ export class QuotesService {
     } catch (e: any) {
       this.logger.warn(`Saving OneDrive ref failed (run migration?) for ${id}: ${e?.message || e}`);
     }
+    // איזה קובץ מצורף פתוח ב-Word — הסנכרון-חזרה יעדכן אותו. guard נפרד (עמודה חדשה יותר).
+    try {
+      await (this.prisma.quote.update as any)({ where: { id }, data: { onedriveAttachmentId: requestedAtt } });
+    } catch { /* עמודה עדיין לא הוגרה */ }
 
     return { webUrl: uploaded.webUrl, webDavUrl: uploaded.webDavUrl, itemId: uploaded.itemId, reused: false };
   }

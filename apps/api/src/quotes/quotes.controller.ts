@@ -191,8 +191,13 @@ export class QuotesController {
    * מחזיר { webUrl, webDavUrl, itemId, reused } — הפרונט פותח את webDavUrl ב-Word דסקטופ.
    */
   @Post(':id/onedrive-edit')
-  openInOneDrive(@Param('id') id: string, @Req() req: any) {
-    return this.quotesService.openInOneDrive(id, req.user?.id);
+  openInOneDrive(
+    @Param('id') id: string,
+    @Body() body: { attachmentId?: string } | undefined,
+    @Req() req: any,
+  ) {
+    // attachmentId — עריכה פר-קובץ: פותח ב-Word את הקובץ המצורף הספציפי (ולא את המיזוג האחרון).
+    return this.quotesService.openInOneDrive(id, req.user?.id, body?.attachmentId);
   }
 
   /**

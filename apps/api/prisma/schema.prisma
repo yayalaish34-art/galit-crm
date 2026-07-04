@@ -806,6 +806,8 @@ model Quote {
   onedriveItemId            String?
   onedriveWebUrl            String?
   onedriveOwnerId           String?
+  /// ה-TaskAttachment שנפתח לעריכה ב-Word (עריכה פר-קובץ) — הסנכרון-חזרה מעדכן אותו, לא את החדש ביותר.
+  onedriveAttachmentId      String?
 
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]

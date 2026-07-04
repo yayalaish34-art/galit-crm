@@ -735,7 +735,7 @@ export function QuoteNewScreen({
   const [wordDocHtml, setWordDocHtml] = useState('');
   // serverBacked=true → הקובץ הממוזג שנשמר בהצעה; הורדתו מושכת את הגרסה העדכנית מהשרת
   // (שמסנכרן מ-OneDrive) ולא את ה-blob שנוצר בזמן המיזוג לפני העריכה ב-Word.
-  const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string; serverBacked?: boolean }[]>([]);
+  const [mergedFiles, setMergedFiles] = useState<{ name: string; url: string; serverBacked?: boolean; attId?: string }[]>([]);
   const [lastMergedPublicUrl, setLastMergedPublicUrl] = useState('');
   const [lastMergedAttachmentId, setLastMergedAttachmentId] = useState('');
   const [orderSource, setOrderSource] = useState('');
@@ -1874,7 +1874,7 @@ export function QuoteNewScreen({
       window.location.href = url;
     }
   }
-  async function handleEditInWord() {
+  async function handleEditInWord(attachmentId?: string) {
     const id = quoteIdRef.current;
     if (!id) { setStatusMsg('שגיאה: יש לשמור ולמזג את ההצעה לפני עריכה ב-Word'); return; }
     const user = getSessionUser();
@@ -1882,7 +1882,12 @@ export function QuoteNewScreen({
     setOnedriveBusy(true);
     setStatusMsg('פותח ב-Word…');
     try {
-      const r = await apiFetch(apiUrl(`/quotes/${id}/onedrive-edit`), { authUser: user, method: 'POST' });
+      // attachmentId — עריכה פר-קובץ: פותח ב-Word את הקובץ הספציפי; בלעדיו — את המיזוג האחרון.
+      const r = await apiFetch(apiUrl(`/quotes/${id}/onedrive-edit`), {
+        authUser: user,
+        method: 'POST',
+        body: JSON.stringify({ attachmentId: attachmentId || undefined }),
+      });
       if (!r.ok) {
         let msg = 'פתיחה ב-Word נכשלה — ודא שחשבון ה-Outlook מחובר';
         try { const e = await r.json(); msg = e?.message || msg; } catch { /* ignore */ }
@@ -2619,6 +2624,7 @@ export function QuoteNewScreen({
 
       // ── Persist the merged file to task attachment and/or quote record ──
       const currentQuoteId = quoteIdRef.current;
+      let mergedAttId: string | undefined; // מזהה הקובץ המצורף — לכפתור "עריכה" ולפתיחה האוטומטית ב-Word
       if (taskId || currentQuoteId) {
         try {
           const dataBase64 = await blobToBase64(blob);
@@ -2635,7 +2641,13 @@ export function QuoteNewScreen({
             // קישור ציבורי להורדת הקובץ — לשימוש בגוף המייל (mailto)
             try {
               const created = attRes.ok ? await attRes.json() : null;
-              if (created?.id) { setLastMergedAttachmentId(created.id); setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`)); }
+              if (created?.id) {
+                mergedAttId = created.id;
+                setLastMergedAttachmentId(created.id);
+                setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`));
+                // משייכים את מזהה הקובץ לשורה ב"קבצים שנוצרו" — לכפתור "עריכה" פר-קובץ.
+                setMergedFiles((prev) => prev.map((m) => (m.name === fileName && !m.attId ? { ...m, attId: created.id } : m)));
+              }
             } catch { /* ignore */ }
             onAttachmentSaved?.();
           }
@@ -2660,8 +2672,10 @@ export function QuoteNewScreen({
       // בזמן השליחה בלבד ("שלח"). כך עורכים DOCX בקלות, וכל מה שנשלח ללקוח הוא PDF.
       setStatusMsg('המסמך נוצר ונשמר — פותח ב-Word…');
       // ── פתיחה אוטומטית ב-Word לעריכה מיד אחרי המיזוג (אין צורך בכפתור "ערוך בוורד" נפרד) ──
+      // מעבירים את מזהה הקובץ המצורף שנוצר — כך גם עריכות מאוחרות מכפתור "עריכה" ימשיכו
+      // באותו קובץ OneDrive במקום להעלות עותק נוסף.
       if (quoteIdRef.current) {
-        await handleEditInWord();
+        await handleEditInWord(mergedAttId);
       } else {
         setTimeout(() => setStatusMsg(''), 4000);
       }
@@ -2697,7 +2711,12 @@ export function QuoteNewScreen({
           });
           try {
             const created = attRes.ok ? await attRes.json() : null;
-            if (created?.id) { setLastMergedAttachmentId(created.id); setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`)); }
+            if (created?.id) {
+              setLastMergedAttachmentId(created.id);
+              setLastMergedPublicUrl(apiUrl(`/public/attachments/${created.id}/price-quote.docx`));
+              // משייכים את מזהה הקובץ לשורה — לכפתור "עריכה" פר-קובץ.
+              setMergedFiles((prev) => prev.map((m) => (m.name === fileName && !m.attId ? { ...m, attId: created.id } : m)));
+            }
           } catch { /* ignore */ }
           onAttachmentSaved?.();
         }
@@ -2941,22 +2960,7 @@ export function QuoteNewScreen({
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
           </button>
-          {/* כפתור "ערוך בוורד" הוסר — המיזוג פותח את המסמך אוטומטית ב-Word. */}
-          {/* אם המסמך כבר נפתח פעם (onedriveActive), נשאיר קיצור קטן לפתיחה חוזרת בלי מיזוג מחדש. */}
-          {onedriveActive && (
-            <button
-              type="button"
-              className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              disabled={onedriveBusy}
-              title="פתח שוב ב-Word — השינויים יישמרו אוטומטית"
-              onClick={() => handleEditInWord()}
-            >
-              <span className="h-10 w-10 rounded-full border border-blue-300 bg-blue-50 text-blue-600 flex items-center justify-center">
-                {onedriveBusy ? <RefreshCw size={18} className="animate-spin" /> : <Pencil size={18} />}
-              </span>
-              <span className="text-[10px] text-gray-500">פתח שוב ב-Word</span>
-            </button>
-          )}
+          {/* כפתור Word בכותרת הוסר — עריכה ב-Word נעשית פר-קובץ מכפתור "עריכה" ב"קבצים שנוצרו". */}
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={!savedOnce || isBusy} title={!savedOnce ? 'יש לשמור את ההצעה לפני שליחה במייל' : undefined} onClick={async () => {
             const id = await doSave({ advanceStage: false }); // שמירה בלי קידום שלב
             if (!id) { setStatusMsg('שמירת ההצעה נכשלה'); return; }
@@ -3235,37 +3239,68 @@ export function QuoteNewScreen({
                   <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).length ?? 0) + (quoteId && lastMergedDocPath ? 1 : 0)})</span>
                 </h3>
                 <div className="space-y-2">
+                  {(() => {
+                    /* כפתור "עריכה" פר-קובץ — פותח את הקובץ הספציפי ב-Word (OneDrive, סנכרון-חזרה
+                       אוטומטי). מוצג רק לקובצי DOCX (Word לא עורך PDF) וכשיש הצעה שמורה. */
+                    const isDocxName = (n: string) => /\.docx$/i.test(n || '');
+                    const editBtn = (attId?: string, name?: string) => (
+                      (quoteId && isDocxName(name || '')) ? (
+                        <button
+                          type="button"
+                          disabled={onedriveBusy}
+                          onClick={() => handleEditInWord(attId)}
+                          title="פתח ב-Word לעריכה — השינויים יסתנכרנו אוטומטית"
+                          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                        >
+                          <Pencil size={12} /> עריכה
+                        </button>
+                      ) : null
+                    );
+                    return (
+                      <>
                   {mergedFiles.map((f, i) => (
-                    (f.serverBacked && quoteId) ? (
-                      /* קובץ ממוזג שנשמר בהצעה — מושכים את הגרסה העדכנית מהשרת (מסנכרן מ-OneDrive),
-                         כדי שאחרי עריכה ב-Word ההורדה תיתן את הגרסה המעודכנת ולא את ה-blob המקורי. */
-                      <button key={`s-${i}`} type="button" onClick={() => handleDownloadMergedDoc(f.name)} className="w-full flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors text-right" title={f.name}>
-                        <FileText size={15} className="text-green-600 flex-shrink-0" />
-                        <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
-                        <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
-                      </button>
-                    ) : (
-                      <a key={`s-${i}`} href={f.url} download={f.name} className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
-                        <FileText size={15} className="text-green-600 flex-shrink-0" />
-                        <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
-                        <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
-                      </a>
-                    )
+                    <div key={`s-${i}`} className="flex items-center gap-2">
+                      {(f.serverBacked && quoteId) ? (
+                        /* קובץ ממוזג שנשמר בהצעה — מושכים את הגרסה העדכנית מהשרת (מסנכרן מ-OneDrive),
+                           כדי שאחרי עריכה ב-Word ההורדה תיתן את הגרסה המעודכנת ולא את ה-blob המקורי. */
+                        <button type="button" onClick={() => handleDownloadMergedDoc(f.name)} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors text-right" title={f.name}>
+                          <FileText size={15} className="text-green-600 flex-shrink-0" />
+                          <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
+                          <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
+                        </button>
+                      ) : (
+                        <a href={f.url} download={f.name} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
+                          <FileText size={15} className="text-green-600 flex-shrink-0" />
+                          <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
+                          <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
+                        </a>
+                      )}
+                      {editBtn(f.attId, f.name)}
+                    </div>
                   ))}
                   {existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).map((att) => (
-                    <button key={att.id} type="button" onClick={() => onDownloadAttachment?.(att)} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
-                      <FileText size={15} className="text-slate-500 flex-shrink-0" />
-                      <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
-                      <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')}</span>
-                    </button>
+                    <div key={att.id} className="flex items-center gap-2">
+                      <button type="button" onClick={() => onDownloadAttachment?.(att)} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
+                        <FileText size={15} className="text-slate-500 flex-shrink-0" />
+                        <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
+                        <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')}</span>
+                      </button>
+                      {editBtn(att.id, att.fileName)}
+                    </div>
                   ))}
                   {mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
-                    <button type="button" onClick={() => handleDownloadMergedDoc()} className="w-full flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
-                      <FileText size={15} className="text-slate-500 flex-shrink-0" />
-                      <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
-                      <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => handleDownloadMergedDoc()} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
+                        <FileText size={15} className="text-slate-500 flex-shrink-0" />
+                        <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
+                        <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>
+                      </button>
+                      {editBtn(undefined, lastMergedDocPath.split(/[\\/]/).pop() || '')}
+                    </div>
                   )}
+                      </>
+                    );
+                  })()}
                   {/* הוספת קובץ ידנית (גרסה שנערכה) לרשימת הקבצים שנוצרו */}
                   <label className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-green-300 bg-white px-4 py-2.5 hover:bg-green-50 transition-colors cursor-pointer text-sm font-bold text-green-700">
                     <input
