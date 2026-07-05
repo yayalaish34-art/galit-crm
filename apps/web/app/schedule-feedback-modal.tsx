@@ -4,6 +4,15 @@ import React, { useState } from 'react';
 import { MessageCircle, Clock, Loader2, X, CheckCircle2 } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
 
+/** ניקוי מספר טלפון ישראלי לפורמט בינלאומי (972...) לצורך קישור wa.me. */
+function toWhatsAppPhone(raw: string): string {
+  const digits = (raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('972')) return digits;
+  if (digits.startsWith('0')) return `972${digits.slice(1)}`;
+  return digits;
+}
+
 /**
  * פופ-אפ "שליחת משוב" שנפתח בסוף הזרימה — אחרי ששולחים את הדוח ללקוח.
  * מאפשר לתזמן שליחה אוטומטית של בקשת משוב בעוד 5 דק' / 30 דק' / שעה / 4 שעות,
@@ -22,6 +31,7 @@ export function ScheduleFeedbackModal({
   customerId,
   customerName,
   customerEmail,
+  customerPhone,
   currentUser,
 }: {
   open: boolean;
@@ -29,6 +39,7 @@ export function ScheduleFeedbackModal({
   customerId: string | null;
   customerName?: string | null;
   customerEmail?: string | null;
+  customerPhone?: string | null;
   currentUser: { id?: string; name?: string } & Record<string, unknown>;
 }) {
   const [busy, setBusy] = useState<number | 'manual' | null>(null);
@@ -38,6 +49,29 @@ export function ScheduleFeedbackModal({
   if (!open) return null;
 
   const hasEmail = !!(customerEmail && customerEmail.includes('@'));
+  const whatsappPhone = toWhatsAppPhone(customerPhone || '');
+
+  const sendWhatsApp = async () => {
+    let reviewUrl = 'https://www.google.com/search?hl=he-IL&gl=il&q=%D7%92%D7%9C%D7%99%D7%AA+-+%D7%94%D7%97%D7%91%D7%A8%D7%94+%D7%9C%D7%90%D7%99%D7%9B%D7%95%D7%AA+%D7%94%D7%A1%D7%91%D7%99%D7%91%D7%94,+%D7%90%D7%95%D7%A1%D7%98%D7%A8%D7%95%D7%91%D7%A1%D7%A7%D7%99+11,+%D7%A8%D7%A2%D7%A0%D7%A0%D7%94&ludocid=6353540875700534600&lsig=AB86z5XBBuvKEizwumoxn7pKhEyY#lrd=0x151d381236a2b835:0x582c4fc3920dfd48,3';
+    try {
+      const r = await apiFetch(apiUrl(`/feedback/draft?name=${encodeURIComponent(customerName || '')}`), {
+        authUser: currentUser as never,
+      });
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.reviewUrl) reviewUrl = data.reviewUrl;
+      }
+    } catch {
+      /* נופל לקישור ברירת המחדל */
+    }
+    const first = (customerName || '').trim().split(/\s+/)[0] || 'לקוח/ה יקר/ה';
+    const text = `שלום ${first},\nתודה שבחרת ב"גלית – החברה לאיכות הסביבה". נשמח מאוד אם תוכל/י להקדיש רגע ולדרג אותנו בגוגל — זה עוזר לנו מאוד:\n${reviewUrl}`;
+    const url = whatsappPhone
+      ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(text)}`
+      : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+    onClose();
+  };
 
   const schedule = async (minutes: number) => {
     if (!customerId) {
@@ -132,7 +166,14 @@ export function ScheduleFeedbackModal({
               >
                 <X className="h-4 w-4" /> ידני (אשלח בעצמי)
               </button>
-              <span className="text-[12px] text-slate-400">השליחה האוטומטית מתבצעת דרך ה-Outlook המחובר</span>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => void sendWhatsApp()}
+                className="flex items-center gap-1.5 rounded-xl bg-[#25D366] px-5 py-2.5 text-sm font-bold text-white hover:brightness-95 disabled:opacity-50"
+              >
+                <MessageCircle className="h-4 w-4" /> שלח בוואטסאפ
+              </button>
             </div>
           </>
         )}

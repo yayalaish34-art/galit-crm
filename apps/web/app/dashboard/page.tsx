@@ -6,6 +6,7 @@ import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { ProducedReportsSection } from '../produced-reports-section';
 import { SendReportModal } from '../send-report-modal';
+import { MarkReportSentModal } from '../mark-report-sent-modal';
 import { ScheduleFeedbackModal } from '../schedule-feedback-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
 import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
@@ -14074,9 +14075,12 @@ function TasksPage({
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח טופס "צרף דוח ושלח במייל" */
   const [reportModalTaskId, setReportModalTaskId] = useState<string | null>(null);
 
+  /* שלב הביצוע: מזהה המשימה שעבורה פתוח מודל "שלחתי כבר דוח" (בלי שליחת מייל) */
+  const [alreadySentTaskId, setAlreadySentTaskId] = useState<string | null>(null);
+
   /* סוף הזרימה: פופ-אפ "שליחת משוב" שנפתח אחרי שליחת הדוח */
   const [feedbackScheduleData, setFeedbackScheduleData] = useState<
-    { customerId: string | null; customerName: string; customerEmail: string } | null
+    { customerId: string | null; customerName: string; customerEmail: string; customerPhone: string } | null
   >(null);
 
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
@@ -17056,10 +17060,19 @@ function TasksPage({
                                 </div>
                                 <div className="rounded-3xl overflow-hidden bg-white" style={{ boxShadow: '0 8px 28px rgba(0,0,0,0.1)' }}>
                                   <div className="px-7 py-5 space-y-4" style={{ background: '#F8FAFC' }}>
+                                    {/* Row 0: שם חברה (עסקי בלבד) — שם הלקוח/חברה בפועל, נפרד משם איש הקשר */}
+                                    {!isPrivate0 && (
+                                      <div className="grid grid-cols-2 gap-4">
+                                        <div className="col-span-2">
+                                          <label className={ccLbl}>שם החברה / העסק *</label>
+                                          <input className={ccInp} placeholder='לדוגמה: אינפורו בע"מ' value={fd.company || ''} onChange={(e) => setF('company', e.target.value)} />
+                                        </div>
+                                      </div>
+                                    )}
                                     {/* Row 1: שם מלא + ח.פ/ת.ז */}
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
-                                        <label className={ccLbl}>שם מלא *</label>
+                                        <label className={ccLbl}>{isPrivate0 ? 'שם מלא *' : 'שם איש קשר *'}</label>
                                         <input className={ccInp} placeholder="לדוגמה: ענבל כהן" value={fd.fullName} onChange={(e) => { const v = e.target.value; setF('fullName', v); setF('firstName', v.split(' ')[0] || ''); setF('lastName', v.split(' ').slice(1).join(' ')); }} />
                                       </div>
                                       <div>
@@ -18650,6 +18663,42 @@ function TasksPage({
                             >
                               <Mail className="h-5 w-5" /> צרף דוח ושלח במייל
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => setAlreadySentTaskId(t.id)}
+                              className="w-full flex items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500 bg-white px-6 py-3 text-base font-extrabold text-emerald-700 transition-all hover:bg-emerald-50"
+                            >
+                              <CheckCircle2 className="h-5 w-5" /> שלחתי כבר דוח
+                            </button>
+                            <div className="text-center text-[12px] text-slate-400">
+                              אם כבר שלחת את הדוח ללקוח בעבר — סמן זאת כאן במקום לשלוח שוב.
+                            </div>
+                            {alreadySentTaskId === t.id && (
+                              <MarkReportSentModal
+                                open
+                                customerName={t.customerName || t.leadName || ''}
+                                onClose={() => setAlreadySentTaskId(null)}
+                                onDone={async ({ paymentStatus }) => {
+                                  setAlreadySentTaskId(null);
+                                  // אותו רישום כמו בשליחת הדוח: הערת תהליך לפי סטטוס התשלום,
+                                  // סימון המשימה DONE, ואז פתיחת פופ-אפ "שליחת משוב".
+                                  const existing = parseProcessNotes(t.processNotes);
+                                  const noteText = paymentStatus === 'paid'
+                                    ? '💰 דוח נשלח (סומן ידנית) — שולם'
+                                    : '⏳ דוח נשלח (סומן ידנית) — טרם שולם';
+                                  const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
+                                  await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
+                                  const cust = customers.find((c) => c.id === t.customerId);
+                                  setFeedbackScheduleData({
+                                    customerId: (t.customerId as string | undefined) ?? null,
+                                    customerName: ((cust as any)?.name as string | undefined) || t.customerName || t.leadName || '',
+                                    customerEmail: ((cust as any)?.email as string | undefined) || t.leadEmail || '',
+                                    customerPhone: ((cust as any)?.phone as string | undefined) || t.leadPhone || '',
+                                  });
+                                  setExpandedTaskId(null);
+                                }}
+                              />
+                            )}
                             {reportModalTaskId === t.id && (
                               <SendReportModal
                                 open
@@ -18681,6 +18730,7 @@ function TasksPage({
                                     customerId: (t.customerId as string | undefined) ?? null,
                                     customerName: ((cust as any)?.name as string | undefined) || t.customerName || t.leadName || '',
                                     customerEmail: ((cust as any)?.email as string | undefined) || t.leadEmail || '',
+                                    customerPhone: ((cust as any)?.phone as string | undefined) || t.leadPhone || '',
                                   });
                                   setExpandedTaskId(null);
                                 }}
@@ -18731,6 +18781,7 @@ function TasksPage({
         customerId={feedbackScheduleData?.customerId ?? null}
         customerName={feedbackScheduleData?.customerName}
         customerEmail={feedbackScheduleData?.customerEmail}
+        customerPhone={feedbackScheduleData?.customerPhone}
         currentUser={currentUser}
       />
 

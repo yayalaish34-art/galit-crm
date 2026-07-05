@@ -3283,7 +3283,7 @@ export function QuoteNewScreen({
                       <button type="button" onClick={() => onDownloadAttachment?.(att)} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
                         <FileText size={15} className="text-slate-500 flex-shrink-0" />
                         <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
-                        <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')}</span>
+                        <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')} {new Date(att.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span>
                       </button>
                       {editBtn(att.id, att.fileName)}
                     </div>
