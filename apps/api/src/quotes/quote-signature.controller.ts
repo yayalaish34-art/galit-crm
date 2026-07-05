@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { QuoteSignatureService } from './quote-signature.service';
 
@@ -29,11 +29,16 @@ export class QuoteSignatureController {
     return this.signature.getForSigning(token);
   }
 
-  /** ה-PDF להצגה/הורדה. btn=1 — צורב על-הדרך את כפתור "לחץ כאן לחתימה" בעמוד האחרון. */
+  /** ה-PDF להצגה/הורדה. btn=1 — צורב על-הדרך את כפתור "לחץ כאן לחתימה".
+   *  כפתור "ההסמכות שלנו ופרופיל החברה" נצרב תמיד (גם ללא btn), בסוף המסמך. */
   @Get(':token/pdf')
-  async getPdf(@Param('token') token: string, @Query('btn') btn: string, @Res() res: Response) {
+  async getPdf(@Param('token') token: string, @Query('btn') btn: string, @Req() req: any, @Res() res: Response) {
     try {
-      const { buffer, fileName } = await this.signature.getPdf(token, { withButton: btn === '1' });
+      const apiBase = (process.env.PUBLIC_API_URL || (req?.headers?.host ? `https://${req.headers.host}` : '')).replace(/\/+$/, '');
+      const { buffer, fileName } = await this.signature.getPdf(token, {
+        withButton: btn === '1',
+        profileUrl: apiBase ? `${apiBase}/public/company-profile.pdf` : undefined,
+      });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
       // אותה כתובת מגישה את הלא-חתום לפני החתימה ואת החתום אחריה — בלי זה דפדפני מובייל

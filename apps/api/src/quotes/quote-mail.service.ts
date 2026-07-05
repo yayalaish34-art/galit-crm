@@ -8,6 +8,7 @@ import { GraphMailService } from '../microsoft/graph-mail.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { CompanyProfileService } from './company-profile.service';
+import { stampQuoteButtons } from './pdf-buttons.util';
 
 @Injectable()
 export class QuoteMailService {
@@ -184,6 +185,21 @@ export class QuoteMailService {
         doc.mime = 'application/pdf';
       } catch (e: any) {
         this.logger.warn(`PDF conversion failed for "${doc.fileName}" — sending DOCX: ${e?.message || e}`);
+      }
+    }
+
+    // ── כפתור "ההסמכות שלנו ופרופיל החברה" בסוף כל PDF מצורף של ההצעה ──
+    // נצרב על קובצי ההצעה עצמם (לפני צירוף קובץ הפרופיל, שאינו זקוק לכפתור על עצמו),
+    // מתחת לתוכן / בעמוד חדש — כך שכל קובץ שיוצא מהמערכת נושא קישור להסמכות.
+    const apiBaseForButtons = (process.env.PUBLIC_API_URL || opts?.publicApiBaseUrl || '').replace(/\/+$/, '');
+    if (apiBaseForButtons) {
+      for (const doc of docs) {
+        if (doc.mime !== 'application/pdf') continue;
+        try {
+          doc.content = await stampQuoteButtons(doc.content, { profileUrl: `${apiBaseForButtons}/public/company-profile.pdf` });
+        } catch (e: any) {
+          this.logger.warn(`profile button stamp failed for "${doc.fileName}": ${e?.message || e}`);
+        }
       }
     }
 

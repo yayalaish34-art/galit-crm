@@ -2,15 +2,12 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { PDFDocument, StandardFonts, rgb, PDFName, PDFString, PDFArray } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
-import { SIGN_BUTTON_PNG_BASE64 } from './sign-button-image';
-
-/** כפתור "לחץ כאן לחתימה" כתמונה מוכנה — תמונה לא ניתנת להיפוך ע"י מציגי PDF (בניגוד לטקסט עברי). */
-const SIGN_BUTTON_PNG_BYTES = Buffer.from(SIGN_BUTTON_PNG_BASE64, 'base64');
+import { stampQuoteButtons } from './pdf-buttons.util';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -186,19 +183,28 @@ export class QuoteSignatureService {
   }
 
   /** ה-PDF להצגה בעמוד החתימה (החתום אם כבר נחתם, אחרת המקורי).
-   *  withButton=true (?btn=1) — צורב על-הדרך את כפתור "לחץ כאן לחתימה" בעמוד האחרון,
-   *  רק כל עוד ההצעה לא נחתמה. ה-PDF השמור נשאר תמיד נקי. */
-  async getPdf(token: string, opts?: { withButton?: boolean }): Promise<{ buffer: Buffer; fileName: string }> {
+   *  withButton=true (?btn=1) — צורב על-הדרך את כפתור "לחץ כאן לחתימה" (נפתח כטופס-פופאפ ?form=1).
+   *  profileUrl — כפתור "ההסמכות שלנו ופרופיל החברה" שנצרב על *כל* PDF מוגש (גם ללא כפתור חתימה).
+   *  הכפתורים ממוקמים מתחת לתוכן / בעמוד חדש (בלי לעלות על טקסט). ה-PDF השמור נשאר תמיד נקי. */
+  async getPdf(
+    token: string,
+    opts?: { withButton?: boolean; profileUrl?: string },
+  ): Promise<{ buffer: Buffer; fileName: string }> {
     const { meta } = await this.loadByToken(token);
     const b64 = meta.signedPdfBase64 || meta.unsignedPdfBase64;
     if (!b64) throw new NotFoundException('המסמך אינו זמין');
     let buffer: Buffer = Buffer.from(b64, 'base64');
-    if (opts?.withButton && !meta.signedPdfBase64 && meta.webOrigin) {
-      try {
-        const signFormUrl = `${String(meta.webOrigin).replace(/\/+$/, '')}/sign/${token}#sign-form`;
-        buffer = await this.stampSignButton(buffer, signFormUrl);
-      } catch (e: any) {
-        this.logger.warn(`stampSignButton on-the-fly failed (${token.slice(0, 8)}…): ${e?.message || e}`);
+    if (!meta.signedPdfBase64) {
+      const signUrl =
+        opts?.withButton && meta.webOrigin
+          ? `${String(meta.webOrigin).replace(/\/+$/, '')}/sign/${token}?form=1`
+          : undefined;
+      if (signUrl || opts?.profileUrl) {
+        try {
+          buffer = await stampQuoteButtons(buffer, { signUrl, profileUrl: opts?.profileUrl });
+        } catch (e: any) {
+          this.logger.warn(`stampQuoteButtons on-the-fly failed (${token.slice(0, 8)}…): ${e?.message || e}`);
+        }
       }
     }
     return { buffer, fileName: meta.fileName };
@@ -477,45 +483,6 @@ export class QuoteSignatureService {
    * אם נמצא סימן בתבנית — מסתיר אותו וצורב את הבלוק במרכזו; אחרת בתחתית-ימין של העמוד האחרון.
    * הבלוק נבנה בדפדפן (עברית) ולכן אין צורך בגופן עברי בשרת.
    */
-  /**
-   * צורב כפתור לחיץ "לחץ כאן לחתימה" בתחתית-מרכז *העמוד האחרון* של ה-PDF, עם קישור (URI)
-   * לטופס החתימה. הכפתור הוא תמונת PNG מוכנה-מראש (אומתה ויזואלית שהעברית קריאה) —
-   * תמונה לא ניתנת להיפוך/סידור-מחדש ע"י אף מציג PDF, בניגוד לטקסט עברי מצויר.
-   */
-  private async stampSignButton(pdf: Buffer, url: string): Promise<Buffer> {
-    const doc = await PDFDocument.load(pdf);
-    const png = await doc.embedPng(SIGN_BUTTON_PNG_BYTES);
-    const pages = doc.getPages();
-    const page = pages[pages.length - 1]; // תמיד העמוד האחרון
-    const { width } = page.getSize();
-
-    // התמונה רונדרה ב-3x — מציירים ברוחב 204pt (חד גם בזום).
-    const bw = 204;
-    const bh = bw * (png.height / png.width);
-    const bx = (width - bw) / 2;
-    const by = 40; // מעל תחתית העמוד
-    page.drawImage(png, { x: bx, y: by, width: bw, height: bh });
-
-    // אנוטציית קישור לחיצה מעל הכפתור.
-    const rect = [bx, by, bx + bw, by + bh];
-    const linkDict = doc.context.obj({
-      Type: 'Annot',
-      Subtype: 'Link',
-      Rect: rect,
-      Border: [0, 0, 0],
-      A: { Type: 'Action', S: 'URI', URI: PDFString.of(url) },
-    });
-    const linkRef = doc.context.register(linkDict);
-    const existing = page.node.Annots();
-    if (existing instanceof PDFArray) {
-      existing.push(linkRef);
-    } else {
-      page.node.set(PDFName.of('Annots'), doc.context.obj([linkRef]));
-    }
-
-    return Buffer.from(await doc.save());
-  }
-
   private async stampSignature(pdf: Buffer, sigPng: Buffer, marker?: SignMarker, coverRect?: number[]): Promise<Buffer> {
     const pdfDoc = await PDFDocument.load(pdf);
     const png = await pdfDoc.embedPng(sigPng);

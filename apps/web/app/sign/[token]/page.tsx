@@ -108,6 +108,14 @@ export default function SignQuotePage() {
     return () => window.clearTimeout(t);
   }, [phase]);
 
+  // מצב "פופאפ" (?form=1) — מגיעים מכפתור "לחץ כאן לחתימה" שבתוך ה-PDF: הלקוח כבר ראה את
+  // ההצעה, אז מציגים רק את שדות החתימה (שם/ת"ז/חתימה) בלי תצוגת ה-PDF — כמו חלון קופץ.
+  const [formOnly, setFormOnly] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setFormOnly(new URLSearchParams(window.location.search).has('form'));
+  }, []);
+
   // ── הכנת הקנבס לרזולוציית המסך ──
   const setupCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -342,7 +350,8 @@ export default function SignQuotePage() {
 
         {(phase === 'ready' || phase === 'submitting') && (
           <div className="space-y-4">
-            {/* תצוגת ההצעה */}
+            {/* תצוגת ההצעה — מוסתרת במצב פופאפ (?form=1): הלקוח הגיע מכפתור בתוך ה-PDF וכבר ראה אותה */}
+            {!formOnly && (
             <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <span className="text-sm font-bold text-slate-700">📄 ההצעה שלך</span>
@@ -353,6 +362,7 @@ export default function SignQuotePage() {
               </div>
               <PdfPreview url={pdfUrl} className="w-full overflow-y-auto bg-slate-50" />
             </div>
+            )}
 
             {/* פרטי החותם — לפי סיווג הלקוח. id="sign-form" — יעד הגלילה מכפתור "לחץ כאן לחתימה" שב-PDF */}
             <div id="sign-form" className="scroll-mt-4 rounded-2xl bg-white p-4 shadow-sm">
@@ -443,7 +453,7 @@ export default function SignQuotePage() {
                 disabled={!fieldsValid || !hasInk || !agreed || phase === 'submitting'}
                 className="mt-3 w-full rounded-xl bg-[#4ba647] py-3.5 text-base font-bold text-white transition hover:brightness-110 disabled:opacity-40"
               >
-                {phase === 'submitting' ? 'שולח…' : 'אשר וחתום ✓'}
+                {phase === 'submitting' ? 'שולח…' : (formOnly ? 'חתום ושלח ✓' : 'אשר וחתום ✓')}
               </button>
             </div>
           </div>
