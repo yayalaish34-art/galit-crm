@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch, apiUrl } from './lib/api-base';
 import { parseApiErrorResponse } from './lib/api-error';
+import { whatsAppLink } from './lib/whatsapp';
 import { SignedQuotesSection } from './signed-quotes-section';
 import { ProducedReportsSection } from './produced-reports-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
@@ -3846,14 +3847,13 @@ export function CustomerLegacyCard({
                                       const ph = (row.phoneSummary || '').replace(/\D/g, '');
                                       const firstName = (row.customerName || '').trim().split(/\s+/)[0] || '';
                                       const quoteRef = row.quoteNumber || row.id.slice(0, 8);
-                                      const msg = encodeURIComponent(
+                                      const msg =
                                         `${firstName ? `שלום ${firstName},` : 'שלום רב,'}\n` +
                                         `מצורפת הצעת המחיר (מס' ${quoteRef}) שהכנו עבורך ב"גלית – החברה לאיכות הסביבה".\n` +
                                         `ההצעה מרכזת את כל פרטי העבודה בצורה ברורה ושקופה.\n` +
                                         `נשמח שתעיין בה בנוחות, ואנחנו זמינים לכל שאלה או הבהרה.\n` +
-                                        `אשמח לעמוד לרשותך לכל שאלה.`
-                                      );
-                                      window.open(`https://wa.me/${ph}?text=${msg}`, '_blank');
+                                        `אשמח לעמוד לרשותך לכל שאלה.`;
+                                      window.open(whatsAppLink(ph, msg), '_blank');
                                     }}
                                   >
                                     וואטסאפ

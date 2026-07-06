@@ -4,6 +4,7 @@ import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, Chev
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
 import { apiUrl, apiFetch, type ApiAuthUser } from '../../lib/api-base';
+import { whatsAppLink } from '../../lib/whatsapp';
 import {
   buildQuoteTemplateContext,
   mergeQuoteTemplateFull,
@@ -1358,14 +1359,9 @@ export function QuoteNewScreen({
   }
 
   // פותח וואטסאפ באופן אמין: פותחים חלון ריק *סינכרונית* בתוך ה-click (לפני ה-await) כדי לא
-  // להיחסם ע"י חוסם ה-popup, ומפנים אותו ל-wa.me אחרי הכנת הקישור.
-  function waHref(phone: string, text: string): string {
-    const wa = phone ? (phone.startsWith('0') ? `972${phone.slice(1)}` : phone) : '';
-    // עם מספר → פתיחת הצ'אט ישירות ב-WhatsApp Web; בלי מספר → בורר נמען.
-    return wa
-      ? `https://web.whatsapp.com/send?phone=${wa}&text=${encodeURIComponent(text)}`
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
-  }
+  // להיחסם ע"י חוסם ה-popup, ומפנים אותו לקישור אחרי הכנתו. הקישור נבנה ב-whatsAppLink המשותף
+  // (web.whatsapp.com/send עם מספר → פתיחה ישירה ב-WhatsApp Web; בלי מספר → בורר נמען).
+  const waHref = (phone: string, text: string) => whatsAppLink(phone, text);
 
   // "שלח במייל" הפשוט — מצרף את ההצעה כ-PDF + את הפרופיל+רישיונות כ-PDF, בלי כפתורים ובלי חתימה.
   async function sendQuoteEmailPlain() {
@@ -1493,8 +1489,7 @@ export function QuoteNewScreen({
   // פותח את הקישור בוואטסאפ של הלקוח (אם יש מספר), אחרת בורר נמען
   function shareSignViaWhatsApp() {
     const msg = `שלום, הצעת המחיר מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${signLink}`;
-    const wa = signPhone ? (signPhone.startsWith('0') ? `972${signPhone.slice(1)}` : signPhone) : '';
-    window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(whatsAppLink(signPhone, msg), '_blank');
   }
 
   async function copySignLink() {

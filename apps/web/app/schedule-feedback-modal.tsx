@@ -3,15 +3,7 @@
 import React, { useState } from 'react';
 import { MessageCircle, Clock, Loader2, X, CheckCircle2 } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
-
-/** ניקוי מספר טלפון ישראלי לפורמט בינלאומי (972...) לצורך קישור wa.me. */
-function toWhatsAppPhone(raw: string): string {
-  const digits = (raw || '').replace(/\D/g, '');
-  if (!digits) return '';
-  if (digits.startsWith('972')) return digits;
-  if (digits.startsWith('0')) return `972${digits.slice(1)}`;
-  return digits;
-}
+import { whatsAppLink, toWhatsAppPhone } from './lib/whatsapp';
 
 /**
  * פופ-אפ "שליחת משוב" שנפתח בסוף הזרימה — אחרי ששולחים את הדוח ללקוח.
@@ -66,10 +58,7 @@ export function ScheduleFeedbackModal({
     }
     const first = (customerName || '').trim().split(/\s+/)[0] || 'לקוח/ה יקר/ה';
     const text = `שלום ${first},\nתודה שבחרת ב"גלית – החברה לאיכות הסביבה". נשמח מאוד אם תוכל/י להקדיש רגע ולדרג אותנו בגוגל — זה עוזר לנו מאוד:\n${reviewUrl}`;
-    const url = whatsappPhone
-      ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(text)}`
-      : `https://wa.me/?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
+    window.open(whatsAppLink(whatsappPhone, text), '_blank');
     onClose();
   };
 

@@ -2,6 +2,7 @@
 
 import { apiUrl, getApiBaseUrl, apiFetch } from '../lib/api-base';
 import { parseApiErrorResponse } from '../lib/api-error';
+import { whatsAppLink } from '../lib/whatsapp';
 import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { ProducedReportsSection } from '../produced-reports-section';
@@ -948,9 +949,8 @@ function phoneToTelHref(phone?: string | null) {
 function phoneToWhatsAppHref(phone?: string | null) {
   const digits = normalizeIsraeliPhoneDigits(phone || '');
   if (!digits) return null;
-  // wa.me expects country code without '+' and without leading zero.
-  const number = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
-  return `https://wa.me/${number}`;
+  // web.whatsapp.com/send — נפתח ישירות ב-WhatsApp Web (דסקטופ), לא בדף הביניים של wa.me.
+  return whatsAppLink(digits);
 }
 
 function emailToMailtoHref(email?: string | null) {
@@ -4634,8 +4634,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
     const digits = (phone || '').replace(/\D/g, '');
     if (!digits) return;
     if (channel === 'whatsapp') {
-      const wa = digits.startsWith('0') ? `972${digits.slice(1)}` : digits;
-      window.open(`https://wa.me/${wa}?text=${encodeURIComponent(msg)}`, '_blank');
+      window.open(whatsAppLink(digits, msg), '_blank');
     } else {
       window.open(`sms:${phone}?body=${encodeURIComponent(msg)}`, '_blank');
     }
@@ -8360,10 +8359,9 @@ function QuotesPage({
       alert('אין מספר טלפון ללקוח הנבחר — עדכן את פרטי הלקוח או הזן ידנית בוואטסאפ.');
       return;
     }
-    const waPhone = phone.startsWith('972') ? phone : phone.startsWith('0') ? `972${phone.slice(1)}` : phone;
     const customerFirstName = (selectedCustomer?.name || '').trim().split(/\s+/)[0] || '';
     const msg = `${customerFirstName ? `שלום ${customerFirstName},` : 'שלום רב,'}\nמצורפת הצעת המחיר שהכנו עבורך ב"גלית – החברה לאיכות הסביבה", בהתאם לפרטים שסיכמנו.\nההצעה כוללת את כל מרכיבי העבודה הנדרשים, וריכזנו בה את הפרטים בצורה ברורה ושקופה.\nנשמח שתעיין בהצעה בנוחות, ואם יעלו שאלות או נקודות שתרצה להבהיר — אנחנו זמינים עבורך.\nאשמח לעמוד לרשותך לכל שאלה.${pdfReady && currentQuoteId ? `\n\nקישור לצפייה בהצעה (נדרשת גישה למערכת):\n${pdfUrlForShare}` : ''}`;
-    window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(whatsAppLink(phone, msg), '_blank');
   };
 
   return (
@@ -15973,7 +15971,7 @@ function TasksPage({
 
   /* ── phone helpers (reuse from leads if exist) ── */
   const phoneClean = (p: string) => (p || '').replace(/[^\d+]/g, '');
-  const waLink = (p: string) => `https://wa.me/${phoneClean(p).replace(/^0/, '972')}`;
+  const waLink = (p: string) => whatsAppLink(phoneClean(p));
 
   /* ── render ── */
   return (
@@ -17879,7 +17877,7 @@ function TasksPage({
                             const followupCustomerName = contactName || t.customerName || t.leadName || 'הלקוח';
                             const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || '').replace(/[^\d+]/g, '');
                             const fu3Email = t.leadEmail || linkedLeadForHeader?.email || '';
-                            const waLink3 = fu3Phone ? `https://wa.me/${fu3Phone.replace(/^0/, '972')}` : null;
+                            const waLink3 = fu3Phone ? whatsAppLink(fu3Phone) : null;
                             const coach = aiCoach[t.id];
                             const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
