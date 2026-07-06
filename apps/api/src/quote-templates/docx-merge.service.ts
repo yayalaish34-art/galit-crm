@@ -514,6 +514,76 @@ export function ensureCityPlaceholderInBookmark(documentXml: string): string {
 }
 
 /**
+ * מבטל הדגשה (bold) מריצת הכתובת {customerAddress}. בכ-43 מתוך התבניות ריצת
+ * הכתובת הוגדרה מודגשת (<w:b/><w:bCs/>) — לבקשת המשתמש הכתובת לא צריכה להיות
+ * מודגשת. מסירים רק את <w:b/>/<w:bCs/> מ-rPr של הריצה שמכילה את ה-placeholder;
+ * קו תחתון, פונט וגודל נשארים. רץ לפני render בזמן שה-placeholder עדיין קיים.
+ */
+export function unboldAddressRun(documentXml: string): string {
+  const ph = '{customerAddress}';
+  const i = documentXml.indexOf(ph);
+  if (i === -1) return documentXml;
+
+  // הריצה שמכילה את ה-placeholder
+  const runStart = Math.max(
+    documentXml.lastIndexOf('<w:r>', i),
+    documentXml.lastIndexOf('<w:r ', i),
+  );
+  if (runStart === -1) return documentXml;
+  const runEndMarker = documentXml.indexOf('</w:r>', i);
+  if (runEndMarker === -1) return documentXml;
+  const runEnd = runEndMarker + '</w:r>'.length;
+  const run = documentXml.slice(runStart, runEnd);
+
+  // הסרת סימני ההדגשה מ-rPr של הריצה בלבד
+  const stripped = run
+    .replace(/<w:b\/>/g, '')
+    .replace(/<w:b\s[^>]*\/>/g, '')
+    .replace(/<w:bCs\/>/g, '')
+    .replace(/<w:bCs\s[^>]*\/>/g, '');
+  if (stripped === run) return documentXml;
+  return documentXml.slice(0, runStart) + stripped + documentXml.slice(runEnd);
+}
+
+/**
+ * מסיר פסקאות ריקות שנמצאות בין פסקת הכתובת ({customerAddress}) לבין פסקת
+ * העיר (סימניית fldCity) — שורת הרווח שהמשתמש ביקש להסיר. חלק מהתבניות הוסיפו
+ * <w:p/> ריקה בין השתיים, כך שבמסמך הממוזג נוצרה שורה ריקה בין הכתובת לעיר.
+ * מסיר כל פסקה שאין בה טקסט (<w:t) בין סוף פסקת הכתובת לתחילת פסקת ה-fldCity.
+ * רץ לפני render. אם אין כתובת/עיר או אין פסקה ריקה ביניהן — לא נוגע.
+ */
+export function removeBlankLineBetweenAddressAndCity(documentXml: string): string {
+  const addrIdx = documentXml.indexOf('{customerAddress}');
+  if (addrIdx === -1) return documentXml;
+
+  // סוף פסקת הכתובת
+  const addrParaEndMarker = documentXml.indexOf('</w:p>', addrIdx);
+  if (addrParaEndMarker === -1) return documentXml;
+  const addrParaEnd = addrParaEndMarker + '</w:p>'.length;
+
+  // תחילת פסקת ה-fldCity (העיר)
+  const cityBookmark = documentXml.search(
+    /<w:bookmarkStart\b[^>]*\bw:name="fldCity"[^>]*\/>/,
+  );
+  if (cityBookmark === -1 || cityBookmark <= addrParaEnd) return documentXml;
+  const cityParaStart = Math.max(
+    documentXml.lastIndexOf('<w:p ', cityBookmark),
+    documentXml.lastIndexOf('<w:p>', cityBookmark),
+  );
+  if (cityParaStart === -1 || cityParaStart < addrParaEnd) return documentXml;
+
+  // המקטע בין פסקת הכתובת לפסקת העיר — מכיל אפס או יותר פסקאות ריקות
+  const between = documentXml.slice(addrParaEnd, cityParaStart);
+  // הסרת פסקאות שאין בהן טקסט (<w:t) — שורות הרווח. פסקה עם טקסט נשמרת.
+  const cleaned = between.replace(
+    /<w:p\b[^>]*>[\s\S]*?<\/w:p>/g,
+    (p) => (/<w:t[ >]/.test(p) ? p : ''),
+  );
+  if (cleaned === between) return documentXml;
+  return documentXml.slice(0, addrParaEnd) + cleaned + documentXml.slice(cityParaStart);
+}
+
+/**
  * הזרקת שורת "הנחה {discountPercent}" לטבלת הסיכום כשהיא חסרה.
  * חלק מהתבניות (10 מתוך 63) בנו טבלת סיכום בלי שורת הנחה — רק
  * "לאחר הנחה" / "מע״מ" / "סה״כ לתשלום" — כך שגם כשיש הנחה היא לא הוצגה.
@@ -722,27 +792,31 @@ export class DocxMergeService {
         let pre = preFile.asText();
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
         pre = ensureCityPlaceholderInBookmark(pre);
-        // ── התאמת זוג טבלאות ההנחה למצב ההנחות בפועל ──
-        // זוג הטבלאות המלא ({#hasDiscount}) כולל גם עמודת "% הנחה לשורה" וגם שורת "% הנחה"
-        // כללית, ומרונדר כאשר קיימת הנחה כלשהי (normalized.hasDiscount = כללית || לשורה).
-        // כאן מסירים את החלק המיותר כדי שכל אחד מ-4 המצבים יוצג נכון:
+        // ביטול הדגשה מהכתובת + הסרת שורת הרווח בין הכתובת לעיר (בקשת המשתמש)
+        pre = unboldAddressRun(pre);
+        pre = removeBlankLineBetweenAddressAndCity(pre);
+        // ── התאמת זוג טבלאות המחיר למצב ההנחות בפועל ──
+        // מאז איחוד התבניות (2026-07-06) בכל תבנית יש זוג יחיד שתמיד מרונדר: טבלת פריטים עם
+        // עמודת "% הנחה לשורה" + טבלת סיכום עם שורת "% הנחה" כללית. כאן מסירים את החלק
+        // המיותר כדי שכל אחד מ-4 המצבים יוצג נכון:
+        //   • אין הנחה כלל     → הסרת עמודת הנחת-השורה + הסרת שורת ההנחה הכללית
         //   • הנחה כללית בלבד  → הסרת עמודת הנחת-השורה (הייתה מציגה 0% בכל השורות)
         //   • הנחת-שורה בלבד   → הסרת שורת ההנחה הכללית (הייתה מציגה "% הנחה: 0")
-        //   • שתיהן / אף אחת  → ללא שינוי (אף אחת → מרונדר זוג ה-{^hasDiscount} ממילא)
+        //   • שתיהן            → ללא שינוי (הכל מוצג)
+        // (תאימות לאחור: בתבניות ישנות עם זוג-כפול ותנאי {#hasDiscount}, הטרנספורמציות
+        //  נוגעות בזוג ה"מלא" בלבד — שממילא לא מרונדר כשאין הנחה — ולכן אינן מזיקות.)
         const hasGeneralDiscount = normalized.hasGeneralDiscount === true;
         const hasLineDiscount = normalized.hasLineDiscount === true;
-        if (hasGeneralDiscount || hasLineDiscount) {
-          if (hasGeneralDiscount) {
-            // הנחה כללית — ודא קיום שורת "הנחה" בטבלת הסיכום (לתבניות ישנות שחסרות אותה)
-            pre = ensureDiscountRowInSummary(pre);
-          } else {
-            // הנחת-שורה בלבד — הסר את שורת ההנחה הכללית המיותרת
-            pre = removeSummaryDiscountRow(pre);
-          }
-          if (!hasLineDiscount) {
-            // אין הנחת-שורה — הסר את עמודת "% הנחה לשורה" מזוג הטבלאות המלא
-            pre = removeTableColumnByPlaceholder(pre, '{lineDiscountPercent}');
-          }
+        if (hasGeneralDiscount) {
+          // הנחה כללית — ודא קיום שורת "הנחה" בטבלת הסיכום (לתבניות ישנות שחסרות אותה)
+          pre = ensureDiscountRowInSummary(pre);
+        } else {
+          // אין הנחה כללית — הסר את שורת ההנחה הכללית המיותרת
+          pre = removeSummaryDiscountRow(pre);
+        }
+        if (!hasLineDiscount) {
+          // אין הנחת-שורה — הסר את עמודת "% הנחה לשורה" מטבלת הפריטים
+          pre = removeTableColumnByPlaceholder(pre, '{lineDiscountPercent}');
         }
         zip.file('word/document.xml', pre);
       }

@@ -27,9 +27,10 @@ import { PublicModule } from './public/public.module';
 import { MicrosoftModule } from './microsoft/microsoft.module';
 import { AiMailModule } from './ai-mail/ai-mail.module';
 import { IncomingLeadsModule } from './incoming-leads/incoming-leads.module';
+import { BackupModule } from './backup/backup.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule],
   controllers: [AppController],
   providers: [AppService],
 })

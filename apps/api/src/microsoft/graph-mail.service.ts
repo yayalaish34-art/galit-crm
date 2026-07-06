@@ -13,6 +13,8 @@ export interface GraphMailAttachment {
 export interface GraphMailMessage {
   to: string;
   cc?: string[];
+  /** עותק מוסתר — נמענים שלא נראים לשאר הנמענים */
+  bcc?: string[];
   subject: string;
   /** HTML body */
   html: string;
@@ -186,6 +188,10 @@ export class GraphMailService {
 
     if (msg.cc?.length) {
       message.ccRecipients = msg.cc.map((address) => ({ emailAddress: { address } }));
+    }
+
+    if (msg.bcc?.length) {
+      message.bccRecipients = msg.bcc.map((address) => ({ emailAddress: { address } }));
     }
 
     if (msg.attachments?.length) {

@@ -9,6 +9,7 @@ import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { CompanyProfileService } from './company-profile.service';
 import { stampQuoteButtons } from './pdf-buttons.util';
+import { resolvePublicApiBase } from './public-api-base.util';
 
 @Injectable()
 export class QuoteMailService {
@@ -59,6 +60,8 @@ export class QuoteMailService {
       subject?: string;
       body?: string;
       cc?: string[];
+      /** עותק מוסתר — נמענים שיקבלו את המייל בלי שייראו לשאר הנמענים. */
+      bcc?: string[];
       includeSignature?: boolean;
       /** מזהה החתימה הנבחרת (UserSignature). אם לא צוין — חתימת ברירת המחדל הישנה. */
       signatureId?: string;
@@ -191,7 +194,7 @@ export class QuoteMailService {
     // ── כפתור "ההסמכות שלנו ופרופיל החברה" בסוף כל PDF מצורף של ההצעה ──
     // נצרב על קובצי ההצעה עצמם (לפני צירוף קובץ הפרופיל, שאינו זקוק לכפתור על עצמו),
     // מתחת לתוכן / בעמוד חדש — כך שכל קובץ שיוצא מהמערכת נושא קישור להסמכות.
-    const apiBaseForButtons = (process.env.PUBLIC_API_URL || opts?.publicApiBaseUrl || '').replace(/\/+$/, '');
+    const apiBaseForButtons = resolvePublicApiBase(opts?.publicApiBaseUrl);
     if (apiBaseForButtons) {
       for (const doc of docs) {
         if (doc.mime !== 'application/pdf') continue;
@@ -222,7 +225,7 @@ export class QuoteMailService {
     // PDF ומדכאים את הכפתור; אחרת (מצב חתימה/קישור) — כפתור-קישור ל-PDF המתארח ב-API.
     // מוודאים שה-PDF קיים/עדכני (best-effort, לא חוסם את השליחה אם נכשל).
     await this.companyProfile.ensurePdf(opts?.userId);
-    const apiBase = (process.env.PUBLIC_API_URL || opts?.publicApiBaseUrl || '').replace(/\/+$/, '');
+    const apiBase = resolvePublicApiBase(opts?.publicApiBaseUrl);
     let profileButton = '';
     if (opts?.attachProfilePdf) {
       try {
@@ -309,6 +312,14 @@ ${signatureHtml}
     const cc = Array.from(
       new Set((opts?.cc || []).map((e) => e.trim()).filter((e) => e.includes('@'))),
     );
+    // עותק מוסתר — נשמר נפרד מ-To/CC (אחרת לא יהיה "מוסתר"), ומנוקה מכפילויות.
+    const bcc = Array.from(
+      new Set(
+        (opts?.bcc || [])
+          .map((e) => e.trim())
+          .filter((e) => e.includes('@') && e !== recipientEmail && !cc.includes(e)),
+      ),
+    );
 
     // ── Send: Graph (user's Outlook) preferred, SMTP fallback ──
     let via: 'graph' | 'smtp';
@@ -325,6 +336,7 @@ ${signatureHtml}
       await this.graphMail.sendMailAsUser(opts.userId, {
         to: recipientEmail,
         cc,
+        bcc,
         subject,
         html,
         attachments: graphAttachments,
@@ -344,6 +356,7 @@ ${signatureHtml}
         from: fromAddress,
         to: recipientEmail,
         cc: cc.length ? cc : undefined,
+        bcc: bcc.length ? bcc : undefined,
         subject,
         html,
         attachments: smtpAttachments,

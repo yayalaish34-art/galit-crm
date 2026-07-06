@@ -16,6 +16,8 @@ export interface SendReportEmailOpts {
   /** נמענים נוספים — יתווספו כ-To. */
   toList?: string[];
   cc?: string[];
+  /** עותק מוסתר — נמענים שיקבלו את המייל בלי שייראו לשאר. */
+  bcc?: string[];
   subject?: string;
   body?: string;
   includeSignature?: boolean;
@@ -75,18 +77,24 @@ export class ReportMailService {
       throw new BadRequestException('לא צורף דוח לשליחה');
     }
 
-    // ── המרת DOCX ל-PDF (best-effort, כמו בהצעת מחיר) ──
-    const isDocx = /\.docx$/i.test(fileName) || mime === DOCX_MIME;
-    if (isDocx) {
-      const canConvert = graphReady || this.pdfConvert.enabled;
-      if (canConvert) {
-        try {
+    // ── המרת הדוח ל-PDF אם הוא לא כבר PDF (best-effort) ──
+    const isPdf = /\.pdf$/i.test(fileName) || mime === 'application/pdf';
+    if (!isPdf) {
+      const isDocx = /\.docx$/i.test(fileName) || mime === DOCX_MIME;
+      try {
+        if (isDocx && (graphReady || this.pdfConvert.enabled)) {
+          // DOCX: מנוע Graph (Word) עם נפילה-חזרה ל-CloudConvert + הקפאת תאריכים, כמו בהצעת מחיר.
           fileBuf = await this.pdfConvert.docxToPdf(fileBuf, fileName, opts.userId);
-          fileName = fileName.replace(/\.docx$/i, '') + '.pdf';
-          mime = 'application/pdf';
-        } catch (e: any) {
-          this.logger.warn(`PDF conversion failed for "${fileName}" — sending DOCX: ${e?.message || e}`);
+        } else if (graphReady) {
+          // כל פורמט אחר (DOC ישן / XLS / XLSX / תמונה וכו') — דרך Graph בלבד.
+          fileBuf = await this.pdfConvert.fileToPdf(fileBuf, fileName, mime, opts.userId);
+        } else {
+          throw new Error('no conversion engine available');
         }
+        fileName = fileName.replace(/\.[a-z0-9]+$/i, '') + '.pdf';
+        mime = 'application/pdf';
+      } catch (e: any) {
+        this.logger.warn(`PDF conversion failed for "${fileName}" — sending original file: ${e?.message || e}`);
       }
     }
 
@@ -144,6 +152,14 @@ ${signatureHtml}
     const cc = Array.from(
       new Set((opts.cc || []).map((e) => e.trim()).filter((e) => e.includes('@') && !toAll.includes(e))),
     );
+    // עותק מוסתר — ניקוי + הסרת כתובות שכבר מופיעות ב-To/CC
+    const bcc = Array.from(
+      new Set(
+        (opts.bcc || [])
+          .map((e) => e.trim())
+          .filter((e) => e.includes('@') && !toAll.includes(e) && !cc.includes(e)),
+      ),
+    );
 
     const attachments = [{ name: fileName, contentType: mime, content: fileBuf }];
     if (signatureImage) {
@@ -160,6 +176,7 @@ ${signatureHtml}
     await this.graphMail.sendMailAsUser(opts.userId, {
       to: toAll[0],
       cc: ccCombined,
+      bcc,
       subject,
       html,
       attachments,

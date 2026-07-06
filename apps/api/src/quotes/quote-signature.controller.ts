@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { QuoteSignatureService } from './quote-signature.service';
+import { resolvePublicApiBase } from './public-api-base.util';
 
 /** עמוד שגיאה ידידותי (RTL) — הלקוח מגיע לקישור מהמייל/וואטסאפ; JSON גולמי לא מובן לו. */
 const ERROR_PAGE_HTML = `<!doctype html>
@@ -34,7 +35,7 @@ export class QuoteSignatureController {
   @Get(':token/pdf')
   async getPdf(@Param('token') token: string, @Query('btn') btn: string, @Req() req: any, @Res() res: Response) {
     try {
-      const apiBase = (process.env.PUBLIC_API_URL || (req?.headers?.host ? `https://${req.headers.host}` : '')).replace(/\/+$/, '');
+      const apiBase = resolvePublicApiBase(req?.headers?.host);
       const { buffer, fileName } = await this.signature.getPdf(token, {
         withButton: btn === '1',
         profileUrl: apiBase ? `${apiBase}/public/company-profile.pdf` : undefined,

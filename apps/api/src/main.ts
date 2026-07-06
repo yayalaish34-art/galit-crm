@@ -48,6 +48,8 @@ async function bootstrap() {
     // (Previously any *.vercel.app was allowed; tightened to these specific origins.)
     // Add more without redeploy via the CORS_ORIGIN env var (checked above).
     const ALLOWED_PROD_ORIGINS = [
+      'https://crm.galit.co.il',
+      'https://www.crm.galit.co.il',
       'https://web-mu-one-96.vercel.app',
       'https://web-yayalaish34-6177s-projects.vercel.app',
       'https://web-yayalaish34-6177-yayalaish34-6177s-projects.vercel.app',

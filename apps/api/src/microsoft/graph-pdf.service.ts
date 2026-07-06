@@ -6,12 +6,12 @@ const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingm
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 
 /**
- * המרת DOCX ל-PDF דרך Microsoft Graph (מנוע ה-render של Office עצמו — זהה ל-Word Online).
+ * המרת מסמכים ל-PDF דרך Microsoft Graph (מנוע ה-render של Office/OneDrive עצמו).
  *
- * למה זה עדיף על CloudConvert/LibreOffice: ה-PDF נוצר על-ידי Word עצמו, ולכן הכותרת,
+ * למה זה עדיף על CloudConvert/LibreOffice: ה-PDF נוצר על-ידי Word/Office עצמו, ולכן הכותרת,
  * הפונטים, ה-RTL והפריסה יוצאים זהים לתבנית — בלי "סחיפת עיצוב" של מנוע render אחר.
  *
- * תהליך: העלאת ה-DOCX ל-OneDrive של המשתמש (קובץ זמני) → הורדה חזרה בפורמט PDF → מחיקת הקובץ הזמני.
+ * תהליך: העלאת הקובץ ל-OneDrive של המשתמש (קובץ זמני) → הורדה חזרה בפורמט PDF → מחיקת הקובץ הזמני.
  * דורש הרשאת Files.ReadWrite (delegated). ההרשאה התווספה לאחר ה-scopes הקיימים, ולכן כל משתמש
  * חייב להתחבר-מחדש פעם אחת כדי לאשר אותה (ראה microsoft-auth.service.ts). עד אז ההמרה תיכשל
  * וה-orchestrator (PdfConvertService) ייפול חזרה ל-CloudConvert.
@@ -35,19 +35,31 @@ export class GraphPdfService {
    * המתקשר אחראי על fallback.
    */
   async docxToPdf(userId: string, docx: Buffer, fileName = 'document.docx'): Promise<Buffer> {
+    return this.fileToPdf(userId, docx, fileName, DOCX_MIME);
+  }
+
+  /**
+   * ממיר קובץ כלשהו (כל פורמט שה-OneDrive/Office יודע לרנדר ל-PDF — Word, Excel, PowerPoint,
+   * תמונות ועוד) ל-PDF דרך ה-OneDrive של המשתמש. מחזיר את ה-buffer של ה-PDF.
+   * זורק אם המשתמש אינו מחובר / חסרה הרשאת Files.ReadWrite / הפורמט לא נתמך / ההמרה נכשלה —
+   * המתקשר אחראי על fallback.
+   */
+  async fileToPdf(userId: string, file: Buffer, fileName: string, mimeType?: string): Promise<Buffer> {
     const token = await this.auth.getAccessToken(userId);
 
-    // שם זמני בטוח-URL וייחודי (נמנע מהתנגשויות בין המרות מקבילות; השם הסופי נקבע ע"י המתקשר).
-    const base = fileName.replace(/\.docx$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'quote';
-    const tempPath = `${GraphPdfService.TEMP_FOLDER}/${base}-${crypto.randomUUID()}.docx`;
+    const ext = (fileName.match(/\.[a-z0-9]+$/i)?.[0] || '').toLowerCase();
+    // שם זמני בטוח-URL וייחודי (נמנע מהתנגשויות בין המרות מקבילות; הסיומת המקורית נשמרת
+    // כדי ש-OneDrive יזהה את סוג הקובץ נכון ויידע לרנדר אותו ל-PDF).
+    const base = fileName.replace(/\.[a-z0-9]+$/i, '').replace(/[^A-Za-z0-9._-]+/g, '_') || 'file';
+    const tempPath = `${GraphPdfService.TEMP_FOLDER}/${base}-${crypto.randomUUID()}${ext}`;
 
     let itemId: string | null = null;
     try {
-      // 1) העלאת ה-DOCX (PUT פשוט — הצעות מחיר קטנות, הרבה מתחת לגבול ה-4MB).
+      // 1) העלאת הקובץ (PUT פשוט — קבצים קטנים, הרבה מתחת לגבול ה-4MB).
       const upRes = await fetch(`${GRAPH}/me/drive/root:/${encodeURI(tempPath)}:/content`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': DOCX_MIME },
-        body: new Uint8Array(docx),
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': mimeType || 'application/octet-stream' },
+        body: new Uint8Array(file),
       });
       if (!upRes.ok) {
         const t = await upRes.text().catch(() => '');

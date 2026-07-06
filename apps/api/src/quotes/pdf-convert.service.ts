@@ -145,6 +145,19 @@ export class PdfConvertService {
     return this.cloudConvertDocxToPdf(frozen, fileName);
   }
 
+  /**
+   * ממיר קובץ כלשהו (DOC/DOCX/XLS/XLSX/תמונה וכו') ל-PDF דרך Microsoft Graph — ללא נפילה-חזרה
+   * ל-CloudConvert (הוא תומך רק ב-DOCX). דורש userId מחובר ל-Outlook.
+   */
+  async fileToPdf(file: Buffer, fileName: string, mimeType?: string, userId?: string): Promise<Buffer> {
+    if (!userId || !this.graphPdf.configured) {
+      throw new BadRequestException('המרת PDF לקובץ זה דורשת חיבור ל-Outlook');
+    }
+    const pdf = await this.graphPdf.fileToPdf(userId, file, fileName, mimeType);
+    this.logger.log(`Converted "${fileName}" to PDF via Microsoft Graph`);
+    return pdf;
+  }
+
   /** המרת DOCX (כבר עם תאריכים מוקפאים) ל-PDF דרך CloudConvert. */
   private async cloudConvertDocxToPdf(docx: Buffer, fileName: string): Promise<Buffer> {
     const authHeaders = { Authorization: `Bearer ${this.apiKey}` };

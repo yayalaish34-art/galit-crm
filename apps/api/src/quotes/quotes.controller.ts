@@ -130,6 +130,7 @@ export class QuotesController {
       subject?: string;
       messageBody?: string;
       cc?: string[];
+      bcc?: string[];
       includeSignature?: boolean;
       signatureId?: string;
       preferOnedrive?: boolean;
@@ -149,13 +150,15 @@ export class QuotesController {
       subject: body.subject,
       body: body.messageBody,
       cc: body.cc,
+      bcc: body.bcc,
       includeSignature: body.includeSignature,
       signatureId: body.signatureId,
       preferOnedrive: body.preferOnedrive,
       viewUrl: body.viewUrl,
       attachProfilePdf: body.attachProfilePdf,
-      // ה-host של הבקשה = הדומיין הציבורי של ה-API (Railway תמיד https חיצונית).
-      // משמש לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות". PUBLIC_API_URL גובר אם הוגדר.
+      // ה-host של הבקשה = fallback אחרון לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות".
+      // resolvePublicApiBase מעדיף RAILWAY_PUBLIC_DOMAIN (הדומיין החי של הדפלוי) ואז PUBLIC_API_URL,
+      // כך שקישור Railway ישן לא נצרב יותר גם אם PUBLIC_API_URL נשאר מיושן ב-env.
       publicApiBaseUrl: req?.headers?.host ? `https://${req.headers.host}` : undefined,
     });
   }

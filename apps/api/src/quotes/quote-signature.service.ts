@@ -6,6 +6,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { PrismaService } from '../prisma/prisma.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { stampQuoteButtons } from './pdf-buttons.util';
 
@@ -69,6 +70,7 @@ export class QuoteSignatureService {
     private readonly prisma: PrismaService,
     private readonly pdfConvert: PdfConvertService,
     private readonly graphMail: GraphMailService,
+    private readonly graphFiles: GraphFilesService,
     private readonly msAuth: MicrosoftAuthService,
   ) {}
 
@@ -81,6 +83,10 @@ export class QuoteSignatureService {
    * מחזיר את הטוקן (הקישור עצמו נבנה בצד הלקוח מ-window.location.origin) + פרטי הלקוח.
    */
   async requestSignature(quoteId: string, userId?: string, opts?: { markRequested?: boolean; webOrigin?: string }) {
+    // אם ההצעה נערכה ב-Word דרך OneDrive — מושכים קודם את הגרסה העדכנית ל-DB, כדי שה-PDF
+    // לחתימה/שליחה ייבנה מהעריכות האחרונות ולא מהמסמך הממוזג הישן. best-effort (לא חוסם).
+    await this.pullLatestFromOneDrive(quoteId);
+
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
       include: {
@@ -373,6 +379,45 @@ export class QuoteSignatureService {
   }
 
   /** בוחר את מסמך ההצעה (DB bytes → disk) ומחזיר buffer + שם + האם כבר PDF. */
+  /**
+   * מושך את הגרסה הערוכה של ההצעה מ-OneDrive (אם קיימת) ומעדכן את QuoteDocument העדכני,
+   * כדי ש-resolveQuoteDoc יקרא את העריכות האחרונות. best-effort — כשל לא חוסם את השליחה.
+   * (מימוש עצמאי דרך graphFiles, בלי תלות ב-QuotesService, כדי להימנע מתלות מעגלית ב-DI.)
+   */
+  private async pullLatestFromOneDrive(quoteId: string): Promise<void> {
+    try {
+      const ref: any = await (this.prisma.quote.findUnique as any)({
+        where: { id: quoteId },
+        select: { onedriveItemId: true, onedriveOwnerId: true },
+      });
+      const itemId = ref?.onedriveItemId;
+      const ownerId = ref?.onedriveOwnerId;
+      if (!itemId || !ownerId) return; // אין קובץ OneDrive — כלום למשוך
+
+      const buffer = await this.graphFiles.downloadContent(ownerId, itemId);
+      if (!buffer?.length) return;
+
+      const docData = {
+        fileName: `quote-${quoteId.slice(0, 8)}.docx`,
+        data: Uint8Array.from(buffer),
+        mimeType: DOCX_MIME,
+        documentType: 'MERGED_DOCX',
+        documentDescription: 'גרסה ערוכה מ-Word (סונכרן לפני שליחה)',
+      };
+      // מעדכנים את ה-DOCX הממוזג האחרון במקום (לא מנפחים את הטבלה); אחרת יוצרים חדש.
+      const existing: any = await (this.prisma.quoteDocument as any)
+        .findFirst({ where: { quoteId, documentType: 'MERGED_DOCX' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
+        .catch(() => null);
+      if (existing?.id) {
+        await (this.prisma.quoteDocument.update as any)({ where: { id: existing.id }, data: docData }).catch(() => null);
+      } else {
+        await (this.prisma.quoteDocument.create as any)({ data: { quoteId, ...docData } }).catch(() => null);
+      }
+    } catch (e: any) {
+      this.logger.warn(`OneDrive pull before signature failed (${quoteId}): ${e?.message || e}`);
+    }
+  }
+
   private resolveQuoteDoc(quote: any): { content: Buffer; fileName: string; isPdf: boolean } {
     const latest = quote.quoteDocuments?.[0];
     if (latest?.data) {
