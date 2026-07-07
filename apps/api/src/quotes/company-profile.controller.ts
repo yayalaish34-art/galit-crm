@@ -13,11 +13,10 @@ export class CompanyProfileController {
 
   @Get('company-profile.pdf')
   async get(@Res() res: Response) {
-    let asset = await this.profile.getCachedPdf();
-    if (!asset) {
-      await this.profile.ensurePdf();
-      asset = await this.profile.getCachedPdf();
-    }
+    // ensurePdf תמיד — הוא זול (בודק חתימת SHA של המקור) ומרענן רק אם התוכן ב-templates
+    // השתנה. כך החלפת הקובץ ב-templates/company-profile.pdf משתקפת מיד, בלי להמתין לשליחת מייל.
+    await this.profile.ensurePdf();
+    const asset = await this.profile.getCachedPdf();
     if (!asset) {
       res.status(404).send('הפרופיל אינו זמין כרגע');
       return;
