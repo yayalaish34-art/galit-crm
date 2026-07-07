@@ -694,6 +694,8 @@ export function QuoteNewScreen({
   const [customer, setCustomer] = useState('');
   const [date, setDate] = useState('');
   const [follow, setFollow] = useState('');
+  // פופ-אפ אזהרה: נפתח כשלוחצים "סגור" בלי שמולא תאריך מעקב (follow ריק).
+  const [followWarnOpen, setFollowWarnOpen] = useState(false);
   const [status, setStatus] = useState('');
   const [salesRep, setSalesRep] = useState('');
   const [salesRepresentativeUserId, setSalesRepresentativeUserId] = useState('');
@@ -1494,6 +1496,21 @@ export function QuoteNewScreen({
 
   async function copySignLink() {
     try { await navigator.clipboard.writeText(signLink); setSignCopied(true); setTimeout(() => setSignCopied(false), 2000); } catch { /* ignore */ }
+  }
+
+  // ביצוע הסגירה בפועל — advanceToFollowUp לפי האם מולא תאריך מעקב.
+  function doExit() {
+    setFollowWarnOpen(false);
+    onExit?.({ advanceToFollowUp: !!follow.trim() });
+  }
+
+  // לחיצה על "סגור": אם אין תאריך מעקב — מזהירים קודם; אחרת סוגרים ישירות.
+  function handleExitClick() {
+    if (!follow.trim()) {
+      setFollowWarnOpen(true);
+      return;
+    }
+    doExit();
   }
 
   // תחזית
@@ -3046,7 +3063,7 @@ export function QuoteNewScreen({
             <span className="text-[10px] text-gray-500">הדפס</span>
           </button>
           {onExit && (
-            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => onExit({ advanceToFollowUp: !!follow.trim() })}>
+            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={handleExitClick}>
               <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></span>
               <span className="text-[10px] text-gray-500">סגור</span>
             </button>
@@ -3412,6 +3429,22 @@ export function QuoteNewScreen({
       {/* Bottom action bar removed — actions moved to header icon row */}
 
       {/* ── Modals (logic unchanged) ── */}
+      {/* אזהרת מעקב: נפתחת בלחיצת "סגור" כשלא מולא תאריך מעקב. */}
+      {followWarnOpen && (
+        <div className="fixed inset-0 z-[9100] flex items-center justify-center bg-black/50 p-4" onClick={() => setFollowWarnOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-2xl">⚠️</span>
+              <h3 className="text-lg font-bold text-gray-800">עדיף לבצע מעקב לפני סגירת הצעת מחיר</h3>
+              <p className="text-sm text-gray-500 leading-relaxed">לא הוגדר תאריך מעקב להצעה זו. קביעת מעקב עוזרת לוודא שההצעה לא תישכח. לחזור ולהגדיר מעקב?</p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button type="button" className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-base font-bold text-white hover:bg-blue-700 transition-colors" onClick={() => setFollowWarnOpen(false)}>חזור למעקב</button>
+              <button type="button" className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-600 hover:bg-gray-50 transition-colors" onClick={doExit}>סגור בכל זאת</button>
+            </div>
+          </div>
+        </div>
+      )}
       {pickerOpen && (
         <CustomerPickerModal
           open={pickerOpen}
