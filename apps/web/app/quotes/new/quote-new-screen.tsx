@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save } from 'lucide-react';
+import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ChevronDown, Check, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save } from 'lucide-react';
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
 import { apiUrl, apiFetch, type ApiAuthUser } from '../../lib/api-base';
@@ -315,7 +315,7 @@ function normalizeQuoteContacts(raw: unknown): QuoteContactRow[] {
     .filter((x) => x.id);
 }
 
-type QuoteUserRow = { id: string; name: string; employeeNumber?: string | null };
+type QuoteUserRow = { id: string; name: string; email?: string | null; employeeNumber?: string | null };
 
 function userOptionLabel(u: { name: string; employeeNumber?: string | null }) {
   const en = (u.employeeNumber && String(u.employeeNumber).trim()) || '';
@@ -665,6 +665,7 @@ export function QuoteNewScreen({
   onAttachmentSaved,
   existingAttachments,
   onDownloadAttachment,
+  onDeleteAttachment,
 }: {
   embedded?: boolean;
   prefillCustomer?: PrefillCustomer | null;
@@ -688,6 +689,8 @@ export function QuoteNewScreen({
   existingAttachments?: Array<{ id: string; fileName: string; mimeType: string; createdAt: string }>;
   /** Called when user wants to download a persisted attachment */
   onDownloadAttachment?: (att: { id: string; fileName: string }) => void;
+  /** Called when user wants to delete a persisted attachment. Resolves true on success. */
+  onDeleteAttachment?: (att: { id: string; fileName: string }) => Promise<boolean> | boolean;
 }) {
   const [tab, setTab] = useState<'פרטי תשלום' | 'מלל' | 'הערות' | 'שונות' | 'תחזית' | 'מסמכים מקושרים'>('תחזית');
   const [quoteNo, setQuoteNo] = useState('חדש');
@@ -861,6 +864,7 @@ export function QuoteNewScreen({
           .map((x) => ({
             id: String((x as { id: unknown }).id),
             name: String((x as { name: unknown }).name ?? ''),
+            email: (x as { email?: string | null }).email ?? null,
             employeeNumber: (x as { employeeNumber?: string | null }).employeeNumber ?? null,
           }))
           .filter((r) => r.id && r.name)
@@ -927,6 +931,8 @@ export function QuoteNewScreen({
   const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
   const [onedriveActive, setOnedriveActive] = useState(false);
   const [onedriveBusy, setOnedriveBusy] = useState(false);
+  // מזהי קבצים שנמצאים כרגע בתהליך מחיקה מ"קבצים שנוצרו" (לפי attId, ואם אין — לפי שם)
+  const [deletingFileKeys, setDeletingFileKeys] = useState<Record<string, boolean>>({});
   // כתובת המייל של חשבון ה-Microsoft המחובר — מוצגת בהנחיה כשWord מבקש כניסה
   const [msAccountEmail, setMsAccountEmail] = useState<string | null>(null);
   useEffect(() => {
@@ -1227,42 +1233,6 @@ export function QuoteNewScreen({
   }
 
   // ניסוח הודעת וואטסאפ קצרה (channel: 'whatsapp') — בלי נושא, רק תוכן
-  async function generateWaDraft(prevBody?: string) {
-    setWaBusy(true);
-    try {
-      const r = await apiFetch(apiUrl('/ai-mail/quote-draft'), {
-        method: 'POST',
-        authUser: getSessionUser(),
-        body: JSON.stringify({
-          channel: 'whatsapp',
-          quoteId: emailForm.quoteId || undefined,
-          customerName: customer || '',
-          contactName: contact || '',
-          serviceName: emailForm.serviceName || reference || '',
-          quoteNumber: (reference || quoteNo || '').trim(),
-          location: aiForm.location.trim() || undefined,
-          inspectionType: aiForm.inspectionType.trim() || undefined,
-          instruction: waInstruction.trim() || undefined,
-          previousBody: (prevBody || '').trim() || undefined,
-        }),
-      });
-      if (r.ok) {
-        const d = await r.json();
-        setWaMsg(d.body || '');
-        setWaInstruction('');
-      } else {
-        const e = await r.json().catch(() => null);
-        setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
-        setTimeout(() => setStatusMsg(''), 4000);
-      }
-    } catch {
-      setStatusMsg('שגיאה בפנייה ל-AI');
-      setTimeout(() => setStatusMsg(''), 4000);
-    } finally {
-      setWaBusy(false);
-    }
-  }
-
   // שליחת המייל מתוך חלון העריכה — Outlook/Graph עם נמענים, חתימה וקובץ מצורף
   async function sendQuoteEmail() {
     const f = emailForm;
@@ -1282,6 +1252,9 @@ export function QuoteNewScreen({
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
+    // עותק מוסתר — נשאר נפרד מ-CC כדי שיהיה "מוסתר" באמת
+    const allBcc = [...f.bccList, ...(f.bccInput.includes('@') ? [f.bccInput.trim()] : [])];
+    const bccList = Array.from(new Set(allBcc)).filter((e) => e && e !== to && !ccList.includes(e));
     let serverSent = false;
     let serverErr = '';
     try {
@@ -1291,6 +1264,7 @@ export function QuoteNewScreen({
         body: JSON.stringify({
           email: to,
           cc: ccList,
+          bcc: bccList,
           subject: f.subject,
           messageBody: f.body,
           includeSignature: f.includeSignature,
@@ -1313,7 +1287,8 @@ export function QuoteNewScreen({
       const subject = f.subject;
       const body = `${f.body}${viewUrl ? '\n\nצפייה בהצעת מחיר:\n' + viewUrl : ''}`;
       const ccParam = ccList.length ? `&cc=${encodeURIComponent(ccList.join(','))}` : '';
-      const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      const bccParam = bccList.length ? `&bcc=${encodeURIComponent(bccList.join(','))}` : '';
+      const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}${bccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
       window.open(owaUrl, '_blank');
       setEmailModalOpen(false);
       setStatusMsg(serverErr ? `נפתח חלון מייל — ${serverErr}` : `נפתח חלון מייל ל-${to}`);
@@ -1375,6 +1350,9 @@ export function QuoteNewScreen({
     setEmailSending(true);
     setStatusMsg('שולח…');
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
+    // עותק מוסתר — נשאר נפרד מ-CC כדי שיהיה "מוסתר" באמת
+    const allBcc = [...f.bccList, ...(f.bccInput.includes('@') ? [f.bccInput.trim()] : [])];
+    const bccList = Array.from(new Set(allBcc)).filter((e) => e && e !== to && !ccList.includes(e));
     const attIds = [f.attId, ...emailExtraAttIds].filter(Boolean);
     let serverSent = false; let serverErr = '';
     try {
@@ -1384,6 +1362,7 @@ export function QuoteNewScreen({
         body: JSON.stringify({
           email: to,
           cc: ccList,
+          bcc: bccList,
           subject: f.subject,
           messageBody: f.body,
           includeSignature: f.includeSignature,
@@ -1540,11 +1519,15 @@ export function QuoteNewScreen({
   // ── חלון עריכת מייל לפני שליחה ──
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
+  const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
+  const [bccDropdownOpen, setBccDropdownOpen] = useState(false);
   const [emailForm, setEmailForm] = useState({
     toList: [] as string[],
     toInput: '',
     ccList: [] as string[],
     ccInput: '',
+    bccList: [] as string[],
+    bccInput: '',
     subject: '',
     body: '',
     includeSignature: true,
@@ -1584,23 +1567,18 @@ export function QuoteNewScreen({
   // מונע קריאות AI מקבילות (closure של aiBusy מתיישן).
   const draftInFlightRef = useRef(false);
 
-  // ── וואטסאפ: ניסוח AI קצר (בלי נושא) → שליחה ב-wa.me למספר הלקוח ──
-  const [waOpen, setWaOpen] = useState(false);
-  const [waMsg, setWaMsg] = useState('');
-  const [waBusy, setWaBusy] = useState(false);
-  const [waInstruction, setWaInstruction] = useState('');
-
   // הוספת נמען לרשימה (chip) — מ-Enter/פסיק. מפצל גם הדבקה מרובה.
-  const addRecipients = (raw: string, field: 'toList' | 'ccList') => {
+  const INPUT_FIELD_OF = { toList: 'toInput', ccList: 'ccInput', bccList: 'bccInput' } as const;
+  const addRecipients = (raw: string, field: 'toList' | 'ccList' | 'bccList') => {
     const parts = raw.split(/[,;\s]+/).map((s) => s.trim()).filter((s) => s.includes('@'));
     if (!parts.length) return;
     setEmailForm((p) => {
       const existing = new Set(p[field]);
       parts.forEach((e) => existing.add(e));
-      return { ...p, [field]: Array.from(existing), [field === 'toList' ? 'toInput' : 'ccInput']: '' };
+      return { ...p, [field]: Array.from(existing), [INPUT_FIELD_OF[field]]: '' };
     });
   };
-  const removeRecipient = (email: string, field: 'toList' | 'ccList') => {
+  const removeRecipient = (email: string, field: 'toList' | 'ccList' | 'bccList') => {
     setEmailForm((p) => ({ ...p, [field]: p[field].filter((e) => e !== email) }));
   };
 
@@ -2745,6 +2723,48 @@ export function QuoteNewScreen({
     }
   }
 
+  // מחיקת קובץ מרשימת "קבצים שנוצרו". מוחק גם את הקובץ המצורף בשרת (אם נשמר),
+  // וגם מסיר את השורה מהתצוגה. קבצי-בליטה בלבד (ללא attId שמור) מוסרים מקומית בלבד.
+  async function handleDeleteGeneratedFile(opts: { attId?: string; fileName: string }) {
+    const { attId, fileName } = opts;
+    const key = attId || `name:${fileName}`;
+    if (deletingFileKeys[key]) return;
+    if (typeof window !== 'undefined' && !window.confirm(`למחוק את הקובץ "${fileName}"?`)) return;
+    setDeletingFileKeys((prev) => ({ ...prev, [key]: true }));
+    try {
+      // מחיקה בשרת רק לקובץ מצורף שמור (יש לו מזהה). קודם דרך ה-parent (הדשבורד
+      // שמנהל את existingAttachments), ואם לא סופק — ישירות מול נתיב המשימה.
+      let serverOk = true;
+      if (attId) {
+        if (onDeleteAttachment) {
+          serverOk = await Promise.resolve(onDeleteAttachment({ id: attId, fileName }));
+        } else if (taskId) {
+          const user = getSessionUser();
+          const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${attId}`), {
+            authUser: user,
+            method: 'DELETE',
+          });
+          serverOk = res.ok;
+        }
+      }
+      if (attId && !serverOk) {
+        setStatusMsg('מחיקת הקובץ נכשלה');
+        setTimeout(() => setStatusMsg(''), 4000);
+        return;
+      }
+      // הסרה מהתצוגה המקומית (קבצים ממוזגים בסשן)
+      setMergedFiles((prev) => prev.filter((m) => (attId ? m.attId !== attId : m.name !== fileName)));
+      setStatusMsg('הקובץ נמחק');
+      setTimeout(() => setStatusMsg(''), 3000);
+    } catch (e) {
+      console.error('Failed to delete generated file:', e);
+      setStatusMsg('מחיקת הקובץ נכשלה');
+      setTimeout(() => setStatusMsg(''), 4000);
+    } finally {
+      setDeletingFileKeys((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    }
+  }
+
   // העלאת "גרסה ערוכה" ישירות מחלון השליחה — מצרפת אותה ומסמנת כקובץ שיישלח
   async function uploadEditedQuoteFile(file: File) {
     if (!file) return;
@@ -3037,6 +3057,8 @@ export function QuoteNewScreen({
               toInput: '',
               ccList: [],
               ccInput: '',
+              bccList: [],
+              bccInput: '',
               subject: defSubject,
               body: defBody,
               includeSignature: hasSig,
@@ -3048,15 +3070,13 @@ export function QuoteNewScreen({
             });
             setEmailExtraAttIds([]); // איפוס קבצים נוספים בכל פתיחה של חלון השליחה
             signTokenRef.current = null; // טוקן חתימה טרי לכל פתיחת חלון (משקף את הגרסה העדכנית)
+            setCcDropdownOpen(false);
+            setBccDropdownOpen(false);
             setEmailModalOpen(true);
             if (!draftReady) void generateEmailDraft(id); // אין ניסוח עדיין — מנסחים עכשיו (יתעדכן חי)
           }}>
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><Mail size={18} /></span>
             <span className="text-[10px] text-gray-500">שלח במייל</span>
-          </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={() => { setWaOpen(true); setWaMsg(''); setWaInstruction(''); void generateWaDraft(); }}>
-            <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><MessageCircle size={18} /></span>
-            <span className="text-[10px] text-gray-500">וואטסאפ</span>
           </button>
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={() => handlePrint()}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Printer size={18} /></span>
@@ -3268,6 +3288,21 @@ export function QuoteNewScreen({
                         </button>
                       ) : null
                     );
+                    /* כפתור "מחק" פר-קובץ — מסיר את הקובץ מהרשימה ומהשרת (אם נשמר כקובץ מצורף). */
+                    const delBtn = (attId: string | undefined, name: string) => {
+                      const key = attId || `name:${name}`;
+                      return (
+                        <button
+                          type="button"
+                          disabled={!!deletingFileKeys[key]}
+                          onClick={() => handleDeleteGeneratedFile({ attId, fileName: name })}
+                          title="מחק את הקובץ"
+                          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-[11px] font-bold text-red-700 hover:bg-red-100 transition-colors disabled:opacity-50"
+                        >
+                          <Trash2 size={12} /> מחק
+                        </button>
+                      );
+                    };
                     return (
                       <>
                   {mergedFiles.map((f, i) => (
@@ -3288,6 +3323,7 @@ export function QuoteNewScreen({
                         </a>
                       )}
                       {editBtn(f.attId, f.name)}
+                      {delBtn(f.attId, f.name)}
                     </div>
                   ))}
                   {existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).map((att) => (
@@ -3298,6 +3334,7 @@ export function QuoteNewScreen({
                         <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')} {new Date(att.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span>
                       </button>
                       {editBtn(att.id, att.fileName)}
+                      {delBtn(att.id, att.fileName)}
                     </div>
                   ))}
                   {mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
@@ -3507,60 +3544,6 @@ export function QuoteNewScreen({
         </div>
       )}
 
-      {waOpen && (
-        <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => !waBusy && setWaOpen(false)}>
-          <div className="w-full max-w-lg rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl max-h-[92vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-3 flex items-center gap-2 border-b border-gray-100 pb-3 text-xl font-bold text-gray-800">
-              <MessageCircle size={22} className="text-green-500" /> שליחת הצעת מחיר בוואטסאפ
-            </div>
-            <div className="mb-3 text-sm text-gray-500">
-              הודעה שנוסחה אוטומטית{contact ? ` עבור ${contact}` : ''}. אפשר לערוך לפני השליחה.
-            </div>
-            {waBusy && !waMsg ? (
-              <div className="flex items-center justify-center gap-2 py-12 text-gray-400">
-                <RefreshCw size={18} className="animate-spin" /> מנסח הודעה…
-              </div>
-            ) : (
-              <>
-                <textarea
-                  value={waMsg}
-                  onChange={(e) => setWaMsg(e.target.value)}
-                  rows={7}
-                  dir="rtl"
-                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:border-green-400"
-                  placeholder="תוכן ההודעה…"
-                />
-                <div className="mt-3 flex gap-2">
-                  <input
-                    value={waInstruction}
-                    onChange={(e) => setWaInstruction(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !waBusy) generateWaDraft(waMsg); }}
-                    className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none focus:border-green-400"
-                    placeholder="רוצה לשנות? כתוב הנחיה ולחץ ׳נסח מחדש׳"
-                  />
-                  <button type="button" disabled={waBusy} onClick={() => generateWaDraft(waMsg)} className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
-                    {waBusy ? '…' : 'נסח מחדש'}
-                  </button>
-                </div>
-              </>
-            )}
-            <div className="mt-5 flex items-center justify-between gap-2 border-t border-gray-100 pt-4">
-              <button type="button" onClick={() => setWaOpen(false)} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium hover:bg-gray-50">ביטול</button>
-              <button
-                type="button"
-                disabled={waBusy || !waMsg.trim()}
-                onClick={() => { let n = (phone || '').replace(/\D/g, ''); if (n.startsWith('0')) n = '972' + n.slice(1); window.open(`https://wa.me/${n}?text=${encodeURIComponent(waMsg)}`, '_blank'); setWaOpen(false); }}
-                className="flex items-center gap-2 rounded-xl px-6 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
-                style={{ background: '#16a34a' }}
-              >
-                <MessageCircle size={16} /> שלח בוואטסאפ
-              </button>
-            </div>
-            {!(phone || '').trim() && <div className="mt-2 text-xs text-amber-600">⚠ אין מספר טלפון ללקוח — הוואטסאפ ייפתח ללא נמען.</div>}
-          </div>
-        </div>
-      )}
-
       {emailModalOpen && (
         <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => !emailSending && setEmailModalOpen(false)}>
           <div className="w-full max-w-3xl rounded-3xl border border-gray-200 bg-white p-8 shadow-2xl max-h-[92vh] overflow-y-auto" dir="rtl" onClick={(e) => e.stopPropagation()}>
@@ -3592,7 +3575,49 @@ export function QuoteNewScreen({
               </div>
               {/* CC כ-chips */}
               <div>
-                <label className="mb-1.5 block text-sm font-semibold text-gray-700">עותק (CC)</label>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-sm font-semibold text-gray-700">עותק (CC)</label>
+                  {!!quoteUserRows.filter((u) => u.email).length && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setCcDropdownOpen((p) => !p)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                      >
+                        עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${ccDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {ccDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setCcDropdownOpen(false)} />
+                          <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                            {quoteUserRows.filter((u) => u.email).map((u) => {
+                              const checked = emailForm.ccList.includes(u.email as string);
+                              return (
+                                <button
+                                  type="button"
+                                  key={u.id}
+                                  onClick={() => setEmailForm((p) => ({
+                                    ...p,
+                                    ccList: checked ? p.ccList.filter((e) => e !== u.email) : Array.from(new Set([...p.ccList, u.email as string])),
+                                  }))}
+                                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                >
+                                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                    {checked && <Check className="h-3 w-3 text-white" />}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                    <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
                   {emailForm.ccList.map((em) => (
                     <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
@@ -3609,6 +3634,71 @@ export function QuoteNewScreen({
                     }}
                     onBlur={() => emailForm.ccInput.includes('@') && addRecipients(emailForm.ccInput, 'ccList')}
                     placeholder="הוסף עותק…" />
+                </div>
+              </div>
+              {/* BCC (עותק מוסתר) כ-chips */}
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label className="text-sm font-semibold text-gray-700">
+                    עותק מוסתר (BCC) <span className="font-normal text-gray-400">(הנמענים לא רואים זה את זה)</span>
+                  </label>
+                  {!!quoteUserRows.filter((u) => u.email).length && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setBccDropdownOpen((p) => !p)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                      >
+                        עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${bccDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+                      {bccDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-10" onClick={() => setBccDropdownOpen(false)} />
+                          <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                            {quoteUserRows.filter((u) => u.email).map((u) => {
+                              const checked = emailForm.bccList.includes(u.email as string);
+                              return (
+                                <button
+                                  type="button"
+                                  key={u.id}
+                                  onClick={() => setEmailForm((p) => ({
+                                    ...p,
+                                    bccList: checked ? p.bccList.filter((e) => e !== u.email) : Array.from(new Set([...p.bccList, u.email as string])),
+                                  }))}
+                                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                                >
+                                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                    {checked && <Check className="h-3 w-3 text-white" />}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                    <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-300 px-3 py-2.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
+                  {emailForm.bccList.map((em) => (
+                    <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
+                      {em}
+                      <button type="button" className="text-base text-gray-400 hover:text-gray-600" onClick={() => removeRecipient(em, 'bccList')}>×</button>
+                    </span>
+                  ))}
+                  <input dir="ltr" className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
+                    value={emailForm.bccInput}
+                    onChange={(e) => setEmailForm((p) => ({ ...p, bccInput: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRecipients(emailForm.bccInput, 'bccList'); }
+                      else if (e.key === 'Backspace' && !emailForm.bccInput && emailForm.bccList.length) { removeRecipient(emailForm.bccList[emailForm.bccList.length - 1], 'bccList'); }
+                    }}
+                    onBlur={() => emailForm.bccInput.includes('@') && addRecipients(emailForm.bccInput, 'bccList')}
+                    placeholder="הוסף עותק מוסתר…" />
                 </div>
               </div>
 

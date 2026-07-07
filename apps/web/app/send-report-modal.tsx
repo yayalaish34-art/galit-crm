@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Mail, Upload, Loader2, FileText, Sparkles, X } from 'lucide-react';
+import { Mail, Upload, Loader2, FileText, Sparkles, X, ChevronDown, Check } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
+
+type EmployeeOption = { id: string; name: string; email: string };
 
 type TaskLike = {
   id: string;
@@ -46,6 +48,8 @@ export function SendReportModal({
   task,
   currentUser,
   defaultEmail,
+  employees,
+  isPrivateCustomer = false,
   onSent,
 }: {
   open: boolean;
@@ -53,6 +57,10 @@ export function SendReportModal({
   task: TaskLike;
   currentUser: { id?: string; name?: string } & Record<string, unknown>;
   defaultEmail?: string;
+  employees?: EmployeeOption[];
+  /** האם הלקוח מסווג כ"לקוח פרטי" (customer.type === 'PRIVATE'). כשלקוח פרטי בוחר
+   *  "טרם שולם" — חובה אישור מנהל לפני שליחת הדוח. */
+  isPrivateCustomer?: boolean;
   onSent: (info: { paymentStatus: 'paid' | 'unpaid' | null }) => void;
 }) {
   const customerId = task.customerId || null;
@@ -67,6 +75,10 @@ export function SendReportModal({
   const [toInput, setToInput] = useState('');
   const [ccList, setCcList] = useState<string[]>([]);
   const [ccInput, setCcInput] = useState('');
+  const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
+  const [bccList, setBccList] = useState<string[]>([]);
+  const [bccInput, setBccInput] = useState('');
+  const [bccDropdownOpen, setBccDropdownOpen] = useState(false);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -84,13 +96,36 @@ export function SendReportModal({
   // שאלת תשלום לפני השליחה — לא חובה, רק תזכורת לוודא שהלקוח שילם.
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | null>(null);
 
+  // אישור מנהל לשליחת דוח ללקוח פרטי שטרם שילם:
+  //  managerApproval = null   → עדיין לא נשאל / לא רלוונטי
+  //  managerApproval = 'yes'  → התקבל אישור מנהל, מותר לשלוח
+  //  managerApproval = 'no'   → אין אישור מנהל, אסור לשלוח (בעיה)
+  const [managerApproval, setManagerApproval] = useState<'yes' | 'no' | null>(null);
+  const [showApprovalPrompt, setShowApprovalPrompt] = useState(false);
+
+  // בחירת סטטוס "טרם שולם". ללקוח פרטי — פותח פופ-אפ אישור מנהל.
+  const chooseUnpaid = () => {
+    setPaymentStatus((p) => (p === 'unpaid' ? null : 'unpaid'));
+    if (isPrivateCustomer) {
+      setManagerApproval(null);
+      setShowApprovalPrompt(true);
+    }
+  };
+
   // אתחול בעת פתיחה
   useEffect(() => {
     if (!open) return;
     setErr('');
     setStatus('');
     setPaymentStatus(null);
+    setManagerApproval(null);
+    setShowApprovalPrompt(false);
     setToList(defaultEmail && defaultEmail.includes('@') ? [defaultEmail.trim()] : []);
+    setCcList([]);
+    setCcDropdownOpen(false);
+    setBccList([]);
+    setBccInput('');
+    setBccDropdownOpen(false);
     // טעינת חתימות המשתמש
     const uid = currentUser?.id;
     if (uid) {
@@ -112,21 +147,25 @@ export function SendReportModal({
     }
   }, [open, defaultEmail, currentUser]);
 
-  const addRecipients = useCallback((raw: string, which: 'to' | 'cc') => {
+  const addRecipients = useCallback((raw: string, which: 'to' | 'cc' | 'bcc') => {
     const emails = raw.split(/[,\s]+/).map((e) => e.trim()).filter((e) => e.includes('@'));
     if (!emails.length) return;
     if (which === 'to') {
       setToList((p) => Array.from(new Set([...p, ...emails])));
       setToInput('');
-    } else {
+    } else if (which === 'cc') {
       setCcList((p) => Array.from(new Set([...p, ...emails])));
       setCcInput('');
+    } else {
+      setBccList((p) => Array.from(new Set([...p, ...emails])));
+      setBccInput('');
     }
   }, []);
 
-  const removeRecipient = (em: string, which: 'to' | 'cc') => {
+  const removeRecipient = (em: string, which: 'to' | 'cc' | 'bcc') => {
     if (which === 'to') setToList((p) => p.filter((x) => x !== em));
-    else setCcList((p) => p.filter((x) => x !== em));
+    else if (which === 'cc') setCcList((p) => p.filter((x) => x !== em));
+    else setBccList((p) => p.filter((x) => x !== em));
   };
 
   // צירוף הדוח — נשמר אוטומטית בכרטיס הלקוח (documentType=REPORT) אם יש לקוח משויך
@@ -238,7 +277,9 @@ export function SendReportModal({
   }, [open]);
 
   const allTo = toInput.includes('@') ? [...toList, toInput.trim()] : toList;
-  const canSend = !!attached && allTo.length > 0 && !sending;
+  // חסימת שליחה ללקוח פרטי שטרם שילם ללא אישור מנהל.
+  const blockedNoApproval = isPrivateCustomer && paymentStatus === 'unpaid' && managerApproval !== 'yes';
+  const canSend = !!attached && allTo.length > 0 && !sending && !blockedNoApproval;
 
   const send = async () => {
     if (!attached) {
@@ -250,11 +291,18 @@ export function SendReportModal({
       setErr('יש להזין נמען');
       return;
     }
+    if (blockedNoApproval) {
+      // לקוח פרטי שטרם שילם — חובה אישור מנהל.
+      setErr('לא ניתן לשלוח דוח ללקוח פרטי שטרם שילם ללא אישור מנהל.');
+      setShowApprovalPrompt(true);
+      return;
+    }
     setSending(true);
     setErr('');
     setStatus('שולח…');
     try {
       const cc = ccInput.includes('@') ? [...ccList, ccInput.trim()] : ccList;
+      const bcc = bccInput.includes('@') ? [...bccList, bccInput.trim()] : bccList;
       const r = await apiFetch(apiUrl(`/tasks/${task.id}/send-report-email`), {
         method: 'POST',
         authUser: currentUser as never,
@@ -266,6 +314,7 @@ export function SendReportModal({
           to: to[0],
           toList: to,
           cc,
+          bcc,
           subject,
           body,
           includeSignature,
@@ -388,7 +437,7 @@ export function SendReportModal({
               </button>
               <button
                 type="button"
-                onClick={() => setPaymentStatus((p) => (p === 'unpaid' ? null : 'unpaid'))}
+                onClick={chooseUnpaid}
                 className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-bold transition-colors ${
                   paymentStatus === 'unpaid'
                     ? 'border-red-500 bg-red-500 text-white'
@@ -400,7 +449,20 @@ export function SendReportModal({
             </div>
             {paymentStatus === 'unpaid' && (
               <div className="mt-2 text-[12px] font-medium text-red-700">
-                שים לב: הלקוח עדיין לא שילם — אפשר לשלוח את הדוח בכל זאת.
+                {isPrivateCustomer && managerApproval === 'yes'
+                  ? '✅ התקבל אישור מנהל — אפשר לשלוח את הדוח.'
+                  : isPrivateCustomer && managerApproval === 'no'
+                    ? '🚫 אין אישור מנהל — לא ניתן לשלוח דוח ללקוח פרטי שטרם שילם.'
+                    : 'שים לב: הלקוח עדיין לא שילם — אפשר לשלוח את הדוח בכל זאת.'}
+                {isPrivateCustomer && managerApproval === 'no' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowApprovalPrompt(true)}
+                    className="ms-2 underline hover:text-red-900"
+                  >
+                    בדוק שוב
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -434,7 +496,46 @@ export function SendReportModal({
 
           {/* ── CC ── */}
           <div>
-            <label className="mb-1.5 block text-sm font-semibold text-gray-700">עותק (CC)</label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-700">עותק (CC)</label>
+              {!!employees?.length && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setCcDropdownOpen((p) => !p)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                  >
+                    עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${ccDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {ccDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setCcDropdownOpen(false)} />
+                      <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                        {employees.map((u) => {
+                          const checked = ccList.includes(u.email);
+                          return (
+                            <button
+                              type="button"
+                              key={u.id}
+                              onClick={() => setCcList((p) => (checked ? p.filter((e) => e !== u.email) : Array.from(new Set([...p, u.email]))))}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                {checked && <Check className="h-3 w-3 text-white" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className={chipBox}>
               {ccList.map((em) => (
                 <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
@@ -453,6 +554,72 @@ export function SendReportModal({
                 }}
                 onBlur={() => ccInput.includes('@') && addRecipients(ccInput, 'cc')}
                 placeholder="הוסף עותק…"
+              />
+            </div>
+          </div>
+
+          {/* ── BCC (עותק מוסתר) ── */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-700">
+                עותק מוסתר (BCC) <span className="font-normal text-gray-400">(הנמענים לא רואים זה את זה)</span>
+              </label>
+              {!!employees?.length && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setBccDropdownOpen((p) => !p)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                  >
+                    עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${bccDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {bccDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setBccDropdownOpen(false)} />
+                      <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                        {employees.map((u) => {
+                          const checked = bccList.includes(u.email);
+                          return (
+                            <button
+                              type="button"
+                              key={u.id}
+                              onClick={() => setBccList((p) => (checked ? p.filter((e) => e !== u.email) : Array.from(new Set([...p, u.email]))))}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                {checked && <Check className="h-3 w-3 text-white" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className={chipBox}>
+              {bccList.map((em) => (
+                <span key={em} className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700" dir="ltr">
+                  {em}
+                  <button type="button" className="text-base text-gray-400 hover:text-gray-600" onClick={() => removeRecipient(em, 'bcc')}>×</button>
+                </span>
+              ))}
+              <input
+                dir="ltr"
+                className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
+                value={bccInput}
+                onChange={(e) => setBccInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addRecipients(bccInput, 'bcc'); }
+                  else if (e.key === 'Backspace' && !bccInput && bccList.length) removeRecipient(bccList[bccList.length - 1], 'bcc');
+                }}
+                onBlur={() => bccInput.includes('@') && addRecipients(bccInput, 'bcc')}
+                placeholder="הוסף עותק מוסתר…"
               />
             </div>
           </div>
@@ -541,6 +708,9 @@ export function SendReportModal({
 
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
           {!attached && <span className="me-auto text-sm text-gray-400">צרף דוח והזן נמען כדי לשלוח</span>}
+          {blockedNoApproval && attached && allTo.length > 0 && (
+            <span className="me-auto text-sm font-medium text-red-600">נדרש אישור מנהל לשליחת הדוח</span>
+          )}
           <button
             type="button"
             disabled={sending}
@@ -559,6 +729,44 @@ export function SendReportModal({
           </button>
         </div>
       </div>
+
+      {/* ── פופ-אפ אישור מנהל — לקוח פרטי שטרם שילם ── */}
+      {showApprovalPrompt && (
+        <div
+          className="fixed inset-0 z-[9100] flex items-center justify-center bg-black/60 p-4"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl border border-gray-200 bg-white p-7 text-center shadow-2xl"
+            dir="rtl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-3xl">
+              🛡️
+            </div>
+            <div className="mb-2 text-xl font-bold text-gray-800">קיבלת אישור מנהל?</div>
+            <div className="mb-6 text-sm leading-relaxed text-gray-500">
+              הלקוח מסווג כלקוח פרטי וטרם שילם. לשליחת הדוח נדרש אישור מנהל.
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setManagerApproval('no'); setShowApprovalPrompt(false); }}
+                className="flex-1 rounded-xl border border-red-200 bg-white px-4 py-3 text-base font-bold text-red-700 hover:bg-red-50"
+              >
+                לא
+              </button>
+              <button
+                type="button"
+                onClick={() => { setManagerApproval('yes'); setShowApprovalPrompt(false); setErr(''); }}
+                className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white hover:bg-emerald-600"
+              >
+                כן, קיבלתי אישור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

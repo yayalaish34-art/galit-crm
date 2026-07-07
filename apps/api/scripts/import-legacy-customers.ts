@@ -86,14 +86,56 @@ function getHebrewCell(raw: Row, label: string): unknown {
   return null;
 }
 
-/** Workbook has no English Customer sheet but Hebrew "קוד לקוח" columns — flat export. */
+/**
+ * Locate the header row (the row that actually contains "קוד לקוח") within the first
+ * few rows of a sheet, then return the data rows keyed by that header. Handles exports
+ * that carry a merged title banner in row 1 (real headers in row 2).
+ * Returns null if no "קוד לקוח" header is found in the scanned window.
+ */
+function readHebrewFlatRows(sheet: XLSX.WorkSheet, scanRows = 5): Row[] | null {
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: false });
+  if (!aoa.length) return null;
+  let headerIdx = -1;
+  for (let r = 0; r < Math.min(scanRows, aoa.length); r++) {
+    const row = aoa[r] || [];
+    if (row.some((c) => c != null && normHeader(String(c)) === normHeader('קוד לקוח'))) {
+      headerIdx = r;
+      break;
+    }
+  }
+  if (headerIdx === -1) return null;
+  const header = (aoa[headerIdx] || []).map((c) => String(c ?? '').trim());
+  const out: Row[] = [];
+  for (let r = headerIdx + 1; r < aoa.length; r++) {
+    const raw = aoa[r] || [];
+    if (raw.every((c) => c == null || c === '')) continue; // skip fully-empty rows
+    const obj: Row = {};
+    for (let c = 0; c < header.length; c++) {
+      const key = header[c];
+      if (!key) continue;
+      obj[key] = raw[c] ?? null;
+    }
+    out.push(obj);
+  }
+  return out;
+}
+
+/** Workbook has no English Customer sheet but Hebrew "קוד לקוח" columns — flat export (banner-tolerant). */
 function isHebrewFlatCustomerWorkbook(wb: XLSX.WorkBook, englishCustomerSheet: XLSX.WorkSheet | null): boolean {
   if (englishCustomerSheet) return false;
   const name = wb.SheetNames[0];
   if (!name) return false;
-  const rows = XLSX.utils.sheet_to_json<Row>(wb.Sheets[name], { defval: null, raw: false });
-  if (!rows.length) return false;
-  return Object.keys(rows[0]).some((k) => normHeader(k) === normHeader('קוד לקוח'));
+  return readHebrewFlatRows(wb.Sheets[name]) !== null;
+}
+
+/** Stable short hash for building deterministic per-contact legacy keys (idempotent re-runs). */
+function shortHash(s: string): string {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (h << 5) - h + s.charCodeAt(i);
+    h |= 0;
+  }
+  return (h >>> 0).toString(36);
 }
 
 /** Map Hebrew flat row → canonical customer row + synthetic child rows (same file, no separate sheets). */
@@ -126,10 +168,11 @@ function expandHebrewFlatRow(raw: Row): {
     phone,
     email,
     city: city || '-',
-    address: str(getHebrewCell(raw, 'כתובת לקוח')),
+    address: str(getHebrewCell(raw, 'כתובת לקוח')) ?? str(getHebrewCell(raw, 'כתובת')),
     zipLegacy: str(getHebrewCell(raw, 'מיקוד')),
     fax: str(getHebrewCell(raw, 'פקס')),
     companyRegNumber: str(getHebrewCell(raw, 'מספר ח.פ')),
+    legacyAccountNumber: str(getHebrewCell(raw, 'מספר בהנהח')),
     salesRepresentative: str(getHebrewCell(raw, 'שם נציג מכירה')),
     legacySubClassificationCode: str(getHebrewCell(raw, 'שם סיווג')),
     managementProfile: str(getHebrewCell(raw, 'שם תת סיווג')),
@@ -158,17 +201,23 @@ function expandHebrewFlatRow(raw: Row): {
   const cFull = str(getHebrewCell(raw, 'שם איש קשר'));
   const cAddr = str(getHebrewCell(raw, 'כתובת איש קשר'));
   const cCity = str(getHebrewCell(raw, 'שם עיר איש קשר'));
-  const cRole = str(getHebrewCell(raw, 'שם תפקיד'));
+  const cRole = str(getHebrewCell(raw, 'שם תפקיד')) ?? str(getHebrewCell(raw, 'תפקיד'));
   const cDept = str(getHebrewCell(raw, 'מחלקה'));
   const cTitle = str(getHebrewCell(raw, 'שם תואר'));
   const hasInlineContact =
     !!(cFull || cPhone || cMobile || emailFromContact || cAddr || cCity || cRole || cDept || cTitle);
   if (id && (hasInlineContact || name)) {
+    const fullName = cFull || name || contactName;
+    // Same קוד לקוח can span many rows (one contact each). Build a DETERMINISTIC per-contact
+    // key from its identifying fields so every distinct contact survives and re-runs are idempotent
+    // (upsert keyed on customerId+importLegacyId). Rows with identical contact data collapse to one.
+    const sig = [fullName, cPhone || '', cMobile || '', emailFromContact || '', cRole || ''].join('|');
+    const contactLegacyId = `${id}-c-${shortHash(sig)}`;
     contactRows.push({
       customerImportLegacyId: id,
-      importLegacyId: `${id}-primary`,
-      fullName: cFull || name || contactName,
-      phone: cPhone || phone,
+      importLegacyId: contactLegacyId,
+      fullName,
+      phone: cPhone || '',
       mobile: cMobile || '',
       email: emailFromContact || '',
       address: cAddr || '',
@@ -527,42 +576,58 @@ function customerDataFromRow(r: Row): Prisma.CustomerCreateInput {
   return data;
 }
 
-async function ensurePotentialClassification() {
-  await prisma.customerClassification.upsert({
-    where: { code: 'POTENTIAL' },
-    create: {
-      id: randomUUID(),
-      code: 'POTENTIAL',
-      labelHe: 'פוטנציאלי',
-      sortOrder: 100,
-      isPreset: false,
-    },
-    update: {},
-  });
+/** Standard classifications this import guarantees exist (code → Hebrew label). */
+const STANDARD_CLASSIFICATIONS: { code: string; labelHe: string; sortOrder: number }[] = [
+  { code: 'COMPANY', labelHe: 'חברה / קבלן', sortOrder: 0 },
+  { code: 'PUBLIC', labelHe: 'רשות / מוסד', sortOrder: 1 },
+  { code: 'PRIVATE', labelHe: 'לקוח פרטי', sortOrder: 2 },
+  { code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3 },
+  { code: 'POTENTIAL', labelHe: 'פוטנציאלי', sortOrder: 100 },
+];
+
+/** In-memory label/synonym → code map, built once. Avoids a DB round-trip per row. */
+const TYPE_CODE_MAP = new Map<string, string>();
+
+/** Ensure the standard classifications exist and build the resolution map (call once before importing). */
+async function ensureStandardClassifications(dryRun: boolean): Promise<void> {
+  if (!dryRun) {
+    for (const c of STANDARD_CLASSIFICATIONS) {
+      await prisma.customerClassification.upsert({
+        where: { code: c.code },
+        create: { id: randomUUID(), code: c.code, labelHe: c.labelHe, sortOrder: c.sortOrder, isPreset: false },
+        update: {},
+      });
+    }
+  }
+  TYPE_CODE_MAP.clear();
+  const put = (k: string, code: string) => TYPE_CODE_MAP.set(k.trim(), code);
+  // Standard codes + their canonical Hebrew labels
+  for (const c of STANDARD_CLASSIFICATIONS) {
+    put(c.code, c.code);
+    put(c.labelHe, c.code);
+  }
+  // This file's exact type strings + common variants
+  put('לקוח עסקי', 'COMPANY');
+  put('עסקי', 'COMPANY');
+  put('לקוח פרטי', 'PRIVATE');
+  put('פרטי', 'PRIVATE');
+  put('פוטנציאלי', 'POTENTIAL');
+  put('ספק', 'SUPPLIER');
+  put('ספקים', 'SUPPLIER'); // file uses plural
+  // Any other classifications already in the DB (by code and by label)
+  if (!dryRun) {
+    const all = await prisma.customerClassification.findMany();
+    for (const c of all) {
+      if (!TYPE_CODE_MAP.has(c.code)) put(c.code, c.code);
+      if (!TYPE_CODE_MAP.has(c.labelHe.trim())) put(c.labelHe.trim(), c.code);
+    }
+  }
 }
 
-/** Map Hebrew label / code / synonym → CustomerClassification.code */
-const HEBREW_TYPE_SYNONYM: Record<string, string> = {
-  'לקוח עסקי': 'COMPANY',
-  עסקי: 'COMPANY',
-};
-
-async function resolveCustomerTypeCode(raw: string): Promise<string | null> {
+function resolveCustomerTypeCode(raw: string): string | null {
   const t = raw.trim();
   if (!t) return null;
-  const syn = HEBREW_TYPE_SYNONYM[t];
-  if (syn) return syn;
-  const byCode = await prisma.customerClassification.findUnique({ where: { code: t } });
-  if (byCode) return byCode.code;
-  const all = await prisma.customerClassification.findMany();
-  const byLabel = all.find((c) => c.labelHe.trim() === t);
-  if (byLabel) return byLabel.code;
-  if (t === 'פוטנציאלי') {
-    await ensurePotentialClassification();
-    const p = await prisma.customerClassification.findUnique({ where: { code: 'POTENTIAL' } });
-    return p?.code ?? null;
-  }
-  return null;
+  return TYPE_CODE_MAP.get(t) ?? null;
 }
 
 async function importOneCustomer(
@@ -611,11 +676,11 @@ async function importOneCustomer(
   }
 
   const typeRaw = String(createUpdate.type ?? '').trim();
-  const resolvedType = await resolveCustomerTypeCode(typeRaw);
+  const resolvedType = resolveCustomerTypeCode(typeRaw);
   if (!resolvedType) {
     summary.customersSkipped++;
     summary.errors.push(
-      `Customer ${importLegacyId}: unknown type "${typeRaw}" — add CustomerClassification (code/labelHe) or synonym in HEBREW_TYPE_SYNONYM`,
+      `Customer ${importLegacyId}: unknown type "${typeRaw}" — add it to STANDARD_CLASSIFICATIONS / TYPE_CODE_MAP`,
     );
     return;
   }
@@ -634,9 +699,15 @@ async function importOneCustomer(
   } else {
     if (existing) {
       const { importLegacyId: _il, ...scalarUpdate } = createUpdate as Record<string, unknown>;
+      // A single customer code can span many rows (one contact per row). Don't let a later row's
+      // synthesized placeholders clobber good data already imported from an earlier row.
+      const rec = scalarUpdate as Record<string, unknown>;
+      if (rec.phone === '-' || rec.phone === '') delete rec.phone;
+      if (rec.city === '-' || rec.city === '') delete rec.city;
+      if (typeof rec.email === 'string' && rec.email.endsWith('@legacy.import.local')) delete rec.email;
       await prisma.customer.update({
         where: { id: existing.id },
-        data: scalarUpdate as Prisma.CustomerUpdateInput,
+        data: rec as Prisma.CustomerUpdateInput,
       });
       customerId = existing.id;
       summary.customersUpdated++;
@@ -968,10 +1039,10 @@ async function main() {
     hebrewFlat = isHebrewFlatCustomerWorkbook(wb, custSheet);
     if (hebrewFlat) {
       const sn = wb.SheetNames[0];
-      customerRows = sheetToRows(wb.Sheets[sn]);
+      customerRows = readHebrewFlatRows(wb.Sheets[sn]) ?? [];
       log(
         'info',
-        `Hebrew flat sheet "${sn}": ${customerRows.length} rows; contacts/referrals synthesized from inline columns.`,
+        `Hebrew flat sheet "${sn}": ${customerRows.length} data rows; contacts/referrals synthesized from inline columns.`,
       );
     } else {
       if (!custSheet) {
@@ -998,6 +1069,8 @@ async function main() {
     }
   }
 
+  await ensureStandardClassifications(args.dryRun);
+
   const ctx = {
     dryRun: args.dryRun,
     contactRows,
@@ -1011,6 +1084,7 @@ async function main() {
     targetCustomerUuid: args.batch ? null : args.customerId,
   };
 
+  let processed = 0;
   for (const row of customerRows) {
     try {
       if (hebrewFlat) {
@@ -1021,6 +1095,10 @@ async function main() {
       }
     } catch (e) {
       summary.errors.push(`Fatal row: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    processed++;
+    if (processed % 1000 === 0) {
+      log('info', `progress: ${processed}/${customerRows.length} rows (created ${summary.customersCreated}, updated ${summary.customersUpdated}, skipped ${summary.customersSkipped}, errors ${summary.errors.length})`);
     }
   }
 

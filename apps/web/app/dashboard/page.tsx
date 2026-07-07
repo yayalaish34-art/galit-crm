@@ -5,7 +5,6 @@ import { parseApiErrorResponse } from '../lib/api-error';
 import { whatsAppLink } from '../lib/whatsapp';
 import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
-import { ProducedReportsSection } from '../produced-reports-section';
 import { SendReportModal } from '../send-report-modal';
 import { MarkReportSentModal } from '../mark-report-sent-modal';
 import { ScheduleFeedbackModal } from '../schedule-feedback-modal';
@@ -936,6 +935,10 @@ function validateIsraeliPhone(value: string) {
 function phoneToDisplay(phone?: string | null) {
   if (!phone) return '-';
   return formatIsraeliPhone(phone) || phone;
+}
+
+function hasHebrewName(name?: string | null) {
+  return !!name && /[֐-׿]/.test(name);
 }
 
 function phoneToTelHref(phone?: string | null) {
@@ -14084,6 +14087,9 @@ function TasksPage({
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
   const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
   const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
+  /* פר-ליד: האם פתוח מצב "שנה שיוך" (בחירת לקוח קיים מחדש), ומחרוזת החיפוש בבורר. */
+  const [leadReassignOpen, setLeadReassignOpen] = useState<Record<string, boolean>>({});
+  const [leadReassignSearch, setLeadReassignSearch] = useState<Record<string, string>>({});
   /**
    * החלטת התאמת ליד ללקוח קיים — נשמרת בין רענונים כדי לא לשאול שוב "האם זה אותו אחד?".
    * הערך: מזהה הלקוח שאושר, או '__none__' אם המשתמש סימן שזה ליד חדש.
@@ -14272,6 +14278,24 @@ function TasksPage({
       console.error('Failed to download attachment:', e);
     } finally {
       setAttachmentDownloading((prev) => { const n = { ...prev }; delete n[att.id]; return n; });
+    }
+  };
+  // מחיקת קובץ מצורף ממשימה — מוחק בשרת ומסיר מרשימת הקבצים של המשימה. מחזיר true בהצלחה.
+  const deleteTaskAttachment = async (taskId: string, att: { id: string; fileName: string }): Promise<boolean> => {
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${att.id}`), {
+        authUser: currentUser,
+        method: 'DELETE',
+      });
+      if (!res.ok) return false;
+      setTaskAttachments((prev) => ({
+        ...prev,
+        [taskId]: (prev[taskId] ?? []).filter((a) => a.id !== att.id),
+      }));
+      return true;
+    } catch (e) {
+      console.error('Failed to delete attachment:', e);
+      return false;
     }
   };
   /* ── שלב הפולואפ: תזמון תזכורת + שיתוף/העברה לעובד אחר ── */
@@ -16946,103 +16970,216 @@ function TasksPage({
                                           onOpenCustomer?.(fresh);
                                         };
 
-                                        // כבר אושר שזה אותו לקוח — לא שואלים שוב, מציגים קישור ישיר.
+                                        // בורר "שנה שיוך" — מאפשר לשייך את הליד לכל לקוח קיים (גם אם כבר שויך בעבר),
+                                        // או לסמן מחדש כליד חדש. פתיחתו נשלטת ב-leadReassignOpen פר-ליד.
+                                        const reassignSearch = (leadReassignSearch[leadKey] || '').trim().toLowerCase();
+                                        const reassignMatches = reassignSearch
+                                          ? customers.filter((c) => {
+                                              const nm = norm(c.name);
+                                              const cn = norm((c as any).contactName);
+                                              const ph = digits((c as any).phone);
+                                              const q = reassignSearch.replace(/\s+/g, ' ');
+                                              return nm.includes(q) || cn.includes(q) || (digits(reassignSearch).length >= 3 && ph.includes(digits(reassignSearch)));
+                                            }).slice(0, 8)
+                                          : [];
+                                        const reassignPicker = (
+                                          <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                            <div className="text-[13px] font-bold text-blue-800 mb-2">שייך ללקוח קיים אחר:</div>
+                                            <input
+                                              autoFocus
+                                              value={leadReassignSearch[leadKey] || ''}
+                                              onChange={(e) => setLeadReassignSearch((s) => ({ ...s, [leadKey]: e.target.value }))}
+                                              placeholder="חפש לפי שם / טלפון…"
+                                              className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                                            />
+                                            {reassignSearch && (
+                                              <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                                                {reassignMatches.length === 0 ? (
+                                                  <div className="px-3 py-2 text-[13px] text-slate-400">לא נמצא לקוח מתאים</div>
+                                                ) : reassignMatches.map((c) => (
+                                                  <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.preventDefault(); e.stopPropagation();
+                                                      recordLeadMatchDecision(leadKey, c.id);
+                                                      setLeadReassignOpen((o) => ({ ...o, [leadKey]: false }));
+                                                      setLeadReassignSearch((s) => ({ ...s, [leadKey]: '' }));
+                                                    }}
+                                                    className="w-full text-right px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-blue-50"
+                                                  >
+                                                    {c.name}{(c as any).phone ? <span className="text-slate-400 font-normal"> · {(c as any).phone}</span> : null}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            )}
+                                            <div className="mt-2 flex items-center gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, '__none__'); setLeadReassignOpen((o) => ({ ...o, [leadKey]: false })); }}
+                                                className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-[12px] font-bold text-amber-700 hover:bg-amber-50"
+                                              >
+                                                סמן כליד חדש
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setLeadReassignOpen((o) => ({ ...o, [leadKey]: false })); }}
+                                                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-500 hover:bg-slate-50"
+                                              >
+                                                ביטול
+                                              </button>
+                                            </div>
+                                          </div>
+                                        );
+                                        const openReassign = (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); setLeadReassignOpen((o) => ({ ...o, [leadKey]: true })); };
+                                        const isReassigning = !!leadReassignOpen[leadKey];
+
+                                        // כבר אושר שזה אותו לקוח — מציגים קישור ישיר + אפשרות "שנה שיוך" (שיוך מחדש).
                                         if (decision && decision !== '__none__') {
                                           const linked = customers.find((c) => c.id === decision) || matched;
                                           if (linked) {
                                             return (
-                                              <div className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                                                <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
-                                                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                                                  מקושר ללקוח קיים: <span className="underline">{linked.name}</span>
+                                              <div className="mb-4">
+                                                <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                                  <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
+                                                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                                    מקושר ללקוח קיים: <span className="underline">{linked.name}</span>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                    <button
+                                                      type="button"
+                                                      onClick={openReassign}
+                                                      className="flex items-center gap-1.5 rounded-lg border border-emerald-400 bg-white px-3 py-2 text-[13px] font-bold text-emerald-700 hover:bg-emerald-100"
+                                                    >
+                                                      <UserPlus className="h-4 w-4" /> שנה שיוך
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); openCustomerCard(linked); }}
+                                                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
+                                                    >
+                                                      <UserCircle2 className="h-4 w-4" /> פתח כרטיס לקוח
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); openCustomerCard(linked); }}
-                                                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
-                                                >
-                                                  <UserCircle2 className="h-4 w-4" /> פתח כרטיס לקוח
-                                                </button>
+                                                {isReassigning && reassignPicker}
                                               </div>
                                             );
                                           }
                                         }
 
-                                        // סומן כליד חדש — לא שואלים שוב.
+                                        // סומן כליד חדש — מציגים סטטוס + אפשרות לשייך ללקוח קיים בכל זאת.
                                         if (decision === '__none__') {
                                           return (
-                                            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
-                                              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                                              <span className="underline">{p.fullName || 'הליד'}</span> מטופל כליד חדש
+                                            <div className="mb-4">
+                                              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                                <div className="text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
+                                                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                                  <span className="underline">{p.fullName || 'הליד'}</span> מטופל כליד חדש
+                                                </div>
+                                                <button
+                                                  type="button"
+                                                  onClick={openReassign}
+                                                  className="flex items-center gap-1.5 rounded-lg border border-amber-400 bg-white px-3 py-2 text-[13px] font-bold text-amber-700 hover:bg-amber-100"
+                                                >
+                                                  <UserPlus className="h-4 w-4" /> שייך ללקוח קיים
+                                                </button>
+                                              </div>
+                                              {isReassigning && reassignPicker}
                                             </div>
                                           );
                                         }
 
-                                        // נמצאה התאמה אך טרם הוכרעה — שואלים פעם אחת בלבד.
+                                        // נמצאה התאמה אך טרם הוכרעה — שואלים פעם אחת בלבד (+ אפשרות לבחור לקוח אחר).
                                         if (matched) {
                                           return (
-                                            <div className="mb-4 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                                              <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
-                                                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                                                נמצא <span className="underline">{matched.name || p.fullName}</span> ברשימת הלקוחות — האם זה אותו אחד?
+                                            <div className="mb-4">
+                                              <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                                <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
+                                                  <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                                  נמצא <span className="underline">{matched.name || p.fullName}</span> ברשימת הלקוחות — האם זה אותו אחד?
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, matched.id); openCustomerCard(matched); }}
+                                                    className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
+                                                  >
+                                                    <UserCircle2 className="h-4 w-4" /> כן, פתח כרטיס לקוח
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={openReassign}
+                                                    className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-[13px] font-bold text-blue-700 hover:bg-blue-50"
+                                                  >
+                                                    לקוח אחר
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, '__none__'); }}
+                                                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50"
+                                                  >
+                                                    לא, ליד חדש
+                                                  </button>
+                                                </div>
                                               </div>
-                                              <div className="flex items-center gap-2">
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, matched.id); openCustomerCard(matched); }}
-                                                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-[13px] font-bold text-white hover:bg-emerald-700"
-                                                >
-                                                  <UserCircle2 className="h-4 w-4" /> כן, פתח כרטיס לקוח
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); recordLeadMatchDecision(leadKey, '__none__'); }}
-                                                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-bold text-slate-600 hover:bg-slate-50"
-                                                >
-                                                  לא, ליד חדש
-                                                </button>
-                                              </div>
+                                              {isReassigning && reassignPicker}
                                             </div>
                                           );
                                         }
                                         return (
-                                          <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
-                                            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                                            <span className="underline">{p.fullName || 'הליד'}</span> לא נמצא כלקוח קיים — אנא התחל תהליך
+                                          <div className="mb-4">
+                                            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                              <div className="text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
+                                                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                                                <span className="underline">{p.fullName || 'הליד'}</span> לא נמצא כלקוח קיים — אנא התחל תהליך
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={openReassign}
+                                                className="flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-2 text-[13px] font-bold text-blue-700 hover:bg-blue-50"
+                                              >
+                                                <UserPlus className="h-4 w-4" /> שייך ללקוח קיים
+                                              </button>
+                                            </div>
+                                            {isReassigning && reassignPicker}
                                           </div>
                                         );
                                       })()}
-                                      {lead.status === 'NEW' && (
-                                        <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3">
-                                          <button
-                                            type="button"
-                                            onClick={() => startLead(lead.id)}
-                                            className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
-                                            style={{ background: '#16a34a' }}
-                                          >
-                                            <CheckCircle2 className="h-4 w-4" /> התחל טיפול בליד
-                                          </button>
-                                          <span className="text-slate-300">|</span>
-                                          <span className="text-sm font-semibold text-slate-600">העבר ל:</span>
-                                          <select
-                                            value={leadTransferSel[lead.id] || ''}
-                                            onChange={(e) => setLeadTransferSel((p) => ({ ...p, [lead.id]: e.target.value }))}
-                                            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
-                                          >
-                                            <option value="">בחר עובד…</option>
-                                            {users.filter((u) => u.id !== currentUser.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                                          </select>
-                                          <button
-                                            type="button"
-                                            disabled={!leadTransferSel[lead.id]}
-                                            onClick={() => transferLead(lead.id, leadTransferSel[lead.id])}
-                                            className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
-                                            style={{ background: '#2563eb' }}
-                                          >
-                                            <UserPlus className="h-4 w-4" /> העבר
-                                          </button>
-                                        </div>
-                                      )}
+                                      {/* פעולות ליד: "התחל טיפול" רק לליד חדש, אך "העבר ל:" נשאר פתוח תמיד. */}
+                                      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3">
+                                        {lead.status === 'NEW' && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => startLead(lead.id)}
+                                              className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+                                              style={{ background: '#16a34a' }}
+                                            >
+                                              <CheckCircle2 className="h-4 w-4" /> התחל טיפול בליד
+                                            </button>
+                                            <span className="text-slate-300">|</span>
+                                          </>
+                                        )}
+                                        <span className="text-sm font-semibold text-slate-600">העבר ל:</span>
+                                        <select
+                                          value={leadTransferSel[lead.id] || ''}
+                                          onChange={(e) => setLeadTransferSel((p) => ({ ...p, [lead.id]: e.target.value }))}
+                                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400"
+                                        >
+                                          <option value="">בחר עובד…</option>
+                                          {users.filter((u) => u.id !== currentUser.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          disabled={!leadTransferSel[lead.id]}
+                                          onClick={() => transferLead(lead.id, leadTransferSel[lead.id])}
+                                          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
+                                          style={{ background: '#2563eb' }}
+                                        >
+                                          <UserPlus className="h-4 w-4" /> העבר
+                                        </button>
+                                      </div>
                                     </div>
                                   );
                                 })()}
@@ -18227,6 +18364,7 @@ function TasksPage({
                                   onAttachmentSaved={() => setTaskAttachments((prev) => { const n = { ...prev }; delete n[t.id]; return n; })}
                                   existingAttachments={taskAttachments[t.id] ?? []}
                                   onDownloadAttachment={(att) => downloadTaskAttachment(t.id, att)}
+                                  onDeleteAttachment={(att) => deleteTaskAttachment(t.id, att)}
                                 />
                               </div>
                             );
@@ -18258,7 +18396,7 @@ function TasksPage({
                             const inviteCustomer = form.inviteCustomer ?? false;
                             const employeeIds = form.employeeIds ?? [];
 
-                            const otherEmployees = users.filter((u) => u.id !== currentUser.id && u.email && u.status !== 'לא פעיל');
+                            const otherEmployees = users.filter((u) => u.email && u.status !== 'לא פעיל' && hasHebrewName(u.name));
                             const busy = !!coordBusy[t.id];
                             const err = coordError[t.id];
                             const result = coordResult[t.id];
@@ -18280,6 +18418,10 @@ function TasksPage({
                               }
                               if (!date || !time) {
                                 setCoordError((p) => ({ ...p, [t.id]: 'יש לבחור תאריך ושעה' }));
+                                return;
+                              }
+                              if (employeeIds.length === 0) {
+                                setCoordError((p) => ({ ...p, [t.id]: 'יש לבחור לפחות עובד אחד לפני יצירת הפגישה' }));
                                 return;
                               }
                               const startLocal = `${date}T${time}:00`;
@@ -18626,13 +18768,16 @@ function TasksPage({
                                 {/* ── כפתור יצירה ── */}
                                 <button
                                   onClick={createMeeting}
-                                  disabled={busy || !coordOutlook.connected}
+                                  disabled={busy || !coordOutlook.connected || employeeIds.length === 0}
                                   className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
                                   style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
                                 >
                                   {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <CalendarPlus className="h-5 w-5" />}
                                   {busy ? 'יוצר פגישה...' : 'צור פגישה ב-Outlook'}
                                 </button>
+                                {employeeIds.length === 0 && (
+                                  <div className="text-[12px] text-slate-400 text-center">יש לבחור לפחות עובד אחד לפני יצירת הפגישה</div>
+                                )}
 
                                 {/* ── מעבר לשלב הבא ── */}
                                 <div>
@@ -18652,7 +18797,6 @@ function TasksPage({
                               <div className="text-xl font-extrabold text-slate-800 mb-1">שליחת הדוח ללקוח</div>
                               <div className="text-sm text-slate-500">צרף את הדוח שהופק ושלח אותו ללקוח במייל — בשליחה המשימה תיסגר אוטומטית.</div>
                             </div>
-                            <ProducedReportsSection customerId={(t.customerId as string | undefined) ?? null} currentUser={currentUser} />
                             <button
                               type="button"
                               onClick={() => setReportModalTaskId(t.id)}
@@ -18710,6 +18854,8 @@ function TasksPage({
                                 }}
                                 currentUser={currentUser}
                                 defaultEmail={((customers.find((c) => c.id === t.customerId) as any)?.email as string | undefined) || t.leadEmail || ''}
+                                isPrivateCustomer={((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
+                                employees={users.filter((u) => u.email).map((u) => ({ id: u.id, name: u.name, email: u.email }))}
                                 onClose={() => setReportModalTaskId(null)}
                                 onSent={async ({ paymentStatus }) => {
                                   setReportModalTaskId(null);
@@ -19433,6 +19579,33 @@ export default function GalitCRMPrototype() {
 
   const quickCreateEmailDuplicateWarning =
     quickCreateDuplicateCustomer || quickCreateDuplicateLead ? 'קיים כבר ליד/לקוח עם אימייל זה' : '';
+
+  const quickCreateNormalizedPhone = useMemo(
+    () => normalizeIsraeliPhoneDigits(quickCreateForm.phone),
+    [quickCreateForm.phone],
+  );
+
+  const quickCreatePhoneMatchCustomer = useMemo(() => {
+    if (!quickCreateNormalizedPhone) return null;
+    return customers.find((c) => normalizeIsraeliPhoneDigits(c.phone || '') === quickCreateNormalizedPhone) || null;
+  }, [customers, quickCreateNormalizedPhone]);
+
+  const quickCreatePhoneMatchLead = useMemo(() => {
+    if (!quickCreateNormalizedPhone) return null;
+    return leads.find((l) => normalizeIsraeliPhoneDigits(l.phone || '') === quickCreateNormalizedPhone) || null;
+  }, [leads, quickCreateNormalizedPhone]);
+
+  const [phoneMatchPromptFor, setPhoneMatchPromptFor] = useState('');
+  const [dismissedPhoneMatch, setDismissedPhoneMatch] = useState('');
+
+  const quickCreatePhoneMatch = quickCreatePhoneMatchCustomer || quickCreatePhoneMatchLead;
+
+  useEffect(() => {
+    if (!quickCreateOpen) return;
+    if (quickCreatePhoneMatch && quickCreateNormalizedPhone !== dismissedPhoneMatch) {
+      setPhoneMatchPromptFor(quickCreateNormalizedPhone);
+    }
+  }, [quickCreateOpen, quickCreatePhoneMatch, quickCreateNormalizedPhone, dismissedPhoneMatch]);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -20240,6 +20413,8 @@ export default function GalitCRMPrototype() {
     });
     setQuickCreateError('');
     setQuickCreateSuccess('');
+    setPhoneMatchPromptFor('');
+    setDismissedPhoneMatch('');
   };
 
   useEffect(() => {
@@ -20934,6 +21109,48 @@ export default function GalitCRMPrototype() {
                 </Button>
               </div>
               <div className="text-xs text-slate-500">שדות חובה: שם מלא, טלפון, סוג שירות, עיר</div>
+            </div>
+          </Modal>
+
+          {/* ── Existing customer/lead found by phone during quick-create ── */}
+          <Modal
+            open={!!phoneMatchPromptFor}
+            onClose={() => {
+              setDismissedPhoneMatch(phoneMatchPromptFor);
+              setPhoneMatchPromptFor('');
+            }}
+            title="מצאנו לקוח קיים"
+            maxWidth="max-w-md"
+          >
+            <div className="space-y-4 text-sm">
+              <div>מצאנו {quickCreatePhoneMatchCustomer ? 'לקוח' : 'ליד'} קיים עם מספר טלפון זהה:</div>
+              <div className="space-y-1 rounded-2xl bg-slate-50 px-4 py-3">
+                <div><span className="text-slate-500">שם: </span>{(quickCreatePhoneMatchCustomer || quickCreatePhoneMatchLead)?.name}</div>
+                <div><span className="text-slate-500">טלפון: </span>{phoneToDisplay((quickCreatePhoneMatchCustomer || quickCreatePhoneMatchLead)?.phone)}</div>
+              </div>
+              <div>תרצה שנתחיל תהליך עם הרשומה הקיימת?</div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <Button
+                  style={{ background: galit.primary }}
+                  onClick={() => {
+                    setPhoneMatchPromptFor('');
+                    setQuickCreateOpen(false);
+                    if (quickCreatePhoneMatchCustomer) openCustomerPage(quickCreatePhoneMatchCustomer);
+                    else if (quickCreatePhoneMatchLead) openLeadPage(quickCreatePhoneMatchLead);
+                  }}
+                >
+                  כן, פתח את הרשומה הקיימת
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDismissedPhoneMatch(phoneMatchPromptFor);
+                    setPhoneMatchPromptFor('');
+                  }}
+                >
+                  לא, המשך ליצור פנייה חדשה
+                </Button>
+              </div>
             </div>
           </Modal>
 

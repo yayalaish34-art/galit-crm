@@ -10,6 +10,20 @@ const assistant = Assistant({
   display: 'swap',
 });
 
+export const metadata = {
+  title: 'גלית CRM',
+  description: 'מערכת CRM לחברת גלית',
+  manifest: '/manifest.json',
+  icons: {
+    icon: [{ url: '/icon.png', type: 'image/png' }],
+    apple: [{ url: '/apple-icon.png', type: 'image/png' }],
+  },
+};
+
+export const viewport = {
+  themeColor: '#5a9c2e',
+};
+
 export default function RootLayout({
   children,
 }: {
