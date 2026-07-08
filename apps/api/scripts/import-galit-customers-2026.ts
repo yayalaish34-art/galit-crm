@@ -26,9 +26,47 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { randomUUID } from 'crypto';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = new PrismaPg(pool);
-const prisma = new PrismaClient({ adapter });
+// The Supabase pooler drops long-lived connections mid-run. Rather than retry on a DEAD pool,
+// we keep a mutable client and REBUILD pool+client on a transient failure, then retry.
+let pool: Pool;
+let prisma: PrismaClient;
+function buildClient() {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    keepAlive: true,
+    connectionTimeoutMillis: 20000,
+    idleTimeoutMillis: 10000,
+    max: 3,
+  });
+  pool.on('error', (e) => console.warn('[galit-import] pool error (will rebuild):', e.message));
+  prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+}
+buildClient();
+
+async function rebuildClient() {
+  try { await prisma.$disconnect(); } catch { /* ignore */ }
+  try { await pool.end(); } catch { /* ignore */ }
+  buildClient();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Retry a DB op on transient connection errors; rebuild the (dead) pool before retrying. */
+async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 6): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      const transient = /Connection terminated|timeout|ECONNRESET|socket|terminating connection|Closed|not queryable|server closed|Can't reach|pool/i.test(msg);
+      if (!transient || i === attempts) throw e;
+      await sleep(Math.min(400 * 2 ** (i - 1), 5000)); // backoff
+      await rebuildClient(); // fresh pool+client so the next attempt isn't on a dead socket
+    }
+  }
+  throw lastErr;
+}
 
 // ── args ──────────────────────────────────────────────────────────────────
 type Args = { file: string; dryRun: boolean; limit: number | null; minYear: number };
@@ -281,11 +319,11 @@ async function main() {
 
   // ensure classifications
   for (const c of STANDARD_CLASSIFICATIONS) {
-    await prisma.customerClassification.upsert({
+    await withRetry(() => prisma.customerClassification.upsert({
       where: { code: c.code },
       create: { id: randomUUID(), code: c.code, labelHe: c.labelHe, sortOrder: c.sortOrder, isPreset: false },
       update: {},
-    });
+    }), `classification ${c.code}`);
   }
 
   // 3) write
@@ -330,7 +368,10 @@ async function main() {
     };
 
     try {
-      const existing = await prisma.customer.findFirst({ where: { importLegacyId: g.legacyId }, select: { id: true } });
+      const existing = await withRetry(
+        () => prisma.customer.findFirst({ where: { importLegacyId: g.legacyId }, select: { id: true } }),
+        `find ${g.legacyId}`,
+      );
       let customerId: string;
       if (existing) {
         const { importLegacyId: _il, ...upd } = data as Record<string, unknown>;
@@ -338,11 +379,14 @@ async function main() {
         if (upd.phone === '-') delete upd.phone;
         if (upd.city === '-') delete upd.city;
         if (typeof upd.email === 'string' && (upd.email as string).endsWith('@legacy.import.local')) delete upd.email;
-        await prisma.customer.update({ where: { id: existing.id }, data: upd as Prisma.CustomerUpdateInput });
+        await withRetry(
+          () => prisma.customer.update({ where: { id: existing.id }, data: upd as Prisma.CustomerUpdateInput }),
+          `update ${g.legacyId}`,
+        );
         customerId = existing.id;
         updated++;
       } else {
-        const c = await prisma.customer.create({ data });
+        const c = await withRetry(() => prisma.customer.create({ data }), `create ${g.legacyId}`);
         customerId = c.id;
         created++;
       }
@@ -353,7 +397,7 @@ async function main() {
         const hasReal = !!(r.cName || r.cPhone || r.cMobile || r.cEmail);
         if (!hasReal && p.isPrivate) continue; // private with no separate contact — the customer IS the person
         const legacy = `${g.legacyId}-c-${shortHash([fullName, r.cPhone || '', r.cMobile || '', (r.cEmail || '').toLowerCase(), r.cRole || ''].join('|'))}`;
-        await prisma.customerContact.upsert({
+        await withRetry(() => prisma.customerContact.upsert({
           where: { customerId_importLegacyId: { customerId, importLegacyId: legacy } },
           create: {
             customerId, importLegacyId: legacy,
@@ -370,7 +414,7 @@ async function main() {
             roleTitle: r.cRole ?? undefined, department: r.cDept ?? undefined,
             notes: r.cTitle ?? undefined,
           },
-        });
+        }), `contact ${legacy}`);
         contactsUp++;
       }
     } catch (e) {

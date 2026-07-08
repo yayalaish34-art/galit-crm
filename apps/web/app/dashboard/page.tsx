@@ -19840,6 +19840,50 @@ export default function GalitCRMPrototype() {
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
   const [pendingPrefillName, setPendingPrefillName] = useState<string | null>(null);
+
+  /* ── Deep-link למשימה: ?taskid=<id> ב-URL ──
+   * קריאה בטעינה: אם ה-URL כולל taskid — פותחים את המשימה במסך הדשבורד.
+   * כתיבה: כשמשימה נפתחת/נסגרת בדשבורד — מעדכנים את ה-URL (replaceState, בלי ניווט).
+   */
+  const deepLinkReadRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkReadRef.current) return;
+    deepLinkReadRef.current = true;
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tid = params.get('taskid');
+      if (tid) {
+        setCurrent('dashboard');
+        setView('dashboard');
+        setPendingExpandTaskId(tid);
+      }
+    } catch {
+      /* ignore malformed URL */
+    }
+  }, []);
+
+  // סנכרון ה-URL עם המשימה הפתוחה (רק בדשבורד). לא מוסיף היסטוריה — replaceState.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!deepLinkReadRef.current) return; // אחרי הקריאה הראשונית בלבד
+    try {
+      const url = new URL(window.location.href);
+      const onDashboard = current === 'dashboard';
+      if (onDashboard && parentExpandedTaskId) {
+        if (url.searchParams.get('taskid') !== parentExpandedTaskId) {
+          url.searchParams.set('taskid', parentExpandedTaskId);
+          window.history.replaceState(window.history.state, '', url.toString());
+        }
+      } else if (url.searchParams.has('taskid')) {
+        // אין משימה פתוחה (או שיצאנו מהדשבורד) — מנקים את הפרמטר.
+        url.searchParams.delete('taskid');
+        window.history.replaceState(window.history.state, '', url.toString());
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [parentExpandedTaskId, current]);
   const [newlyCreatedTaskId, setNewlyCreatedTaskId] = useState<string | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
