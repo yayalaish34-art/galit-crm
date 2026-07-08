@@ -19845,7 +19845,10 @@ export default function GalitCRMPrototype() {
    * קריאה בטעינה: אם ה-URL כולל taskid — פותחים את המשימה במסך הדשבורד.
    * כתיבה: כשמשימה נפתחת/נסגרת בדשבורד — מעדכנים את ה-URL (replaceState, בלי ניווט).
    */
+  //  שים לב: רשימת המשימות הניתנות לפתיחה נמצאת ב-current === 'tasks' (TasksPage), לא ב-'dashboard'
+  //  (שהוא מסך סיכום). לכן deep-link מנווט ל-'tasks' ופותח שם את המשימה.
   const deepLinkReadRef = useRef(false);
+  const [deepLinkTaskId, setDeepLinkTaskId] = useState<string | null>(null);
   useEffect(() => {
     if (deepLinkReadRef.current) return;
     deepLinkReadRef.current = true;
@@ -19854,8 +19857,9 @@ export default function GalitCRMPrototype() {
       const params = new URLSearchParams(window.location.search);
       const tid = params.get('taskid');
       if (tid) {
-        setCurrent('dashboard');
-        setView('dashboard');
+        setDeepLinkTaskId(tid);   // נזכור שיש deep-link ממתין — עד שהמשימה נפתחת
+        setCurrent('tasks');      // רשימת המשימות (עם השורות הנפתחות) היא כאן
+        setView('tasks');
         setPendingExpandTaskId(tid);
       }
     } catch {
@@ -19863,13 +19867,15 @@ export default function GalitCRMPrototype() {
     }
   }, []);
 
-  // סנכרון ה-URL עם המשימה הפתוחה (רק בדשבורד). לא מוסיף היסטוריה — replaceState.
+  // סנכרון ה-URL עם המשימה הפתוחה. המשימות נפתחות במסך הרשימה (current === 'tasks'),
+  // ולפעמים נשארות פתוחות גם בסיכום ('dashboard'). לא מוסיף היסטוריה — replaceState.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!deepLinkReadRef.current) return; // אחרי הקריאה הראשונית בלבד
     try {
       const url = new URL(window.location.href);
-      const onDashboard = current === 'dashboard';
+      // הקשרים שבהם משימה יכולה להיות פתוחה/נטענת (לא מסכי כרטיס לקוח/ליד/פרויקט).
+      const taskContext = current === 'tasks' || current === 'dashboard';
       const setParam = (id: string) => {
         if (url.searchParams.get('taskid') !== id) {
           url.searchParams.set('taskid', id);
@@ -19883,16 +19889,15 @@ export default function GalitCRMPrototype() {
         }
       };
 
-      if (!onDashboard) {
-        // יצאנו מהדשבורד — מנקים תמיד.
+      if (!taskContext) {
+        // עברנו למסך אחר (כרטיס לקוח/ליד/פרויקט וכו') — מנקים.
         clearParam();
       } else if (parentExpandedTaskId) {
-        // משימה פתוחה בדשבורד — משקפים אותה ב-URL.
+        // משימה פתוחה — משקפים אותה ב-URL.
         setParam(parentExpandedTaskId);
-      } else if (pendingExpandTaskId) {
-        // deep-link ממתין להיפתח (המשימות עדיין נטענות) — משאירים/כותבים את הפרמטר,
-        // כדי לא לרוקן את ה-URL לפני שהמשימה בכלל נפתחה.
-        setParam(pendingExpandTaskId);
+      } else if (pendingExpandTaskId || deepLinkTaskId) {
+        // deep-link ממתין להיפתח (המשימות עדיין נטענות) — שומרים את הפרמטר.
+        setParam((pendingExpandTaskId || deepLinkTaskId) as string);
       } else {
         // אין משימה פתוחה ואין המתנה — מנקים.
         clearParam();
@@ -19900,7 +19905,14 @@ export default function GalitCRMPrototype() {
     } catch {
       /* ignore */
     }
-  }, [parentExpandedTaskId, current, pendingExpandTaskId]);
+  }, [parentExpandedTaskId, current, pendingExpandTaskId, deepLinkTaskId]);
+
+  // כשהמשימה נפתחה בפועל (parentExpandedTaskId נקבע) — ה-deep-link הושלם, מנקים את הזיכרון.
+  useEffect(() => {
+    if (deepLinkTaskId && parentExpandedTaskId === deepLinkTaskId) {
+      setDeepLinkTaskId(null);
+    }
+  }, [parentExpandedTaskId, deepLinkTaskId]);
   const [newlyCreatedTaskId, setNewlyCreatedTaskId] = useState<string | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
