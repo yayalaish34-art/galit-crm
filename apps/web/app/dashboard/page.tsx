@@ -19870,20 +19870,37 @@ export default function GalitCRMPrototype() {
     try {
       const url = new URL(window.location.href);
       const onDashboard = current === 'dashboard';
-      if (onDashboard && parentExpandedTaskId) {
-        if (url.searchParams.get('taskid') !== parentExpandedTaskId) {
-          url.searchParams.set('taskid', parentExpandedTaskId);
+      const setParam = (id: string) => {
+        if (url.searchParams.get('taskid') !== id) {
+          url.searchParams.set('taskid', id);
           window.history.replaceState(window.history.state, '', url.toString());
         }
-      } else if (url.searchParams.has('taskid')) {
-        // אין משימה פתוחה (או שיצאנו מהדשבורד) — מנקים את הפרמטר.
-        url.searchParams.delete('taskid');
-        window.history.replaceState(window.history.state, '', url.toString());
+      };
+      const clearParam = () => {
+        if (url.searchParams.has('taskid')) {
+          url.searchParams.delete('taskid');
+          window.history.replaceState(window.history.state, '', url.toString());
+        }
+      };
+
+      if (!onDashboard) {
+        // יצאנו מהדשבורד — מנקים תמיד.
+        clearParam();
+      } else if (parentExpandedTaskId) {
+        // משימה פתוחה בדשבורד — משקפים אותה ב-URL.
+        setParam(parentExpandedTaskId);
+      } else if (pendingExpandTaskId) {
+        // deep-link ממתין להיפתח (המשימות עדיין נטענות) — משאירים/כותבים את הפרמטר,
+        // כדי לא לרוקן את ה-URL לפני שהמשימה בכלל נפתחה.
+        setParam(pendingExpandTaskId);
+      } else {
+        // אין משימה פתוחה ואין המתנה — מנקים.
+        clearParam();
       }
     } catch {
       /* ignore */
     }
-  }, [parentExpandedTaskId, current]);
+  }, [parentExpandedTaskId, current, pendingExpandTaskId]);
   const [newlyCreatedTaskId, setNewlyCreatedTaskId] = useState<string | null>(null);
   const [quickCreateBusy, setQuickCreateBusy] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState('');
