@@ -155,6 +155,7 @@ type CustomerClassificationDto = {
 };
 
 const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
+  POTENTIAL: 'לקוח פוטנציאלי',
   COMPANY: 'חברה / קבלן',
   PUBLIC: 'רשות / מוסד',
   PRIVATE: 'לקוח פרטי',
@@ -952,7 +953,7 @@ function phoneToTelHref(phone?: string | null) {
 function phoneToWhatsAppHref(phone?: string | null) {
   const digits = normalizeIsraeliPhoneDigits(phone || '');
   if (!digits) return null;
-  // web.whatsapp.com/send — נפתח ישירות ב-WhatsApp Web (דסקטופ), לא בדף הביניים של wa.me.
+  // wa.me — מעביר לאפליקציית WhatsApp Desktop הקיימת בלי לטעון WhatsApp Web מחדש בטאב חדש.
   return whatsAppLink(digits);
 }
 
@@ -2177,10 +2178,12 @@ function LeadProfile({
 
   const customerTypeLabel = (type: string) => {
     const map: Record<string, string> = {
+      POTENTIAL: 'לקוח פוטנציאלי',
       COMPANY: 'חברה / קבלן',
       PUBLIC: 'רשות / מוסד',
       PRIVATE: 'לקוח פרטי',
       SUPPLIER: 'ספק',
+      'לקוח פוטנציאלי': 'לקוח פוטנציאלי',
       'חברה / קבלן': 'חברה / קבלן',
       'רשות / מוסד': 'רשות / מוסד',
       'לקוח פרטי': 'לקוח פרטי',
@@ -6631,6 +6634,10 @@ function CitySearchInput({
     return cityList.filter((c) => c.includes(q)).slice(0, 28);
   }, [value, cityList]);
 
+  // עיר שהוקלדה ידנית ואינה ברשימה — מאפשרים להוסיף אותה כמו שהיא (יש ערים שלא ברשימה).
+  const trimmed = value.trim();
+  const showAddManual = trimmed.length > 0 && !cityList.some((c) => c === trimmed);
+
   const cancelBlur = () => {
     if (blurTimer.current) {
       clearTimeout(blurTimer.current);
@@ -6658,11 +6665,28 @@ function CitySearchInput({
         }}
       />
       {icon}
-      {open && filtered.length > 0 && (
+      {open && (filtered.length > 0 || showAddManual) && (
         <ul
           className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-2xl border border-slate-200 bg-white py-1 shadow-lg"
           role="listbox"
         >
+          {showAddManual && (
+            <li>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-right text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  cancelBlur();
+                  onChange(trimmed);
+                  setOpen(false);
+                }}
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                <span>הוסף עיר: &laquo;{trimmed}&raquo;</span>
+              </button>
+            </li>
+          )}
           {filtered.map((c) => (
             <li key={c}>
               <button
@@ -6891,7 +6915,7 @@ function CustomersPage({
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
-    type: 'COMPANY',
+    type: 'POTENTIAL',
     contactName: '',
     phone: '',
     email: '',
@@ -6919,6 +6943,7 @@ function CustomersPage({
 
   const normalizeCustomerTypeEnum = (type: string) => {
     const t = (type || '').trim();
+    if (t === 'POTENTIAL' || t === 'לקוח פוטנציאלי') return 'POTENTIAL';
     if (t === 'COMPANY' || t === 'חברה / קבלן') return 'COMPANY';
     if (t === 'PUBLIC' || t === 'רשות / מוסד') return 'PUBLIC';
     if (t === 'PRIVATE' || t === 'לקוח פרטי') return 'PRIVATE';
@@ -6931,14 +6956,19 @@ function CustomersPage({
       classifications.length > 0
         ? classifications
         : [
+            { id: 'preset-potential', code: 'POTENTIAL', labelHe: 'לקוח פוטנציאלי', sortOrder: -1, isPreset: true },
             { id: 'preset-company', code: 'COMPANY', labelHe: 'חברה / קבלן', sortOrder: 0, isPreset: true },
             { id: 'preset-public', code: 'PUBLIC', labelHe: 'רשות / מוסד', sortOrder: 1, isPreset: true },
             { id: 'preset-private', code: 'PRIVATE', labelHe: 'לקוח פרטי', sortOrder: 2, isPreset: true },
           ];
-    // ודא שסיווג "ספק" תמיד זמין — מתנהג כמו חברה / מוסד (דורש איש קשר), לא כמו לקוח פרטי.
-    const withSupplier = raw.some((c: any) => c.code === 'SUPPLIER')
+    // ודא שסיווג "לקוח פוטנציאלי" תמיד זמין (ברירת המחדל) — מתנהג כמו לקוח פרטי.
+    const withPotential = raw.some((c: any) => c.code === 'POTENTIAL')
       ? raw
-      : [...raw, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3, isPreset: true }];
+      : [{ id: 'preset-potential', code: 'POTENTIAL', labelHe: 'לקוח פוטנציאלי', sortOrder: -1, isPreset: true }, ...raw];
+    // ודא שסיווג "ספק" תמיד זמין — מתנהג כמו חברה / מוסד (דורש איש קשר), לא כמו לקוח פרטי.
+    const withSupplier = withPotential.some((c: any) => c.code === 'SUPPLIER')
+      ? withPotential
+      : [...withPotential, { id: 'preset-supplier', code: 'SUPPLIER', labelHe: 'ספק', sortOrder: 3, isPreset: true }];
     return [...withSupplier].sort(
       (a, b) => a.sortOrder - b.sortOrder || a.labelHe.localeCompare(b.labelHe, 'he'),
     );
@@ -6969,6 +6999,7 @@ function CustomersPage({
   };
 
   const typeFilterToEnum = (label: string) => {
+    if (label === 'לקוח פוטנציאלי') return 'POTENTIAL';
     if (label === 'חברה / קבלן') return 'COMPANY';
     if (label === 'רשות / מוסד') return 'PUBLIC';
     if (label === 'לקוח פרטי') return 'PRIVATE';
@@ -7140,7 +7171,7 @@ function CustomersPage({
       setEditingCustomerId(null);
       setForm({
         name: '',
-        type: 'COMPANY',
+        type: 'POTENTIAL',
         contactName: '',
         phone: '',
         email: '',
@@ -7223,7 +7254,7 @@ function CustomersPage({
     setEditingCustomerId(null);
     setForm({
       name: computedName,
-      type: 'COMPANY',
+      type: 'POTENTIAL',
       contactName: '',
       phone: '',
       email: '',
@@ -14173,6 +14204,13 @@ function TasksPage({
     } catch { /* ignore */ } finally { setCoordOutlookBusy(false); }
   }, [currentUser]);
 
+  // קובץ מצורף לפגישה — נשמר כ-base64 (נשלח ב-fileAttachment ל-Graph)
+  type CoordAttachment = {
+    fileName: string;
+    mimeType: string;
+    contentBase64: string;
+    sizeBytes: number;
+  };
   // טופס פגישה לכל משימה (נשמר לפי taskId; ערכי ברירת מחדל מחושבים בזמן הרינדור)
   type CoordMeetingForm = {
     subject: string;
@@ -14184,6 +14222,7 @@ function TasksPage({
     isOnline: boolean;
     inviteCustomer: boolean;
     employeeIds: string[]; // עובדים נוספים שיוזמנו כמשתתפים
+    attachments: CoordAttachment[]; // קבצים לצירוף לפגישה (אופציונלי)
   };
   const [coordForms, setCoordForms] = useState<Record<string, Partial<CoordMeetingForm>>>({});
   const [coordDurationManual, setCoordDurationManual] = useState<Record<string, boolean>>({});
@@ -14198,6 +14237,84 @@ function TasksPage({
     const next = current.includes(empId) ? current.filter((id) => id !== empId) : [...current, empId];
     setCoordForms((prev) => ({ ...prev, [taskId]: { ...prev[taskId], employeeIds: next } }));
   }, []);
+
+  // ── קבצים מצורפים לפגישה ── (אופציונלי; מגבלת ~3MB לכלל הקבצים בגלל צירוף inline ל-Graph)
+  const COORD_ATTACH_MAX_TOTAL = 3 * 1024 * 1024;
+  const addCoordAttachments = useCallback(async (taskId: string, files: FileList | File[]) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    const read = (file: File) =>
+      new Promise<CoordAttachment>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => {
+          const s = String(fr.result);
+          resolve({
+            fileName: file.name,
+            mimeType: file.type || 'application/octet-stream',
+            contentBase64: s.includes(',') ? s.split(',')[1] : s,
+            sizeBytes: file.size,
+          });
+        };
+        fr.onerror = () => reject(new Error('read failed'));
+        fr.readAsDataURL(file);
+      });
+    try {
+      const parsed = await Promise.all(list.map(read));
+      setCoordForms((prev) => {
+        const existing = prev[taskId]?.attachments ?? [];
+        // מניעת כפילויות לפי שם + גודל
+        const merged = [...existing];
+        for (const a of parsed) {
+          if (!merged.some((x) => x.fileName === a.fileName && x.sizeBytes === a.sizeBytes)) merged.push(a);
+        }
+        const total = merged.reduce((s, a) => s + a.sizeBytes, 0);
+        if (total > COORD_ATTACH_MAX_TOTAL) {
+          setCoordError((e) => ({ ...e, [taskId]: 'סך הקבצים המצורפים חורג מ-3MB — הסירו/צרפו קבצים קטנים יותר' }));
+          return prev;
+        }
+        setCoordError((e) => ({ ...e, [taskId]: '' }));
+        return { ...prev, [taskId]: { ...prev[taskId], attachments: merged } };
+      });
+    } catch {
+      setCoordError((e) => ({ ...e, [taskId]: 'צירוף הקובץ נכשל' }));
+    }
+  }, [COORD_ATTACH_MAX_TOTAL]);
+  const removeCoordAttachment = useCallback((taskId: string, fileName: string, sizeBytes: number) => {
+    setCoordForms((prev) => ({
+      ...prev,
+      [taskId]: {
+        ...prev[taskId],
+        attachments: (prev[taskId]?.attachments ?? []).filter((a) => !(a.fileName === fileName && a.sizeBytes === sizeBytes)),
+      },
+    }));
+  }, []);
+
+  // ── ניסוח כותרת הפגישה דרך ה-GPT API (שלב התיאום) ──
+  //  coordTitleBusy: מזהה שהניסוח בעבודה; coordTitleDraftedRef: כדי לנסח פעם אחת אוטומטית לכל משימה
+  //  (ref ולא state — כדי לא לקרוא ל-setState בזמן רינדור).
+  const [coordTitleBusy, setCoordTitleBusy] = useState<Record<string, boolean>>({});
+  const coordTitleDraftedRef = useRef<Record<string, boolean>>({});
+  const draftMeetingTitle = useCallback(
+    async (taskId: string, details: { customerName?: string; serviceName?: string; city?: string; address?: string; location?: string }) => {
+      setCoordTitleBusy((p) => ({ ...p, [taskId]: true }));
+      try {
+        const r = await apiFetch(apiUrl('/ai-mail/meeting-title'), {
+          method: 'POST',
+          authUser: currentUser,
+          body: JSON.stringify(details),
+        });
+        if (r.ok) {
+          const d = await r.json();
+          if (d?.title) setCoordForms((prev) => ({ ...prev, [taskId]: { ...prev[taskId], subject: d.title } }));
+        }
+      } catch {
+        /* silent — נשארים על הכותרת הגנרית */
+      } finally {
+        setCoordTitleBusy((p) => ({ ...p, [taskId]: false }));
+      }
+    },
+    [currentUser],
+  );
 
   /* Scroll expanded row to the top of the viewport (just under the sticky header) — fires on mount,
      on every expansion change, and again when arriving here with a pending expand (so it re-positions
@@ -14306,6 +14423,8 @@ function TasksPage({
   const [followupManualOpen, setFollowupManualOpen] = useState<Record<string, boolean>>({});
   const [followupManualValue, setFollowupManualValue] = useState<Record<string, string>>({});
   const [copiedPhrase, setCopiedPhrase] = useState<string | null>(null);
+  /** מזהה המשימה שעבורה נפתחה אזהרת "לא ביצעת מעקב" בסגירת שלב הצעת המחיר (null = סגור). */
+  const [quoteCloseWarnTaskId, setQuoteCloseWarnTaskId] = useState<string | null>(null);
   /**
    * משימות שנקבע להן מעקב בשלב "הצעת מחיר" וממתינות לקידום לשלב "פולואפ".
    * הקידום בפועל מתבצע רק כשעוזבים את המשימה (סגירה/מעבר) — כדי לא לקטוע עריכת ההצעה.
@@ -14362,6 +14481,10 @@ function TasksPage({
   const transferTaskToEmployee = async (taskId: string, newOwnerId: string) => {
     setFollowupBusy((p) => ({ ...p, [taskId]: true }));
     try {
+      // חובה: לשמור/ליצור את הלקוח ולקשר אותו למשימה לפני ההעברה, אחרת העובד החדש
+      // יקבל משימה בלי פרטי לקוח (הפרטים שהוזנו בטופס השיחה עדיין לא נשמרו למסד).
+      const taskForSave = tasks.find((t) => t.id === taskId);
+      if (taskForSave) await saveCustomerForTask(taskForSave);
       await apiFetch(apiUrl(`/tasks/${taskId}`), {
         method: 'PATCH',
         authUser: currentUser,
@@ -14377,13 +14500,15 @@ function TasksPage({
   const shareTaskWithEmployee = async (task: Task, newOwnerId: string) => {
     setFollowupBusy((p) => ({ ...p, [task.id]: true }));
     try {
+      // ודא שהלקוח נשמר/נוצר לפני יצירת עותק המשימה — אחרת המשימה המשותפת תיווצר בלי לקוח.
+      const savedCustomerId = (await saveCustomerForTask(task)) || task.customerId || undefined;
       await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
         authUser: currentUser,
         body: JSON.stringify({
           title: task.title,
           ownerId: newOwnerId,
-          customerId: task.customerId || undefined,
+          customerId: savedCustomerId,
           leadId: task.leadId || undefined,
           priority: task.priority || 'MEDIUM',
           status: 'OPEN',
@@ -15540,9 +15665,50 @@ function TasksPage({
    * Safe to call from any coach action: silently no-ops when there's nothing to
    * save. Used so that clicking דחייה/העברה while still on שלב כרטיס לקוח still
    * creates the real Customer record (→ shows up under "10 לקוחות אחרונים"). */
+  /**
+   * שומר את אנשי הקשר שהוזנו בצינור (taskContactsMap) על הלקוח, עם הגנה מפני כפילויות.
+   * דרוש כי אחרת פרטי איש הקשר חיים רק בזיכרון הדפדפן של העובד המקורי — וכשמעבירים
+   * את המשימה לעובד אחר, הצעת המחיר שלו טוענת רשימת אנשי קשר ריקה.
+   * מזהה כפילות לפי שם+טלפון (case/space-insensitive) מול אנשי הקשר הקיימים במסד.
+   */
+  const persistTaskContactsToCustomer = async (taskId: string, customerId: string) => {
+    const local = (taskContactsMap[taskId] || []).filter(
+      (c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim(),
+    );
+    if (local.length === 0) return;
+    const norm = (s: string | null | undefined) => (s || '').toString().trim().toLowerCase().replace(/[\s-]/g, '');
+    const key = (name: string | null | undefined, phone: string | null | undefined) => `${norm(name)}|${norm(phone)}`;
+    let existing: Array<{ fullName?: string; phone?: string; mobile?: string }> = [];
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customerId}/contacts`), { authUser: currentUser });
+      if (res.ok) existing = await res.json();
+    } catch { /* treat as empty */ }
+    const seen = new Set(existing.map((c) => key(c.fullName, c.phone || c.mobile)));
+    for (const c of local) {
+      const k = key(c.fullName, c.phone);
+      if (seen.has(k)) continue; // כבר קיים — לא מכפילים
+      seen.add(k);
+      await apiFetch(apiUrl(`/customers/${customerId}/contacts`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          fullName: c.fullName,
+          phone: c.phone,
+          email: c.email,
+          roleTitle: c.roleTitle,
+          isPrimary: c.isPrimary,
+        }),
+      }).catch(() => {});
+    }
+  };
+
   const saveCustomerForTask = async (task: Task): Promise<string | null> => {
     if (!task) return null;
-    if (task.customerId) return task.customerId; // already a real customer
+    if (task.customerId) {
+      // לקוח כבר קיים — ודא שאנשי הקשר שהוזנו בצינור נשמרים למסד לפני העברה/יצירת הצעה.
+      await persistTaskContactsToCustomer(task.id, task.customerId);
+      return task.customerId;
+    }
     const fd = callFormData[task.id];
     if (!fd) return null; // form never opened → nothing entered to save
     const fullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
@@ -15578,14 +15744,7 @@ function TasksPage({
       if (!customerRes.ok) return null;
       const createdCustomer = await customerRes.json();
       if (!isPrivate) {
-        for (const c of (taskContactsMap[task.id] || [])) {
-          if (!c.fullName?.trim() && !c.phone?.trim() && !c.email?.trim()) continue;
-          await apiFetch(apiUrl(`/customers/${createdCustomer.id}/contacts`), {
-            method: 'POST',
-            authUser: currentUser,
-            body: JSON.stringify({ fullName: c.fullName, phone: c.phone, email: c.email, roleTitle: c.roleTitle, isPrimary: c.isPrimary }),
-          }).catch(() => {});
-        }
+        await persistTaskContactsToCustomer(task.id, createdCustomer.id);
       }
       if (task.leadId) {
         await apiFetch(apiUrl(`/leads/${task.leadId}`), {
@@ -16354,6 +16513,11 @@ function TasksPage({
                               <button
                                 type="button"
                                 onClick={() => {
+                                  // בשלב הצעת המחיר, אם לא נקבע מעקב למשימה — מזהירים לפני הסגירה.
+                                  if (currentStep === QUOTE_STEP_IDX && !followupPendingAdvance[t.id]) {
+                                    setQuoteCloseWarnTaskId(t.id);
+                                    return;
+                                  }
                                   // סגירת הפאנל בלבד — המשימה מסומנת DONE רק כששולחים את הדוח במייל (שלב הביצוע).
                                   setExpandedTaskId(null);
                                 }}
@@ -16456,7 +16620,7 @@ function TasksPage({
 
                             {/* RIGHT SIDEBAR: פרטי לקוח */}
                             <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 248, direction: 'rtl', padding: 12 }}>
-                              <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {(() => {
                                   type SidebarField = { icon: React.ElementType; label: string; value: string | null | undefined };
@@ -16507,8 +16671,8 @@ function TasksPage({
                                       <div key={f.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
                                         <FIcon style={{ width: 13, height: 13, color: '#94a3b8', flexShrink: 0, marginTop: 1 }} />
                                         <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontSize: 8, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{f.label}</div>
-                                          <div style={{ fontSize: 11, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.value}</div>
+                                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{f.label}</div>
+                                          <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.value}</div>
                                         </div>
                                       </div>
                                     );
@@ -16696,7 +16860,7 @@ function TasksPage({
                           {currentStep === 0 ? (() => {
                             /* ── כרטיס לקוח stage — customer card intake / review ── */
                             const linkedLead = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
-                            const ccSourceMap: Record<string, string> = { facebook: 'פייסבוק', google: 'גוגל', website: 'אתר', whatsapp: 'WhatsApp', phone: 'טלפון נכנס', referral: 'המלצה', returning: 'לקוח חוזר', partner: 'שותף / קבלן' };
+                            const ccSourceMap: Record<string, string> = { facebook: 'פייסבוק', google: 'גוגל', website: 'אתר אינטרנט', whatsapp: 'WhatsApp', phone: 'טלפון נכנס', referral: 'המלצה', returning: 'לקוח חוזר', partner: 'שותף / קבלן' };
                             const ccSourceRaw = linkedLead?.source || '';
                             const ccSourceDisplay = ccSourceMap[ccSourceRaw.toLowerCase()] || ccSourceRaw || 'לא צוין';
                             const linkedCustomerForCard = t.customerId ? customers.find((c) => c.id === t.customerId) : null;
@@ -17448,7 +17612,7 @@ function TasksPage({
                             /* ── התאמת הפתרון stage — custom inquiry view ── */
                             const linkedLead = t.leadId ? leads.find((l) => l.id === t.leadId) : null;
                             const sourceRaw = linkedLead?.source || '';
-                            const sourceMap: Record<string, string> = { facebook: 'פייסבוק', google: 'גוגל', website: 'אתר', whatsapp: 'WhatsApp', phone: 'טלפון נכנס', referral: 'המלצה', returning: 'לקוח חוזר', partner: 'שותף / קבלן' };
+                            const sourceMap: Record<string, string> = { facebook: 'פייסבוק', google: 'גוגל', website: 'אתר אינטרנט', whatsapp: 'WhatsApp', phone: 'טלפון נכנס', referral: 'המלצה', returning: 'לקוח חוזר', partner: 'שותף / קבלן' };
                             const sourceDisplay = sourceMap[sourceRaw.toLowerCase()] || sourceRaw || 'לא צוין';
                             const serviceRaw = linkedLead?.service || linkedLead?.serviceType || t.projectName || taskTypeLabel(t.type || 'GENERAL');
                             const cityDisplay = linkedLead?.city || '';
@@ -18019,6 +18183,15 @@ function TasksPage({
                             const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
                               <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
+                                {/* ── באנר שם + טלפון (הועבר לכאן משלב הצעת המחיר) ── */}
+                                {(followupCustomerName || fu3Phone) && (
+                                  <div className="rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-3">
+                                    {followupCustomerName && <div className="text-2xl font-extrabold text-blue-900 leading-tight">{followupCustomerName}</div>}
+                                    {fu3Phone && (
+                                      <a href={`tel:${fu3Phone}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3Phone}</a>
+                                    )}
+                                  </div>
+                                )}
                                 {/* ── כותרת פולואפ + טיימר + פעולות יצירת קשר ── */}
                                 <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
                                   <div className="flex flex-wrap items-start justify-between gap-4">
@@ -18372,6 +18545,42 @@ function TasksPage({
                             /* ── תיאום stage — יצירת פגישה ביומן Outlook + הזמנת עובדים/לקוח ── */
                             const lead = linkedLeadForHeader;
                             const customerLabel = contactName || t.customerName || t.leadName || 'הלקוח';
+                            // כותרת הפגישה מבוססת על השירות (למשל "בדיקת ראדון — שם לקוח"), לא טקסט גנרי.
+                            // ממפים את קוד/שם השירות לעברית; אם אין שירות — נופלים לכותרת הגנרית.
+                            const coordServiceRaw = String((t as any).serviceType || (t as any).service || lead?.serviceType || lead?.service || '').trim();
+                            const coordServiceMap: Record<string, string> = {
+                              RADON: 'ראדון', ASBESTOS: 'אסבסט', RADIATION: 'קרינה', AIR_QUALITY: 'איכות אוויר',
+                              ACOUSTICS: 'אקוסטיקה / רעש', NOISE: 'אקוסטיקה / רעש', ODOR: 'ריח', SOIL: 'קרקע',
+                              LAB: 'מעבדה', GREEN_BUILDING: 'בנייה ירוקה',
+                            };
+                            const coordServiceLabel = coordServiceRaw
+                              ? (coordServiceMap[coordServiceRaw.toUpperCase()] || coordServiceRaw)
+                              : '';
+                            const meetingTitle = coordServiceLabel
+                              ? `בדיקת ${coordServiceLabel} — ${customerLabel}`
+                              : `תיאום פגישה עם ${customerLabel}`;
+                            // פרטים אישיים לניסוח הכותרת ע"י ה-GPT API (שם לקוח / שירות / עיר / כתובת / מיקום הפגישה).
+                            const coordCustomerName = (t.customerName || t.leadName || customerLabel || '').trim();
+                            const coordCity = (lead?.city || '').trim();
+                            const coordAddress = (lead?.address || '').trim();
+                            // מיקום הפגישה — הערך שבטופס אם הוזן, אחרת מהליד (כתובת + עיר). מועבר לניסוח הכותרת.
+                            const coordMeetingLocation = (
+                              coordForms[t.id]?.location ??
+                              (lead?.address ? `${lead.address}${lead?.city ? ', ' + lead.city : ''}` : (lead?.city || ''))
+                            ).trim();
+                            const titleBusy = !!coordTitleBusy[t.id];
+                            const draftTitle = () => draftMeetingTitle(t.id, {
+                              customerName: coordCustomerName,
+                              serviceName: coordServiceLabel || coordServiceRaw,
+                              city: coordCity,
+                              address: coordAddress,
+                              location: coordMeetingLocation,
+                            });
+                            // ניסוח אוטומטי פעם אחת בפתיחת שלב התיאום — רק אם המשתמש עדיין לא ערך כותרת ידנית.
+                            if (!coordTitleDraftedRef.current[t.id] && coordForms[t.id]?.subject === undefined) {
+                              coordTitleDraftedRef.current[t.id] = true; // סימון מיידי כדי למנוע ריצה כפולה
+                              void draftTitle();
+                            }
                             const ccContactsCoord = taskContactsMap[t.id] || [];
                             const customerEmail = (
                               t.leadEmail || lead?.email ||
@@ -18386,7 +18595,7 @@ function TasksPage({
                             const defaultLocation = lead?.address
                               ? `${lead.address}${lead?.city ? ', ' + lead.city : ''}`
                               : (lead?.city || '');
-                            const subject = form.subject ?? `תיאום הגעה — ${customerLabel}`;
+                            const subject = form.subject ?? meetingTitle;
                             const date = form.date ?? todayStr;
                             const time = form.time ?? '10:00';
                             const durationMin = form.durationMin ?? 60;
@@ -18395,6 +18604,7 @@ function TasksPage({
                             const isOnline = form.isOnline ?? false;
                             const inviteCustomer = form.inviteCustomer ?? false;
                             const employeeIds = form.employeeIds ?? [];
+                            const attachments = form.attachments ?? [];
 
                             const otherEmployees = users.filter((u) => u.email && u.status !== 'לא פעיל' && hasHebrewName(u.name));
                             const busy = !!coordBusy[t.id];
@@ -18455,6 +18665,11 @@ function TasksPage({
                                     attendees,
                                     employeeUserIds: employeeIds,
                                     isOnlineMeeting: isOnline,
+                                    attachments: attachments.map((a) => ({
+                                      fileName: a.fileName,
+                                      mimeType: a.mimeType,
+                                      contentBase64: a.contentBase64,
+                                    })),
                                   }),
                                 });
                                 if (!r.ok) {
@@ -18516,7 +18731,7 @@ function TasksPage({
                                       </div>
                                       <div>
                                         <div className="text-xl md:text-2xl font-extrabold text-blue-900 leading-snug">
-                                          תיאום פגישה עם {customerLabel}
+                                          {meetingTitle}
                                         </div>
                                         <div className="text-sm font-bold text-blue-700 mt-1">
                                           קביעת פגישה ביומן Outlook — אפשר לצרף עובדים נוספים והלקוח לתיאום משותף
@@ -18575,8 +18790,24 @@ function TasksPage({
                                 {/* ── טופס הפגישה ── */}
                                 <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 space-y-4">
                                   <div>
-                                    <label className={labelCls}>כותרת הפגישה</label>
-                                    <input className={fieldBox} value={subject} onChange={(e) => updateCoordForm(t.id, { subject: e.target.value })} />
+                                    <div className="flex items-center justify-between mb-1">
+                                      <label className={`${labelCls} mb-0`}>כותרת הפגישה</label>
+                                      <button
+                                        type="button"
+                                        disabled={titleBusy}
+                                        onClick={draftTitle}
+                                        className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                      >
+                                        {titleBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                                        {titleBusy ? 'מנסח…' : 'נסח כותרת'}
+                                      </button>
+                                    </div>
+                                    <input
+                                      className={fieldBox}
+                                      value={subject}
+                                      placeholder={titleBusy && !subject ? '✨ מנסח כותרת…' : 'כותרת הפגישה'}
+                                      onChange={(e) => updateCoordForm(t.id, { subject: e.target.value })}
+                                    />
                                   </div>
 
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -18667,6 +18898,41 @@ function TasksPage({
                                   <div>
                                     <label className={labelCls}>הערות לפגישה</label>
                                     <textarea className={`${fieldBox} resize-none`} rows={3} value={notes} placeholder="פרטים נוספים שיופיעו בגוף ההזמנה" onChange={(e) => updateCoordForm(t.id, { notes: e.target.value })} />
+                                  </div>
+
+                                  {/* ── קבצים מצורפים לפגישה (אופציונלי) ── */}
+                                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <label className="text-[12px] font-bold text-slate-600">קבצים מצורפים <span className="font-normal text-slate-400">(לא חובה)</span></label>
+                                      <label className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-[12px] font-bold text-blue-700 hover:bg-blue-100 cursor-pointer">
+                                        <Paperclip className="h-4 w-4" /> צרף קבצים
+                                        <input
+                                          type="file"
+                                          multiple
+                                          className="hidden"
+                                          onChange={(e) => { if (e.target.files?.length) void addCoordAttachments(t.id, e.target.files); e.target.value = ''; }}
+                                        />
+                                      </label>
+                                    </div>
+                                    {attachments.length > 0 ? (
+                                      <div className="space-y-2">
+                                        {attachments.map((a) => (
+                                          <div key={`${a.fileName}-${a.sizeBytes}`} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                            <div className="flex min-w-0 items-center gap-2">
+                                              <FileText className="h-4 w-4 shrink-0 text-blue-500" />
+                                              <span className="truncate text-[13px] font-medium text-slate-700">{a.fileName}</span>
+                                              <span className="shrink-0 text-[11px] text-slate-400">{(a.sizeBytes / 1024).toFixed(0)} KB</span>
+                                            </div>
+                                            <button type="button" onClick={() => removeCoordAttachment(t.id, a.fileName, a.sizeBytes)} className="shrink-0 text-slate-400 hover:text-red-500" aria-label="הסר">
+                                              <X className="h-4 w-4" />
+                                            </button>
+                                          </div>
+                                        ))}
+                                        <div className="text-[11px] text-slate-400">הקבצים יצורפו לפגישה ב-Outlook (עד 3MB בסך הכל).</div>
+                                      </div>
+                                    ) : (
+                                      <div className="text-[12px] text-slate-400">אפשר לצרף קבצים לפגישה — הם יופיעו בהזמנת ה-Outlook.</div>
+                                    )}
                                   </div>
 
                                   <label className="flex items-center gap-2 cursor-pointer select-none">
@@ -18928,6 +19194,40 @@ function TasksPage({
         customerPhone={feedbackScheduleData?.customerPhone}
         currentUser={currentUser}
       />
+
+      {/* ═══ אזהרת "לא ביצעת מעקב" — בסגירת שלב הצעת המחיר בלי שנקבע מעקב ═══ */}
+      {quoteCloseWarnTaskId && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setQuoteCloseWarnTaskId(null)}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex flex-col items-center text-center gap-3">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-2xl">⚠️</span>
+              <h3 className="text-lg font-bold text-gray-800">שים לב שלא ביצעת מעקב להצעת מחיר</h3>
+              <p className="text-sm text-gray-500 leading-relaxed">
+                לא נקבע מעקב להצעה זו. קביעת מעקב עוזרת לוודא שההצעה לא תישכח. לחזור ולקבוע מעקב?
+              </p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-base font-bold text-white hover:bg-blue-700 transition-colors"
+                onClick={() => setQuoteCloseWarnTaskId(null)}
+              >
+                חזור למעקב
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                onClick={() => { setQuoteCloseWarnTaskId(null); setExpandedTaskId(null); }}
+              >
+                סגור בכל זאת
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══ NEW TASK MODAL ═══ */}
       <Modal open={open} onClose={() => setOpen(false)} title="משימה חדשה" maxWidth="max-w-2xl">

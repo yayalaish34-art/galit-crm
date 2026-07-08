@@ -40,7 +40,7 @@ function parseDocumentType(v: unknown): DocumentType {
 export class CustomersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private static readonly PRESET_CLASSIFICATION_CODES = new Set(['COMPANY', 'PUBLIC', 'PRIVATE']);
+  private static readonly PRESET_CLASSIFICATION_CODES = new Set(['POTENTIAL', 'COMPANY', 'PUBLIC', 'PRIVATE']);
 
   private async assertClassificationCode(code: string | undefined) {
     if (code == null || code === '') {

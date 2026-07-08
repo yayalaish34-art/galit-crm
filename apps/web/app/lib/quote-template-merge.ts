@@ -154,6 +154,26 @@ export function mergeTemplatePlaceholders(template: string, ctx: Record<string, 
   return template.replace(/\{\{\s*([\w]+)\s*\}\}/g, (_, key: string) => (key in ctx ? ctx[key] : ''));
 }
 
+/**
+ * מסיר שורות "פקס" ישנות מכל HTML ממוזג — כדי שאף מסמך ממוזג (docx/PDF) לא יכלול אותן,
+ * גם אם הן עדיין שמורות בתבנית שב-DB. מכסה את שתי הגרסאות:
+ *   "לתיאום הגעה, נא לחתום ולשלוח לפקס 09-7724446. תודה."
+ *   "אישור ההצעה: נא לשלוח את ההצעה חתומה לפקס 09-7724446 ..."
+ * מוחק פסקאות (<p>…</p>) שמכילות את מספר הפקס או ניסוח "לשלוח...לפקס"; משאיר שאר התוכן כמות שהוא.
+ */
+export function stripFaxLines(html: string): string {
+  if (!html) return html;
+  // מחיקת כל <p>…</p> שמכיל את מספר הפקס (עם/בלי מקף) או הוראת שליחה לפקס.
+  // ([\s\S] במקום flag של dotAll — תאימות ל-target ישן יותר.)
+  const paragraphWithFax = /<p\b[^>]*>(?:(?!<\/p>)[\s\S])*?(?:09[-\s]?7724446|ל(?:חתום ולשלוח|שלוח[^<]*?)\s*לפקס)(?:(?!<\/p>)[\s\S])*?<\/p>\s*/gi;
+  let out = html.replace(paragraphWithFax, '');
+  // גיבוי: אם השורה הופיעה בלי עטיפת <p> — מסירים את הטקסט עצמו.
+  out = out
+    .replace(/לתיאום הגעה,?\s*נא לחתום ולשלוח לפקס\s*\.?09[-\s]?7724446\.?\s*תודה\.?/gi, '')
+    .replace(/אישור ההצעה:\s*נא לשלוח את ההצעה חתומה לפקס\s*09[-\s]?7724446[^<\n]*/gi, '');
+  return out;
+}
+
 export function mergeQuoteTemplateParts(
   parts: {
     introHtml?: string | null;
@@ -167,7 +187,7 @@ export function mergeQuoteTemplateParts(
     (x): x is string => typeof x === 'string' && x.trim().length > 0,
   );
   const merged = chunks.map((c) => mergeTemplatePlaceholders(c, ctx)).join('\n<hr class="quote-sep" />\n');
-  return merged;
+  return stripFaxLines(merged);
 }
 
 /** מיזוג מלא: פתיחה, גוף, סיום, ואז תנאים (ממוזגים פעם אחת; {{terms}} בגוף מתמלא מבלוק התנאים) */
@@ -188,7 +208,7 @@ export function mergeQuoteTemplateFull(
     mergeTemplatePlaceholders(tpl.closingHtml || '', ctx2),
     termsMerged,
   ].filter((x) => x.trim().length > 0);
-  return chunks.join('\n<hr class="quote-sep" />\n');
+  return stripFaxLines(chunks.join('\n<hr class="quote-sep" />\n'));
 }
 
 export function mergedHtmlToPlainDescription(html: string): string {

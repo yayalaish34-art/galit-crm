@@ -20,4 +20,12 @@ export class AiMailController {
   reportDraft(@Body() body: DraftContext) {
     return this.aiMail.generateReportDraft(body || {});
   }
+
+  /** POST /ai-mail/meeting-title — generate a coordination-step meeting title (Galit style). */
+  @Post('meeting-title')
+  meetingTitle(
+    @Body() body: { customerName?: string; serviceName?: string; city?: string; address?: string },
+  ) {
+    return this.aiMail.generateMeetingTitle(body || {});
+  }
 }

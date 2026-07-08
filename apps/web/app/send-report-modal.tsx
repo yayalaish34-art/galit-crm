@@ -654,7 +654,7 @@ export function SendReportModal({
               className="w-full resize-y rounded-xl border border-gray-300 px-3 py-2.5 text-base leading-relaxed outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder={aiBusy && !body ? '✨ מנסח מייל אוטומטית מתוך הצעת המחיר…' : 'כתוב את תוכן המייל, או לחץ ׳נסח לי מייל׳'}
+              placeholder={aiBusy && !body ? '✨ מנסח מייל: העבודה בוצעה, מצורף הדוח עם התוצאות…' : 'כתוב את תוכן המייל, או לחץ ׳נסח לי מייל׳'}
             />
           </div>
 

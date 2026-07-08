@@ -9,6 +9,18 @@ export interface GraphEventAttendee {
   type?: 'required' | 'optional';
 }
 
+export interface GraphEventAttachment {
+  /** שם הקובץ כפי שיוצג בפגישה */
+  fileName: string;
+  /** תוכן הקובץ בקידוד base64 (ללא תחילית data:) */
+  contentBase64: string;
+  /** סוג MIME (ברירת מחדל application/octet-stream) */
+  mimeType?: string;
+}
+
+/** מגבלת Graph לצירוף inline בבקשת יצירת האירוע (~3MB לכלל הבקשה). שמרני. */
+const MAX_INLINE_ATTACHMENTS_BYTES = 3 * 1024 * 1024;
+
 export interface GraphCalendarEvent {
   subject: string;
   /** הערות/תיאור הפגישה (טקסט חופשי; שורות חדשות יומרו ל-<br>) */
@@ -25,6 +37,8 @@ export interface GraphCalendarEvent {
   employeeUserIds?: string[];
   /** יצירת פגישת Teams מקוונת */
   isOnlineMeeting?: boolean;
+  /** קבצים לצירוף לפגישה (אם הלקוח/המשתמש בחר לצרף) */
+  attachments?: GraphEventAttachment[];
 }
 
 export interface GraphCalendarEventResult {
@@ -94,6 +108,28 @@ export class GraphCalendarService {
     if (ev.isOnlineMeeting) {
       payload.isOnlineMeeting = true;
       payload.onlineMeetingProvider = 'teamsForBusiness';
+    }
+
+    // ── קבצים מצורפים לפגישה ── (inline fileAttachment; מתאים לקבצים קטנים)
+    const attachments = (ev.attachments || []).filter(
+      (a) => a?.fileName?.trim() && a?.contentBase64?.trim(),
+    );
+    if (attachments.length) {
+      const totalBytes = attachments.reduce(
+        (sum, a) => sum + Math.floor((a.contentBase64.length * 3) / 4),
+        0,
+      );
+      if (totalBytes > MAX_INLINE_ATTACHMENTS_BYTES) {
+        throw new BadRequestException(
+          'הקבצים המצורפים גדולים מדי (מגבלת ~3MB לכלל הקבצים). צרפו קבצים קטנים יותר.',
+        );
+      }
+      payload.attachments = attachments.map((a) => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: a.fileName.trim(),
+        contentType: a.mimeType?.trim() || 'application/octet-stream',
+        contentBytes: a.contentBase64.trim(),
+      }));
     }
 
     const res = await fetch('https://graph.microsoft.com/v1.0/me/events', {

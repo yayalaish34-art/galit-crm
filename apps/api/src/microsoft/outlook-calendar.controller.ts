@@ -1,5 +1,5 @@
 import { BadRequestException, Body, Controller, Headers, Post } from '@nestjs/common';
-import { GraphCalendarService, GraphEventAttendee } from './graph-calendar.service';
+import { GraphCalendarService, GraphEventAttendee, GraphEventAttachment } from './graph-calendar.service';
 
 interface CreateOutlookEventBody {
   subject: string;
@@ -11,6 +11,7 @@ interface CreateOutlookEventBody {
   attendees?: GraphEventAttendee[];
   employeeUserIds?: string[];
   isOnlineMeeting?: boolean;
+  attachments?: GraphEventAttachment[];
 }
 
 @Controller('outlook/calendar')

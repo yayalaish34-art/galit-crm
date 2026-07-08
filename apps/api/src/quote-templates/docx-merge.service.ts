@@ -682,6 +682,23 @@ export function removeSummaryDiscountRow(documentXml: string): string {
 }
 
 /**
+ * מסיר מ-document.xml כל פסקה שמכילה את שורת ה"פקס" הישנה — כדי שאף מסמך ממוזג
+ * לא יכלול אותה, גם כשהיא צרובה בקובץ ה-DOCX של התבנית עצמה. מכסה את שתי הגרסאות:
+ *   "לתיאום הגעה, נא לחתום ולשלוח לפקס 09-7724446. תודה."
+ *   "אישור ההצעה: נא לשלוח את ההצעה חתומה לפקס 09-7724446 ..."
+ * הזיהוי לפי הטקסט המשורשר של הפסקה (מספר הפקס או ניסוח "לשלוח...לפקס"), כדי לתפוס גם
+ * מקרים שבהם הטקסט מפוצל לכמה ריצות (<w:t>). רץ לפני render.
+ */
+export function stripFaxParagraphsFromDocXml(documentXml: string): string {
+  return documentXml.replace(/<w:p\b[^>]*>[\s\S]*?<\/w:p>/g, (para) => {
+    const text = para.replace(/<[^>]+>/g, '');
+    const hasFax =
+      /09[-\s]?7724446/.test(text) || /לשלוח[^]{0,40}?לפקס/.test(text) || /לחתום ולשלוח\s*לפקס/.test(text);
+    return hasFax ? '' : para;
+  });
+}
+
+/**
  * נרמול payload מיזוג — מיפוי שמות שדות ישנים לקנוניים
  */
 export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<string, unknown> {
@@ -790,6 +807,8 @@ export class DocxMergeService {
       const preFile = zip.file('word/document.xml');
       if (preFile) {
         let pre = preFile.asText();
+        // הסרת שורת ה"פקס" הישנה מכל מסמך ממוזג (צרובה בחלק מקבצי ה-DOCX של התבניות)
+        pre = stripFaxParagraphsFromDocXml(pre);
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
         pre = ensureCityPlaceholderInBookmark(pre);
         // ביטול הדגשה מהכתובת + הסרת שורת הרווח בין הכתובת לעיר (בקשת המשתמש)

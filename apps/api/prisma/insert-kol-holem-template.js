@@ -77,7 +77,6 @@ const closingHtml = `<div dir="rtl" style="font-family:'David','Arial',sans-seri
   <p>תנאי תשלום: {{paymentTerms}}</p>
   <p>תוקף ההצעה: {{validityDate}}</p>
   <p>תאריך הצעה: {{quoteDate}}</p>
-  <p>אישור ההצעה: נא לשלוח את ההצעה חתומה לפקס 09-7724446 ואנו נחזור לתאם הגעה בהקדם.</p>
   <p>הנני מאשר את ההצעה על כל סעיפיה.</p>
   <table dir="rtl" border="1" cellpadding="8" style="border-collapse:collapse;width:100%;max-width:720px;margin-top:12px;">
     <thead><tr>
@@ -91,7 +90,6 @@ const closingHtml = `<div dir="rtl" style="font-family:'David','Arial',sans-seri
       <td style="border:1px solid #bbb;padding:8px;">&nbsp;</td>
     </tr></tbody>
   </table>
-  <p style="margin-top:12px;">לתיאום הגעה, נא לחתום ולשלוח לפקס 09-7724446. תודה.</p>
   <p><strong>נספח א': תעודת הסמכה של הרשות להסמכת מעבדות</strong></p>
   <p><strong>נספח ב': תעודות ISO</strong></p>
 </div>`;

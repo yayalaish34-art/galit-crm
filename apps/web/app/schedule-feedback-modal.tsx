@@ -153,7 +153,7 @@ export function ScheduleFeedbackModal({
                 onClick={onClose}
                 className="flex items-center gap-1.5 rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-gray-50 disabled:opacity-50"
               >
-                <X className="h-4 w-4" /> ידני (אשלח בעצמי)
+                <X className="h-4 w-4" /> ללא משוב
               </button>
               <button
                 type="button"

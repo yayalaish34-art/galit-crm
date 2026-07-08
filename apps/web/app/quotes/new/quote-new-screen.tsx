@@ -1337,7 +1337,7 @@ export function QuoteNewScreen({
 
   // פותח וואטסאפ באופן אמין: פותחים חלון ריק *סינכרונית* בתוך ה-click (לפני ה-await) כדי לא
   // להיחסם ע"י חוסם ה-popup, ומפנים אותו לקישור אחרי הכנתו. הקישור נבנה ב-whatsAppLink המשותף
-  // (web.whatsapp.com/send עם מספר → פתיחה ישירה ב-WhatsApp Web; בלי מספר → בורר נמען).
+  // (wa.me עם מספר → מעביר לאפליקציית WhatsApp Desktop הקיימת; בלי מספר → בורר נמען).
   const waHref = (phone: string, text: string) => whatsAppLink(phone, text);
 
   // "שלח במייל" הפשוט — מצרף את ההצעה כ-PDF + את הפרופיל+רישיונות כ-PDF, בלי כפתורים ובלי חתימה.
@@ -3101,6 +3101,16 @@ export function QuoteNewScreen({
 
             {/* ── Customer Details ── */}
             <section className="rounded-2xl bg-white border border-gray-100 shadow-sm p-4">
+              {/* כותרת בולטת: שם הלקוח + טלפון בפונט גדול, לזיהוי מהיר של ההצעה.
+                  בשלב הצעת המחיר בלוח המשימות (embedded) — הבאנר מוצג בשלב הפולואפ במקום כאן. */}
+              {!embedded && (customer.trim() || phone.trim()) && (
+                <div className="mb-3 rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-3">
+                  {customer.trim() && <div className="text-2xl font-extrabold text-blue-900 leading-tight">{customer.trim()}</div>}
+                  {phone.trim() && (
+                    <a href={`tel:${phone.trim()}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{phone.trim()}</a>
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-base font-bold text-gray-700 flex items-center gap-2">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-50 text-blue-500"><SearchIcon size={12} /></span>
@@ -3472,7 +3482,7 @@ export function QuoteNewScreen({
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col items-center text-center gap-3">
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-2xl">⚠️</span>
-              <h3 className="text-lg font-bold text-gray-800">עדיף לבצע מעקב לפני סגירת הצעת מחיר</h3>
+              <h3 className="text-lg font-bold text-gray-800">שים לב שלא ביצעת מעקב להצעת מחיר</h3>
               <p className="text-sm text-gray-500 leading-relaxed">לא הוגדר תאריך מעקב להצעה זו. קביעת מעקב עוזרת לוודא שההצעה לא תישכח. לחזור ולהגדיר מעקב?</p>
             </div>
             <div className="mt-6 flex gap-3">
