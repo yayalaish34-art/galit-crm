@@ -26,9 +26,10 @@ export class FeedbackController {
     return this.feedback.listFeedbackCustomers(req.user);
   }
 
-  /** טיוטה אישית מוכנה (נושא + גוף) לחלון השליחה. */
+  /** טיוטה אישית מוכנה (נושא + גוף) לחלון השליחה — זמין לכל העובדים, נדרש בשלב
+   *  "משוב" בזרימת המשימה (חלון תזמון בקשת המשוב שולף כאן נושא+גוף מוכנים). */
   @Get('draft')
-  @Roles('ADMIN')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   draft(@Query('name') name?: string) {
     return this.feedback.feedbackDraft(name);
   }
