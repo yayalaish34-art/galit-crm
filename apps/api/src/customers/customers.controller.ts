@@ -16,7 +16,7 @@ import {
 
 @Controller('customers')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}
 

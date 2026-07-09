@@ -6,8 +6,8 @@ import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('leads')
 @UseGuards(RolesGuard)
-/** תואם ל-canAccess בפרונט (כולל expert עם מסכי לידים) */
-@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT')
+/** תואם ל-canAccess בפרונט — כל התפקידים (כולל טכנאי) ניגשים ללידים/לקוחות מהמשימות */
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class LeadsController {
 
   constructor(private leadsService: LeadsService) {}
