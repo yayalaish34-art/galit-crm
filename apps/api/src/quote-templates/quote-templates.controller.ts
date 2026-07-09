@@ -24,7 +24,7 @@ export class QuoteTemplatesController {
   /* ── Static routes FIRST (before :id) ── */
 
   @Get()
-  @Roles('ADMIN', 'MANAGER', 'SALES')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   findAll(@Query('serviceType') serviceType?: string, @Query('activeOnly') activeOnly?: string) {
     return this.quoteTemplatesService.findAll({
       serviceType: serviceType || undefined,
@@ -51,7 +51,7 @@ export class QuoteTemplatesController {
   /* ── Parameterized routes ── */
 
   @Get(':id')
-  @Roles('ADMIN', 'MANAGER', 'SALES')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   findOne(@Param('id') id: string) {
     return this.quoteTemplatesService.findOne(id);
   }
@@ -73,7 +73,7 @@ export class QuoteTemplatesController {
    * מידע על תבנית ה-DOCX: נתיב, placeholders, וגודל קובץ
    */
   @Get(':id/docx-info')
-  @Roles('ADMIN', 'MANAGER', 'SALES')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   async docxInfo(@Param('id') id: string) {
     const template = await this.quoteTemplatesService.findOne(id);
     if (!template) {
@@ -105,7 +105,7 @@ export class QuoteTemplatesController {
    * מיזוג תבנית DOCX עם נתוני הצעת מחיר — מחזיר קובץ Word אמיתי (.docx)
    */
   @Post(':id/merge-docx')
-  @Roles('ADMIN', 'MANAGER', 'SALES')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   async mergeDocx(
     @Param('id') id: string,
     @Body() body: Record<string, unknown>,

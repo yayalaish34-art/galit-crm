@@ -11,7 +11,7 @@ import * as fs from 'fs';
 
 @Controller('quotes')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class QuotesController {
   constructor(
     private readonly quotesService: QuotesService,

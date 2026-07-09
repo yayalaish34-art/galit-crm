@@ -6,7 +6,7 @@ import { PaymentTermsService } from './payment-terms.service';
 
 @Controller('payment-terms')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class PaymentTermsController {
   constructor(private readonly service: PaymentTermsService) {}
 
