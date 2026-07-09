@@ -8,8 +8,7 @@ import { GraphMailService } from '../microsoft/graph-mail.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { CompanyProfileService } from './company-profile.service';
-import { stampQuoteButtons } from './pdf-buttons.util';
-import { resolvePublicApiBase } from './public-api-base.util';
+import { QuoteSignatureService } from './quote-signature.service';
 
 @Injectable()
 export class QuoteMailService {
@@ -23,6 +22,7 @@ export class QuoteMailService {
     private readonly graphFiles: GraphFilesService,
     private readonly pdfConvert: PdfConvertService,
     private readonly companyProfile: CompanyProfileService,
+    private readonly signature: QuoteSignatureService,
   ) {
     const host = process.env.SMTP_HOST;
     const port = Number(process.env.SMTP_PORT || 587);
@@ -68,20 +68,17 @@ export class QuoteMailService {
       /** משוך את הגרסה העדכנית מ-OneDrive (הקובץ שנערך ב-Word) במקום העותק השמור. */
       preferOnedrive?: boolean;
       /**
-       * קישור לעמוד הצפייה/חתימה (/sign). אם סופק — לא מצרפים קובץ למייל,
-       * אלא משבצים כפתור "צפייה בהצעת מחיר" שמפנה לקישור.
+       * מצב חתימה: טוקן החתימה של ההצעה. אם סופק — מצרפים למייל את קובץ ה-PDF של ההצעה
+       * כשבתוכו מוטמע כפתור "לחץ כאן לחתימה" (במקום כפתור-קישור "צפייה בהצעת מחיר" בגוף המייל).
        */
-      viewUrl?: string;
+      signToken?: string;
       /**
-       * כתובת הבסיס הציבורית של ה-API (למשל https://api.example.up.railway.app) —
-       * לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות". מקור: PUBLIC_API_URL או ה-host
-       * של הבקשה. אם ריק — הכפתור לא יוצג.
+       * כתובת הבסיס הציבורית של ה-API (למשל https://api.example.up.railway.app).
+       * מקור: PUBLIC_API_URL או ה-host של הבקשה.
        */
       publicApiBaseUrl?: string;
       /**
-       * מצב "שלח במייל" הפשוט: מצרפים את הפרופיל+רישיונות כקובץ PDF (במקום כפתור-קישור),
-       * ומדכאים את כפתור "הפרופיל שלנו + רישיונות". יחד עם היעדר viewUrl — ההצעה מצורפת
-       * כ-PDF וללא כפתורים.
+       * שמור לתאימות לאחור בלבד — אינו בשימוש עוד. הפרופיל+רישיונות מצורף תמיד כקובץ PDF.
        */
       attachProfilePdf?: boolean;
     },
@@ -116,13 +113,25 @@ export class QuoteMailService {
     //   3) קובץ מהדיסק (fallback לרשומות ישנות).
     const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     const docs: { content: Buffer; fileName: string; mime: string }[] = [];
-    // מצב קישור: לא מצרפים קובץ — שולחים כפתור "צפייה בהצעת מחיר" לעמוד /sign.
-    const linkMode = !!opts?.viewUrl;
+    // מצב חתימה: מצרפים את קובץ ה-PDF של ההצעה כשבתוכו כבר מוטמע כפתור "לחץ כאן לחתימה"
+    // (נשלף משירות החתימה לפי הטוקן) — במקום כפתור-קישור בגוף המייל.
+    const signMode = !!opts?.signToken;
     const quoteNumberForName = quote.quoteNumber || quote.importLegacyId || '';
     const baseDocName = `הצעת מחיר${quoteNumberForName ? ' ' + quoteNumberForName : ''}`;
 
+    // מצב חתימה: מצרפים את ה-PDF (עם כפתור החתימה מוטמע בפנים) — נשלף ישירות משירות החתימה.
+    if (signMode) {
+      try {
+        const { buffer, fileName } = await this.signature.getPdf(opts!.signToken!, { withButton: true });
+        docs.push({ content: buffer, fileName: fileName || `${baseDocName}.pdf`, mime: 'application/pdf' });
+      } catch (e: any) {
+        this.logger.warn(`sign-mode PDF fetch failed for quote ${quoteId}: ${e?.message || e}`);
+        throw new BadRequestException('הכנת קובץ ההצעה לחתימה נכשלה');
+      }
+    }
+
     // 0) OneDrive — אם המשתמש ערך ב-Word, מושכים את הגרסה העדכנית ישירות משם.
-    if (!linkMode && opts?.preferOnedrive) {
+    if (!signMode && opts?.preferOnedrive) {
       const ref = await this.getOnedriveRefSafe(quoteId);
       if (ref) {
         try {
@@ -137,7 +146,7 @@ export class QuoteMailService {
     // 1) תמיכה בכמה קבצים: attachmentIds (רבים) או attachmentId (בודד — תאימות לאחור).
     const attachmentIds = (opts?.attachmentIds?.length ? opts.attachmentIds : opts?.attachmentId ? [opts.attachmentId] : [])
       .filter((x): x is string => !!x);
-    if (!linkMode && docs.length === 0) {
+    if (!signMode && docs.length === 0) {
       for (const attId of attachmentIds) {
         const att = await this.prisma.taskAttachment.findUnique({ where: { id: attId } });
         if (att) {
@@ -147,11 +156,11 @@ export class QuoteMailService {
     }
     // Fallback: DB-stored bytes from the latest QuoteDocument (survives deploys), then disk path.
     // משתמשים ב-mimeType השמור — כך PDF שהועלה (Word→PDF) נשלח כמות-שהוא בלי המרה.
-    if (!linkMode && docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
+    if (!signMode && docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
       const qd = quote.quoteDocuments[0];
       docs.push({ content: Buffer.from(qd.data), fileName: qd.fileName, mime: qd.mimeType || DOCX_MIME });
     }
-    if (!linkMode && docs.length === 0) {
+    if (!signMode && docs.length === 0) {
       let relPath: string | null = null;
       let diskName: string | null = null;
       if (quote.quoteDocuments?.length > 0) {
@@ -191,21 +200,6 @@ export class QuoteMailService {
       }
     }
 
-    // ── כפתור "ההסמכות שלנו ופרופיל החברה" בסוף כל PDF מצורף של ההצעה ──
-    // נצרב על קובצי ההצעה עצמם (לפני צירוף קובץ הפרופיל, שאינו זקוק לכפתור על עצמו),
-    // מתחת לתוכן / בעמוד חדש — כך שכל קובץ שיוצא מהמערכת נושא קישור להסמכות.
-    const apiBaseForButtons = resolvePublicApiBase(opts?.publicApiBaseUrl);
-    if (apiBaseForButtons) {
-      for (const doc of docs) {
-        if (doc.mime !== 'application/pdf') continue;
-        try {
-          doc.content = await stampQuoteButtons(doc.content, { profileUrl: `${apiBaseForButtons}/public/company-profile.pdf` });
-        } catch (e: any) {
-          this.logger.warn(`profile button stamp failed for "${doc.fileName}": ${e?.message || e}`);
-        }
-      }
-    }
-
     // ── Build the email (HTML עם לחצן/קישור מתויג + הקובץ מצורף) ──
     const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER!;
     const quoteNumber = quote.quoteNumber || quote.importLegacyId || 'טיוטה';
@@ -216,30 +210,16 @@ export class QuoteMailService {
       opts?.subject?.trim() ||
       `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''}${custName ? ' - ' + custName : ''}`;
 
-    // במצב קישור: כפתור "צפייה בהצעת מחיר" שמפנה לעמוד /sign (במקום קובץ מצורף).
-    const linkBlock = opts?.viewUrl
-      ? `<div style="margin:22px 0;"><a href="${opts.viewUrl.replace(/&/g, '&amp;').replace(/"/g, '&quot;')}" target="_blank" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 30px;border-radius:10px;">צפייה בהצעת מחיר</a></div>`
-      : '';
-
-    // "הפרופיל שלנו + רישיונות": במצב "שלח במייל" הפשוט (attachProfilePdf) מצרפים אותו כקובץ
-    // PDF ומדכאים את הכפתור; אחרת (מצב חתימה/קישור) — כפתור-קישור ל-PDF המתארח ב-API.
+    // "הפרופיל שלנו + רישיונות": מצורף תמיד כקובץ PDF (בלי כפתור-קישור בגוף המייל).
     // מוודאים שה-PDF קיים/עדכני (best-effort, לא חוסם את השליחה אם נכשל).
     await this.companyProfile.ensurePdf(opts?.userId);
-    const apiBase = resolvePublicApiBase(opts?.publicApiBaseUrl);
-    let profileButton = '';
-    if (opts?.attachProfilePdf) {
-      try {
-        const prof = await this.companyProfile.getCachedPdf();
-        if (prof?.buffer?.length) {
-          docs.push({ content: prof.buffer, fileName: prof.fileName || 'הפרופיל שלנו + רישיונות.pdf', mime: 'application/pdf' });
-        }
-      } catch (e: any) {
-        this.logger.warn(`company profile PDF attach failed for quote ${quoteId}: ${e?.message || e}`);
+    try {
+      const prof = await this.companyProfile.getCachedPdf();
+      if (prof?.buffer?.length) {
+        docs.push({ content: prof.buffer, fileName: prof.fileName || 'הפרופיל שלנו + רישיונות.pdf', mime: 'application/pdf' });
       }
-    } else {
-      profileButton = apiBase
-        ? `<div style="margin:14px 0;"><a href="${apiBase}/public/company-profile.pdf" target="_blank" style="display:inline-block;background:#2f5c32;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:11px 24px;border-radius:10px;">📄 הפרופיל שלנו + רישיונות</a></div>`
-        : '';
+    } catch (e: any) {
+      this.logger.warn(`company profile PDF attach failed for quote ${quoteId}: ${e?.message || e}`);
     }
 
     // Resolve the per-user signature (text + optional image, if requested).
@@ -290,19 +270,17 @@ export class QuoteMailService {
     }
 
     // Body: custom text (converted to HTML) if provided, else the default template.
-    const defaultIntro = linkMode
-      ? `<p>הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''} מוכנה לצפייה ולחתימה — לחצו על הכפתור שלהלן.</p>`
+    const defaultIntro = signMode
+      ? `<p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''} — לצפייה ולחתימה, פתחו את הקובץ המצורף ולחצו על כפתור "לחץ כאן לחתימה" שבתוכו.</p>`
       : `<p>מצורפת הצעת מחיר${quoteNumber ? ' מספר <strong>' + quoteNumber + '</strong>' : ''}.</p>`;
     const bodyHtml = opts?.body?.trim()
-      ? `<div>${this.toHtml(opts.body)}</div>${linkBlock}`
+      ? `<div>${this.toHtml(opts.body)}</div>`
       : `<p>שלום${custName ? ' ' + custName : ''},</p>
 ${defaultIntro}
-${linkBlock}
 <p>בברכה,<br>גלית – החברה לאיכות הסביבה</p>`;
 
     const html = `<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px;color:#111111;line-height:1.6;">
 ${bodyHtml}
-${profileButton}
 ${signatureHtml}
 </div>`;
 

@@ -134,10 +134,8 @@ export class QuotesController {
       includeSignature?: boolean;
       signatureId?: string;
       preferOnedrive?: boolean;
-      /** קישור לעמוד הצפייה/חתימה (/sign). אם סופק — לא מצרפים קובץ, אלא כפתור "צפייה בהצעת מחיר". */
-      viewUrl?: string;
-      /** "שלח במייל" הפשוט: מצרפים את הפרופיל+רישיונות כ-PDF ומדכאים את הכפתור. */
-      attachProfilePdf?: boolean;
+      /** מצב חתימה: טוקן החתימה. אם סופק — מצרפים את קובץ ההצעה עם כפתור "לחץ כאן לחתימה" מוטמע בפנים. */
+      signToken?: string;
     },
     @Req() req: any,
   ) {
@@ -154,11 +152,7 @@ export class QuotesController {
       includeSignature: body.includeSignature,
       signatureId: body.signatureId,
       preferOnedrive: body.preferOnedrive,
-      viewUrl: body.viewUrl,
-      attachProfilePdf: body.attachProfilePdf,
-      // ה-host של הבקשה = fallback אחרון לבניית הקישור לכפתור "הפרופיל שלנו + רישיונות".
-      // resolvePublicApiBase מעדיף RAILWAY_PUBLIC_DOMAIN (הדומיין החי של הדפלוי) ואז PUBLIC_API_URL,
-      // כך שקישור Railway ישן לא נצרב יותר גם אם PUBLIC_API_URL נשאר מיושן ב-env.
+      signToken: body.signToken,
       publicApiBaseUrl: req?.headers?.host ? `https://${req.headers.host}` : undefined,
     });
   }

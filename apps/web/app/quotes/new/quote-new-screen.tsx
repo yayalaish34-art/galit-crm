@@ -766,19 +766,6 @@ export function QuoteNewScreen({
     }
   }, []);
 
-  /* ── Auto-calc: תאריך תוקף ההצעה = תאריך הצעה + ימי תוקף ── */
-  useEffect(() => {
-    const days = parseInt(validityDays) || 30;
-    const baseDate = date ? new Date(date) : new Date();
-    // Guard against invalid date
-    if (isNaN(baseDate.getTime())) return;
-    baseDate.setDate(baseDate.getDate() + days);
-    const yyyy = baseDate.getFullYear();
-    const mm = String(baseDate.getMonth() + 1).padStart(2, '0');
-    const dd = String(baseDate.getDate()).padStart(2, '0');
-    setPaymentValidityDate(`${yyyy}-${mm}-${dd}`);
-  }, [date, validityDays]);
-
   /* ── Pre-fill from customer card context ──
    * חשוב: המילוי המקדים רץ *פעם אחת לכל לקוח* בלבד — לא בכל re-render של ההורה.
    * ההורה (לוח המשימות) מעביר אובייקט prefillCustomer חדש בכל שמירה (onQuoteSaved),
@@ -845,6 +832,23 @@ export function QuoteNewScreen({
       return prev;
     });
   }, [prefillServiceName, draftReady]);
+
+  /* ── Auto-calc: תאריך תוקף ההצעה = תאריך הצעה + ימי תוקף ──
+   * ממלא את שדה "תאריך תוקף" (paymentDueDate — הוא זה שמוצג בטופס) וגם paymentValidityDate.
+   * רץ רק אחרי סיום טעינת ההצעה (draftReady) וממלא *רק כשהשדה ריק* — כך:
+   *   • הצעה חדשה / הצעה שנשמרה בלי תאריך תוקף → מתמלא אוטומטית (היום + ימי תוקף),
+   *   • ערך שנשמר/נערך ידנית → לא נדרס.
+   * לכן אין תלות ב-initialQuoteId: המקור של ההצעה יכול להיות prop / URL / משימה. */
+  useEffect(() => {
+    if (!draftReady) return;
+    const days = parseInt(validityDays) || 30;
+    const ymd = dueDateAfterDaysFromQuote(date, days);
+    // updater פונקציונלי: ממלא *רק כשהשדה ריק*, בלי להכניס את paymentDueDate לתלויות.
+    // כך האפקט רץ בכל שינוי של date/validityDays/draftReady ותמיד מתקן שדה ריק בטעינה,
+    // אבל לעולם לא דורס ערך שנטען מהשרת או נערך ידנית.
+    setPaymentValidityDate((prev) => prev || ymd);
+    setPaymentDueDate((prev) => prev || ymd);
+  }, [draftReady, date, validityDays]);
 
   /* ── Default quote date: today (only for new quotes) ──
    * חשוב: בלי זה date נשאר '' ותאריך התוקף מחושב על בסיס לא-צפוי. תאריך ההצעה = היום,
@@ -1260,12 +1264,12 @@ export function QuoteNewScreen({
     const to = allTo[0]?.trim() || '';
     if (!to) { setStatusMsg('חסר נמען'); return; }
     setEmailSending(true);
-    // "עם חתימה": הכפתור במייל פותח ישירות את קובץ ה-PDF של ההצעה, שבעמוד האחרון שלו מוטמע
-    // כפתור "לחץ כאן לחתימה" (URI) המוביל לטופס החתימה. מכינים את ה-PDF+טוקן ובונים קישור ישיר ל-PDF.
+    // "עם חתימה": מצרפים למייל את קובץ ה-PDF של ההצעה, שבתוכו מוטמע כפתור "לחץ כאן לחתימה"
+    // (URI) המוביל לטופס החתימה. מכינים את ה-PDF+טוקן ושולחים את הטוקן לשרת, שיצרף את הקובץ.
     setStatusMsg('מכין קובץ לחתימה…');
     const { token, error: tokErr } = await ensureSignToken();
     if (!token) { setEmailSending(false); setStatusMsg(tokErr || 'הכנת הקובץ לחתימה נכשלה'); return; }
-    // btn=1 → ה-PDF מוגש עם כפתור "לחץ כאן לחתימה" (תמונה) בעמוד האחרון.
+    // קישור ישיר ל-PDF (עם כפתור החתימה) — לשימוש בנפילה-חזרה ל-Outlook Web בלבד.
     const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
@@ -1287,8 +1291,8 @@ export function QuoteNewScreen({
           messageBody: f.body,
           includeSignature: f.includeSignature,
           signatureId: f.signatureId || undefined,
-          // קישור הצפייה/חתימה במקום קובץ מצורף.
-          viewUrl,
+          // מצב חתימה: השרת יצרף את קובץ ה-PDF עם כפתור "לחץ כאן לחתימה" מוטמע בפנים.
+          signToken: token,
           customerName: customer || '',
         }),
       });
@@ -1385,9 +1389,8 @@ export function QuoteNewScreen({
           messageBody: f.body,
           includeSignature: f.includeSignature,
           signatureId: f.signatureId || undefined,
-          // בלי viewUrl → ההצעה מצורפת כקובץ (PDF). attachProfilePdf → הפרופיל+רישיונות מצורף אף הוא.
+          // בלי signToken → ההצעה מצורפת כקובץ (PDF). הפרופיל+רישיונות מצורף תמיד ע"י השרת.
           attachmentIds: attIds.length ? attIds : undefined,
-          attachProfilePdf: true,
           preferOnedrive: onedriveActive,
           customerName: customer || '',
         }),
@@ -1501,20 +1504,11 @@ export function QuoteNewScreen({
     onExit?.({ advanceToFollowUp: !!follow.trim() });
   }
 
-  // לחיצה על "סגור": אם אין תאריך מעקב — מזהירים קודם; אחרת סוגרים ישירות.
-  function handleExitClick() {
-    if (!follow.trim()) {
-      setFollowWarnOpen(true);
-      return;
-    }
-    doExit();
-  }
-
   // תחזית
   const [fFunctional, setFFunctional] = useState('');
   const [fClosePercent, setFClosePercent] = useState('0.00');
   const [fCloseColor, setFCloseColor] = useState('');
-  const [fLastDate, setFLastDate] = useState('2026-03-25');
+  const [fLastDate, setFLastDate] = useState('');
   const [fLastUser, setFLastUser] = useState('');
   const [fLastTime, setFLastTime] = useState('');
   /* ── Save / print state ── */
@@ -3100,12 +3094,6 @@ export function QuoteNewScreen({
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><Printer size={18} /></span>
             <span className="text-[10px] text-gray-500">הדפס</span>
           </button>
-          {onExit && (
-            <button type="button" className="flex flex-col items-center gap-0.5 transition-colors" onClick={handleExitClick}>
-              <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-gray-400 hover:bg-gray-50 hover:text-gray-600"><X size={18} /></span>
-              <span className="text-[10px] text-gray-500">סגור</span>
-            </button>
-          )}
         </div>
       </header>
 

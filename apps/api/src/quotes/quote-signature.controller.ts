@@ -30,8 +30,8 @@ export class QuoteSignatureController {
     return this.signature.getForSigning(token);
   }
 
-  /** ה-PDF להצגה/הורדה. btn=1 — צורב על-הדרך את כפתור "לחץ כאן לחתימה".
-   *  כפתור "ההסמכות שלנו ופרופיל החברה" נצרב תמיד (גם ללא btn), בסוף המסמך. */
+  /** ה-PDF להצגה/הורדה (הקישור שנשלח בוואטסאפ). btn=1 — צורב על-הדרך את כפתור "לחץ כאן לחתימה".
+   *  כפתור "להסמכות שלנו" (קישור לפרופיל+רישיונות) נצרב תמיד בקבצי הוואטסאפ, בסוף המסמך. */
   @Get(':token/pdf')
   async getPdf(@Param('token') token: string, @Query('btn') btn: string, @Req() req: any, @Res() res: Response) {
     try {
