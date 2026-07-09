@@ -16,7 +16,7 @@ import { OrdersService } from './orders.service';
 
 @Controller('orders')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 

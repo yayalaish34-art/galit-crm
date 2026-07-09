@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('opportunities')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class OpportunitiesController {
   constructor(private readonly opportunitiesService: OpportunitiesService) {}
 

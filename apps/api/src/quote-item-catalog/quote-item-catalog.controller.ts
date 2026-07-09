@@ -5,7 +5,7 @@ import { QuoteItemCatalogService } from './quote-item-catalog.service';
 
 @Controller('quote-item-catalog')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class QuoteItemCatalogController {
   constructor(private readonly service: QuoteItemCatalogService) {}
 

@@ -5,7 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 
 @Controller('documents')
 @UseGuards(RolesGuard)
-@Roles('ADMIN', 'MANAGER')
+@Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
