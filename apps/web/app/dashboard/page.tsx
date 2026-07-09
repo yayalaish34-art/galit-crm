@@ -18010,6 +18010,12 @@ function TasksPage({
                                 await updateTaskField(t.id, { description: intakeLines });
                               }
                               if (advance) {
+                                // ── לפני המעבר להצעת המחיר: לשמור/לעדכן את הלקוח + אנשי הקשר (טלפון/מייל)
+                                //    מתוך טופס הפנייה למסד. בלי זה, מסך ההצעה שולף את אנשי הקשר של הלקוח
+                                //    מה-DB (שעדיין ריקים/ישנים) ודורס את הפרטים — כך שפרטי הלקוח מהפנייה
+                                //    לא הופיעו בהצעה. ──
+                                const freshTask = tasks.find((tk) => tk.id === t.id) || t;
+                                try { await saveCustomerForTask(freshTask); } catch { /* לא חוסם מעבר שלב */ }
                                 // Advance to the embedded quote stage (step 99) — no separate tab
                                 setManualStepOverride((prev) => ({ ...prev, [t.id]: QUOTE_STEP_IDX }));
                                 await updateTaskField(t.id, { type: 'QUOTE_PREPARATION' });

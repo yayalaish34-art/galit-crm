@@ -721,8 +721,8 @@ export function QuoteNewScreen({
   const [companyNo, setCompanyNo] = useState('');
   const [notes, setNotes] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
-  const [paymentValidityDate, setPaymentValidityDate] = useState('2026-03-25');
-  const [paymentDueDate, setPaymentDueDate] = useState('2026-03-25');
+  const [paymentValidityDate, setPaymentValidityDate] = useState('');
+  const [paymentDueDate, setPaymentDueDate] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [paymentTermsCode, setPaymentTermsCode] = useState('0');
   const [paymentTermRows, setPaymentTermRows] = useState<Array<{ id: string; label: string }>>([]);
@@ -785,16 +785,16 @@ export function QuoteNewScreen({
    * ובלי השמירה הזו כל לחיצה על "שמור" הייתה דורסת טלפון/מייל/כתובת שהמשתמש ערך
    * ומחזירה אותם לערכים הישנים מכרטיס הלקוח. */
   const prefilledCustomerIdRef = useRef<string | null>(null);
+  // האם המשתמש כבר ערך ידנית שדה לקוח בהצעה — מרגע זה לא דורסים אוטומטית.
+  const customerFieldsTouchedRef = useRef(false);
   useEffect(() => {
     if (!prefillCustomer) return;
-    const pid = prefillCustomer.id ?? '';
-    // מפתח המילוי: כשיש לקוח שמור (id) — לפי ה-id בלבד (לא דורסים עריכות בשמירות חוזרות).
-    // כשעדיין אין לקוח שמור (id ריק, פתיחה מהפנייה) — לפי תוכן הפרטים, כדי שעדכון של מה
-    // שהוקלד ב"פתיחת פנייה" (שם/טלפון/מייל/איש קשר) יזרום להצעה גם אם הפנייה נערכה אחרי הפתיחה.
-    const key = pid
-      ? pid
-      : `new:${prefillCustomer.name || ''}|${prefillCustomer.phone || ''}|${prefillCustomer.email || ''}|${prefillCustomer.contactName || ''}|${prefillCustomer.city || ''}|${prefillCustomer.address || ''}`;
-    if (prefilledCustomerIdRef.current === key) return; // כבר מולא עבור פרטים אלה — לא דורסים עריכות
+    if (customerFieldsTouchedRef.current) return; // המשתמש ערך ידנית — לא דורסים
+    // מפתח המילוי מבוסס על *תוכן* הפרטים (לא רק ה-id): כך אם פרטי הלקוח שנמסרים מההורה
+    // משתפרים אחרי הפתיחה (למשל נתוני "פתיחת פנייה" שנטענים/מתעדכנים) — המילוי חל שוב.
+    // ההגנה מפני דריסת עריכות ידניות נעשית דרך customerFieldsTouchedRef.
+    const key = `${prefillCustomer.id || ''}|${prefillCustomer.name || ''}|${prefillCustomer.phone || ''}|${prefillCustomer.email || ''}|${prefillCustomer.contactName || ''}|${prefillCustomer.city || ''}|${prefillCustomer.address || ''}`;
+    if (prefilledCustomerIdRef.current === key) return;
     prefilledCustomerIdRef.current = key;
     setCustomer(prefillCustomer.name);
     if (prefillCustomer.phone)           setPhone(prefillCustomer.phone);
@@ -845,6 +845,18 @@ export function QuoteNewScreen({
       return prev;
     });
   }, [prefillServiceName, draftReady]);
+
+  /* ── Default quote date: today (only for new quotes) ──
+   * חשוב: בלי זה date נשאר '' ותאריך התוקף מחושב על בסיס לא-צפוי. תאריך ההצעה = היום,
+   * ומכאן תאריך התוקף = היום + ימי תוקף (ברירת מחדל 30 → חודש מהיום). */
+  useEffect(() => {
+    if (initialQuoteId) return; // don't override when editing existing
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    setDate(`${yyyy}-${mm}-${dd}`);
+  }, [initialQuoteId]);
 
   /* ── Default follow date: 3 days from today (only for new quotes) ── */
   useEffect(() => {
@@ -3161,16 +3173,16 @@ export function QuoteNewScreen({
                       {quoteContactRows.map((c) => <option key={c.id} value={c.id}>{c.fullName}{c.isPrimary ? ' (ראשי)' : ''}</option>)}
                     </select>
                   ) : (
-                    <input className={inp} value={contact} onChange={(e) => setContact(e.target.value)} placeholder="שם איש הקשר" />
+                    <input className={inp} value={contact} onChange={(e) => { customerFieldsTouchedRef.current = true; setContact(e.target.value); }} placeholder="שם איש הקשר" />
                   )}
                 </div>
                 <div>
                   <div className={lbl}>טלפון</div>
-                  <input className={inp} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="טלפון" />
+                  <input className={inp} value={phone} onChange={(e) => { customerFieldsTouchedRef.current = true; setPhone(e.target.value); }} placeholder="טלפון" />
                 </div>
                 <div>
                   <div className={lbl}>אימייל איש קשר</div>
-                  <input className={inp} value={customerEmail} onChange={(e) => setCustomerEmail(e.target.value)} placeholder="אימייל" />
+                  <input className={inp} value={customerEmail} onChange={(e) => { customerFieldsTouchedRef.current = true; setCustomerEmail(e.target.value); }} placeholder="אימייל" />
                 </div>
               </div>
             </section>
