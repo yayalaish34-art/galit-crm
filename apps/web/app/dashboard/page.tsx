@@ -18470,7 +18470,11 @@ function TasksPage({
                               (cf0.email || '').trim() ||
                               (stage0Contacts.find((c) => c.isPrimary && c.email?.trim())?.email || '').trim() ||
                               (stage0Contacts.find((c) => c.email?.trim())?.email || '').trim();
-                            const quotePrefillCust = (linkedCustomerForQuote || cfCustomerName || cfContactName || t.customerName || t.leadName) ? {
+                            // חשוב: יוצרים prefill רק כשקיים לקוח/שם אמיתי (לקוח שמור / שם על המשימה / ליד).
+                            // אחרת ה-prefill היה "לקוח רפאים" בלי id — שדה הלקוח היה מוצג כמלא (readonly)
+                            // אך customerId ריק, וה"שמור" בהצעה נחסם עם "נא לבחור לקוח". פרטי הפנייה (cf0)
+                            // עדיין משמשים למילוי הערכים כשיש לקוח/שם אמיתי.
+                            const quotePrefillCust = (linkedCustomerForQuote || t.customerName || t.leadName) ? {
                               id: t.customerId || undefined,
                               // סדר עדיפויות: Customer שמור → מה שהוקלד בפנייה → נתוני המשימה/ליד.
                               name: linkedCustomerForQuote?.name || cfCustomerName || cfContactName || t.customerName || t.leadName || '',
