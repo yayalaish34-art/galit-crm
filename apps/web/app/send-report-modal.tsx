@@ -195,13 +195,20 @@ export function SendReportModal({
           setErr('שמירת הדוח בכרטיס הלקוח נכשלה — עדיין ניתן לשלוח במייל');
         }
       }
-      setAttached({
+      const rep: AttachedReport = {
         documentId,
         name: file.name,
         mimeType: file.type || 'application/octet-stream',
         dataBase64: b64,
         sizeBytes: file.size,
-      });
+      };
+      setAttached(rep);
+      // ניסוח אוטומטי מיד אחרי הצירוף — פעם אחת — על בסיס תוכן הדוח שצורף.
+      // מעבירים את הדוח במפורש כדי לא להיות תלויים ב-state שעדיין לא התעדכן.
+      if (!autoDraftedRef.current) {
+        autoDraftedRef.current = true;
+        void draft(undefined, rep);
+      }
     } catch {
       setErr('צירוף הדוח נכשל');
     } finally {
@@ -234,7 +241,8 @@ export function SendReportModal({
     if (file) acceptDropped(file);
   };
 
-  const draft = async (instruction?: string) => {
+  const draft = async (instruction?: string, report?: AttachedReport) => {
+    const rep = report || attached;
     setAiBusy(true);
     setErr('');
     try {
@@ -247,7 +255,10 @@ export function SendReportModal({
           contactName: task.leadName || task.customerName || '',
           projectName: task.projectName || '',
           serviceName: task.type || '',
-          reportName: attached?.name || '',
+          reportName: rep?.name || '',
+          // תוכן הדוח עצמו — השרת מחלץ ממנו טקסט ומנסח על בסיסו.
+          reportBase64: rep?.dataBase64 || undefined,
+          reportMimeType: rep?.mimeType || undefined,
           instruction: instruction || undefined,
           previousSubject: subject || undefined,
           previousBody: body || undefined,
@@ -267,13 +278,10 @@ export function SendReportModal({
     }
   };
 
-  // ניסוח אוטומטי בפתיחה — ה-AI מנסח נושא+תוכן מתוך מייל הצעת המחיר שנשלח, פעם אחת.
+  // איפוס דגל הניסוח האוטומטי בכל פתיחה/סגירה. הניסוח עצמו מופעל *אחרי צירוף הדוח*
+  // (ב-onPick), כדי שה-AI ינסח על בסיס תוכן הדוח שצורף — לא מראש בפתיחה ריקה.
   useEffect(() => {
-    if (!open) { autoDraftedRef.current = false; return; }
-    if (autoDraftedRef.current) return;
-    autoDraftedRef.current = true;
-    void draft();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    autoDraftedRef.current = false;
   }, [open]);
 
   const allTo = toInput.includes('@') ? [...toList, toInput.trim()] : toList;

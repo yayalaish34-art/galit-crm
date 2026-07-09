@@ -36,22 +36,20 @@ function buildClient() {
     keepAlive: true,
     connectionTimeoutMillis: 20000,
     idleTimeoutMillis: 10000,
-    max: 3,
+    max: Number(process.env.IMPORT_CONCURRENCY || 12) + 4,
   });
   pool.on('error', (e) => console.warn('[galit-import] pool error (will rebuild):', e.message));
   prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 }
 buildClient();
 
-async function rebuildClient() {
-  try { await prisma.$disconnect(); } catch { /* ignore */ }
-  try { await pool.end(); } catch { /* ignore */ }
-  buildClient();
-}
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-/** Retry a DB op on transient connection errors; rebuild the (dead) pool before retrying. */
-async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 6): Promise<T> {
+/**
+ * Retry a DB op on transient connection errors. pg.Pool discards broken sockets and hands out
+ * a fresh connection on the next call, so a simple backoff-retry recovers a dropped connection
+ * WITHOUT tearing down the whole pool (which would break sibling workers running concurrently).
+ */
+async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 8): Promise<T> {
   let lastErr: unknown;
   for (let i = 1; i <= attempts; i++) {
     try {
@@ -59,27 +57,27 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, attempts = 6): 
     } catch (e) {
       lastErr = e;
       const msg = e instanceof Error ? e.message : String(e);
-      const transient = /Connection terminated|timeout|ECONNRESET|socket|terminating connection|Closed|not queryable|server closed|Can't reach|pool/i.test(msg);
+      const transient = /Connection terminated|timeout|ECONNRESET|socket|terminating connection|Closed|not queryable|server closed|Can't reach|pool|ETIMEDOUT|ENOTFOUND/i.test(msg);
       if (!transient || i === attempts) throw e;
-      await sleep(Math.min(400 * 2 ** (i - 1), 5000)); // backoff
-      await rebuildClient(); // fresh pool+client so the next attempt isn't on a dead socket
+      await sleep(Math.min(300 * 2 ** (i - 1), 6000)); // backoff up to 6s
     }
   }
   throw lastErr;
 }
 
 // ── args ──────────────────────────────────────────────────────────────────
-type Args = { file: string; dryRun: boolean; limit: number | null; minYear: number };
+type Args = { file: string; dryRun: boolean; limit: number | null; minYear: number; skipExisting: boolean };
 function parseArgs(argv: string[]): Args {
-  let file = '', dryRun = false, limit: number | null = null, minYear = 2002;
+  let file = '', dryRun = false, limit: number | null = null, minYear = 2002, skipExisting = false;
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') dryRun = true;
+    else if (a === '--skip-existing') skipExisting = true; // resume mode: only create missing customers
     else if (a === '--file' && argv[i + 1]) file = argv[++i];
     else if (a === '--limit' && argv[i + 1]) limit = parseInt(argv[++i], 10) || null;
     else if (a === '--min-year' && argv[i + 1]) minYear = parseInt(argv[++i], 10) || 2002;
   }
-  return { file, dryRun, limit, minYear };
+  return { file, dryRun, limit, minYear, skipExisting };
 }
 
 // ── parsing helpers ─────────────────────────────────────────────────────────
@@ -327,12 +325,37 @@ async function main() {
   }
 
   // 3) write
-  let created = 0, updated = 0, contactsUp = 0, errors = 0;
+  let created = 0, updated = 0, contactsUp = 0, errors = 0, skipped = 0;
   const errSamples: string[] = [];
-  const toProcess = args.limit ? groupList.slice(0, args.limit) : groupList;
+  let toProcess = groupList;
 
-  for (let gi = 0; gi < toProcess.length; gi++) {
-    const g = toProcess[gi];
+  // Resume mode: bulk-load already-imported legacy IDs in ONE query and skip them in memory.
+  // Turns a slow "update 11k existing" pass into an instant skip, focusing only on missing rows.
+  if (args.skipExisting) {
+    const existingRows = await withRetry(
+      () => prisma.customer.findMany({ where: { importLegacyId: { not: null } }, select: { importLegacyId: true } }),
+      'bulk-load existing ids',
+    );
+    const done = new Set(existingRows.map((r) => r.importLegacyId).filter(Boolean) as string[]);
+    const before = toProcess.length;
+    toProcess = toProcess.filter((g) => !done.has(g.legacyId));
+    skipped = before - toProcess.length;
+    console.log(`[galit-import] skip-existing: ${skipped} already imported, ${toProcess.length} still missing`);
+  }
+
+  // Apply limit AFTER skip so "--skip-existing --limit N" processes N *new* customers per chunk.
+  if (args.limit && toProcess.length > args.limit) {
+    toProcess = toProcess.slice(0, args.limit);
+    console.log(`[galit-import] chunk limited to ${args.limit} this run`);
+  }
+
+  // Concurrent worker pool: run CONCURRENCY groups in parallel. Round-trips to the Tokyo
+  // pooler are latency-bound (~1/s serially); parallelizing gives ~10x throughput.
+  const CONCURRENCY = Number(process.env.IMPORT_CONCURRENCY || 12);
+  let cursor = 0;
+  let done = 0;
+
+  async function processGroup(g: Group) {
     const p = g.primary;
     const absorbed = g.allCodes.filter((c) => c !== g.legacyId);
     const internalNotes = [
@@ -421,15 +444,25 @@ async function main() {
       errors++;
       if (errSamples.length < 30) errSamples.push(`${g.legacyId} "${p.name}": ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
 
-    if ((gi + 1) % 500 === 0) {
-      console.log(`[galit-import] progress ${gi + 1}/${toProcess.length} (created ${created}, updated ${updated}, contacts ${contactsUp}, errors ${errors})`);
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= toProcess.length) return;
+      await processGroup(toProcess[i]);
+      done++;
+      if (done % 500 === 0) {
+        console.log(`[galit-import] progress ${done}/${toProcess.length} (created ${created}, updated ${updated}, contacts ${contactsUp}, errors ${errors})`);
+      }
     }
   }
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
   console.log('[galit-import] === DONE ===');
   console.log(`  customers created: ${created}`);
   console.log(`  customers updated: ${updated}`);
+  console.log(`  customers skipped (already imported): ${skipped}`);
   console.log(`  contacts upserted: ${contactsUp}`);
   console.log(`  errors: ${errors}`);
   for (const e of errSamples) console.log('   - ' + e);

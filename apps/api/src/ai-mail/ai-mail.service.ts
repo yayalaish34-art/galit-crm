@@ -15,6 +15,10 @@ export interface DraftContext {
   projectName?: string;
   /** שם הדוח המצורף (לניסוח מייל דוח) */
   reportName?: string;
+  /** תוכן הדוח המצורף (base64) — השרת מחלץ ממנו טקסט ומשתמש בו כרפרנס לניסוח. PDF או DOCX. */
+  reportBase64?: string;
+  /** סוג ה-MIME של הדוח המצורף — קובע האם לחלץ כ-PDF או DOCX. */
+  reportMimeType?: string;
 
   // ── פרטי המקרה שהמשתמש ממלא (שאלון) ──
   location?: string;        // מיקום מדויק
@@ -355,14 +359,20 @@ export class AiMailService {
     const serviceOrProject =
       ctx.projectName?.trim() || ctx.serviceName?.trim() || quoteEmail?.service?.trim() || '';
 
+    // ── תוכן הדוח המצורף עצמו — הרפרנס העיקרי לניסוח. מחלצים טקסט מ-PDF/DOCX. ──
+    const reportText = await this.extractReportText(ctx.reportBase64, ctx.reportMimeType, ctx.reportName);
+
     const contextLines = [
       ctx.customerName ? `לקוח: ${ctx.customerName}` : '',
       firstName ? `שם פרטי לפנייה (השתמש בזה בלבד בפנייה "שלום [שם]"): ${firstName}` : '',
       serviceOrProject ? `שירות/פרויקט: ${serviceOrProject}` : '',
       ctx.reportName ? `שם הדוח: ${ctx.reportName}` : '',
       ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
+      reportText
+        ? `תוכן הדוח המצורף (זהו הרפרנס העיקרי — בסס את תיאור העבודה והתוצאות על הטקסט הזה בלבד, אל תמציא נתונים):\n${reportText}`
+        : '',
       quoteEmail?.subject || quoteEmail?.body
-        ? `מייל הצעת המחיר המקורי שנשלח ללקוח (בסס עליו את תיאור השירות, אך נסח מחדש כמייל המלווה דוח שהושלם):\nנושא: ${quoteEmail.subject || '(ללא)'}\nתוכן:\n${quoteEmail.body || '(ללא)'}`
+        ? `מייל הצעת המחיר המקורי שנשלח ללקוח (להקשר על השירות שהוזמן; אם יש סתירה — תוכן הדוח גובר):\nנושא: ${quoteEmail.subject || '(ללא)'}\nתוכן:\n${quoteEmail.body || '(ללא)'}`
         : '',
     ].filter(Boolean).join('\n');
 
@@ -509,6 +519,60 @@ export class AiMailService {
     }
 
     return result;
+  }
+
+  /**
+   * מחלץ טקסט מדוח מצורף (base64) — תומך ב-PDF וב-DOCX. best-effort: בכישלון מחזיר ''.
+   * משמש לניסוח מייל הדוח כדי שה-AI יתבסס על תוכן הדוח האמיתי.
+   */
+  private async extractReportText(base64?: string, mimeType?: string, fileName?: string): Promise<string> {
+    if (!base64) return '';
+    let buf: Buffer;
+    try {
+      buf = Buffer.from(base64.replace(/^data:[^;]+;base64,/, ''), 'base64');
+    } catch {
+      return '';
+    }
+    const mime = String(mimeType || '');
+    const isPdf = /pdf/i.test(mime) || /\.pdf$/i.test(String(fileName || ''));
+    const isDocx = /word|officedocument/i.test(mime) || /\.docx$/i.test(String(fileName || ''));
+    try {
+      if (isPdf) return await this.extractPdfText(buf);
+      if (isDocx) return this.extractDocxText(buf);
+      // ברירת מחדל: מנסים DOCX (זול), אם ריק — PDF.
+      const docx = this.extractDocxText(buf);
+      return docx || (await this.extractPdfText(buf));
+    } catch (e: any) {
+      this.logger.warn(`extractReportText failed: ${e?.message || e}`);
+      return '';
+    }
+  }
+
+  /** מחלץ טקסט מ-PDF באמצעות pdfjs-dist. מוגבל באורך לפרומפט. best-effort. */
+  private async extractPdfText(pdf: Buffer): Promise<string> {
+    try {
+      // legacy build — ריצה ב-Node ללא DOM. בגרסה 3.11 זהו UMD (pdf.js), לכן import דינמי
+      // עשוי להחזיר את ה-API תחת default או ישירות על המודול.
+      const mod: any = await import('pdfjs-dist/legacy/build/pdf.js');
+      const pdfjs: any = mod?.getDocument ? mod : mod?.default;
+      if (!pdfjs?.getDocument) throw new Error('pdfjs getDocument unavailable');
+      const data = new Uint8Array(pdf.buffer, pdf.byteOffset, pdf.byteLength);
+      const doc = await pdfjs.getDocument({ data, disableWorker: true, isEvalSupported: false }).promise;
+      const parts: string[] = [];
+      const maxPages = Math.min(doc.numPages, 15); // תקרה — דוחות ארוכים מספיק בעמודים הראשונים
+      for (let i = 1; i <= maxPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const line = content.items.map((it: any) => (typeof it.str === 'string' ? it.str : '')).join(' ');
+        if (line.trim()) parts.push(line.trim());
+        if (parts.join('\n').length > 6000) break;
+      }
+      await doc.destroy?.();
+      return parts.join('\n').slice(0, 6000);
+    } catch (e: any) {
+      this.logger.warn(`extractPdfText failed: ${e?.message || e}`);
+      return '';
+    }
   }
 
   /** מחלץ טקסט גולמי מ-DOCX (word/document.xml) — פסקאות מופרדות בשורה חדשה. מוגבל באורך לפרומפט. */

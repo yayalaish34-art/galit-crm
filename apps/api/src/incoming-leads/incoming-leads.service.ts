@@ -65,6 +65,13 @@ export class IncomingLeadsService implements OnModuleInit {
     const existing = await this.prisma.incomingLead.findUnique({ where: { messageId: m.id } });
     if (existing) return;
 
+    // סינון: מיילים שמכילים את הביטוי המדויק "Want More Stats?" בגוף אינם לידים אמיתיים
+    // (מיילים אוטומטיים/סטטיסטיקות) — לא מכניסים אותם לבסיס הנתונים כלל.
+    if ((m.bodyText || '').includes('Want More Stats?')) {
+      this.logger.log(`Skipping non-lead email "${m.subject}" (contains "Want More Stats?")`);
+      return;
+    }
+
     const lead = await this.prisma.incomingLead.create({
       data: {
         messageId: m.id,

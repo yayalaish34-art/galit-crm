@@ -18227,8 +18227,9 @@ function TasksPage({
                                   : remainingHours >= 1 ? `${remainingHours} שעות` : 'פחות משעה')
                               : null;
                             const followupCustomerName = contactName || t.customerName || t.leadName || 'הלקוח';
-                            const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || '').replace(/[^\d+]/g, '');
-                            const fu3Email = t.leadEmail || linkedLeadForHeader?.email || '';
+                            // Phone/email may live on the linked CUSTOMER (converted/imported tasks), not only on a lead.
+                            const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || linkedCustomerForGate?.phone || '').replace(/[^\d+]/g, '');
+                            const fu3Email = t.leadEmail || linkedLeadForHeader?.email || linkedCustomerForGate?.email || '';
                             const waLink3 = fu3Phone ? whatsAppLink(fu3Phone) : null;
                             const coach = aiCoach[t.id];
                             const activeFollowupTab = followupTab[t.id] || 'service';
@@ -18622,9 +18623,9 @@ function TasksPage({
                             const coordServiceLabel = coordServiceRaw
                               ? (coordServiceMap[coordServiceRaw.toUpperCase()] || coordServiceRaw)
                               : '';
-                            const meetingTitle = coordServiceLabel
-                              ? `בדיקת ${coordServiceLabel} — ${customerLabel}`
-                              : `תיאום פגישה עם ${customerLabel}`;
+                            // שם הפריט המלא (מתוך SERVICE_CATEGORIES לפי productName), למשל שם תת-שירות מלא —
+                            // עדיף על ה-label המקוצר ("קרינה"). נופל חזרה ל-label המקוצר אם אין התאמה.
+                            const coordFullItemName = (serviceNameFromProductId(t.productName, lead) || coordServiceLabel || '').trim();
                             // פרטים אישיים לניסוח הכותרת ע"י ה-GPT API (שם לקוח / שירות / עיר / כתובת / מיקום הפגישה).
                             const coordCustomerName = (t.customerName || t.leadName || customerLabel || '').trim();
                             const coordCity = (lead?.city || '').trim();
@@ -18634,6 +18635,10 @@ function TasksPage({
                               coordForms[t.id]?.location ??
                               (lead?.address ? `${lead.address}${lead?.city ? ', ' + lead.city : ''}` : (lead?.city || ''))
                             ).trim();
+                            // כותרת מלאה יותר: שם הפריט המלא ואז המיקום (במקום רק "בדיקת קרינה").
+                            const meetingTitle = coordFullItemName
+                              ? `בדיקת ${coordFullItemName}${coordMeetingLocation ? ` — ${coordMeetingLocation}` : ` — ${customerLabel}`}`
+                              : `תיאום פגישה עם ${customerLabel}`;
                             const titleBusy = !!coordTitleBusy[t.id];
                             const draftTitle = () => draftMeetingTitle(t.id, {
                               customerName: coordCustomerName,

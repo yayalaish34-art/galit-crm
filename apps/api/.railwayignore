@@ -1,10 +1,14 @@
 node_modules
 dist
+.next
 .env
 .env.*
 storage
 test
 *.md
+_*.mjs
+_*.json
+*.log
 templates/*.bak
 templates/*.doc
 templates/example_*

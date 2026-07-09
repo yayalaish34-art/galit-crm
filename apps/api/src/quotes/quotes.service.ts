@@ -11,6 +11,11 @@ import PDFDocument = require('pdfkit');
 // INSERT/UPDATE RETURNING clause so they never cause "column does not exist" errors.
 const SCHEMA_DRIFT_OMIT = ['salesRepresentativeId', 'performerUserId', 'performerName'];
 
+// תפקידים המורשים לצפות/ליצור/לעדכן/למחוק הצעות מחיר. חייב להיות תואם ל-@Roles שעל
+// QuotesController — אחרת עובד עובר את guard הנתיב אך נחסם כאן ומקבל 403 בשמירה
+// (בדיוק הבאג של "הכפתור שמור לא עובד" לטכנאים/מומחים/חיוב).
+const QUOTE_ALLOWED_ROLES = new Set(['ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING']);
+
 const QUOTE_WRITABLE_FIELDS = new Set([
   'importLegacyId',
   'quoteNumber',
@@ -122,7 +127,7 @@ export class QuotesService {
   } = {}) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
-    if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
+    if (!QUOTE_ALLOWED_ROLES.has(role)) throw new ForbiddenException();
 
     // Automation: expire quotes whose validity passed while still SENT (best-effort — older DBs may lack EXPIRED enum)
     const now = new Date();
@@ -205,7 +210,7 @@ export class QuotesService {
   create(data: any, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
-    if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
+    if (!QUOTE_ALLOWED_ROLES.has(role)) throw new ForbiddenException();
 
     const clean = this.sanitizeQuoteInput(data);
 
@@ -289,7 +294,7 @@ export class QuotesService {
   async update(id: string, data: any, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
-    if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
+    if (!QUOTE_ALLOWED_ROLES.has(role)) throw new ForbiddenException();
 
     const existing = await this.prisma.quote.findUnique({
       where: { id },
@@ -412,7 +417,7 @@ export class QuotesService {
   async remove(id: string, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
-    if (role !== 'ADMIN' && role !== 'MANAGER' && role !== 'SALES') throw new ForbiddenException();
+    if (!QUOTE_ALLOWED_ROLES.has(role)) throw new ForbiddenException();
     try {
       return await this.prisma.quote.delete({ where: { id } });
     } catch (e: any) {
