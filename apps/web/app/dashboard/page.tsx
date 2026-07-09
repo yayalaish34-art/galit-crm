@@ -15672,7 +15672,26 @@ function TasksPage({
    * מזהה כפילות לפי שם+טלפון (case/space-insensitive) מול אנשי הקשר הקיימים במסד.
    */
   const persistTaskContactsToCustomer = async (taskId: string, customerId: string) => {
-    const local = (taskContactsMap[taskId] || []).filter(
+    const rows = [...(taskContactsMap[taskId] || [])];
+    // ── איש הקשר הראשי מטופס הפנייה (fd.fullName/phone/email) — זהו ה"שם איש קשר"
+    //    שהמשתמש הקליד למעלה. הוא שדה נפרד מרשימת ccContacts, ולכן בלי זה הוא לא נשמר
+    //    כאיש קשר של הלקוח — וב"הצעת מחיר" רשימת אנשי הקשר יוצאת ריקה (או בלי טלפון/מייל).
+    //    מוסיפים אותו כאן כאיש קשר ראשי אם הוזן, כדי שיזרום להצעה. ──
+    const fd = callFormData[taskId] || {};
+    const cfFullName = ([fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '').trim();
+    const cfPhone = (fd.phone || '').trim();
+    const cfEmail = (fd.email || '').trim();
+    if (cfFullName || cfPhone || cfEmail) {
+      rows.unshift({
+        id: `callform-${taskId}`,
+        fullName: cfFullName,
+        phone: cfPhone,
+        email: cfEmail,
+        roleTitle: '',
+        isPrimary: true,
+      });
+    }
+    const local = rows.filter(
       (c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim(),
     );
     if (local.length === 0) return;
