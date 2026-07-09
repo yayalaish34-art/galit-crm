@@ -18429,23 +18429,34 @@ function TasksPage({
                             // Pull the full Customer record (created in שלב כרטיס לקוח) so all its
                             // fields auto-fill "פרטי הלקוח" in the new quote form.
                             const linkedCustomerForQuote = t.customerId ? customers.find((c) => c.id === t.customerId) : undefined;
-                            // אימייל איש הקשר מהשלב הראשון ("פתיחת פנייה"): ישירות מטופס השיחה ומאנשי הקשר של המשימה
+                            // ── פרטי הלקוח שהוזנו בשלב "פתיחת פנייה" (טופס השיחה) — מקור אמת חי גם לפני
+                            //    שנשמר Customer, ומעודכן יותר מהשדות שעל המשימה/ליד. משמש למילוי "פרטי הלקוח"
+                            //    בהצעת המחיר כדי שמה שהוקלד בפנייה יזרום לכאן. ──
+                            const cf0 = callFormData[t.id] || {};
+                            const cfIsCompany = (cf0.customerType || '').trim() === 'עסקי'
+                              || (cf0.customerType || '').trim().toUpperCase() === 'COMPANY'
+                              || !!(cf0.company || '').trim();
+                            // שם הלקוח: לחברה — שם החברה; לפרטי — שם האדם המלא.
+                            const cfCustomerName = (cfIsCompany ? (cf0.company || '').trim() : (cf0.fullName || '').trim());
+                            const cfContactName = (cf0.fullName || cf0.contactName || '').trim();
                             const stage0Contacts = taskContactsMap[t.id] || [];
                             const stage0ContactEmail =
-                              (callFormData[t.id]?.email || '').trim() ||
+                              (cf0.email || '').trim() ||
                               (stage0Contacts.find((c) => c.isPrimary && c.email?.trim())?.email || '').trim() ||
                               (stage0Contacts.find((c) => c.email?.trim())?.email || '').trim();
-                            const quotePrefillCust = (linkedCustomerForQuote || t.customerName || t.leadName) ? {
+                            const quotePrefillCust = (linkedCustomerForQuote || cfCustomerName || cfContactName || t.customerName || t.leadName) ? {
                               id: t.customerId || undefined,
-                              name: linkedCustomerForQuote?.name || t.customerName || t.leadName || '',
-                              phone: linkedCustomerForQuote?.phone || contactPhone || undefined,
+                              // סדר עדיפויות: Customer שמור → מה שהוקלד בפנייה → נתוני המשימה/ליד.
+                              name: linkedCustomerForQuote?.name || cfCustomerName || cfContactName || t.customerName || t.leadName || '',
+                              phone: linkedCustomerForQuote?.phone || (cf0.phone || '').trim() || contactPhone || undefined,
                               email: linkedCustomerForQuote?.email || stage0ContactEmail || t.leadEmail || linkedLeadForHeader?.email || undefined,
-                              city: linkedCustomerForQuote?.city || linkedLeadForHeader?.city || undefined,
-                              address: linkedCustomerForQuote?.address || linkedLeadForHeader?.address || undefined,
-                              contactName: linkedCustomerForQuote?.contactName || undefined,
-                              companyRegNumber: linkedCustomerForQuote?.companyRegNumber || undefined,
+                              city: linkedCustomerForQuote?.city || (cf0.city || '').trim() || linkedLeadForHeader?.city || undefined,
+                              address: linkedCustomerForQuote?.address || (cf0.address || '').trim() || linkedLeadForHeader?.address || undefined,
+                              contactName: linkedCustomerForQuote?.contactName || cfContactName || undefined,
+                              companyRegNumber: linkedCustomerForQuote?.companyRegNumber || (cf0.companyRegNumber || '').trim() || undefined,
                               fax: linkedCustomerForQuote?.fax || undefined,
-                              customerType: linkedCustomerForQuote?.type || undefined,
+                              customerType: linkedCustomerForQuote?.type
+                                || (cfIsCompany ? 'COMPANY' : (cf0.customerType ? 'PRIVATE' : undefined)),
                             } : null;
                             const quotePrefillSvc = serviceNameFromProductId(t.productName, linkedLeadForHeader) || null;
                             const fuAssignee = followupAssignee[t.id] || '';

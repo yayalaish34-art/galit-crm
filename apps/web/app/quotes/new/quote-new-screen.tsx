@@ -788,8 +788,14 @@ export function QuoteNewScreen({
   useEffect(() => {
     if (!prefillCustomer) return;
     const pid = prefillCustomer.id ?? '';
-    if (prefilledCustomerIdRef.current === pid) return; // כבר מולא עבור לקוח זה — לא דורסים עריכות
-    prefilledCustomerIdRef.current = pid;
+    // מפתח המילוי: כשיש לקוח שמור (id) — לפי ה-id בלבד (לא דורסים עריכות בשמירות חוזרות).
+    // כשעדיין אין לקוח שמור (id ריק, פתיחה מהפנייה) — לפי תוכן הפרטים, כדי שעדכון של מה
+    // שהוקלד ב"פתיחת פנייה" (שם/טלפון/מייל/איש קשר) יזרום להצעה גם אם הפנייה נערכה אחרי הפתיחה.
+    const key = pid
+      ? pid
+      : `new:${prefillCustomer.name || ''}|${prefillCustomer.phone || ''}|${prefillCustomer.email || ''}|${prefillCustomer.contactName || ''}|${prefillCustomer.city || ''}|${prefillCustomer.address || ''}`;
+    if (prefilledCustomerIdRef.current === key) return; // כבר מולא עבור פרטים אלה — לא דורסים עריכות
+    prefilledCustomerIdRef.current = key;
     setCustomer(prefillCustomer.name);
     if (prefillCustomer.phone)           setPhone(prefillCustomer.phone);
     if (prefillCustomer.fax)             setFax(prefillCustomer.fax);
