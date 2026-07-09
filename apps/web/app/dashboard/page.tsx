@@ -15705,7 +15705,32 @@ function TasksPage({
   const saveCustomerForTask = async (task: Task): Promise<string | null> => {
     if (!task) return null;
     if (task.customerId) {
-      // לקוח כבר קיים — ודא שאנשי הקשר שהוזנו בצינור נשמרים למסד לפני העברה/יצירת הצעה.
+      // לקוח כבר קיים — לפני העברה/יצירת הצעה:
+      //  (1) מעדכנים את פרטי הלקוח מהערכים שהוקלדו בצינור (טלפון/מייל/עיר/כתובת/איש קשר),
+      //      אחרת עריכות שנעשו בפנייה לא נשמרות והעובד החדש רואה נתונים ישנים.
+      //  (2) שומרים את אנשי הקשר שהוזנו (כולל טלפון+מייל).
+      const fdExisting = callFormData[task.id];
+      if (fdExisting) {
+        const fullNameE = [fdExisting.firstName, fdExisting.lastName].filter(Boolean).join(' ').trim() || fdExisting.fullName || '';
+        const phoneE = (fdExisting.phone || '').trim();
+        const emailE = (fdExisting.email || '').trim();
+        const cityE = (fdExisting.city || '').trim();
+        const addressE = (fdExisting.address || '').trim();
+        // שולחים רק שדות שיש בהם ערך, כדי לא לרוקן נתונים קיימים במסד.
+        const patch: Record<string, unknown> = {};
+        if (fullNameE) patch.contactName = fullNameE;
+        if (phoneE) patch.phone = phoneE;
+        if (emailE) patch.email = emailE;
+        if (cityE) patch.city = cityE;
+        if (addressE) patch.address = addressE;
+        if (Object.keys(patch).length > 0) {
+          await apiFetch(apiUrl(`/customers/${task.customerId}`), {
+            method: 'PATCH',
+            authUser: currentUser,
+            body: JSON.stringify(patch),
+          }).catch(() => {});
+        }
+      }
       await persistTaskContactsToCustomer(task.id, task.customerId);
       return task.customerId;
     }
@@ -15743,9 +15768,10 @@ function TasksPage({
       });
       if (!customerRes.ok) return null;
       const createdCustomer = await customerRes.json();
-      if (!isPrivate) {
-        await persistTaskContactsToCustomer(task.id, createdCustomer.id);
-      }
+      // שומרים תמיד את אנשי הקשר שהוזנו בצינור (כולל טלפון+מייל) — גם ללקוח פרטי —
+      // אחרת בהעברת המשימה לעובד אחר פרטי הקשר חיים רק בזיכרון של העובד המקורי ואובדים.
+      // (persistTaskContactsToCustomer כולל דדופ, כך שאין כפילויות מול איש הקשר של הלקוח.)
+      await persistTaskContactsToCustomer(task.id, createdCustomer.id);
       if (task.leadId) {
         await apiFetch(apiUrl(`/leads/${task.leadId}`), {
           method: 'PATCH',
