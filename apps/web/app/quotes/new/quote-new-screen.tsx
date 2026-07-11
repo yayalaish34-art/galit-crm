@@ -1578,6 +1578,9 @@ export function QuoteNewScreen({
   const emailDraftEditedRef = useRef(false);
   // מונע קריאות AI מקבילות (closure של aiBusy מתיישן).
   const draftInFlightRef = useRef(false);
+  // ניסוח המייל מתבצע פעם אחת בלבד — אחרי שהגרסה הערוכה נשמרה חזרה מ-Word (syncFromWord),
+  // ולא מיד אחרי המיזוג. כך ה-AI מנסח על בסיס הקובץ הסופי, אחרי שהמשתמש עורך אותו.
+  const draftedAfterWordSaveRef = useRef(false);
 
   // הוספת נמען לרשימה (chip) — מ-Enter/פסיק. מפצל גם הדבקה מרובה.
   const INPUT_FIELD_OF = { toList: 'toInput', ccList: 'ccInput', bccList: 'bccInput' } as const;
@@ -1940,6 +1943,12 @@ export function QuoteNewScreen({
         if (d?.synced) {
           setStatusMsg('הגרסה מ-Word נשמרה במערכת ✓');
           setTimeout(() => setStatusMsg(''), 5000);
+          // ── ניסוח המייל *עכשיו* — אחרי שהקובץ הערוך נשמר ── פעם אחת בלבד. ל-AI יש
+          // את טקסט המסמך הסופי (הערוך), לא את הגרסה הגולמית שזה עתה מוזגה.
+          if (!draftedAfterWordSaveRef.current && !emailDraftEditedRef.current) {
+            draftedAfterWordSaveRef.current = true;
+            void generateEmailDraft(id);
+          }
           return true;
         }
       }
@@ -2665,10 +2674,10 @@ export function QuoteNewScreen({
         }
       }
 
-      // ── ניסוח מייל רק אחרי המיזוג ── עכשיו שהמסמך המלא נשמר להצעה, ל-AI יש את כל
-      // ההקשר (סכום/תנאי תשלום/פריטים + טקסט המסמך). לפני המיזוג לא מנסחים כדי לא
-      // לשלוח ל-AI בקשה חסרת הקשר.
-      if (currentQuoteId) void generateEmailDraft(currentQuoteId);
+      // ── לא מנסחים כאן! ── הניסוח נדחה עד *אחרי* שהמשתמש עורך את הקובץ ב-Word ושומר,
+      // כי המסמך הגולמי שזה עתה מוזג עדיין ישתנה. הניסוח מתבצע ב-syncFromWord אחרי
+      // שהגרסה הערוכה נשמרת חזרה ל-DB (פעם אחת, לפי draftedAfterWordSaveRef).
+      draftedAfterWordSaveRef.current = false; // מיזוג חדש → מאפשר ניסוח טרי אחרי השמירה הבאה
 
       // ההמרה ל-PDF אינה מתבצעת כאן יותר — הקובץ נשמר כ-DOCX, וההמרה ל-PDF מתבצעת בצד השרת
       // בזמן השליחה בלבד ("שלח"). כך עורכים DOCX בקלות, וכל מה שנשלח ללקוח הוא PDF.

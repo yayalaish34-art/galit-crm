@@ -56,6 +56,29 @@ export class MicrosoftController {
     return { success: true };
   }
 
+  // ── OneDrive נפרד — חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד ──
+
+  /** Status of the current user's separate OneDrive connection (for the UI button). */
+  @Get('onedrive/status')
+  onedriveStatus(@Headers('x-user-id') userId?: string) {
+    if (!userId) throw new BadRequestException('Missing x-user-id');
+    return this.auth.getOneDriveStatus(userId);
+  }
+
+  /** Returns the Microsoft consent URL for connecting a *separate* OneDrive account (files only). */
+  @Get('onedrive/login')
+  onedriveLogin(@Headers('x-user-id') userId?: string) {
+    if (!userId) throw new BadRequestException('Missing x-user-id');
+    return { url: this.auth.buildAuthUrl(userId, 'onedrive') };
+  }
+
+  @Post('onedrive/disconnect')
+  async onedriveDisconnect(@Headers('x-user-id') userId?: string) {
+    if (!userId) throw new BadRequestException('Missing x-user-id');
+    await this.auth.disconnectOneDrive(userId);
+    return { success: true };
+  }
+
   /** Minimal HTML that notifies the opener and closes the popup. */
   private closePage(message: string, success: boolean): string {
     const safe = message.replace(/</g, '&lt;').replace(/>/g, '&gt;');

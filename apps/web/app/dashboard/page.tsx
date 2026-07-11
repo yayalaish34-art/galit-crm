@@ -11487,6 +11487,9 @@ function SettingsPage({
   // ── Outlook (Microsoft Graph) connection for the edited employee ──
   const [msStatus, setMsStatus] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
   const [msBusy, setMsBusy] = useState(false);
+  // ── חשבון OneDrive נפרד (רק לאורי) — לאחסון קבצים בלבד, נפרד מ-Outlook ──
+  const [odStatus, setOdStatus] = useState<{ connected: boolean; email: string | null }>({ connected: false, email: null });
+  const [odBusy, setOdBusy] = useState(false);
   // תמונת חתימה (data-URL לתצוגה מקדימה; null = אין)
   const [sigImagePreview, setSigImagePreview] = useState<string | null>(null);
   const [sigImageBusy, setSigImageBusy] = useState(false);
@@ -11559,10 +11562,16 @@ function SettingsPage({
       if (r.ok) setMsStatus(await r.json());
     } catch { /* ignore */ }
   };
-  // Re-check status when the OAuth popup signals completion.
+  const refreshOdStatus = async () => {
+    try {
+      const r = await apiFetch(apiUrl('/auth/microsoft/onedrive/status'), { authUser: currentUser });
+      if (r.ok) setOdStatus(await r.json());
+    } catch { /* ignore */ }
+  };
+  // Re-check status when the OAuth popup signals completion (covers both Outlook and OneDrive).
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
-      if (e?.data?.type === 'ms-auth') refreshMsStatus();
+      if (e?.data?.type === 'ms-auth') { refreshMsStatus(); refreshOdStatus(); }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
@@ -11907,6 +11916,8 @@ function SettingsPage({
     setSmtpTestMsg('');
     setMsStatus({ connected: false, email: null });
     refreshMsStatus();
+    setOdStatus({ connected: false, email: null });
+    refreshOdStatus();
     loadSignatureImage(u.id);
     loadUserSignatures(u.id);
     setNewSigTitle('');
@@ -13568,6 +13579,63 @@ function SettingsPage({
                   }}
                 >
                   <Mail className="h-4 w-4" /> התחבר ל-Outlook
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* חשבון OneDrive נפרד — רק לאורי. חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד. */}
+          {empEditing && (currentUser?.email || '').toLowerCase() === 'uri@galit.co.il' && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-sky-800">
+                <FolderKanban className="h-4 w-4" /> חשבון OneDrive נפרד
+              </div>
+              <div className="mb-3 text-xs text-slate-600">
+                חבר חשבון <strong>OneDrive נפרד</strong> לאחסון ועריכת הצעות מחיר — <strong>אינו חייב להיות</strong> חשבון ה-Outlook שלך ({currentUser?.email}).
+                בלחיצה על "התחבר" ייפתח חלון בחירת חשבון Microsoft — בחר את חשבון ה-OneDrive הרצוי.
+                {' '}אם לא תחבר חשבון נפרד, הקבצים יישמרו ב-OneDrive של חשבון ה-Outlook.
+              </div>
+              {odStatus.connected ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+                    ✓ מחובר{odStatus.email ? ` — ${odStatus.email}` : ''}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={odBusy}
+                    className="rounded-xl border border-red-200 bg-white px-4 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    onClick={async () => {
+                      setOdBusy(true);
+                      try {
+                        await apiFetch(apiUrl('/auth/microsoft/onedrive/disconnect'), {
+                          method: 'POST',
+                          authUser: currentUser,
+                        });
+                        setOdStatus({ connected: false, email: null });
+                      } catch { /* ignore */ } finally { setOdBusy(false); }
+                    }}
+                  >
+                    נתק חשבון OneDrive
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={odBusy}
+                  className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
+                  onClick={async () => {
+                    setOdBusy(true);
+                    try {
+                      const r = await apiFetch(apiUrl('/auth/microsoft/onedrive/login'), {
+                        authUser: currentUser,
+                      });
+                      if (!r.ok) { setOdBusy(false); return; }
+                      const { url } = await r.json();
+                      window.open(url, 'od-oauth', 'width=520,height=680');
+                    } catch { /* ignore */ } finally { setOdBusy(false); }
+                  }}
+                >
+                  <FolderKanban className="h-4 w-4" /> התחבר ל-OneDrive
                 </button>
               )}
             </div>

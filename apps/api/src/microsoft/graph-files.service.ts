@@ -35,7 +35,7 @@ export class GraphFilesService {
     fileName: string,
     docx: Buffer,
   ): Promise<{ itemId: string; webUrl: string; webDavUrl: string; name: string }> {
-    const token = await this.auth.getAccessToken(userId);
+    const token = await this.auth.getFilesAccessToken(userId);
     const safe =
       (fileName.replace(/\.docx$/i, '') || 'quote').replace(/[^A-Za-z0-9._\-א-ת ]+/g, '_').trim().slice(0, 120) ||
       'quote';
@@ -88,7 +88,7 @@ export class GraphFilesService {
     userId: string,
     itemId: string,
   ): Promise<{ itemId: string; webUrl: string; webDavUrl: string; name: string; lastModified: string } | null> {
-    const token = await this.auth.getAccessToken(userId);
+    const token = await this.auth.getFilesAccessToken(userId);
     const res = await fetch(
       `${GRAPH}/me/drive/items/${itemId}?$select=id,name,webUrl,webDavUrl,lastModifiedDateTime`,
       { headers: { Authorization: `Bearer ${token}` } },
@@ -108,7 +108,7 @@ export class GraphFilesService {
    * Graph מחזיר בד"כ 302 לכתובת אחסון מאומתת-מראש — מפנים אליה ללא כותרת Authorization.
    */
   async downloadContent(userId: string, itemId: string): Promise<Buffer> {
-    const token = await this.auth.getAccessToken(userId);
+    const token = await this.auth.getFilesAccessToken(userId);
     const res = await fetch(`${GRAPH}/me/drive/items/${itemId}/content`, {
       headers: { Authorization: `Bearer ${token}` },
       redirect: 'manual',

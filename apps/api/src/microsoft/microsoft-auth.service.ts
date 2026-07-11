@@ -19,7 +19,15 @@ export class MicrosoftAuthService {
   // הוספת scope מחייבת חיבור-מחדש חד-פעמי של כל משתמש כדי לאשר את ההרשאה החדשה.
   static readonly SCOPES = 'offline_access Mail.Send Mail.Read User.Read Calendars.ReadWrite Files.ReadWrite';
 
+  // חשבון OneDrive נפרד (uri@galit.co.il) — קבצים בלבד, ללא הרשאות דואר/יומן.
+  // חשבון זה יכול להיות Microsoft שונה מ-Outlook; משמש רק לאחסון/עריכת הצעות מחיר ב-OneDrive.
+  static readonly ONEDRIVE_SCOPES = 'offline_access User.Read Files.ReadWrite';
+
   constructor(private readonly prisma: PrismaService) {}
+
+  private scopesFor(account: 'outlook' | 'onedrive'): string {
+    return account === 'onedrive' ? MicrosoftAuthService.ONEDRIVE_SCOPES : MicrosoftAuthService.SCOPES;
+  }
 
   private cfg() {
     const clientId = process.env.GRAPH_CLIENT_ID;
@@ -34,23 +42,33 @@ export class MicrosoftAuthService {
     return { clientId, clientSecret, tenantId, redirectUri };
   }
 
-  /** Build the Microsoft consent URL. `state` carries the CRM user id back to the callback. */
-  buildAuthUrl(userId: string): string {
+  /**
+   * Build the Microsoft consent URL. `state` carries the CRM user id — and, for the separate
+   * OneDrive account, an `od:` prefix — back to the callback.
+   * `prompt=select_account` lets the user pick a *different* account than their Outlook login.
+   */
+  buildAuthUrl(userId: string, account: 'outlook' | 'onedrive' = 'outlook'): string {
     const { clientId, tenantId, redirectUri } = this.cfg();
     const params = new URLSearchParams({
       client_id: clientId,
       response_type: 'code',
       redirect_uri: redirectUri,
       response_mode: 'query',
-      scope: MicrosoftAuthService.SCOPES,
-      state: userId,
+      scope: this.scopesFor(account),
+      state: account === 'onedrive' ? `od:${userId}` : userId,
       prompt: 'select_account',
     });
     return `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?${params.toString()}`;
   }
 
-  /** Exchange the auth code for tokens and persist the (encrypted) refresh token against the user. */
-  async handleCallback(code: string, userId: string): Promise<{ email: string | null }> {
+  /**
+   * Exchange the auth code for tokens and persist the (encrypted) refresh token against the user.
+   * The `state` may carry an `od:` prefix, meaning the separate OneDrive account (files only).
+   */
+  async handleCallback(code: string, state: string): Promise<{ email: string | null }> {
+    const isOneDrive = state.startsWith('od:');
+    const userId = isOneDrive ? state.slice(3) : state;
+    const account: 'outlook' | 'onedrive' = isOneDrive ? 'onedrive' : 'outlook';
     const { clientId, clientSecret, tenantId, redirectUri } = this.cfg();
     const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
@@ -63,14 +81,16 @@ export class MicrosoftAuthService {
         grant_type: 'authorization_code',
         code,
         redirect_uri: redirectUri,
-        scope: MicrosoftAuthService.SCOPES,
+        scope: this.scopesFor(account),
       }),
     });
 
     if (!res.ok) {
       const detail = await res.text();
       this.logger.error(`Token exchange failed: ${detail}`);
-      throw new BadRequestException('חיבור ל-Outlook נכשל בעת קבלת ההרשאה');
+      throw new BadRequestException(
+        isOneDrive ? 'חיבור ל-OneDrive נכשל בעת קבלת ההרשאה' : 'חיבור ל-Outlook נכשל בעת קבלת ההרשאה',
+      );
     }
 
     const data = (await res.json()) as { access_token?: string; refresh_token?: string };
@@ -85,25 +105,51 @@ export class MicrosoftAuthService {
 
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        msRefreshToken: encryptSecret(data.refresh_token),
-        msEmail: email,
-        msConnectedAt: new Date(),
-      },
+      data: isOneDrive
+        ? {
+            odRefreshToken: encryptSecret(data.refresh_token),
+            odEmail: email,
+            odConnectedAt: new Date(),
+          }
+        : {
+            msRefreshToken: encryptSecret(data.refresh_token),
+            msEmail: email,
+            msConnectedAt: new Date(),
+          },
     });
 
     return { email };
   }
 
-  /** Mint a fresh access token for a connected user; rotates the stored refresh token. */
+  /** Mint a fresh access token for a connected user (Outlook account); rotates the stored refresh token. */
   async getAccessToken(userId: string): Promise<string> {
+    return this.mintAccessToken(userId, 'outlook');
+  }
+
+  /**
+   * Mint an access token for OneDrive file operations. If the user has connected a *separate*
+   * OneDrive account, that account's token is used; otherwise it falls back to the Outlook account.
+   * Lets an employee (e.g. Uri) store quote files in a OneDrive that isn't their login mailbox.
+   */
+  async getFilesAccessToken(userId: string): Promise<string> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (user?.odRefreshToken) return this.mintAccessToken(userId, 'onedrive');
+    return this.mintAccessToken(userId, 'outlook');
+  }
+
+  private async mintAccessToken(userId: string, account: 'outlook' | 'onedrive'): Promise<string> {
     const { clientId, clientSecret, tenantId } = this.cfg();
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user?.msRefreshToken) {
-      throw new BadRequestException('חשבון Outlook אינו מחובר — יש להתחבר תחילה');
+    const stored = account === 'onedrive' ? user?.odRefreshToken : user?.msRefreshToken;
+    if (!stored) {
+      throw new BadRequestException(
+        account === 'onedrive'
+          ? 'חשבון OneDrive אינו מחובר — יש להתחבר תחילה'
+          : 'חשבון Outlook אינו מחובר — יש להתחבר תחילה',
+      );
     }
 
-    const refreshToken = decryptSecret(user.msRefreshToken);
+    const refreshToken = decryptSecret(stored);
     const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
     const res = await fetch(tokenUrl, {
@@ -114,25 +160,41 @@ export class MicrosoftAuthService {
         client_secret: clientSecret,
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
-        scope: MicrosoftAuthService.SCOPES,
+        scope: this.scopesFor(account),
       }),
     });
 
     if (!res.ok) {
       const detail = await res.text();
-      this.logger.error(`Token refresh failed for user ${userId}: ${detail}`);
+      this.logger.error(`Token refresh failed for user ${userId} (${account}): ${detail}`);
       // Refresh token revoked/expired — clear it so the UI prompts a reconnect.
       await this.prisma.user
-        .update({ where: { id: userId }, data: { msRefreshToken: null, msConnectedAt: null } })
+        .update({
+          where: { id: userId },
+          data:
+            account === 'onedrive'
+              ? { odRefreshToken: null, odConnectedAt: null }
+              : { msRefreshToken: null, msConnectedAt: null },
+        })
         .catch(() => undefined);
-      throw new BadRequestException('חיבור ה-Outlook פג תוקף — יש להתחבר מחדש');
+      throw new BadRequestException(
+        account === 'onedrive'
+          ? 'חיבור ה-OneDrive פג תוקף — יש להתחבר מחדש'
+          : 'חיבור ה-Outlook פג תוקף — יש להתחבר מחדש',
+      );
     }
 
     const data = (await res.json()) as { access_token: string; refresh_token?: string };
     // Microsoft rotates refresh tokens — persist the new one if present.
     if (data.refresh_token) {
       await this.prisma.user
-        .update({ where: { id: userId }, data: { msRefreshToken: encryptSecret(data.refresh_token) } })
+        .update({
+          where: { id: userId },
+          data:
+            account === 'onedrive'
+              ? { odRefreshToken: encryptSecret(data.refresh_token) }
+              : { msRefreshToken: encryptSecret(data.refresh_token) },
+        })
         .catch(() => undefined);
     }
     return data.access_token;
@@ -148,6 +210,19 @@ export class MicrosoftAuthService {
   async getStatus(userId: string): Promise<{ connected: boolean; email: string | null }> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     return { connected: !!user?.msRefreshToken, email: user?.msEmail ?? null };
+  }
+
+  /** Disconnect the separate OneDrive account (file operations fall back to the Outlook account). */
+  async disconnectOneDrive(userId: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { odRefreshToken: null, odEmail: null, odConnectedAt: null },
+    });
+  }
+
+  async getOneDriveStatus(userId: string): Promise<{ connected: boolean; email: string | null }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    return { connected: !!user?.odRefreshToken, email: user?.odEmail ?? null };
   }
 
   private async fetchMailbox(accessToken: string): Promise<string | null> {

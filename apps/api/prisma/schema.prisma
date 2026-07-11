@@ -69,6 +69,13 @@ model User {
   msRefreshToken        String?
   /// מתי המשתמש חיבר את חשבון ה-Outlook
   msConnectedAt         DateTime?
+  // ── OneDrive נפרד — חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד (CRM-Quotes) ──
+  /// כתובת המייל של חשבון ה-OneDrive הנפרד (לתצוגה). null = משתמשים בחשבון ה-Outlook הרגיל.
+  odEmail               String?
+  /// refresh token מוצפן ב-AES-256 של חשבון ה-OneDrive הנפרד — לא מוחזר ל-frontend
+  odRefreshToken        String?
+  /// מתי המשתמש חיבר את חשבון ה-OneDrive הנפרד
+  odConnectedAt         DateTime?
   /// חתימת מייל אישית — מתווספת אוטומטית לגוף הצעות מחיר שנשלחות
   mailSignature         String?
   /// תמונת חתימה (לוגו/חתימה סרוקה) — מוטמעת בגוף המייל מתחת לטקסט
