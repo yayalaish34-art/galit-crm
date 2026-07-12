@@ -1,8 +1,17 @@
 @import "tailwindcss";
 
+/* מצב כהה מבוסס-מחלקה (Tailwind v4): הפעלת `.dark` על <html> מפעילה `dark:` וגם את
+   ההתאמות שמוגדרות למטה. אנחנו לא נשענים על prefers-color-scheme אלא על בחירת המשתמש. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+}
+
+.dark {
+  --background: #0b1220;
+  --foreground: #e5e7eb;
 }
 
 @theme inline {
@@ -12,18 +21,95 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   מצב כהה — התאמת מחלקות Tailwind "קשיחות" ללא עריכת כל הקומפוננטות.
+   הקוד הקיים משתמש בצבעי-בהיר קבועים (bg-white, text-slate-500, border-slate-200…).
+   כאן אנחנו ממפים אותם לערכי-כהה כשה-<html> נושא את המחלקה `.dark`.
+   כל כלל מוגדר ל-`.dark` בלבד — במצב בהיר שום דבר לא משתנה.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* רקעים */
+.dark .bg-white { background-color: #111827 !important; }
+.dark .bg-slate-50 { background-color: #0f172a !important; }
+.dark .bg-slate-100 { background-color: #1e293b !important; }
+.dark .bg-slate-200 { background-color: #334155 !important; }
+.dark .bg-gray-50 { background-color: #0f172a !important; }
+.dark .bg-gray-100 { background-color: #1e293b !important; }
+
+/* רקעים "רכים" צבעוניים (כרטיסי מידע) → גוונים כהים עמומים */
+.dark .bg-blue-50 { background-color: #172033 !important; }
+.dark .bg-blue-50\/50 { background-color: #151d2e !important; }
+.dark .bg-sky-50 { background-color: #10202e !important; }
+.dark .bg-emerald-50 { background-color: #0f1f1a !important; }
+.dark .bg-green-50 { background-color: #0f1f16 !important; }
+.dark .bg-amber-50 { background-color: #241d10 !important; }
+.dark .bg-yellow-50 { background-color: #241f10 !important; }
+.dark .bg-red-50 { background-color: #2a1416 !important; }
+.dark .bg-orange-50 { background-color: #291a10 !important; }
+.dark .bg-purple-50 { background-color: #1e1630 !important; }
+.dark .bg-indigo-50 { background-color: #171a33 !important; }
+
+/* טקסט */
+.dark .text-slate-900,
+.dark .text-gray-900,
+.dark .text-black { color: #f1f5f9 !important; }
+.dark .text-slate-800,
+.dark .text-gray-800 { color: #e2e8f0 !important; }
+.dark .text-slate-700,
+.dark .text-gray-700 { color: #cbd5e1 !important; }
+.dark .text-slate-600,
+.dark .text-gray-600 { color: #b0bccc !important; }
+.dark .text-slate-500,
+.dark .text-gray-500 { color: #94a3b8 !important; }
+.dark .text-slate-400,
+.dark .text-gray-400 { color: #7c8aa0 !important; }
+
+/* גבולות */
+.dark .border-slate-200,
+.dark .border-gray-200 { border-color: #273244 !important; }
+.dark .border-slate-300,
+.dark .border-gray-300 { border-color: #313e52 !important; }
+.dark .border-slate-100,
+.dark .border-gray-100 { border-color: #1e2836 !important; }
+.dark .border-blue-200 { border-color: #24344f !important; }
+.dark .border-sky-200 { border-color: #1e3346 !important; }
+
+/* שדות קלט — רקע כהה + טקסט בהיר, כדי שלא יישארו לבנים */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.dark textarea,
+.dark select {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+  border-color: #313e52 !important;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b !important; }
+
+/* צל — עדין יותר על רקע כהה */
+.dark .shadow-xl,
+.dark .shadow-lg,
+.dark .shadow-md { --tw-shadow-color: rgba(0,0,0,0.6) !important; }
+
+/* פתח-מילוט: אלמנטים שחייבים להישאר בהירים גם במצב כהה (תצוגת PDF, קנבס חתימה,
+   תבניות הצעה, לוגו על רקע לבן) — יש להוסיף להם את המחלקה `keep-light`. */
+.dark .keep-light,
+.dark .keep-light * {
+  background-color: initial;
+  color: initial;
+  border-color: initial;
+}
+.dark .keep-light { background-color: #ffffff; color: #171717; }
+
+/* אין להחשיך תצוגות מוטמעות של מסמכים */
+.dark iframe,
+.dark embed,
+.dark object { background-color: #ffffff; }
 
 @keyframes fadeSlideIn {
   from { opacity: 0; transform: translateY(6px); }

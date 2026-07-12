@@ -11392,6 +11392,24 @@ function SettingsPage({
   const canEmployeeHandoff = currentUser.role === 'admin';
   const canManageQuoteTemplates = currentUser.role === 'admin' || currentUser.role === 'manager';
 
+  // ── מצב תצוגה בהיר/כהה (dark mode) ──
+  // מקור האמת הוא מחלקת `dark` על <html> + localStorage. הסקריפט ב-layout מחיל את השמור
+  // עוד לפני הצביעה (בלי הבהוב); כאן מסנכרנים את ה-state עם ה-DOM ומאפשרים החלפה.
+  const [darkMode, setDarkMode] = useState(false);
+  useEffect(() => {
+    try { setDarkMode(document.documentElement.classList.contains('dark')); } catch { /* ignore */ }
+  }, []);
+  const toggleDarkMode = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      try {
+        document.documentElement.classList.toggle('dark', next);
+        window.localStorage.setItem('galit-crm-theme', next ? 'dark' : 'light');
+      } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   type SettingsTabKey =
     | 'myProfile'
     | 'employees'
@@ -13529,6 +13547,32 @@ function SettingsPage({
           {empEditing && currentUser && empEditing.id === currentUser.id && (
             <ChangePasswordSection currentUser={{ id: currentUser.id, role: currentUser.role }} />
           )}
+
+          {/* ── מצב תצוגה: בהיר / כהה ── (העדפת ממשק — מוצג תמיד) */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                  <Eye className="h-4 w-4" /> מצב תצוגה
+                </div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {darkMode ? 'מצב כהה פעיל — נוח יותר לעיניים בתאורה חלשה' : 'מצב בהיר (ברירת מחדל) — החלף למצב כהה'}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={darkMode}
+                onClick={toggleDarkMode}
+                title={darkMode ? 'כבה מצב כהה' : 'הפעל מצב כהה'}
+                className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors ${darkMode ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${darkMode ? 'translate-x-1' : 'translate-x-6'}`}
+                />
+              </button>
+            </div>
+          </div>
 
           {empEditing && (
             <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
@@ -21383,10 +21427,17 @@ export default function GalitCRMPrototype() {
         const r = await apiFetch(apiUrl('/incoming-leads/pending'), { authUser: currentUser });
         if (!r.ok) return;
         const list = await r.json();
-        if (cancelled || !Array.isArray(list) || list.length === 0) return;
+        if (cancelled || !Array.isArray(list)) return;
+        // מפתחות הלידים שעדיין "ממתינים" בשרת (status=NEW). ליד שנתפס/הועבר/נדחה ע"י מישהו
+        // כבר לא יופיע כאן — לכן נסיר את הפופ-אפ שלו מכל שאר העובדים בסבב הבא.
+        const pendingIds = new Set<string>((list as any[]).map((l) => l.id));
+        const pendingKeys = new Set<string>((list as any[]).map((l) => l.internetMessageId || l.id));
         setLeadToasts((prev) => {
-          const have = new Set(prev.map((x) => x.id));
-          const haveKeys = new Set(prev.map((x) => x.dedupeKey));
+          // 1) הסרת פופ-אפים ללידים שכבר לא ממתינים בשרת (נתפסו/הועברו ע"י עובד אחר).
+          const kept = prev.filter((x) => pendingIds.has(x.id) || pendingKeys.has(x.dedupeKey));
+          // 2) הוספת לידים חדשים.
+          const have = new Set(kept.map((x) => x.id));
+          const haveKeys = new Set(kept.map((x) => x.dedupeKey));
           const seenKeys = new Set<string>();
           // dedup לפי internetMessageId: אותו מייל-ליד שהגיע לכמה תיבות = פופ-אפ אחד בלבד.
           const fresh: { id: string; subject: string; taskId?: string | null; ownerId?: string | null; dedupeKey: string }[] = [];
@@ -21397,7 +21448,9 @@ export default function GalitCRMPrototype() {
             seenKeys.add(dedupeKey);
             fresh.push({ id: l.id, subject: l.subject, taskId: l.taskId, ownerId: l.ownerId, dedupeKey });
           }
-          return fresh.length ? [...prev, ...fresh] : prev;
+          // החזרת אותו array אם אין שינוי — מונע re-render מיותר.
+          if (kept.length === prev.length && fresh.length === 0) return prev;
+          return [...kept, ...fresh];
         });
         // לא מסמנים notified כאן! הסימון קורה רק ב-dismissLeadToast (אישור המשתמש).
       } catch { /* ignore */ }

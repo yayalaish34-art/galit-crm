@@ -31,6 +31,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="he" dir="rtl" className={assistant.variable}>
+      <head>
+        {/* מחיל את מצב התצוגה השמור (בהיר/כהה) לפני הצביעה הראשונה — מונע הבהוב לבן בטעינה */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem('galit-crm-theme');if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}`,
+          }}
+        />
+      </head>
       <body>
         {children}
         <UiTranslationApplier />
