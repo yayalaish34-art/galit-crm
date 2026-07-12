@@ -614,11 +614,14 @@ export class QuotesService {
     };
 
     // מעדכנים את ה-DOCX הממוזג האחרון במקום (לא מנפחים את הטבלה בכל סנכרון); אחרת יוצרים חדש.
+    // חשוב: מקדמים את createdAt ל-"עכשיו" — כך הגרסה הערוכה מ-Word הופכת למסמך העדכני ביותר,
+    // ו-resolveQuoteDoc/getLatestMergedDocument (שבוחרים לפי createdAt desc) יצרפו אותה בשליחה,
+    // ולא מיזוג-טופס ישן/PDF שנוצר אחריה. בלי זה — עדכון-במקום משמר createdAt ישן והעריכה "נעלמת".
     const existingDoc: any = await (this.prisma.quoteDocument as any)
       .findFirst({ where: { quoteId: id, documentType: 'MERGED_DOCX' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
       .catch(() => null);
     if (existingDoc?.id) {
-      await (this.prisma.quoteDocument.update as any)({ where: { id: existingDoc.id }, data: docData }).catch(() => null);
+      await (this.prisma.quoteDocument.update as any)({ where: { id: existingDoc.id }, data: { ...docData, createdAt: new Date() } }).catch(() => null);
     } else {
       await (this.prisma.quoteDocument.create as any)({ data: { quoteId: id, ...docData } }).catch(() => null);
     }

@@ -406,11 +406,13 @@ export class QuoteSignatureService {
         documentDescription: 'גרסה ערוכה מ-Word (סונכרן לפני שליחה)',
       };
       // מעדכנים את ה-DOCX הממוזג האחרון במקום (לא מנפחים את הטבלה); אחרת יוצרים חדש.
+      // מקדמים createdAt ל-"עכשיו" כדי שהגרסה הערוכה תהיה המסמך העדכני ביותר — resolveQuoteDoc
+      // בוחר לפי createdAt desc, ובלי זה מיזוג/PDF שנוצר אחרי העריכה היה גובר עליה בשליחה.
       const existing: any = await (this.prisma.quoteDocument as any)
         .findFirst({ where: { quoteId, documentType: 'MERGED_DOCX' }, orderBy: { createdAt: 'desc' }, select: { id: true } })
         .catch(() => null);
       if (existing?.id) {
-        await (this.prisma.quoteDocument.update as any)({ where: { id: existing.id }, data: docData }).catch(() => null);
+        await (this.prisma.quoteDocument.update as any)({ where: { id: existing.id }, data: { ...docData, createdAt: new Date() } }).catch(() => null);
       } else {
         await (this.prisma.quoteDocument.create as any)({ data: { quoteId, ...docData } }).catch(() => null);
       }
