@@ -2482,27 +2482,6 @@ export function CustomerLegacyCard({
                 >
                   +
                 </button>
-                {onNewQuote && (
-                  <button
-                    type="button"
-                    className="h-[36px] rounded-[14px] px-4 text-xs font-medium text-white hover:opacity-90 transition-all"
-                    style={{ backgroundColor: primaryColor }}
-                    title={contactEdit ? `חדש הצעה עבור ${contactEdit.fullName}` : 'חדש הצעה'}
-                    onClick={() => { onNewQuote(contactEdit?.id ?? null); }}
-                  >
-                    חדש הצעה
-                  </button>
-                )}
-                {onNewInteraction && (
-                  <button
-                    type="button"
-                    className="h-[36px] rounded-[14px] bg-amber-500 px-4 text-xs font-medium text-white hover:bg-amber-600 transition-all"
-                    title={contactEdit ? `פנייה חדשה עבור ${contactEdit.fullName}` : 'פנייה חדשה'}
-                    onClick={() => { onNewInteraction(contactEdit?.id ?? null); }}
-                  >
-                    פנייה חדשה
-                  </button>
-                )}
               </div>
             </div>
 

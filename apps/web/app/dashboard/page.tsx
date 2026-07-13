@@ -13628,8 +13628,8 @@ function SettingsPage({
             </div>
           )}
 
-          {/* חשבון OneDrive נפרד — רק לאורי. חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד. */}
-          {empEditing && (currentUser?.email || '').toLowerCase() === 'uri@galit.co.il' && (
+          {/* חשבון OneDrive נפרד — זמין לכל העובדים. חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד. */}
+          {empEditing && (
             <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
               <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-sky-800">
                 <FolderKanban className="h-4 w-4" /> חשבון OneDrive נפרד
@@ -14276,14 +14276,45 @@ function TasksPage({
     for (const l of incomingLeads) { if (l.taskId) m[l.taskId] = l; }
     return m;
   }, [incomingLeads]);
+  // אם עובד אחר תפס את הליד באותו רגע, השרת מחזיר 403 ("הליד כבר נתפס על ידי עובד אחר").
+  // חשוב לא לעדכן אופטימיסטית ל-ACTIVE לפני שנדע שהצליח — אחרת המפסיד ב-race חושב שלקח ליד
+  // שבפועל אינו שלו. מציגים הודעה ומרעננים כדי שהליד/המשימה ייעלמו אצלו.
+  const leadTakenMessage = async (r: Response): Promise<string> => {
+    try { const j = await r.json(); if (j?.message) return String(j.message); } catch { /* ignore */ }
+    return 'הליד כבר נתפס על ידי עובד אחר';
+  };
   const startLead = async (leadId: string) => {
-    setIncomingLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: 'ACTIVE' } : l)));
-    try { await apiFetch(apiUrl(`/incoming-leads/${leadId}/start`), { method: 'POST', authUser: currentUser }); } catch { /* ignore */ }
+    let r: Response;
+    try {
+      r = await apiFetch(apiUrl(`/incoming-leads/${leadId}/start`), { method: 'POST', authUser: currentUser });
+    } catch {
+      alert('אירעה שגיאה בתפיסת הליד. נסה שוב.');
+      return;
+    }
+    if (!r.ok) {
+      alert(await leadTakenMessage(r)); // נתפס ע"י אחר / שגיאה — לא מסמנים ACTIVE
+      void loadIncomingLeads();          // רענון: הליד יעבור/ייעלם אצל המפסיד
+      void onReloadTasks?.();
+      return;
+    }
+    setIncomingLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: 'ACTIVE' } : l))); // רק אחרי הצלחה
   };
   const transferLead = async (leadId: string, toUserId: string) => {
     if (!toUserId) return;
-    try { await apiFetch(apiUrl(`/incoming-leads/${leadId}/transfer`), { method: 'POST', authUser: currentUser, body: JSON.stringify({ toUserId }) }); } catch { /* ignore */ }
-    setIncomingLeads((prev) => prev.filter((l) => l.id !== leadId));
+    let r: Response;
+    try {
+      r = await apiFetch(apiUrl(`/incoming-leads/${leadId}/transfer`), { method: 'POST', authUser: currentUser, body: JSON.stringify({ toUserId }) });
+    } catch {
+      alert('אירעה שגיאה בהעברת הליד. נסה שוב.');
+      return;
+    }
+    if (!r.ok) {
+      alert(await leadTakenMessage(r)); // נתפס ע"י אחר / שגיאה — לא מסירים מקומית
+      void loadIncomingLeads();
+      void onReloadTasks?.();
+      return;
+    }
+    setIncomingLeads((prev) => prev.filter((l) => l.id !== leadId)); // רק אחרי הצלחה
     setExpandedTaskId(null);
     void onReloadTasks?.();
   };
@@ -21456,9 +21487,39 @@ export default function GalitCRMPrototype() {
       } catch { /* ignore */ }
     };
     void check();
-    const t = window.setInterval(check, 60_000);
+    // קצב מהיר (20ש') כדי שהפופ-אפ ייעלם מהר אצל שאר העובדים כשליד נתפס — מסונכרן עם
+    // ניטור המשימות למטה, כך שהפופ-אפ והמשימה נעלמים יחד ולא בזמנים שונים.
+    const t = window.setInterval(check, 20_000);
     return () => { cancelled = true; window.clearInterval(t); };
   }, [currentUser?.id]);
+
+  // ── ניטור גלובלי: כשעובד אחר "תופס"/מעביר ליד, המשימה "ליד חדש נכנס" צריכה להיעלם ──
+  // רץ בכל טאב (לא רק בטאב "משימות"), כדי שהמשימה תיעלם מיד לכל העובדים ולא רק אצל מי
+  // שנמצא כרגע ברשימת המשימות. כשליד שהיה NEW אצל העובד נעלם מ-/incoming-leads (עבר
+  // ל-DISMISSED כי מישהו תפס אותו), מרעננים את המשימות — המשימה התלויה כבר נמחקה בשרת.
+  const globalPrevLeadIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!currentUser) return;
+    if (!canAccess(currentUser.role, 'tasks')) return;
+    let cancelled = false;
+    globalPrevLeadIdsRef.current = new Set();
+    const watch = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/incoming-leads'), { authUser: currentUser });
+        if (!r.ok) return;
+        const list = await r.json();
+        if (cancelled || !Array.isArray(list)) return;
+        const newIds = new Set<string>(list.map((l: any) => l.id));
+        let lost = false;
+        globalPrevLeadIdsRef.current.forEach((id) => { if (!newIds.has(id)) lost = true; });
+        globalPrevLeadIdsRef.current = newIds;
+        if (lost) void reloadTasks(); // ליד נתפס ע"י אחר → רענון כדי שהמשימה תיעלם
+      } catch { /* ignore */ }
+    };
+    void watch();
+    const t = window.setInterval(watch, 20_000); // קצב מהיר לתפיסת ליד בין עובדים
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [currentUser?.id, reloadTasks]);
 
   if (!authBootstrapped) {
     return (
