@@ -11,6 +11,29 @@ function startOfWeek(d = new Date()) {
   x.setHours(0, 0, 0, 0);
   return x;
 }
+/**
+ * תחילת היום (חצות) לפי שעון ישראל, כ-Date ב-UTC — נקודת ה-cutoff ל"באיחור".
+ * משימה נחשבת באיחור רק אם תאריך היעד שלה *לפני* תחילת היום הנוכחי בשעון ישראל,
+ * כלומר משימה שתאריך היעד שלה היום — בכל שעה — עדיין אינה באיחור. תואם את חישוב
+ * הרשימה בצד הלקוח (today.setHours(0,0,0,0)), כדי שהכרטיס והרשימה יסכימו.
+ * ה-offset נגזר מ-Intl (Asia/Jerusalem) ולכן מטפל ב-DST אוטומטית.
+ */
+function startOfTodayIsrael(now = new Date()): Date {
+  // התאריך הקלנדרי (YYYY-MM-DD) כפי שהוא בישראל כרגע.
+  const ymd = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now); // e.g. "2026-07-12"
+  // ה-offset של ישראל כרגע (‎+02:00/+03:00), במילישניות.
+  const offLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jerusalem', timeZoneName: 'longOffset',
+  }).formatToParts(now).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+02:00';
+  const m = /GMT([+-])(\d{2}):?(\d{2})?/.exec(offLabel);
+  const offsetMs = m
+    ? (m[1] === '-' ? -1 : 1) * ((Number(m[2]) * 60 + Number(m[3] || '0')) * 60_000)
+    : 2 * 60 * 60_000;
+  // חצות מקומית בישראל = חצות-UTC-של-אותו-יום פחות ה-offset.
+  return new Date(new Date(`${ymd}T00:00:00Z`).getTime() - offsetMs);
+}
 
 @Injectable()
 export class DashboardService {
@@ -296,11 +319,12 @@ export class DashboardService {
     const leadsLost = leadStatuses.filter((s) => s === 'LOST').length;
 
     const openTaskStatuses = new Set<TaskStatus>([TaskStatus.OPEN, TaskStatus.IN_PROGRESS]);
+    const overdueCutoff = startOfTodayIsrael(now); // באיחור = לפני תחילת היום (שעון ישראל), לא "כרגע"
     const tasksOpen = tasks.filter((t) => openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)).length;
     const tasksOverdue = tasks.filter((t) => {
       if (!t.dueDate) return false;
       if (!openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)) return false;
-      return t.dueDate.getTime() < now.getTime();
+      return t.dueDate.getTime() < overdueCutoff.getTime();
     }).length;
     const quotesOpenActive = quotes.filter((q) => q.status === QuoteStatus.DRAFT || q.status === QuoteStatus.SENT).length;
 
@@ -475,11 +499,12 @@ export class DashboardService {
       const winRate = (wonOpps + lostOpps) === 0 ? 0 : wonOpps / (wonOpps + lostOpps);
 
       const openTaskStatuses = new Set<TaskStatus>([TaskStatus.OPEN, TaskStatus.IN_PROGRESS]);
+      const overdueCutoff = startOfTodayIsrael(now); // באיחור = לפני תחילת היום (שעון ישראל), לא "כרגע"
       const openTasks = tasks.filter((t) => openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)).length;
       const overdueTasks = tasks.filter((t) => {
         if (!t.dueDate) return false;
         if (!openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)) return false;
-        return t.dueDate.getTime() < now.getTime();
+        return t.dueDate.getTime() < overdueCutoff.getTime();
       }).length;
 
       const conversionLeadToQuote = totalLeads === 0 ? 0 : Math.round((quotesSent / totalLeads) * 100);
