@@ -546,6 +546,87 @@ export function unboldAddressRun(documentXml: string): string {
 }
 
 /**
+ * מסיר שדות INCLUDEPICTURE שמפנים לתמונה חיצונית (URL). כמה תבניות (קרינה/ראדון) מכילות
+ * שדה Word מסוג `INCLUDEPICTURE "http://..."` — לרוב תמונת-רווח שקופה זניחה. כש-Word פותח
+ * מסמך כזה הוא מנסה למשוך את התמונה מהאינטרנט ומקפיץ "תוכן שאינו ניתן לקריאה / שחזור",
+ * מה שגם שובר את סנכרון הגרסה הערוכה מ-OneDrive. הפונקציה מסירה את כל מבנה השדה
+ * (fldChar begin → instrText → separate → תוכן → fldChar end) עבור כל שדה INCLUDEPICTURE,
+ * כך שלא נשאר rHref חיצוני ולא נשאר fldChar לא-מאוזן. רצה לפני render.
+ *
+ * הגישה: מאתרים כל <w:instrText> שמכיל INCLUDEPICTURE, מרחיבים אחורה עד ה-<w:r> שמכיל את
+ * fldChar begin ההולם, וקדימה עד ה-<w:r> שמכיל את fldChar end, ומוחקים את כל הריצות שביניהן
+ * (כולל ה-begin וה-end). מטפל בשדות מקוננים ע"י ספירת begin/end.
+ */
+export function stripIncludePictureFields(documentXml: string): string {
+  if (!/INCLUDEPICTURE/i.test(documentXml)) return documentXml;
+  let xml = documentXml;
+  // לולאה: כל עוד יש INCLUDEPICTURE, מסירים שדה אחד ומתחילים מחדש (המיקומים משתנים אחרי מחיקה).
+  for (let guard = 0; guard < 50; guard++) {
+    const instrIdx = xml.search(/<w:instrText\b[^>]*>[^<]*INCLUDEPICTURE/i);
+    if (instrIdx === -1) break;
+
+    // אחורה: מצא את ה-<w:r> שמכיל fldChar begin שפותח את השדה הזה (הקרוב ביותר לפני ה-instr,
+    // עם איזון begin/end כדי לתפוס את ה-begin הנכון גם אם יש שדות סמוכים).
+    const beginRunStart = findFieldBeginRunStart(xml, instrIdx);
+    if (beginRunStart === -1) break;
+    // קדימה: מצא את סוף ה-<w:r> שמכיל את fldChar end ההולם (איזון begin/end).
+    const endRunEnd = findFieldEndRunEnd(xml, instrIdx);
+    if (endRunEnd === -1) break;
+
+    xml = xml.slice(0, beginRunStart) + xml.slice(endRunEnd);
+  }
+  return xml;
+}
+
+/** תחילת ה-<w:r> שמכיל את fldChar begin של השדה שה-instr שלו נמצא ב-instrIdx. */
+function findFieldBeginRunStart(xml: string, instrIdx: number): number {
+  // סורק אחורה מ-instrIdx ומאתר fldCharType="begin" תוך התעלמות מ-begin/end מקוננים.
+  let depth = 0;
+  let searchFrom = instrIdx;
+  // מאתרים את ה-begin: כל 'end' לפני ה-instr מגדיל depth, כל 'begin' מקטין; ה-begin שמאפס = שלנו.
+  const fldRe = /<w:fldChar\b[^>]*w:fldCharType="(begin|end)"/g;
+  const positions: Array<{ idx: number; type: string }> = [];
+  let m: RegExpExecArray | null;
+  const head = xml.slice(0, instrIdx);
+  while ((m = fldRe.exec(head)) !== null) positions.push({ idx: m.index, type: m[1] });
+  // מהסוף לאחור: מוצאים את ה-begin ההולם
+  for (let i = positions.length - 1; i >= 0; i--) {
+    if (positions[i].type === 'end') depth++;
+    else if (positions[i].type === 'begin') {
+      if (depth === 0) {
+        // תחילת ה-<w:r> שמכיל את ה-fldChar הזה
+        const rStart = Math.max(
+          xml.lastIndexOf('<w:r>', positions[i].idx),
+          xml.lastIndexOf('<w:r ', positions[i].idx),
+        );
+        return rStart;
+      }
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/** סוף ה-<w:r> שמכיל את fldChar end ההולם של השדה שה-instr שלו נמצא ב-instrIdx. */
+function findFieldEndRunEnd(xml: string, instrIdx: number): number {
+  const fldRe = /<w:fldChar\b[^>]*w:fldCharType="(begin|end)"/g;
+  fldRe.lastIndex = instrIdx;
+  let depth = 0;
+  let m: RegExpExecArray | null;
+  while ((m = fldRe.exec(xml)) !== null) {
+    if (m[1] === 'begin') depth++;
+    else if (m[1] === 'end') {
+      if (depth === 0) {
+        const rEndMarker = xml.indexOf('</w:r>', m.index);
+        return rEndMarker === -1 ? -1 : rEndMarker + '</w:r>'.length;
+      }
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/**
  * מסיר פסקאות ריקות שנמצאות בין פסקת הכתובת ({customerAddress}) לבין פסקת
  * העיר (סימניית fldCity) — שורת הרווח שהמשתמש ביקש להסיר. חלק מהתבניות הוסיפו
  * <w:p/> ריקה בין השתיים, כך שבמסמך הממוזג נוצרה שורה ריקה בין הכתובת לעיר.
@@ -874,6 +955,9 @@ export class DocxMergeService {
       const preFile = zip.file('word/document.xml');
       if (preFile) {
         let pre = preFile.asText();
+        // הסרת שדות INCLUDEPICTURE עם URL חיצוני — גורמים ל-Word להקפיץ "תוכן שאינו ניתן לקריאה"
+        // (ניסיון למשוך תמונה מהאינטרנט) ולשבור את סנכרון OneDrive. תבניות קרינה/ראדון בעיקר.
+        pre = stripIncludePictureFields(pre);
         // הסרת שורת ה"פקס" הישנה מכל מסמך ממוזג (צרובה בחלק מקבצי ה-DOCX של התבניות)
         pre = stripFaxParagraphsFromDocXml(pre);
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
