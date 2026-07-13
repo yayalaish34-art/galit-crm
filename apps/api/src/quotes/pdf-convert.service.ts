@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import PizZip from 'pizzip';
 import { GraphPdfService } from '../microsoft/graph-pdf.service';
+import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 
 /**
  * המרת DOCX ל-PDF. מנוע ראשי: Microsoft Graph (Word עצמו — כותרת/עיצוב זהים לתבנית), בתנאי
@@ -126,12 +127,21 @@ export class PdfConvertService {
     const frozen = await this.freezeDocxDates(docx);
 
     // 1) ניסיון ראשי: Microsoft Graph (מנוע Word — כותרת/עיצוב זהים לתבנית).
-    if (userId && this.graphPdf.configured) {
+    //    ההמרה עוברת דרך חשבון ה-OneDrive הייעודי המחובר (לא דרך חשבון הקורא), ולכן די בכך
+    //    ש-Graph מוגדר ברמת השרת — אין תלות ב-userId של הקורא.
+    let graphErr: any = null;
+    if (this.graphPdf.configured) {
       try {
-        const pdf = await this.graphPdf.docxToPdf(userId, frozen, fileName);
+        const pdf = await this.graphPdf.docxToPdf(userId ?? '', frozen, fileName);
         this.logger.log(`Converted "${fileName}" to PDF via Microsoft Graph`);
         return pdf;
       } catch (e: any) {
+        graphErr = e;
+        // "לא מחובר חשבון OneDrive להמרת PDF" — הדרישה היא fail-with-clear-error: אין ליפול
+        // חזרה ל-CloudConvert (או לחשבון הקורא). מעבירים את השגיאה כמות שהיא כדי שמנהל יחבר OneDrive.
+        if (String(e?.message || '').includes(MicrosoftAuthService.NO_ONEDRIVE_FOR_PDF)) {
+          throw e;
+        }
         this.logger.warn(
           `Graph PDF conversion failed for "${fileName}" — falling back to CloudConvert: ${e?.message || e}`,
         );
@@ -140,9 +150,46 @@ export class PdfConvertService {
 
     // 2) גיבוי: CloudConvert (LibreOffice).
     if (!this.apiKey) {
-      throw new BadRequestException('המרת PDF לא מוגדרת בשרת — חבר חשבון Outlook או הגדר CLOUDCONVERT_API_KEY');
+      // אין מנוע גיבוי — ההודעה נגזרת מהסיבה האמיתית שבגללה Graph נכשל, כדי שהמשתמש יֵדע
+      // אם עליו להתחבר, להתחבר-מחדש, או שהבעיה בקובץ/בשרת (ולא לשלוח מחובר שוב ל"התחבר").
+      throw this.pdfUnavailableError(userId, graphErr);
     }
     return this.cloudConvertDocxToPdf(frozen, fileName);
+  }
+
+  /**
+   * בונה הודעת שגיאה מדויקת כשאין מנוע PDF זמין, לפי *סיבת* כשל ה-Graph:
+   * - אין userId / משתמש לא מחובר / הטוקן פג  → "חבר / התחבר-מחדש ל-Outlook".
+   * - Graph זמין אך נכשל על הקובץ (403/406/500/timeout) → הבעיה בקובץ/בהמרה, לא בחיבור.
+   */
+  private pdfUnavailableError(userId?: string, graphErr?: any): BadRequestException {
+    if (!userId) {
+      return new BadRequestException('אינך מחובר ל-Outlook — התחבר ל-Outlook בהגדרות ונסה שוב.');
+    }
+    const msg = String(graphErr?.message || graphErr || '');
+    const status = graphErr?.status ?? (msg.match(/\b(40[0-9]|50[0-9])\b/)?.[1] ? Number(msg.match(/\b(40[0-9]|50[0-9])\b/)![1]) : undefined);
+    // חיבור פג/נדחה: mintAccessToken כבר זרק BadRequestException עם הודעת "התחבר מחדש" —
+    // מעבירים אותה כמות שהיא (היא מדויקת). גם 401 = טוקן לא תקף.
+    if (graphErr instanceof BadRequestException) return graphErr;
+    if (status === 401) {
+      return new BadRequestException('חיבור ה-Outlook פג תוקף או שההרשאות חסרות — התחבר מחדש ל-Outlook ונסה שוב.');
+    }
+    if (status === 403) {
+      // 403 provisioningNotAllowed = לחשבון אין OneDrive/רישיון. הפתרון: לחבר חשבון OneDrive
+      // *נפרד* (בהגדרות › חשבון OneDrive נפרד) שדרכו תתבצע ההמרה.
+      if (/provisioningNotAllowed|personal site|valid license/i.test(msg)) {
+        return new BadRequestException(
+          'לחשבון ה-Outlook שלך אין OneDrive להמרת הקובץ ל-PDF. חבר "חשבון OneDrive נפרד" בהגדרות ונסה שוב.',
+        );
+      }
+      return new BadRequestException(
+        'חסרה הרשאת גישה ל-OneDrive להמרת הקובץ. התחבר מחדש ל-Outlook (כדי לאשר את ההרשאה החדשה) ונסה שוב.',
+      );
+    }
+    // Graph היה זמין אך נכשל על הקובץ עצמו (406/415/500/timeout וכו') — לא בעיית חיבור.
+    return new BadRequestException(
+      'המרת הקובץ ל-PDF נכשלה. ייתכן שהקובץ פגום או כבד מדי. נסה למזג מחדש את ההצעה, או שמור אותה כ-PDF ב-Word ולהעלות ידנית.',
+    );
   }
 
   /**

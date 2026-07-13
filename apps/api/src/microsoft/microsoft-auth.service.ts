@@ -23,6 +23,11 @@ export class MicrosoftAuthService {
   // חשבון זה יכול להיות Microsoft שונה מ-Outlook; משמש רק לאחסון/עריכת הצעות מחיר ב-OneDrive.
   static readonly ONEDRIVE_SCOPES = 'offline_access User.Read Files.ReadWrite';
 
+  // הודעת השגיאה כשאין חשבון OneDrive מחובר להמרת PDF. מזוהה ב-PdfConvertService כדי לא ליפול
+  // חזרה ל-CloudConvert/חשבון הקורא אלא להעביר את השגיאה כמות שהיא (fail-with-clear-error).
+  static readonly NO_ONEDRIVE_FOR_PDF =
+    'לא מחובר חשבון OneDrive להמרת PDF. חבר "חשבון OneDrive נפרד" בהגדרות (מנהל) ונסה שוב.';
+
   constructor(private readonly prisma: PrismaService) {}
 
   private scopesFor(account: 'outlook' | 'onedrive'): string {
@@ -135,6 +140,29 @@ export class MicrosoftAuthService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (user?.odRefreshToken) return this.mintAccessToken(userId, 'onedrive');
     return this.mintAccessToken(userId, 'outlook');
+  }
+
+  /**
+   * Mint an access token for the ONE designated OneDrive account used for PDF conversion —
+   * independent of whoever is calling. PDF rendering must always go through the connected
+   * OneDrive account (the separate `od*` account, e.g. Uri's), NEVER through the calling
+   * user's own Outlook/login account. We pick any user that has a separate OneDrive connected
+   * (most-recently-connected wins if more than one). Throws a clear error if none is connected —
+   * we deliberately do NOT fall back to the caller's account.
+   */
+  async getPdfConverterAccessToken(): Promise<{ token: string; userId: string }> {
+    const owner = await this.prisma.user.findFirst({
+      where: { odRefreshToken: { not: null } },
+      orderBy: { odConnectedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!owner) {
+      throw new BadRequestException(
+        MicrosoftAuthService.NO_ONEDRIVE_FOR_PDF,
+      );
+    }
+    const token = await this.mintAccessToken(owner.id, 'onedrive');
+    return { token, userId: owner.id };
   }
 
   private async mintAccessToken(userId: string, account: 'outlook' | 'onedrive'): Promise<string> {
