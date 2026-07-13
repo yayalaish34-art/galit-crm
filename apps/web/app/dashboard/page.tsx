@@ -12344,6 +12344,23 @@ function SettingsPage({
     }
   };
 
+  const deleteCatalogItem = async (it: any) => {
+    if (!window.confirm(`למחוק לצמיתות את הפריט "${it.name || it.itemCode}"? פעולה זו אינה הפיכה.`)) return;
+    setCatalogError('');
+    try {
+      const res = await apiFetch(apiUrl(`/quote-item-catalog/${it.id}`), {
+        method: 'DELETE',
+        authUser: currentUser,
+      });
+      if (!res.ok) throw new Error();
+      await loadCatalog();
+      setSettingsMsg('הפריט נמחק בהצלחה');
+      window.setTimeout(() => setSettingsMsg(''), 2000);
+    } catch {
+      setCatalogError('מחיקת פריט נכשלה.');
+    }
+  };
+
   const permissionsMatrix: Array<{ role: string; modules: string[] }> = [
     { role: 'ADMIN', modules: ['לוח בקרה', 'לידים', 'לקוחות', 'הצעות מחיר', 'הזדמנויות', 'פרויקטים', 'דוחות', 'מסמכים', 'מעבדה', 'משימות', 'יומן שטח', 'הגדרות', 'משתמשים'] },
     { role: 'MANAGER', modules: ['לוח בקרה', 'לידים', 'לקוחות', 'הצעות מחיר', 'הזדמנויות', 'פרויקטים', 'דוחות', 'מסמכים', 'מעבדה', 'משימות', 'יומן שטח', 'הגדרות'] },
@@ -13033,7 +13050,7 @@ function SettingsPage({
             >
               שמור יעדים
             </Button>
-            <div className="text-xs text-slate-500">הערה: חיבור מלא לדשבורד מנהל יתבצע בשלב הבא (כרגע הדשבורד משתמש ביעד ברירת מחדל בשרת).</div>
+            <div className="text-xs text-slate-500">היעד נשמר אוטומטית ומוצג בכרטיס "עמידה ביעד מכירות שנתי" בדשבורד המנהל (יעד שנתי = יעד חודשי × 12).</div>
           </CardContent>
         </Card>
       )}
@@ -13076,6 +13093,12 @@ function SettingsPage({
                           <button className="rounded-xl border px-3 py-1 text-xs hover:bg-slate-50" onClick={() => openEditCatalog(it)}>עריכה</button>
                           <button className="rounded-xl border px-3 py-1 text-xs hover:bg-slate-50" onClick={() => toggleCatalogActive(it)}>
                             {it.isActive ? 'השבתה' : 'הפעלה'}
+                          </button>
+                          <button
+                            className="rounded-xl border border-red-200 px-3 py-1 text-xs text-red-600 hover:bg-red-50"
+                            onClick={() => deleteCatalogItem(it)}
+                          >
+                            מחיקה
                           </button>
                         </div>
                       </TableCell>
@@ -18794,6 +18817,24 @@ function TasksPage({
                               ccContactsCoord.find((c) => c.email?.trim())?.email || ''
                             ).trim();
 
+                            // ── פרטי איש הקשר להערות הפגישה (שם מלא + טלפון) — אותה עדיפות כמו האימייל:
+                            //    איש קשר ראשי → כל איש קשר → פרטי הליד/המשימה. משמש כברירת מחדל להערות. ──
+                            const coordContactName = (
+                              ccContactsCoord.find((c) => c.isPrimary && c.fullName?.trim())?.fullName ||
+                              ccContactsCoord.find((c) => c.fullName?.trim())?.fullName ||
+                              contactName || ''
+                            ).trim();
+                            const coordContactPhone = (
+                              ccContactsCoord.find((c) => c.isPrimary && c.phone?.trim())?.phone ||
+                              ccContactsCoord.find((c) => c.phone?.trim())?.phone ||
+                              t.leadPhone || lead?.phone || ''
+                            ).trim();
+                            // הערות ברירת-מחדל: שם מלא + טלפון של איש הקשר (רק אם יש לפחות אחד מהם).
+                            const defaultCoordNotes = [
+                              coordContactName ? `שם איש קשר: ${coordContactName}` : '',
+                              coordContactPhone ? `טלפון: ${coordContactPhone}` : '',
+                            ].filter(Boolean).join('\n');
+
                             const form = coordForms[t.id] || {};
                             const today = new Date();
                             const pad2 = (n: number) => String(n).padStart(2, '0');
@@ -18806,7 +18847,7 @@ function TasksPage({
                             const time = form.time ?? '10:00';
                             const durationMin = form.durationMin ?? 60;
                             const location = form.location ?? defaultLocation;
-                            const notes = form.notes ?? '';
+                            const notes = form.notes ?? defaultCoordNotes;
                             const isOnline = form.isOnline ?? false;
                             const inviteCustomer = form.inviteCustomer ?? false;
                             const employeeIds = form.employeeIds ?? [];
@@ -18886,36 +18927,62 @@ function TasksPage({
                                 }
                                 const data = await r.json();
                                 setCoordResult((p) => ({ ...p, [t.id]: data }));
-                                // שמירת נתוני הפגישה ב-TaskField (best-effort — לא חוסמת המשך).
-                                // שולחים רק שדות שתואמים לעמודות הטבלה בפועל. productName (קוד סוג הבדיקה)
+                                // שמירת נתוני הפגישה ב-TaskField. לא חוסמת המשך, אבל *כן* נבדקת:
+                                // אם השרת דילג (productName לא תואם ל-InspectionType / שדות חובה חסרים)
+                                // מציגים אזהרה במקום להיכשל בשקט. productName (קוד סוג הבדיקה)
                                 // מתורגם בשרת ל-inspectionTypeId (uuid) מתוך טבלת InspectionType.
-                                void apiFetch(apiUrl(`/tasks/${t.id}/field`), {
-                                  method: 'POST',
-                                  authUser: currentUser,
-                                  body: JSON.stringify({
-                                    productName: t.productName ?? null,
-                                    appointmentTitle: subject,
-                                    scheduledStartAt: startLocal,
-                                    scheduledEndAt: endLocal,
-                                    durationMinutes: durationMin,
-                                    siteAddress: location || null,
-                                    siteCity: lead?.city || null,
-                                    fieldContactName: contactName || null,
-                                    fieldContactPhone: t.leadPhone || lead?.phone || null,
-                                    navigationUrl: location
-                                      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`
-                                      : null,
-                                    specialInstructions: notes || null,
-                                    updatedByUserId: currentUser.id,
-                                  }),
-                                });
+                                // השרת מחזיר { skipped: true, missing: [...] } כשלא ניתן לכתוב שורת TaskField
+                                // (נפוץ: למשימה אין productName, או שהקוד לא קיים ב-InspectionType).
+                                // מחכים לתוצאה כדי לדעת אם להתריע — אם השמירה נכשלה, משאירים את הפאנל פתוח
+                                // עם אזהרה במקום לקדם בשקט את המשימה בלי פרטי שדה.
+                                let fieldSaved = false;
+                                try {
+                                  const fr = await apiFetch(apiUrl(`/tasks/${t.id}/field`), {
+                                    method: 'POST',
+                                    authUser: currentUser,
+                                    body: JSON.stringify({
+                                      productName: t.productName ?? null,
+                                      appointmentTitle: subject,
+                                      scheduledStartAt: startLocal,
+                                      scheduledEndAt: endLocal,
+                                      durationMinutes: durationMin,
+                                      siteAddress: location || null,
+                                      siteCity: lead?.city || null,
+                                      fieldContactName: contactName || null,
+                                      fieldContactPhone: t.leadPhone || lead?.phone || null,
+                                      navigationUrl: location
+                                        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`
+                                        : null,
+                                      specialInstructions: notes || null,
+                                      updatedByUserId: currentUser.id,
+                                    }),
+                                  });
+                                  const fd = fr.ok ? await fr.json().catch(() => null) : null;
+                                  if (fr.ok && fd && !fd.skipped) {
+                                    fieldSaved = true;
+                                  } else {
+                                    const miss = Array.isArray(fd?.missing) ? fd.missing.join(', ') : '';
+                                    setCoordError((p) => ({
+                                      ...p,
+                                      [t.id]: `הפגישה נוצרה ב-Outlook, אך פרטי השדה לא נשמרו במשימה${miss ? ` (חסר: ${miss})` : ''}. בדקו שסוג הבדיקה מוגדר במשימה.`,
+                                    }));
+                                  }
+                                } catch {
+                                  setCoordError((p) => ({
+                                    ...p,
+                                    [t.id]: 'הפגישה נוצרה ב-Outlook, אך שמירת פרטי השדה במשימה נכשלה.',
+                                  }));
+                                }
                                 // נקבעה פגישה ב-Outlook → שלב התיאום הסתיים. מקדמים את המשימה
                                 // לשלב הבא (ביצוע) — בלי לסמן DONE (שהיה מקפיץ אותה לשלב האחרון/סגור).
                                 // type=FIELD_WORK → detectStep מחזיר 5 (ביצוע). status נשאר פעיל.
                                 void updateTaskField(t.id, { type: 'FIELD_WORK' });
-                                // חזרה לרשימת המשימות (כפי שהיה) — המשימה תופיע כעת בשלב "ביצוע".
-                                setManualStepOverride((prev) => { const n = { ...prev }; delete n[t.id]; return n; });
-                                setExpandedTaskId(null);
+                                // רק אם פרטי השדה נשמרו — חוזרים לרשימת המשימות. אם דילגנו,
+                                // משאירים את הפאנל פתוח כדי שהעובד יראה את האזהרה ויוכל לתקן.
+                                if (fieldSaved) {
+                                  setManualStepOverride((prev) => { const n = { ...prev }; delete n[t.id]; return n; });
+                                  setExpandedTaskId(null);
+                                }
                               } catch {
                                 setCoordError((p) => ({ ...p, [t.id]: 'שגיאת רשת — נסו שוב' }));
                               } finally {

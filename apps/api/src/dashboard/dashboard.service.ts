@@ -39,14 +39,34 @@ function startOfTodayIsrael(now = new Date()): Date {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** ברירת המחדל ליעד ההכנסות החודשי — כשעדיין לא הוגדר יעד בהגדרות. */
+  private static readonly DEFAULT_MONTHLY_REVENUE_TARGET = 450_000;
+
+  /**
+   * קורא את יעד ההכנסות החודשי שנשמר בהגדרות (SystemSetting key="targets",
+   * שדה monthlyRevenueTarget) — מוזן ע"י מנהל במסך "יעדים". נופל לברירת מחדל
+   * אם לא הוגדר / לא תקין. best-effort — לא זורק (כדי לא להפיל את הדשבורד).
+   */
+  private async getMonthlyRevenueTarget(): Promise<number> {
+    try {
+      const s: any = await this.prisma.systemSetting.findUnique({ where: { key: 'targets' } });
+      const raw = s?.value?.monthlyRevenueTarget;
+      const n = Number(raw);
+      if (Number.isFinite(n) && n > 0) return n;
+    } catch {
+      /* נופל לברירת המחדל */
+    }
+    return DashboardService.DEFAULT_MONTHLY_REVENUE_TARGET;
+  }
+
   async manager(user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
     if (role !== 'ADMIN' && role !== 'MANAGER') throw new ForbiddenException();
 
     try {
-    // Temporary config until real quota/target system exists
-    const monthlyRevenueTarget = 450_000;
+    // יעד ההכנסות החודשי — מהגדרות המנהל ("יעדים"), עם נפילה לברירת מחדל.
+    const monthlyRevenueTarget = await this.getMonthlyRevenueTarget();
 
     const now = new Date();
     const som = startOfMonth(now);
@@ -418,7 +438,7 @@ export class DashboardService {
       },
       workingNowEmployees,
       assumptions: {
-        monthlyRevenueTarget: 'Temporary constant (450,000) until quota system exists',
+        monthlyRevenueTarget: 'From SystemSetting("targets").monthlyRevenueTarget (manager-configured), default 450,000',
         wonRevenueThisMonth: 'Sum of APPROVED (and legacy SIGNED) quotes where updatedAt is within current month',
         pipeline: 'Sum of estimatedValue for opportunities not WON/LOST',
         winRate: 'Opportunities WON / (WON+LOST)',
@@ -592,7 +612,7 @@ export class DashboardService {
   /** Safe JSON when Prisma schema is ahead of DB (missing columns / relations). */
   private managerEmptyPayload() {
     const now = new Date();
-    const monthlyRevenueTarget = 450_000;
+    const monthlyRevenueTarget = DashboardService.DEFAULT_MONTHLY_REVENUE_TARGET;
     return {
       updatedAt: now.toISOString(),
       config: { monthlyRevenueTarget },
@@ -633,7 +653,7 @@ export class DashboardService {
       },
       workingNowEmployees: [],
       assumptions: {
-        monthlyRevenueTarget: 'Temporary constant (450,000) until quota system exists',
+        monthlyRevenueTarget: 'Default 450,000 (settings unavailable in fallback path)',
         wonRevenueThisMonth: 'Fallback: apply DB migrations (P2022 schema drift)',
         pipeline: 'Sum of estimatedValue for opportunities not WON/LOST',
         winRate: 'Opportunities WON / (WON+LOST)',
