@@ -1,9 +1,11 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly quotesService: QuotesService,
@@ -206,6 +208,7 @@ export class TasksService {
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     let inspectionTypeId = data.inspectionTypeId ?? undefined;
     let family = data.family ?? undefined;
+    let productLookupFailed = false;
     if ((!inspectionTypeId || !uuidRe.test(inspectionTypeId)) && data.productName) {
       const rows = await this.prisma.$queryRaw<Array<{ id: string; family: string }>>`
         SELECT id, family FROM "InspectionType"
@@ -214,12 +217,31 @@ export class TasksService {
       if (rows[0]) {
         inspectionTypeId = rows[0].id;
         family = family ?? rows[0].family;
+      } else {
+        productLookupFailed = true;
       }
     }
 
-    // עמודות NOT NULL בטבלה — בלעדיהן אי-אפשר לכתוב. יוצאים בשקט (best-effort).
-    if (!inspectionTypeId || !parsedStart || !parsedEnd || data.durationMinutes == null) {
-      return null;
+    // עמודות NOT NULL בטבלה — בלעדיהן אי-אפשר לכתוב. במקום ליפול בשקט (best-effort),
+    // מדווחים סיבה מדויקת ל-log + מחזירים אובייקט skip שהפרונט יכול להציג כאזהרה.
+    const missing: string[] = [];
+    if (!inspectionTypeId) {
+      missing.push(
+        productLookupFailed
+          ? `inspectionTypeId (productName ${JSON.stringify(data.productName)} לא תואם לאף code ב-InspectionType)`
+          : !data.productName
+            ? 'inspectionTypeId (productName ריק/חסר במשימה)'
+            : 'inspectionTypeId',
+      );
+    }
+    if (!parsedStart) missing.push('scheduledStartAt');
+    if (!parsedEnd) missing.push('scheduledEndAt');
+    if (data.durationMinutes == null) missing.push('durationMinutes');
+    if (missing.length > 0) {
+      this.logger.warn(
+        `upsertTaskField skipped for task ${taskId}: missing required column(s) → ${missing.join(', ')}`,
+      );
+      return { skipped: true as const, reason: 'missing_required_fields', missing };
     }
 
     const payload = {

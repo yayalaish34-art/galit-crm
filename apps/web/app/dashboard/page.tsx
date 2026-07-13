@@ -11441,8 +11441,7 @@ function SettingsPage({
     { key: 'services', label: 'שירותים', enabled: true },
     { key: 'statuses', label: 'סטטוסים', enabled: true },
     { key: 'targets', label: 'יעדים', enabled: true },
-    { key: 'catalog', label: 'פריטים / מחירון', enabled: true },
-    { key: 'templates', label: 'תבניות Word להצעות מחיר', enabled: true },
+    { key: 'catalog', label: 'פריטים', enabled: true },
     { key: 'system', label: 'מערכת', enabled: true },
   ];
 
@@ -11644,7 +11643,8 @@ function SettingsPage({
   };
 
   useEffect(() => {
-    if (tab !== 'templates') return;
+    // תבניות ה-Word אוחדו לטאב "פריטים" (catalog) — טוענים אותן כשנפתח הטאב הזה.
+    if (tab !== 'catalog') return;
     void loadQuoteTemplates();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, currentUser.id]);
@@ -13111,8 +13111,9 @@ function SettingsPage({
         </Card>
       )}
 
-      {tab === 'templates' && (
-        <div className="space-y-6" dir="rtl">
+      {/* תבניות Word — מוצג באותו טאב "פריטים" מתחת לטבלת הפריטים/מחירון */}
+      {tab === 'catalog' && (
+        <div className="space-y-6 mt-6" dir="rtl">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
             <p className="mt-1 text-sm text-slate-600">העלה קובץ Word מקורי שישמש כתבנית למיזוג הצעות מחיר</p>

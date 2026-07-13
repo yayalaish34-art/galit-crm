@@ -3,14 +3,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { resolvePublicApiBase } from '../quotes/public-api-base.util';
+import { GOOGLE_REVIEW_FULL_URL } from '../dashboard/feedback.service';
 
 /**
  * ברירת מחדל לקישור הביקורות בגוגל של גלית — ניתן לדריסה דרך SystemSetting("googleReviewUrl").
- * משתמש ב-ludocid (מזהה העסק ב-Google Maps) של גלית כדי לפתוח ישירות את חלונית כתיבת הביקורת.
+ *
+ * הפורמט הישן `writereview?ludocid=<CID>` הופסק ע"י גוגל ומחזיר HTTP 400 (לא נפתח).
+ * משתמשים בקישור העובד המשותף (GOOGLE_REVIEW_FULL_URL) — אותו קישור שכבר בשימוש בזרימת
+ * המשוב הידנית (feedback.service) ובדשבורד — כדי לשמור מקור-אמת אחד לקישור הדירוג של גלית.
  */
-const GALIT_LUDOCID = '6353540875700534600';
-const DEFAULT_GOOGLE_REVIEW_URL =
-  `https://search.google.com/local/writereview?ludocid=${GALIT_LUDOCID}`;
+const DEFAULT_GOOGLE_REVIEW_URL = GOOGLE_REVIEW_FULL_URL;
 
 /** מפתח ההגדרה שבו נשמר קישור הביקורות בגוגל (ניתן לעריכה בהגדרות המערכת). */
 export const GOOGLE_REVIEW_URL_KEY = 'googleReviewUrl';
