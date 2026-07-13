@@ -9,6 +9,7 @@ import { GraphMailService } from '../microsoft/graph-mail.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { stampQuoteButtons } from './pdf-buttons.util';
+import { stripSignatureTableFromDocx } from '../quote-templates/signature-table';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -99,11 +100,15 @@ export class QuoteSignatureService {
 
     const { content, fileName, isPdf } = this.resolveQuoteDoc(quote);
 
+    // בזרימת החתימה הדיגיטלית נצרב כפתור "לחץ כאן לחתימה" על ה-PDF — לכן מסירים את טבלת
+    // החתימה הפיזית מה-DOCX לפני ההמרה, כדי שלא יופיעו שתיהן (טבלה + כפתור). (best-effort)
+    const docForPdf = isPdf ? content : stripSignatureTableFromDocx(content);
+
     // המרה ל-PDF (אם זה DOCX). דורש Outlook מחובר (Graph) או CloudConvert.
-    let pdfBuffer = content;
+    let pdfBuffer = docForPdf;
     if (!isPdf) {
       try {
-        pdfBuffer = await this.pdfConvert.docxToPdf(content, fileName, userId);
+        pdfBuffer = await this.pdfConvert.docxToPdf(docForPdf, fileName, userId);
       } catch (e: any) {
         this.logger.warn(`docxToPdf failed for quote ${quoteId}: ${e?.message || e}`);
         throw new BadRequestException(

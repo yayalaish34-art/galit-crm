@@ -15,6 +15,10 @@ export class ReportMailController {
    */
   @Post(':id/send-report-email')
   send(@Param('id') id: string, @Body() body: SendReportEmailOpts, @Req() req: any) {
-    return this.reportMail.sendReportEmail(id, { ...(body || {}), userId: req.user?.id });
+    return this.reportMail.sendReportEmail(id, {
+      ...(body || {}),
+      userId: req.user?.id,
+      requestHost: req?.headers?.host,
+    });
   }
 }

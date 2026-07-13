@@ -7,7 +7,6 @@ import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { SendReportModal } from '../send-report-modal';
 import { MarkReportSentModal } from '../mark-report-sent-modal';
-import { ScheduleFeedbackModal } from '../schedule-feedback-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
 import { InteractionNewScreen } from '../interactions/new/interaction-new-screen';
 import { OrderNewScreen, OrderOldStyleToolbar } from '../orders/new/order-new-screen';
@@ -14223,10 +14222,6 @@ function TasksPage({
   const [alreadySentTaskId, setAlreadySentTaskId] = useState<string | null>(null);
 
   /* סוף הזרימה: פופ-אפ "שליחת משוב" שנפתח אחרי שליחת הדוח */
-  const [feedbackScheduleData, setFeedbackScheduleData] = useState<
-    { customerId: string | null; customerName: string; customerEmail: string; customerPhone: string } | null
-  >(null);
-
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
   const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
   const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
@@ -19307,13 +19302,7 @@ function TasksPage({
                                     : '⏳ דוח נשלח (סומן ידנית) — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
-                                  const cust = customers.find((c) => c.id === t.customerId);
-                                  setFeedbackScheduleData({
-                                    customerId: (t.customerId as string | undefined) ?? null,
-                                    customerName: ((cust as any)?.name as string | undefined) || t.customerName || t.leadName || '',
-                                    customerEmail: ((cust as any)?.email as string | undefined) || t.leadEmail || '',
-                                    customerPhone: ((cust as any)?.phone as string | undefined) || t.leadPhone || '',
-                                  });
+                                  // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח — אין יותר פופ-אפ משוב ידני.
                                   setExpandedTaskId(null);
                                 }}
                               />
@@ -19345,14 +19334,8 @@ function TasksPage({
                                     : '⏳ דוח נשלח — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
-                                  // פתיחת פופ-אפ "שליחת משוב" בסוף הזרימה
-                                  const cust = customers.find((c) => c.id === t.customerId);
-                                  setFeedbackScheduleData({
-                                    customerId: (t.customerId as string | undefined) ?? null,
-                                    customerName: ((cust as any)?.name as string | undefined) || t.customerName || t.leadName || '',
-                                    customerEmail: ((cust as any)?.email as string | undefined) || t.leadEmail || '',
-                                    customerPhone: ((cust as any)?.phone as string | undefined) || t.leadPhone || '',
-                                  });
+                                  // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח מיד אחרי הדוח —
+                                  // אין יותר פופ-אפ "שליחת משוב" ידני בסוף הזרימה.
                                   setExpandedTaskId(null);
                                 }}
                               />
@@ -19394,17 +19377,6 @@ function TasksPage({
         </table>
       </div>
       )}
-
-      {/* ═══ פופ-אפ "שליחת משוב" — נפתח בסוף הזרימה אחרי שליחת הדוח ═══ */}
-      <ScheduleFeedbackModal
-        open={!!feedbackScheduleData}
-        onClose={() => setFeedbackScheduleData(null)}
-        customerId={feedbackScheduleData?.customerId ?? null}
-        customerName={feedbackScheduleData?.customerName}
-        customerEmail={feedbackScheduleData?.customerEmail}
-        customerPhone={feedbackScheduleData?.customerPhone}
-        currentUser={currentUser}
-      />
 
       {/* ═══ אזהרת "לא ביצעת מעקב" — בסגירת שלב הצעת המחיר בלי שנקבע מעקב ═══ */}
       {quoteCloseWarnTaskId && (

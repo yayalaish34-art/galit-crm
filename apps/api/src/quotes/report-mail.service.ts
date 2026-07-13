@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { PdfConvertService } from './pdf-convert.service';
+import { ReviewRequestService } from '../reviews/review-request.service';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -25,6 +26,13 @@ export interface SendReportEmailOpts {
   customerName?: string;
   /** המשתמש השולח (לתיבת ה-Outlook שלו + חתימה). */
   userId?: string;
+  /**
+   * לשלוח אוטומטית מייל "בקשת דירוג" (5 פרצופים) ללקוח מיד אחרי שליחת הדוח.
+   * ברירת מחדל: true. best-effort — כישלון לא מפיל את שליחת הדוח.
+   */
+  sendReviewRequest?: boolean;
+  /** host הבקשה — לבניית קישור ה-API הציבורי שנצרב במייל הדירוג. */
+  requestHost?: string | null;
 }
 
 /**
@@ -41,6 +49,7 @@ export class ReportMailService {
     private readonly msAuth: MicrosoftAuthService,
     private readonly graphMail: GraphMailService,
     private readonly pdfConvert: PdfConvertService,
+    private readonly reviewRequest: ReviewRequestService,
   ) {}
 
   async sendReportEmail(
@@ -187,6 +196,23 @@ ${signatureHtml}
       await this.prisma.task.update({ where: { id: taskId }, data: { status: 'DONE' as any } });
     } catch (e: any) {
       this.logger.warn(`mark task ${taskId} DONE failed: ${e?.message || e}`);
+    }
+
+    // ── שליחת מייל "בקשת דירוג" (5 פרצופים) ללקוח מיד אחרי הדוח (best-effort) ──
+    // נשלח לנמען הראשי בלבד. כישלון כאן לא מפיל את שליחת הדוח.
+    if (opts.sendReviewRequest !== false) {
+      try {
+        await this.reviewRequest.sendReviewRequest({
+          toEmail: toAll[0],
+          customerName: custName || undefined,
+          taskId,
+          customerId: task.customerId || undefined,
+          userId: opts.userId,
+          requestHost: opts.requestHost,
+        });
+      } catch (e: any) {
+        this.logger.warn(`auto review request failed for task ${taskId}: ${e?.message || e}`);
+      }
     }
 
     return { success: true, sentTo: toAll[0], fileName, via: 'graph' };

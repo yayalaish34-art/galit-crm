@@ -1256,3 +1256,32 @@ enum ProjectStatus {
   POSTPONED
   CANCELLED
 }
+
+/// בקשת דירוג שנשלחה ללקוח (אוטומטית אחרי שליחת דוח) — מייל עם 5 פרצופים.
+/// לחיצה על פרצוף נקלטת ב-/public/rate/:token ומעדכנת את הרשומה:
+/// דירוג 4-5 → הפניה לדף הביקורות בגוגל ; דירוג 1-3 → דף משוב/התנצלות פנימי.
+model ReviewRequest {
+  id            String    @id @default(uuid())
+  /// טוקן לא-ניחוש שמשובץ בקישורי המייל (משמש כהרשאה בנתיב הציבורי)
+  token         String    @unique @default(uuid())
+
+  /// הקשר — למי נשלח (best-effort; לא חובה שכולם יהיו קיימים)
+  customerId    String?
+  taskId        String?
+  toEmail       String
+  customerName  String?
+
+  /// הדירוג שנבחר (1..5). null עד שהלקוח לוחץ.
+  rating        Int?
+  ratedAt       DateTime?
+  /// משוב חופשי שהלקוח כתב בדף המשוב (רק בדירוג נמוך)
+  feedback      String?   @db.Text
+  feedbackAt    DateTime?
+
+  sentAt        DateTime  @default(now())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([customerId])
+  @@index([taskId])
+}

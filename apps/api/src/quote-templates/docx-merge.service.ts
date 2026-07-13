@@ -6,6 +6,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
+import { appendSignatureTable } from './signature-table';
 
 let Docxtemplater: any;
 let PizZip: any;
@@ -1067,6 +1068,10 @@ export class DocxMergeService {
       // אין נגיעה ברוחב/ביישור של טבלאות המחיר — הן מרונדרות בדיוק כפי
       // שהוגדרו בתבנית. (בעבר alignPriceTablesRight מתח את רוחב עמודות
       // טבלת הסיכום/הנחה כדי להשוות לרוחב טבלת הפריטים — הוסר ביודעין.)
+      // ── טבלת החתימה: נצרבת תמיד בסוף כל הצעה ממוזגת (שם מלא | חתימה | חותמת). ──
+      // בזרימת החתימה הדיגיטלית מסירים אותה (stripSignatureTable) לפני ההמרה ל-PDF,
+      // כי שם נצרב כפתור "לחץ כאן לחתימה" במקומה.
+      replaced = appendSignatureTable(replaced);
       outZip.file('word/document.xml', replaced);
     }
 

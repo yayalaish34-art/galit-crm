@@ -11,9 +11,10 @@ import { ReportMailController } from './report-mail.controller';
 import { CompanyProfileController } from './company-profile.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MicrosoftModule } from '../microsoft/microsoft.module';
+import { ReviewsModule } from '../reviews/reviews.module';
 
 @Module({
-  imports: [PrismaModule, MicrosoftModule],
+  imports: [PrismaModule, MicrosoftModule, ReviewsModule],
   controllers: [QuotesController, QuoteSignatureController, ReportMailController, CompanyProfileController],
   providers: [QuotesService, QuoteMailService, PdfConvertService, QuoteSignatureService, ReportMailService, CompanyProfileService],
   exports: [QuotesService],
