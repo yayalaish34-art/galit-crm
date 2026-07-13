@@ -659,6 +659,49 @@ function replaceFirstLabelText(rowXml: string, newLabel: string): string {
 }
 
 /**
+ * כשאין הנחה כללית — התווית "סה״כ לאחר הנחה" בטבלת הסיכום מטעה (אין הנחה שאחריה).
+ * הפונקציה מחליפה את הטקסט "סה״כ לאחר הנחה" → "סה״כ" בשורת {subtotalAfterDiscount}.
+ * מטפלת בכל וריאציית הגרשיים (״ / " / '') ובטקסט מפוצל לכמה ריצות. רצה רק כשאין הנחה כללית,
+ * לפני render. אם התווית לא קיימת — לא נוגעת.
+ */
+export function relabelSubtotalAfterDiscountWhenNoDiscount(documentXml: string): string {
+  const ph = '{subtotalAfterDiscount}';
+  const phIdx = documentXml.indexOf(ph);
+  if (phIdx === -1) return documentXml;
+
+  // גבולות השורה (<w:tr>) שמכילה את ה-placeholder של הסכום — התווית יושבת באותה שורה, בתא נפרד.
+  const trStart = Math.max(
+    documentXml.lastIndexOf('<w:tr>', phIdx),
+    documentXml.lastIndexOf('<w:tr ', phIdx),
+  );
+  if (trStart === -1) return documentXml;
+  const trEndMarker = documentXml.indexOf('</w:tr>', phIdx);
+  if (trEndMarker === -1) return documentXml;
+  const trEnd = trEndMarker + '</w:tr>'.length;
+  let tr = documentXml.slice(trStart, trEnd);
+
+  // 1) המקרה הנפוץ: הטקסט "סה״כ לאחר הנחה" נמצא ב-<w:t> יחיד. מחליפים ל"סה״כ".
+  //    מכסה גרש עברי (״), מרכאות ASCII ("), שני גרשים בודדים ('') וכן רווחים משתנים.
+  const singleRunRe = /(<w:t\b[^>]*>)\s*סה(?:״|"|'')?כ\s+לאחר\s+הנחה\s*(<\/w:t>)/;
+  if (singleRunRe.test(tr)) {
+    const fixed = tr.replace(singleRunRe, (_m, open, close) => `${open}סה״כ${close}`);
+    return documentXml.slice(0, trStart) + fixed + documentXml.slice(trEnd);
+  }
+
+  // 2) נפילה-חזרה: הטקסט מפוצל לכמה ריצות. מוחקים "לאחר הנחה" מכל <w:t> שמכיל אותו,
+  //    ומשאירים את "סה״כ" (הרעיון: להסיר את המילים "לאחר הנחה" בלבד).
+  const strippedTr = tr.replace(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g, (m, open, txt, close) => {
+    if (!/לאחר\s+הנחה/.test(txt)) return m;
+    const nt = txt.replace(/\s*לאחר\s+הנחה/g, '').replace(/\s+$/, '');
+    return `${open}${nt}${close}`;
+  });
+  if (strippedTr !== tr) {
+    return documentXml.slice(0, trStart) + strippedTr + documentXml.slice(trEnd);
+  }
+  return documentXml;
+}
+
+/**
  * מסיר את שורת "% הנחה {discountPercent}" מטבלת הסיכום — לשימוש כאשר יש הנחת-שורה אך אין
  * הנחה כללית: זוג הטבלאות המלא ({#hasDiscount}) מרונדר כדי להציג את עמודת הנחת-השורה, אך
  * שורת ההנחה הכללית מיותרת (הייתה מציגה "% הנחה: 0"). מסיר את ה-<w:tr> שמכיל את
@@ -747,8 +790,14 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   r.hasDiscount = r.hasGeneralDiscount === true || r.hasLineDiscount === true;
 
   // Recipient block canonical lines
-  const customerName = pickStr(r, ['customerName']).trim();
+  const companyName = pickStr(r, ['customerName']).trim();
   const contactName = pickStr(r, ['contactName']).trim();
+  // שם הנמען בכותרת: שם איש הקשר, ואם ריק — שם החברה. רוב התבניות מציגות {customerName}
+  // בשורת השם (בלי placeholder נפרד לאיש קשר), לכן דורסים את customerName עצמו כך שיציג את
+  // איש הקשר כשקיים. שם החברה נשמר ב-companyName למקרה שתבנית משתמשת בו בנפרד.
+  const displayName = contactName || companyName;
+  r.customerName = displayName;
+  r.companyName = companyName;
   const cityOnly = extractCityOnly(
     pickStr(r, ['customerCity', 'city', 'billingCity', 'customer_city']).trim(),
     pickStr(r, ['customerAddress', 'address', 'billingAddress']).trim(),
@@ -759,10 +808,9 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   // מלא אותם מטלפון/מייל הלקוח — אחרת הם נשארים ריקים ולא מוצגים בכלל.
   r.contactPhone = contactPhone;
   r.contactEmail = contactEmail;
-  const recipientLine3 = customerName ? customerName : '';
   r.recipientLine1 = 'לכבוד';
   r.recipientLine2 = contactName;
-  r.recipientLine3 = recipientLine3;
+  r.recipientLine3 = companyName;
   r.recipientLine4 = cityOnly;
   // נפילה-חזרה ל-{customerCity}: אם שדה העיר ריק אך חולצה עיר מהכתובת — מלא גם את ה-placeholder הישיר
   if (!pickStr(r, ['customerCity']).trim() && cityOnly) r.customerCity = cityOnly;
@@ -772,6 +820,25 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   r.recipientLine7 = `תאריך: ${quoteDateStr}`;
 
   return sanitizeDocxPayload(r) as Record<string, unknown>;
+}
+
+/**
+ * מוודא ש-[Content_Types].xml הוא הפריט הראשון בחבילת ה-ZIP (דרישת OPC/OOXML).
+ * PizZip/docxtemplater עלולים לסדר אותו לא-ראשון אחרי render → Word מסמן "unreadable content".
+ * מסדר מחדש את מפת הקבצים כך שהחלק הזה ראשון; שאר הסדר נשמר. פועל על אובייקט PizZip.
+ */
+function ensureContentTypesFirst(zip: any): void {
+  const CT = '[Content_Types].xml';
+  const files = zip?.files;
+  if (!files || !files[CT]) return;
+  const keys = Object.keys(files);
+  if (keys[0] === CT) return; // כבר ראשון
+  const reordered: Record<string, unknown> = {};
+  reordered[CT] = files[CT];
+  for (const k of keys) {
+    if (k !== CT) reordered[k] = files[k];
+  }
+  zip.files = reordered;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -832,6 +899,8 @@ export class DocxMergeService {
         } else {
           // אין הנחה כללית — הסר את שורת ההנחה הכללית המיותרת
           pre = removeSummaryDiscountRow(pre);
+          // ...ושנה את התווית "סה״כ לאחר הנחה" → "סה״כ" (אין הנחה שאחריה — התווית מטעה)
+          pre = relabelSubtotalAfterDiscountWhenNoDiscount(pre);
         }
         if (!hasLineDiscount) {
           // אין הנחת-שורה — הסר את עמודת "% הנחה לשורה" מטבלת הפריטים
@@ -861,6 +930,14 @@ export class DocxMergeService {
       // טבלת הסיכום/הנחה כדי להשוות לרוחב טבלת הפריטים — הוסר ביודעין.)
       outZip.file('word/document.xml', replaced);
     }
+
+    // ── תיקון קריטי: [Content_Types].xml חייב להיות הפריט הראשון ב-ZIP ──
+    // מפרט ה-OPC (ISO/IEC 29500) דורש ש-[Content_Types].xml יהיה החלק הראשון בחבילה.
+    // docxtemplater/PizZip מסדרים מחדש את הפריטים אחרי render, כך ש-[Content_Types].xml
+    // כבר לא ראשון — ו-Word מסמן "תוכן שאינו ניתן לקריאה" ומציע לתקן (repair). כתוצאה,
+    // הקובץ שנשמר ל-OneDrive פגום, וכשמושכים אותו בחזרה זו הגרסה הגולמית ולא הערוכה.
+    // כאן מסדרים מחדש כך ש-[Content_Types].xml ראשון — ואז Word פותח את הקובץ ללא repair.
+    ensureContentTypesFirst(outZip);
 
     return outZip.generate({
       type: 'nodebuffer',
