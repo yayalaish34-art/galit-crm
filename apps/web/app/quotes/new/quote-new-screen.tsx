@@ -3328,50 +3328,91 @@ export function QuoteNewScreen({
                         </button>
                       );
                     };
+                    /* ── קובץ פעיל = הכי חדש בלבד ──
+                       מאחדים את כל הקבצים (ממוזגים-בסשן + מצורפים-בשרת + lastMergedDocPath) לרשימה
+                       אחת, ממיינים לפי createdAt, ומסמנים ירוק (=פעיל) *רק* את הקובץ העדכני ביותר.
+                       כך אחרי יום/סשן חדש, הקובץ האחרון שנערך תמיד יופיע פעיל — לא קובץ ישן. */
+                    type UFile = {
+                      key: string; name: string; attId?: string; createdAt: number;
+                      kind: 'merged' | 'attachment' | 'path';
+                      url?: string; serverBacked?: boolean; att?: { id: string; fileName: string };
+                    };
+                    const files: UFile[] = [];
+                    // קבצים שמוזגו/נוספו בסשן הנוכחי — נוצרו "עכשיו", אבל אם יש להם attId נעדיף את ה-createdAt
+                    // מהשרת (מ-existingAttachments) כדי שמיון יהיה עקבי בין סשנים.
+                    for (const f of mergedFiles) {
+                      const match = f.attId ? existingAttachments?.find((a) => a.id === f.attId) : undefined;
+                      files.push({
+                        key: `m:${f.attId || f.name}`, name: f.name, attId: f.attId,
+                        createdAt: match ? new Date(match.createdAt).getTime() : Date.now(),
+                        kind: 'merged', url: f.url, serverBacked: f.serverBacked,
+                      });
+                    }
+                    // קבצים מצורפים בשרת שאין להם כפילות בקבצי הסשן (לפי attId או שם).
+                    for (const att of existingAttachments ?? []) {
+                      if (mergedFiles.some((f) => f.attId === att.id || f.name === att.fileName)) continue;
+                      files.push({
+                        key: `a:${att.id}`, name: att.fileName, attId: att.id,
+                        createdAt: new Date(att.createdAt).getTime(), kind: 'attachment', att,
+                      });
+                    }
+                    // fallback: הקובץ הממוזג האחרון מהדיסק, רק אם אין שום קובץ אחר.
+                    if (files.length === 0 && quoteId && lastMergedDocPath) {
+                      files.push({
+                        key: 'path', name: lastMergedDocPath.split(/[\\/]/).pop() || '', createdAt: 0, kind: 'path',
+                      });
+                    }
+                    // מיון: העדכני ביותר קודם. הראשון = פעיל (ירוק), השאר אפורים.
+                    files.sort((a, b) => b.createdAt - a.createdAt);
                     return (
                       <>
-                  {mergedFiles.map((f, i) => (
-                    <div key={`s-${i}`} className="flex items-center gap-2">
-                      {(f.serverBacked && quoteId) ? (
-                        /* קובץ ממוזג שנשמר בהצעה — מושכים את הגרסה העדכנית מהשרת (מסנכרן מ-OneDrive),
-                           כדי שאחרי עריכה ב-Word ההורדה תיתן את הגרסה המעודכנת ולא את ה-blob המקורי. */
-                        <button type="button" onClick={() => handleDownloadMergedDoc(f.name)} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors text-right" title={f.name}>
-                          <FileText size={15} className="text-green-600 flex-shrink-0" />
-                          <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
-                          <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
-                        </button>
-                      ) : (
-                        <a href={f.url} download={f.name} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 hover:bg-green-100 transition-colors" title={f.name}>
-                          <FileText size={15} className="text-green-600 flex-shrink-0" />
-                          <span className="flex-1 text-sm font-semibold text-green-800 truncate">{f.name}</span>
-                          <span className="text-[11px] font-bold text-green-600 flex-shrink-0 border border-green-300 rounded-lg px-2 py-0.5">הורד</span>
-                        </a>
-                      )}
-                      {editBtn(f.attId, f.name)}
-                      {delBtn(f.attId, f.name)}
-                    </div>
-                  ))}
-                  {existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).map((att) => (
-                    <div key={att.id} className="flex items-center gap-2">
-                      <button type="button" onClick={() => onDownloadAttachment?.(att)} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
-                        <FileText size={15} className="text-slate-500 flex-shrink-0" />
-                        <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{att.fileName}</span>
-                        <span className="text-[11px] text-slate-400 flex-shrink-0">{new Date(att.createdAt).toLocaleDateString('he-IL')} {new Date(att.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span>
-                      </button>
-                      {editBtn(att.id, att.fileName)}
-                      {delBtn(att.id, att.fileName)}
-                    </div>
-                  ))}
-                  {mergedFiles.length === 0 && quoteId && lastMergedDocPath && (
-                    <div className="flex items-center gap-2">
-                      <button type="button" onClick={() => handleDownloadMergedDoc()} className="flex-1 min-w-0 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 hover:bg-slate-100 transition-colors text-right">
-                        <FileText size={15} className="text-slate-500 flex-shrink-0" />
-                        <span className="flex-1 text-sm font-semibold text-slate-700 truncate">{lastMergedDocPath.split(/[\\/]/).pop()}</span>
-                        <span className="text-[11px] font-bold text-slate-500 flex-shrink-0 border border-slate-300 rounded-lg px-2 py-0.5">הורד</span>
-                      </button>
-                      {editBtn(undefined, lastMergedDocPath.split(/[\\/]/).pop() || '')}
-                    </div>
-                  )}
+                  {files.map((f, i) => {
+                    const isActive = i === 0; // רק הקובץ העדכני ביותר פעיל
+                    const wrap = isActive
+                      ? 'border-green-200 bg-green-50 hover:bg-green-100'
+                      : 'border-slate-200 bg-slate-50 hover:bg-slate-100';
+                    const icon = isActive ? 'text-green-600' : 'text-slate-500';
+                    const text = isActive ? 'text-green-800' : 'text-slate-700';
+                    const badge = isActive
+                      ? 'text-green-600 border-green-300'
+                      : 'text-slate-500 border-slate-300';
+                    const timeLabel = f.createdAt
+                      ? `${new Date(f.createdAt).toLocaleDateString('he-IL')} ${new Date(f.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`
+                      : '';
+                    const onClick =
+                      f.kind === 'attachment' && f.att ? () => onDownloadAttachment?.(f.att!)
+                      : f.kind === 'path' ? () => handleDownloadMergedDoc()
+                      : (f.serverBacked && quoteId) ? () => handleDownloadMergedDoc(f.name)
+                      : undefined; // 'merged' לא-server-backed → קישור <a> להורדה ישירה
+                    const inner = (
+                      <>
+                        <FileText size={15} className={`${icon} flex-shrink-0`} />
+                        <span className={`flex-1 text-sm font-semibold ${text} truncate`}>{f.name}</span>
+                        {isActive && (
+                          <span className="text-[10px] font-bold text-white bg-green-500 rounded-full px-2 py-0.5 flex-shrink-0">פעיל</span>
+                        )}
+                        {timeLabel && <span className={`text-[11px] flex-shrink-0 ${isActive ? 'text-green-600' : 'text-slate-400'}`}>{timeLabel}</span>}
+                        {!timeLabel && (f.kind === 'path' || f.kind === 'merged') && (
+                          <span className={`text-[11px] font-bold flex-shrink-0 border rounded-lg px-2 py-0.5 ${badge}`}>הורד</span>
+                        )}
+                      </>
+                    );
+                    return (
+                      <div key={f.key} className="flex items-center gap-2">
+                        {onClick ? (
+                          <button type="button" onClick={onClick} className={`flex-1 min-w-0 flex items-center gap-3 rounded-xl border px-4 py-2.5 transition-colors text-right ${wrap}`} title={f.name}>
+                            {inner}
+                          </button>
+                        ) : (
+                          <a href={f.url} download={f.name} className={`flex-1 min-w-0 flex items-center gap-3 rounded-xl border px-4 py-2.5 transition-colors ${wrap}`} title={f.name}>
+                            {inner}
+                          </a>
+                        )}
+                        {editBtn(f.attId, f.name)}
+                        {f.kind !== 'path' && delBtn(f.attId, f.name)}
+                      </div>
+                    );
+                  })}
                       </>
                     );
                   })()}
@@ -3835,8 +3876,8 @@ export function QuoteNewScreen({
                         </select>
                       </div>
                     )}
-                    {/* קובץ ההצעה הוסר — נשלח כפתור "צפייה בהצעת מחיר" במקום קובץ מצורף (אין צורך בקובץ) */}
-                    {false && (
+                    {/* בחירת/החלפת הקובץ שיישלח: אפשר להעלות גרסה ערוכה (DOCX/PDF) שתחליף את הקובץ. */}
+                    {emailForm.quoteId && (
                     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2.5">
                       {onedriveActive && (
                         <div className="mb-2.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-800">
@@ -3885,30 +3926,6 @@ export function QuoteNewScreen({
                       <div className="mt-1 text-[11px] text-gray-500">
                         <strong className="text-emerald-700">לנאמנות מלאה של הכותרת:</strong> ב-Word עשה <strong>File → Save as PDF</strong> והעלה את ה-PDF כאן — הוא יישלח בדיוק כפי שהוא, בלי המרת שרת שמזיזה תמונות. (DOCX שמועלה כאן עדיין יומר ל-PDF בשרת.)
                       </div>
-
-                      {/* ── קבצים נוספים: יישלחו בנוסף לקובץ הראשי, וכל DOCX יומר ל-PDF ── */}
-                      {emailExtraAttIds.length > 0 && (
-                        <div className="mt-2.5 flex flex-wrap gap-1.5">
-                          {emailExtraAttIds.map((eid) => {
-                            const nm = emailAttachments.find((a) => a.id === eid)?.fileName || 'קובץ';
-                            return (
-                              <span key={eid} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[12px] text-emerald-800" title={nm}>
-                                📎 <span className="max-w-[160px] truncate">{nm}</span>
-                                <button type="button" onClick={() => removeExtraEmailAttachment(eid)} className="text-emerald-500 hover:text-emerald-700" aria-label="הסר קובץ">✕</button>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <label className={`mt-2 flex items-center justify-center gap-2 rounded-lg border border-dashed border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer ${emailAttBusy ? 'opacity-50 pointer-events-none' : ''}`}>
-                        <input
-                          type="file"
-                          className="hidden"
-                          disabled={emailAttBusy}
-                          onChange={(e) => { const f = e.target.files?.[0]; if (f) void addEmailAttachmentFile(f); e.currentTarget.value = ''; }}
-                        />
-                        {emailAttBusy ? 'מצרף…' : '➕ הוסף קובץ (יישלח בנוסף — יומר ל-PDF)'}
-                      </label>
                     </div>
                     )}
                     {/* בקשת שינוי מ-AI */}

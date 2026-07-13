@@ -653,8 +653,10 @@ export class QuotesService {
         select: { onedriveAttachmentId: true },
       });
       if (q?.onedriveAttachmentId) {
+        // createdAt מקודם ל-now כדי שהגרסה הערוכה תהיה ה"עדכנית ביותר" (הקובץ הפעיל/ירוק
+        // ב-UI, ומה שהמייל בוחר) — אחרת עריכה ב-Word משאירה timestamp ישן והקובץ נראה לא-פעיל.
         await this.prisma.taskAttachment
-          .update({ where: { id: q.onedriveAttachmentId }, data: { data: Uint8Array.from(buffer) } })
+          .update({ where: { id: q.onedriveAttachmentId }, data: { data: Uint8Array.from(buffer), createdAt: new Date() } })
           .catch(() => null);
         return;
       }
@@ -678,7 +680,7 @@ export class QuotesService {
     if (!att?.id) return;
 
     await this.prisma.taskAttachment
-      .update({ where: { id: att.id }, data: { data: Uint8Array.from(buffer) } })
+      .update({ where: { id: att.id }, data: { data: Uint8Array.from(buffer), createdAt: new Date() } })
       .catch(() => null);
   }
 
