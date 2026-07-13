@@ -2579,6 +2579,9 @@ export function QuoteNewScreen({
         : '',
       customerName: customer || '',
       contactName: contactNameMerged,
+      // סיווג הלקוח — כדי שהמיזוג ידע אם זה עסק (כל מה שאינו PRIVATE) ואז יוסיף את שם החברה
+      // מתחת לשם איש הקשר בבלוק "לכבוד".
+      customerType: (prefillCustomer?.customerType || '').toUpperCase(),
       contactTitle: '',
       customerAddress: customerAddress || '',
       customerCity: customerCity || '',

@@ -69,6 +69,10 @@ export type DocxMergeData = {
   items: DocxMergeItemRow[];
   /** כינויים ישנים / נוספים */
   customerCity?: string;
+  /** סיווג הלקוח (PRIVATE / COMPANY / ...) — קובע אם להוסיף שורת שם-חברה בכותרת */
+  customerType?: string;
+  /** שם החברה (לעסק) — מוזרק כשורה מתחת לשם איש הקשר */
+  companyName?: string;
   contactTitle?: string;
   vat?: string;
   total?: string;
@@ -468,6 +472,36 @@ export function removeTableColumnByPlaceholder(documentXml: string, placeholder:
 }
 
 /**
+ * מזריק שורת שם-חברה מתחת לשורת שם איש הקשר, לתבניות שמשתמשות ב-placeholder ישיר
+ * {customerName} (ולא בבלוק הנמען עם המרקר). משמש ללקוח עסקי: {customerName} כבר מכיל את
+ * שם איש הקשר, וכאן מוסיפים פסקה נוספת מיד אחריו עם {companyName} (שם החברה), באותו עיצוב
+ * ריצה. רץ לפני render. אם אין {customerName} או שאין שם חברה להזרקה (companyLine ריק) —
+ * לא נוגע. ה-placeholder {companyName} מוחלף אח״כ ע"י docxtemplater.
+ */
+export function injectCompanyLineAfterName(documentXml: string, companyLine: string): string {
+  if (!companyLine) return documentXml;
+  const ph = '{customerName}';
+  const i = documentXml.indexOf(ph);
+  if (i === -1) return documentXml;
+  // גבולות הפסקה שמכילה את {customerName}
+  const pStart = Math.max(documentXml.lastIndexOf('<w:p ', i), documentXml.lastIndexOf('<w:p>', i));
+  if (pStart === -1) return documentXml;
+  const pEndMarker = documentXml.indexOf('</w:p>', i);
+  if (pEndMarker === -1) return documentXml;
+  const pEnd = pEndMarker + '</w:p>'.length;
+  const para = documentXml.slice(pStart, pEnd);
+
+  // בונים פסקה חדשה זהה בעיצוב אך עם {companyName} במקום {customerName}, וללא הסימניות
+  // (bookmarkStart/End) של הפסקה המקורית — כדי לא לשכפל id של סימנייה (ישבור את Word).
+  const companyPara = para
+    .replace(/\{customerName\}/g, '{companyName}')
+    .replace(/<w:bookmarkStart\b[^>]*\/>/g, '')
+    .replace(/<w:bookmarkEnd\b[^>]*\/>/g, '');
+
+  return documentXml.slice(0, pEnd) + companyPara + documentXml.slice(pEnd);
+}
+
+/**
  * חלק גדול מהתבניות מכילות סימנייה ריקה fldCity (מיקום עיר הלקוח במכתב) —
  * בלי placeholder בתוכה ובלי {customerCity} בשום מקום אחר במסמך. התוצאה:
  * עיר הלקוח לעולם לא מודפסת, גם כשללקוח יש עיר.
@@ -514,10 +548,10 @@ export function ensureCityPlaceholderInBookmark(documentXml: string): string {
 }
 
 /**
- * מבטל הדגשה (bold) מריצת הכתובת {customerAddress}. בכ-43 מתוך התבניות ריצת
- * הכתובת הוגדרה מודגשת (<w:b/><w:bCs/>) — לבקשת המשתמש הכתובת לא צריכה להיות
- * מודגשת. מסירים רק את <w:b/>/<w:bCs/> מ-rPr של הריצה שמכילה את ה-placeholder;
- * קו תחתון, פונט וגודל נשארים. רץ לפני render בזמן שה-placeholder עדיין קיים.
+ * מבטל הדגשה (bold) **וקו תחתון** מריצת הכתובת {customerAddress}. בכ-43 מתוך התבניות ריצת
+ * הכתובת הוגדרה מודגשת (<w:b/><w:bCs/>) ועם קו תחתון (<w:u/>) — לבקשת המשתמש הכתובת לא
+ * צריכה להיות מודגשת ולא צריך קו מתחתיה. מסירים רק את <w:b/>/<w:bCs/>/<w:u/> מ-rPr של
+ * הריצה שמכילה את ה-placeholder; פונט וגודל נשארים. רץ לפני render כשה-placeholder קיים.
  */
 export function unboldAddressRun(documentXml: string): string {
   const ph = '{customerAddress}';
@@ -535,12 +569,14 @@ export function unboldAddressRun(documentXml: string): string {
   const runEnd = runEndMarker + '</w:r>'.length;
   const run = documentXml.slice(runStart, runEnd);
 
-  // הסרת סימני ההדגשה מ-rPr של הריצה בלבד
+  // הסרת ההדגשה (b/bCs) והקו התחתון (u) מ-rPr של הריצה בלבד
   const stripped = run
     .replace(/<w:b\/>/g, '')
     .replace(/<w:b\s[^>]*\/>/g, '')
     .replace(/<w:bCs\/>/g, '')
-    .replace(/<w:bCs\s[^>]*\/>/g, '');
+    .replace(/<w:bCs\s[^>]*\/>/g, '')
+    .replace(/<w:u\/>/g, '')
+    .replace(/<w:u\s[^>]*\/>/g, '');
   if (stripped === run) return documentXml;
   return documentXml.slice(0, runStart) + stripped + documentXml.slice(runEnd);
 }
@@ -876,9 +912,25 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   // שם הנמען בכותרת: שם איש הקשר, ואם ריק — שם החברה. רוב התבניות מציגות {customerName}
   // בשורת השם (בלי placeholder נפרד לאיש קשר), לכן דורסים את customerName עצמו כך שיציג את
   // איש הקשר כשקיים. שם החברה נשמר ב-companyName למקרה שתבנית משתמשת בו בנפרד.
+  // "עסקי" = לקוח שמחייב שם חברה/מוסד ואיש קשר: COMPANY (חברה/קבלן), PUBLIC (רשות/מוסד),
+  // SUPPLIER (ספק). ל"עסקי" מציגים איש-קשר *ואז* שם חברה בכותרת. לעומתם PRIVATE (פרטי) ו-
+  // POTENTIAL (פוטנציאלי — ברירת המחדל, מתנהג כמו פרטי) מציגים שם אחד בלבד. סיווג לא-מוכר/ריק
+  // → מטופל כפרטי (שמרני, בלי הזרקת שורת חברה). קודי הסיווג מ-CustomerClassification.
+  // מקבלים גם קודים (COMPANY/PUBLIC/SUPPLIER) וגם תוויות עבריות ('עסקי'/'חברה'/'רשות'/'ספק'/
+  // 'מוסד'/'קבלן') — כי מסכים שונים מעבירים customerType בצורות שונות. PRIVATE/POTENTIAL/'פרטי'/
+  // 'פוטנציאלי'/ריק/לא-מוכר → פרטי (בלי שורת חברה).
+  const BUSINESS_CODES = new Set(['COMPANY', 'PUBLIC', 'SUPPLIER']);
+  const BUSINESS_HE = ['עסקי', 'חברה', 'קבלן', 'רשות', 'מוסד', 'ספק'];
+  const custType = pickStr(r, ['customerType', 'type']).trim();
+  const custUpper = custType.toUpperCase();
+  const isBusiness = BUSINESS_CODES.has(custUpper) || BUSINESS_HE.some((w) => custType.includes(w));
   const displayName = contactName || companyName;
   r.customerName = displayName;
   r.companyName = companyName;
+  // שם החברה שיוזרק כשורה נפרדת מתחת לשם (רק לעסק, ורק אם שם החברה שונה משם התצוגה
+  // כדי לא לכפול). ריק = לא מזריקים. נצרך גם ב-injectCompanyLineAfterName (direct placeholders).
+  r.recipientCompanyLine =
+    isBusiness && companyName && companyName !== displayName ? companyName : '';
   const cityOnly = extractCityOnly(
     pickStr(r, ['customerCity', 'city', 'billingCity', 'customer_city']).trim(),
     pickStr(r, ['customerAddress', 'address', 'billingAddress']).trim(),
@@ -890,8 +942,9 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   r.contactPhone = contactPhone;
   r.contactEmail = contactEmail;
   r.recipientLine1 = 'לכבוד';
-  r.recipientLine2 = contactName;
-  r.recipientLine3 = companyName;
+  r.recipientLine2 = contactName || companyName; // שם איש הקשר (או החברה אם אין איש קשר)
+  // שורת החברה מתחת לאיש הקשר — רק לעסק, ורק כשיש איש קשר (אחרת החברה כבר בשורה 2).
+  r.recipientLine3 = isBusiness && contactName && companyName && companyName !== contactName ? companyName : '';
   r.recipientLine4 = cityOnly;
   // נפילה-חזרה ל-{customerCity}: אם שדה העיר ריק אך חולצה עיר מהכתובת — מלא גם את ה-placeholder הישיר
   if (!pickStr(r, ['customerCity']).trim() && cityOnly) r.customerCity = cityOnly;
@@ -962,9 +1015,11 @@ export class DocxMergeService {
         pre = stripFaxParagraphsFromDocXml(pre);
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
         pre = ensureCityPlaceholderInBookmark(pre);
-        // ביטול הדגשה מהכתובת + הסרת שורת הרווח בין הכתובת לעיר (בקשת המשתמש)
+        // ביטול הדגשה + קו-תחתון מהכתובת, והסרת שורת הרווח בין הכתובת לעיר (בקשת המשתמש)
         pre = unboldAddressRun(pre);
         pre = removeBlankLineBetweenAddressAndCity(pre);
+        // לקוח עסקי: הזרקת שורת שם-החברה מתחת לשם איש הקשר (תבניות עם {customerName} ישיר)
+        pre = injectCompanyLineAfterName(pre, String(normalized.recipientCompanyLine || ''));
         // ── התאמת זוג טבלאות המחיר למצב ההנחות בפועל ──
         // מאז איחוד התבניות (2026-07-06) בכל תבנית יש זוג יחיד שתמיד מרונדר: טבלת פריטים עם
         // עמודת "% הנחה לשורה" + טבלת סיכום עם שורת "% הנחה" כללית. כאן מסירים את החלק

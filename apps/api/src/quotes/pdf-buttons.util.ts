@@ -6,12 +6,17 @@ const SIGN_PNG = Buffer.from(SIGN_BUTTON_PNG_BASE64, 'base64');
 const PROFILE_PNG = Buffer.from(PROFILE_BUTTON_PNG_BASE64, 'base64');
 
 /**
- * ה-y הנמוך ביותר של *תוכן* בעמוד — טקסט וגם תמונות/גרפיקה (קואורדינטות pdf, מקור
- * בתחתית-שמאל). משמש כדי לצרוב את הכפתורים *מתחת* לכל התוכן ולא עליו — כולל טבלת
- * החתימה ותעודות ההסמכה שהן תמונות. כשל בזיהוי → 0 (שמרני: מניחים עמוד מלא, הכפתורים
- * יעברו לעמוד חדש — בלי סיכון של עלייה על תוכן).
+ * מנתח עמוד ומחזיר שתי נקודות-y (קואורדינטות pdf, מקור בתחתית-שמאל):
+ *   textBottom  — ה-y של בסיס הטקסט הנמוך ביותר בעמוד (איפה הטקסט נגמר).
+ *   footerTop   — הקצה העליון של אשכול תמונות-הפוטר (תעודות הסמכה/לוגו בתחתית העמוד).
+ *                 null אם אין תמונות פוטר. הכפתור אמור לשבת *מתחת לטקסט ומעל הפוטר*.
+ * כשל בזיהוי → textBottom=null (שמרני).
  */
-async function contentBottomY(pdf: Buffer, pageIndex: number, pageHeight: number): Promise<number> {
+async function analyzePage(
+  pdf: Buffer,
+  pageIndex: number,
+  pageHeight: number,
+): Promise<{ textBottom: number | null; footerTop: number | null }> {
   try {
     // טעינה עצלה של pdfjs (legacy CJS — תואם Node 20 בפרודקשן).
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,21 +28,21 @@ async function contentBottomY(pdf: Buffer, pageIndex: number, pageHeight: number
     const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf), useSystemFonts: true, isEvalSupported: false }).promise;
     try {
       const page = await doc.getPage(pageIndex + 1);
-      let minY = Infinity;
 
-      // (1) טקסט — ה-y של בסיס כל ריצת טקסט.
+      // (1) טקסט — ה-y של בסיס הטקסט הנמוך ביותר.
+      let textBottom = Infinity;
       const tc = await page.getTextContent();
       for (const it of tc.items as any[]) {
         if (it?.str && String(it.str).trim() && Array.isArray(it.transform)) {
           const y = Number(it.transform[5]);
-          if (isFinite(y) && y < minY) minY = y;
+          if (isFinite(y) && y < textBottom) textBottom = y;
         }
       }
 
-      // (2) תמונות/גרפיקה — סורקים את רשימת האופרטורים ומאתרים ציור תמונות.
-      //     ה-CTM הנוכחי (transform) קובע את מיקום התחתית של התמונה: e[5] הוא ה-y
-      //     של הפינה התחתונה (בגלל שמטריצת התמונה מנרמלת יחידה 1x1). זה מכסה את
-      //     תעודות ההסמכה/הלוגו שאינן טקסט, כדי שהכפתורים לא ייצרבו עליהן.
+      // (2) תמונות — אוספים את מלבני התמונות (bottom+top) כדי לזהות את אשכול הפוטר.
+      //     אשכול הפוטר = תמונות שיושבות בשליש התחתון של העמוד. footerTop = הקצה העליון
+      //     הגבוה ביותר מביניהן (מעליו מותר לצרוב את הכפתור, מתחתיו נמצא הפוטר).
+      const imgRects: Array<{ bottom: number; top: number }> = [];
       try {
         const opList = await page.getOperatorList();
         const OPS = pdfjs.OPS || {};
@@ -46,7 +51,6 @@ async function contentBottomY(pdf: Buffer, pageIndex: number, pageHeight: number
             (x: any) => typeof x === 'number',
           ),
         );
-        // מעקב אחר מטריצת הטרנספורמציה הנוכחית (CTM) דרך save/restore/transform.
         const stack: number[][] = [];
         let ctm = [1, 0, 0, 1, 0, 0];
         const mul = (a: number[], b: number[]) => [
@@ -67,20 +71,32 @@ async function contentBottomY(pdf: Buffer, pageIndex: number, pageHeight: number
           } else if (fn === OPS.transform && Array.isArray(args) && args.length >= 6) {
             ctm = mul(ctm, args as number[]);
           } else if (imageOps.has(fn)) {
-            // התחתית של התמונה = ה-y של תרגום ה-CTM (הפינה בקואורדינטות היחידה 0,0).
+            // בקואורדינטות היחידה: התמונה תופסת 0..1 בשני הצירים; לכן הגובה = |ctm[3]|.
             const bottom = ctm[5];
-            if (isFinite(bottom) && bottom < minY) minY = bottom;
+            const top = ctm[5] + Math.abs(ctm[3]);
+            if (isFinite(bottom) && isFinite(top)) imgRects.push({ bottom, top });
           }
         }
       } catch { /* אם רשימת האופרטורים נכשלת — מסתמכים על הטקסט בלבד */ }
 
-      // אין תוכן בעמוד → כולו פנוי.
-      return isFinite(minY) ? Math.max(0, minY - 8) : pageHeight;
+      // אשכול הפוטר: תמונות שכולן בשליש התחתון של העמוד (top < pageHeight/3).
+      // footerTop = ה-top הגבוה ביותר מביניהן. אם אין — null (אין פוטר לחסום).
+      let footerTop: number | null = null;
+      for (const r of imgRects) {
+        if (r.top < pageHeight / 3) {
+          if (footerTop === null || r.top > footerTop) footerTop = r.top;
+        }
+      }
+
+      return {
+        textBottom: isFinite(textBottom) ? textBottom : null,
+        footerTop,
+      };
     } finally {
       try { await doc.destroy(); } catch { /* ignore */ }
     }
   } catch {
-    return 0;
+    return { textBottom: null, footerTop: null };
   }
 }
 
@@ -89,12 +105,10 @@ async function contentBottomY(pdf: Buffer, pageIndex: number, pageHeight: number
  *   signUrl    → "לחץ כאן לחתימה" (ירוק)  — קישור לטופס החתימה
  *   profileUrl → "לחץ כאן להסמכות שלנו" (כחול) — קישור לפרופיל+רישיונות (משמש רק בשליחת וואטסאפ)
  *
- * מיקום: הערימה נצרבת מיד מתחת לסוף התוכן — כמה שיותר גבוה, בלי לעלות על טקסט. מעדיף
- * להישאר בעמוד האחרון (מתחת לטקסט האחרון); אם באמת אין שם מקום פנוי, סורק אחורה לעמוד
- * הקודם שיש בו מספיק שטח פנוי בתחתית וצורב שם.
- *
- * מוצא אחרון: אם אין באף עמוד מקום פנוי מעל התוכן (כולל תמונות הפוטר) — נוסף עמוד חדש
- * לכפתורים. *לעולם* לא צורבים על הפוטר (שיש עליו תמונות), כי זה נראה לא טוב.
+ * מיקום: הכפתור נצרב מיד *מתחת לטקסט האחרון* בעמוד האחרון — ולא בעמוד נפרד. אם יש
+ * תמונות פוטר (תעודות/לוגו) בתחתית, הכפתור נשאר בין סוף הטקסט לבין ראש הפוטר; אם המרווח
+ * צר, הכפתור מוקטן כדי להיכנס (עד גבול מינימלי) במקום לעבור לעמוד חדש. עמוד חדש נוסף רק
+ * במקרה קיצוני שבו באמת אין שום מרווח סביר מתחת לטקסט.
  */
 export async function stampQuoteButtons(
   pdf: Buffer,
@@ -104,6 +118,7 @@ export async function stampQuoteButtons(
   const doc = await PDFDocument.load(pdf);
   const pages = doc.getPages();
   const lastPage = pages[pages.length - 1];
+  const lastIdx = pages.length - 1;
   const { width: pw, height: ph } = lastPage.getSize();
 
   // הטמעת התמונות (רונדרו ב-3x — נצרבות ברוחב נקודות קטן פי 3 לחדות בזום).
@@ -119,39 +134,48 @@ export async function stampQuoteButtons(
     stack.push({ img, url: opts.profileUrl, w, h: w * (img.height / img.width) });
   }
   const gap = 12;
-  const stackH = stack.reduce((s, b) => s + b.h, 0) + gap * (stack.length - 1);
-  const bottomMargin = 20; // שוליים תחתונים מינימליים
-  const topGap = 16;       // רווח בין סוף הטקסט לכפתור הראשון
+  const fullStackH = stack.reduce((s, b) => s + b.h, 0) + gap * (stack.length - 1);
+  const topGap = 12;       // רווח בין סוף הטקסט לכפתור הראשון
+  const footerPad = 8;     // רווח מינימלי בין הכפתור לראש הפוטר
+  const bottomMargin = 16; // שוליים תחתונים כשאין פוטר
 
-  // מאתרים עמוד שיש בו מקום פנוי מתחת לתוכן לכל הערימה: קודם העמוד האחרון (עדיף), ואם
-  // אין — סורקים אחורה. contentBottomY לוקח בחשבון גם טקסט וגם תמונות/גרפיקה (טבלת
-  // חתימה, תעודות הסמכה וכו') כדי שהכפתורים לא ייצרבו עליהן.
+  // ── בחירת עמוד ומיקום: מעדיפים את העמוד האחרון, מתחת לטקסט האחרון ומעל הפוטר ──
+  const analysis = await analyzePage(pdf, lastIdx, ph);
+  // סוף הטקסט (אם אין טקסט — מניחים אמצע העמוד כדי לא להיתקע גבוה מדי).
+  const textBottom = analysis.textBottom ?? ph * 0.5;
+  // הרצפה שמעליה מותר לצרוב: ראש הפוטר (אם קיים) אחרת השוליים התחתונים.
+  const floorY = analysis.footerTop != null ? analysis.footerTop + footerPad : bottomMargin;
+
+  // ה-y הפנוי מתחת לטקסט ועד הרצפה.
+  const available = (textBottom - topGap) - floorY;
+
   let page = lastPage;
-  let y: number | null = null; // הקצה העליון של הכפתור הראשון בערימה
-  for (let i = pages.length - 1; i >= 0; i--) {
-    const p = pages[i];
-    const { height: h } = p.getSize();
-    const contentBottom = await contentBottomY(pdf, i, h);
-    if (contentBottom - topGap - stackH >= bottomMargin) {
-      page = p;
-      y = contentBottom - topGap;
-      break;
-    }
-  }
+  let topY: number;        // הקצה העליון של הכפתור הראשון
+  let scale = 1;           // קנה-מידה של הכפתורים (מוקטן אם צריך כדי להיכנס)
 
-  // מוצא אחרון: אף עמוד לא פנוי מעל התוכן (כולל תמונות הפוטר) — מוסיפים עמוד חדש לכפתורים.
-  // *לא* צורבים על הפוטר (שיש עליו תמונות) — זה נראה לא טוב. בפועל זה נדיר מאוד, כי
-  // contentBottomY סופר גם את הפוטר, ולכן כמעט תמיד יש מרווח פנוי מעל הפוטר בעמוד כלשהו.
-  if (y === null) {
+  const MIN_SCALE = 0.6;   // לא מקטינים מתחת ל-60% (עדיין קריא)
+  if (available >= fullStackH) {
+    // יש מספיק מקום — צורבים בגודל מלא מיד מתחת לטקסט.
+    topY = textBottom - topGap;
+  } else if (available >= fullStackH * MIN_SCALE) {
+    // מרווח צר — מקטינים את הכפתור כדי שייכנס בין הטקסט לפוטר.
+    scale = available / fullStackH;
+    topY = textBottom - topGap;
+  } else {
+    // באמת אין מקום סביר מתחת לטקסט בעמוד האחרון — מוצא אחרון: עמוד חדש.
     page = doc.addPage([pw, ph]);
-    y = ph - 90;
+    topY = ph - 90;
+    scale = 1;
   }
 
+  let y = topY;
   for (const b of stack) {
-    const x = (pw - b.w) / 2;
-    const by = y - b.h;
-    page.drawImage(b.img, { x, y: by, width: b.w, height: b.h });
-    const rect = [x, by, x + b.w, by + b.h];
+    const w = b.w * scale;
+    const h = b.h * scale;
+    const x = (pw - w) / 2;
+    const by = y - h;
+    page.drawImage(b.img, { x, y: by, width: w, height: h });
+    const rect = [x, by, x + w, by + h];
     const linkDict = doc.context.obj({
       Type: 'Annot',
       Subtype: 'Link',
@@ -163,7 +187,7 @@ export async function stampQuoteButtons(
     const existing = page.node.Annots();
     if (existing instanceof PDFArray) existing.push(linkRef);
     else page.node.set(PDFName.of('Annots'), doc.context.obj([linkRef]));
-    y = by - gap;
+    y = by - gap * scale;
   }
 
   return Buffer.from(await doc.save());
