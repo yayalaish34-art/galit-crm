@@ -713,6 +713,26 @@ export class QuotesService {
   }
 
   /**
+   * בונה את שם הקובץ שנשמר ב-OneDrive עבור הצעה ממוזגת (לא קובץ מצורף ספציפי), בפורמט:
+   *   "{שם לקוח/חברה} - הצעת מחיר ל: {שם הפריט הראשון}"
+   * שם הלקוח/חברה: quote.customerName, ואם ריק — שם הלקוח מהיחס. שם הפריט הראשון: תיאור הפריט
+   * עם rowOrder הנמוך ביותר (quoteItems[0]), עם נפילה-חזרה ל-lineItemsJson ואז ל-quote.service.
+   * ללא מזהה ייחודי — שתי הצעות לאותו לקוח+שירות ידרסו זו את זו ב-OneDrive (לבקשת המשתמש).
+   * העלאה (uploadEditable) ממילא מנקה תווים לא-חוקיים; כאן רק מקצצים ומאחדים רווחים.
+   */
+  private buildQuoteFileName(quote: any): string {
+    const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+    const customer = clean(quote?.customerName) || clean(quote?.customer?.name) || 'לקוח';
+    const firstItem =
+      clean(quote?.quoteItems?.[0]?.productDescription) ||
+      clean(Array.isArray(quote?.lineItemsJson) ? (quote.lineItemsJson[0]?.productDescription ?? quote.lineItemsJson[0]?.description ?? quote.lineItemsJson[0]?.name) : '') ||
+      clean(quote?.service);
+    const name = firstItem ? `${customer} - הצעת מחיר ל: ${firstItem}` : `${customer} - הצעת מחיר`;
+    // גבול שם קובץ סביר (uploadEditable חותך ל-120 בכל מקרה); מונע שמות ענק אם התיאור ארוך.
+    return name.slice(0, 120).trim();
+  }
+
+  /**
    * פותח את ההצעה לעריכה ב-Word דרך OneDrive — מחזיר webUrl לפתיחה.
    *
    * אם כבר קיים קובץ פעיל ב-OneDrive → מחזיר אותו (לא מעלים מחדש, כדי לא לדרוס עריכות).
@@ -721,7 +741,12 @@ export class QuotesService {
    */
   async openInOneDrive(id: string, userId: string, attachmentId?: string): Promise<{ webUrl: string; webDavUrl: string; itemId: string; reused: boolean }> {
     if (!userId) throw new BadRequestException('משתמש לא מזוהה — יש להתחבר מחדש');
-    const quote = await this.prisma.quote.findUnique({ where: { id } });
+    const quote = await this.prisma.quote.findUnique({
+      where: { id },
+      // הלקוח + הפריט הראשון (rowOrder הנמוך ביותר) נדרשים לבניית שם הקובץ ב-OneDrive:
+      // "{שם לקוח/חברה} - הצעת מחיר ל: {שם הפריט הראשון}".
+      include: { customer: true, quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 } },
+    });
     if (!quote) throw new NotFoundException('Quote not found');
     const requestedAtt = (attachmentId || '').trim() || null;
 
@@ -768,7 +793,7 @@ export class QuotesService {
       if (!bytes) {
         throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
       }
-      fileName = `הצעת מחיר ${quote.quoteNumber ? quote.quoteNumber + ' ' : ''}${id.slice(0, 8)}`.trim();
+      fileName = this.buildQuoteFileName(quote);
     }
 
     let uploaded: { itemId: string; webUrl: string; webDavUrl: string; name: string };
