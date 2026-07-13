@@ -153,11 +153,12 @@ export class IncomingLeadsService implements OnModuleInit {
   async start(id: string, actor: { id?: string }) {
     const lead = await this.assertOwner(id, actor);
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
-    await this.removeSiblings(lead); // תפיסת הליד — מסיר אותו מכל שאר העובדים
-    return this.prisma.incomingLead.update({
+    await this.claimGroup(lead); // תפיסה אטומית של כל קבוצת ההודעה (race-safe)
+    await this.prisma.incomingLead.update({
       where: { id: lead.id },
       data: { status: 'ACTIVE', notifiedAt: lead.notifiedAt ?? new Date() },
     });
+    return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
   }
 
   /** "העבר ל" — מחליף owner של הליד ושל ה-Task, מסמן ACTIVE (למקבל אין טופס). */
@@ -165,7 +166,7 @@ export class IncomingLeadsService implements OnModuleInit {
     const lead = await this.assertOwner(id, actor);
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     if (!toUserId) throw new ForbiddenException('חסר עובד יעד');
-    await this.removeSiblings(lead); // תפיסת הליד — מסיר אותו מכל שאר העובדים
+    await this.claimGroup(lead); // תפיסה אטומית של כל קבוצת ההודעה (race-safe)
     const updated = await this.prisma.incomingLead.update({
       where: { id: lead.id },
       data: { ownerId: toUserId, transferredToId: toUserId, status: 'ACTIVE', notifiedAt: null },
@@ -177,31 +178,44 @@ export class IncomingLeadsService implements OnModuleInit {
   }
 
   /**
-   * "תופס" את הליד: מסיר את אותו ליד (לפי internetMessageId — אותו מייל שהגיע לכמה תיבות)
-   * מכל העובדים האחרים — מוחק את המשימה שלהם ומסמן את הליד שלהם כ-DISMISSED.
-   * כך ששני עובדים לא יטפלו באותו ליד.
+   * תפיסה אטומית של קבוצת ההודעה (כל העותקים עם אותו internetMessageId): מסמן את כל האחים
+   * (השורות של שאר העובדים) כ-DISMISSED ומוחק את המשימות שלהם — בעסקת Serializable יחידה, בתנאי
+   * שאף אח עדיין לא נתפס (ACTIVE). זו נקודת הסריאליזציה: ב-race של שני עובדים שלוחצים בו-זמנית,
+   * או שהשני רואה אח ACTIVE ונדחה, או ששתי העסקאות מתנגשות וה-DB דוחה את השנייה (P2034 → 403).
+   * הליד עצמו (של המנצח) לא נכלל בדחייה — הוא מסומן ACTIVE ע"י הקורא (start/transfer).
    */
-  private async removeSiblings(lead: { id: string; internetMessageId: string | null }) {
-    if (!lead.internetMessageId) return;
-    const siblings = await this.prisma.incomingLead.findMany({
-      where: {
-        internetMessageId: lead.internetMessageId,
-        id: { not: lead.id },
-        status: 'NEW', // רק עותקים שעדיין לא נתפסו — לא דורסים מי שכבר התחיל
-      },
-    });
-    for (const s of siblings) {
-      if (s.taskId) {
-        await this.prisma.task.delete({ where: { id: s.taskId } }).catch(() => {});
-      }
-      await this.prisma.incomingLead
-        .update({ where: { id: s.id }, data: { status: 'DISMISSED' } })
-        .catch(() => {});
-    }
-    if (siblings.length) {
-      this.logger.log(`Lead claimed — removed ${siblings.length} duplicate(s) from other employees`);
+  private async claimGroup(lead: { id: string; internetMessageId: string | null }) {
+    if (!lead.internetMessageId) return; // אין קבוצה (מייל לתיבה אחת) — אין race בין עובדים
+    const msgId = lead.internetMessageId;
+    try {
+      await this.prisma.$transaction(
+        async (tx) => {
+          // אם כבר יש אח (לא אני) שנתפס (ACTIVE) — הפסדתי ב-race.
+          const alreadyClaimed = await tx.incomingLead.count({
+            where: { internetMessageId: msgId, id: { not: lead.id }, status: 'ACTIVE' },
+          });
+          if (alreadyClaimed > 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+          // דוחים את כל האחים שעדיין NEW. תחת Serializable, שתי תפיסות מקבילות מתנגשות
+          // וה-DB דוחה את השנייה (P2034) — מתורגם ל-403. כך אין דריסה כפולה גם ב-race מדויק.
+          const siblings = await tx.incomingLead.findMany({
+            where: { internetMessageId: msgId, id: { not: lead.id }, status: 'NEW' },
+            select: { id: true, taskId: true },
+          });
+          for (const s of siblings) {
+            if (s.taskId) await tx.task.delete({ where: { id: s.taskId } }).catch(() => undefined);
+            await tx.incomingLead.update({ where: { id: s.id }, data: { status: 'DISMISSED' } });
+          }
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } catch (e: any) {
+      if (e instanceof ForbiddenException) throw e;
+      // P2034 = כשל סריאליזציה/deadlock: עסקה מקבילה תפסה את הליד קודם → הפסדתי ב-race.
+      if (e?.code === 'P2034') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+      throw e;
     }
   }
+
 
   /** דחיית ליד (לא רלוונטי). */
   async dismiss(id: string, actor: { id?: string }) {
