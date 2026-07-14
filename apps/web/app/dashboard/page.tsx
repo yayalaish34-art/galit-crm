@@ -14354,6 +14354,9 @@ function FieldSchedulePage({
   );
 }
 
+/** איש קשר של לקוח לצורך בחירה ב"התחל תהליך" (משותף בין TasksPage לרכיב האב). */
+type ProcessContact = { id: string; fullName: string; phone: string; email: string; roleTitle: string; isPrimary: boolean };
+
 function TasksPage({
   tasks,
   setTasks,
@@ -14374,6 +14377,7 @@ function TasksPage({
   onReloadLeads,
   pendingExpandTaskId,
   pendingPrefillName,
+  pendingPrefillContact,
   onExpandHandled,
   customerClassifications: extCustomerClassifications,
   onNavigate,
@@ -14400,6 +14404,7 @@ function TasksPage({
   onReloadLeads?: () => void | Promise<void>;
   pendingExpandTaskId?: string | null;
   pendingPrefillName?: string | null;
+  pendingPrefillContact?: ProcessContact | null;
   onExpandHandled?: () => void;
   customerClassifications?: CustomerClassificationDto[];
   onNavigate?: (target: string) => void;
@@ -15154,6 +15159,25 @@ function TasksPage({
             fullName: trimmed,
             firstName: nameParts[0] || '',
             lastName: nameParts.slice(1).join(' ') || '',
+          },
+        }));
+      } else if (pendingPrefillContact) {
+        // איש הקשר שנבחר ב"התחל תהליך" (לקוח עם כמה אנשי קשר) — זריעה לטופס הפנייה.
+        const c = pendingPrefillContact;
+        const task = tasks.find((t) => t.id === pendingExpandTaskId);
+        const cust = task?.customerId ? customers.find((x) => x.id === task.customerId) : undefined;
+        const nameParts = (c.fullName || '').trim().split(/\s+/);
+        setCallFormData((prev) => ({
+          ...prev,
+          [pendingExpandTaskId]: {
+            ...getCallForm(pendingExpandTaskId, null, task || {}, cust),
+            fullName: c.fullName || '',
+            firstName: nameParts[0] || '',
+            lastName: nameParts.slice(1).join(' ') || '',
+            phone: c.phone || cust?.phone || '',
+            email: c.email || cust?.email || '',
+            role: c.roleTitle || '',
+            contactName: c.fullName || '',
           },
         }));
       }
@@ -20447,6 +20471,10 @@ export default function GalitCRMPrototype() {
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
   const [pendingPrefillName, setPendingPrefillName] = useState<string | null>(null);
+  // איש הקשר שנבחר ב"התחל תהליך" (כשללקוח כמה) — נזרע לטופס הפנייה של המשימה ב-TasksPage.
+  const [pendingPrefillContact, setPendingPrefillContact] = useState<ProcessContact | null>(null);
+  // מודל בחירת איש קשר ל"התחל תהליך" — נפתח כשללקוח יש 2+ אנשי קשר.
+  const [contactPicker, setContactPicker] = useState<{ cust: Customer; contacts: ProcessContact[] } | null>(null);
 
   /* ── Deep-link למשימה: ?taskid=<id> ב-URL ──
    * קריאה בטעינה: אם ה-URL כולל taskid — פותחים את המשימה במסך הדשבורד.
@@ -21719,7 +21747,10 @@ export default function GalitCRMPrototype() {
   };
 
   /* פתיחת תהליך טיפול חדש מתוך כרטיס לקוח קיים — יוצר משימת "פנייה", עובר למסך משימות ופותח אותה במרכז המסך */
-  const startCustomerProcess = async (cust: Customer) => {
+  // יצירת משימת התהליך בפועל. contact = איש הקשר שנבחר (כשיש כמה); אם undefined —
+  // המשימה תשתמש ב-contactName של הלקוח. איש הקשר הנבחר מועבר ל-TasksPage דרך
+  // pendingPrefillContact, ושם נזרע לטופס הפנייה (callFormData) בעת פתיחת המשימה.
+  const createProcessTask = async (cust: Customer, contact?: ProcessContact) => {
     if (!currentUser) return;
     const dbUser = users.find((u: any) =>
       u.id === currentUser.id ||
@@ -21747,12 +21778,35 @@ export default function GalitCRMPrototype() {
       }
       const task = await res.json();
       setTasks((prev) => [...prev, task]);
+      // מעבירים את איש הקשר הנבחר ל-TasksPage כדי שיזרע אותו לטופס הפנייה של המשימה.
+      setPendingPrefillContact(contact || null);
       setPendingExpandTaskId(task.id);
       navigateSafely('tasks');
       void reloadTasks();
     } catch (err) {
       console.error('[start process] task creation network error:', err);
     }
+  };
+
+  const startCustomerProcess = async (cust: Customer) => {
+    if (!currentUser) return;
+    // טוענים את אנשי הקשר של הלקוח. אם יש 2+ — שואלים עם מי להמשיך לפני יצירת המשימה.
+    let contacts: ProcessContact[] = [];
+    try {
+      const r = await apiFetch(apiUrl(`/customers/${cust.id}/contacts`), { authUser: currentUser });
+      if (r.ok) {
+        const list = await r.json();
+        contacts = Array.isArray(list) ? list : [];
+      }
+    } catch { /* נופלים ל-contactName של הלקוח */ }
+    // מסננים אנשי קשר "ריקים" (בלי שם) שלא רלוונטיים לבחירה.
+    const named = contacts.filter((c) => (c.fullName || '').trim());
+    if (named.length >= 2) {
+      setContactPicker({ cust, contacts: named });
+      return;
+    }
+    // אחד/אפס אנשי קשר → מתחילים מיד (עם היחיד אם קיים, אחרת contactName של הלקוח).
+    await createProcessTask(cust, named[0]);
   };
 
   const consumePendingSettingsTab = useCallback(() => setPendingSettingsTab(null), []);
@@ -22750,7 +22804,8 @@ export default function GalitCRMPrototype() {
               onReloadLeads={reloadLeads}
               pendingExpandTaskId={pendingExpandTaskId}
               pendingPrefillName={pendingPrefillName}
-              onExpandHandled={() => { setPendingExpandTaskId(null); setPendingPrefillName(null); }}
+              pendingPrefillContact={pendingPrefillContact}
+              onExpandHandled={() => { setPendingExpandTaskId(null); setPendingPrefillName(null); setPendingPrefillContact(null); }}
               customerClassifications={customerClassifications}
               onNavigate={navigateSafely}
               onNewCustomer={handleNewCustomer}
@@ -22765,6 +22820,62 @@ export default function GalitCRMPrototype() {
           </div>
         </main>
       </div>
+
+      {/* ═══ בחירת איש קשר ל"התחל תהליך" — כשללקוח יש כמה אנשי קשר ═══ */}
+      {contactPicker && (
+        <div
+          className="fixed inset-0 z-[10060] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setContactPicker(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            dir="rtl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-1 flex items-center gap-2.5">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-600">
+                <PlayCircle className="h-5 w-5" />
+              </span>
+              <h3 className="text-base font-bold text-gray-800">עם איזה איש קשר להמשיך?</h3>
+            </div>
+            <p className="mb-4 text-sm text-gray-500">
+              ללקוח <span className="font-semibold">{contactPicker.cust.name}</span> יש כמה אנשי קשר. בחר עם מי לפתוח את התהליך.
+            </p>
+            <div className="flex max-h-72 flex-col gap-2 overflow-auto">
+              {contactPicker.contacts.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => { const picked = contactPicker; setContactPicker(null); void createProcessTask(picked.cust, c); }}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 text-right transition-colors hover:border-blue-300 hover:bg-blue-50"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-bold text-gray-800">{c.fullName}</span>
+                      {c.isPrimary && (
+                        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">ראשי</span>
+                      )}
+                    </div>
+                    {(c.roleTitle || c.phone || c.email) && (
+                      <div className="truncate text-xs text-gray-400">
+                        {[c.roleTitle, phoneToDisplay(c.phone) || c.phone, c.email].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                  <PlayCircle className="h-4 w-4 shrink-0 text-blue-500" />
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setContactPicker(null)}
+              className="mt-4 w-full rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            >
+              ביטול
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
