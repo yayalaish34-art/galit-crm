@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { DashboardService } from './dashboard.service';
@@ -12,6 +12,13 @@ export class DashboardController {
   @Roles('ADMIN', 'MANAGER')
   manager(@Req() req: any) {
     return this.dashboardService.manager(req.user);
+  }
+
+  /** עדכון יעד המכירות השנתי (נשמר כיעד חודשי = שנתי ÷ 12). מנהל/אדמין בלבד. */
+  @Post('target')
+  @Roles('ADMIN', 'MANAGER')
+  setTarget(@Req() req: any, @Body('annualRevenueTarget') annualRevenueTarget: number) {
+    return this.dashboardService.setAnnualRevenueTarget(annualRevenueTarget, req.user);
   }
 
   @Get('me')

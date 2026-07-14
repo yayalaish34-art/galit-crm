@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { OpportunityStage, Prisma, QuoteStatus, ReportStatus, UserRole, WorkMode, TaskStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -59,6 +59,36 @@ export class DashboardService {
     return DashboardService.DEFAULT_MONTHLY_REVENUE_TARGET;
   }
 
+  /**
+   * מעדכן את יעד ההכנסות השנתי (SystemSetting key="targets"). המנהל מזין יעד *שנתי*
+   * בכרטיס "עמידה ביעד מכירות שנתי", ואנחנו שומרים אותו כיעד *חודשי* (שנתי ÷ 12),
+   * כי כל שאר הדשבורד עובד מול היעד החודשי. משמר שדות אחרים שקיימים ב-value.
+   * מנהל/אדמין בלבד. מחזיר את היעד השנתי והחודשי שנשמרו.
+   */
+  async setAnnualRevenueTarget(annualTarget: number, user?: { id?: string; role?: string }) {
+    const role = (user?.role || '').toUpperCase();
+    if (!role) throw new UnauthorizedException('Missing role');
+    if (role !== 'ADMIN' && role !== 'MANAGER') throw new ForbiddenException();
+
+    const annual = Math.round(Number(annualTarget));
+    if (!Number.isFinite(annual) || annual <= 0) {
+      throw new BadRequestException('יעד שנתי חייב להיות מספר חיובי');
+    }
+    const monthly = Math.round(annual / 12);
+
+    const existing: any = await this.prisma.systemSetting.findUnique({ where: { key: 'targets' } }).catch(() => null);
+    const prevValue = existing && typeof existing.value === 'object' && existing.value ? existing.value : {};
+    const value = { ...prevValue, monthlyRevenueTarget: monthly };
+
+    await this.prisma.systemSetting.upsert({
+      where: { key: 'targets' },
+      create: { key: 'targets', value },
+      update: { value },
+    });
+
+    return { monthlyRevenueTarget: monthly, annualRevenueTarget: monthly * 12 };
+  }
+
   async manager(user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
@@ -82,6 +112,7 @@ export class DashboardService {
       projects,
       tasks,
       reportsWaitingCount,
+      ratedReviews,
     ] = await Promise.all([
       this.prisma.user.findMany({
         where: {
@@ -122,6 +153,13 @@ export class DashboardService {
 
       this.prisma.report.count({
         where: { status: ReportStatus.WAITING_DATA },
+      }),
+
+      // ביקורות שנקלטו בפועל (הלקוח בחר פרצוף) — rating לא-null. משמש לכרטיס "שביעות רצון".
+      this.prisma.reviewRequest.findMany({
+        where: { rating: { not: null } },
+        select: { rating: true, feedback: true, ratedAt: true, customerId: true, customerName: true },
+        orderBy: [{ ratedAt: 'desc' }],
       }),
     ]);
 
@@ -338,6 +376,37 @@ export class DashboardService {
     const leadsWon = leadStatuses.filter((s) => s === 'WON').length;
     const leadsLost = leadStatuses.filter((s) => s === 'LOST').length;
 
+    // ── לידים חדשים ברבעון (נתוני אמת לפי createdAt) + השוואה לרבעון הקודם ──
+    // רבעון = 3 חודשים קלנדריים. סופרים לפי מועד יצירת הליד, לא לפי הסטטוס הנוכחי.
+    const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    const thisQuarterStart = new Date(now.getFullYear(), qStartMonth, 1);
+    const prevQuarterStart = new Date(now.getFullYear(), qStartMonth - 3, 1); // JS מנרמל חודש שלילי לשנה הקודמת
+    const leadsNewThisQuarter = leads.filter((l) => l.createdAt >= thisQuarterStart).length;
+    const leadsNewPrevQuarter = leads.filter((l) => l.createdAt >= prevQuarterStart && l.createdAt < thisQuarterStart).length;
+    // אחוז שינוי מול הרבעון הקודם. אם ברבעון הקודם היו 0 לידים — אין בסיס להשוואה (null).
+    const leadsQuarterChangePct = leadsNewPrevQuarter > 0
+      ? Math.round(((leadsNewThisQuarter - leadsNewPrevQuarter) / leadsNewPrevQuarter) * 100)
+      : null;
+
+    // ── שביעות רצון לקוחות מתוך הביקורות שנקלטו בפועל (ReviewRequest.rating) ──
+    const reviewRatings = ratedReviews.map((r) => Number(r.rating)).filter((n) => n >= 1 && n <= 5);
+    const reviewsCount = reviewRatings.length;
+    const reviewsAvg = reviewsCount ? reviewRatings.reduce((a, n) => a + n, 0) / reviewsCount : 0;
+    // CSAT = אחוז הלקוחות ששבעי רצון (דירוג 4-5) מתוך כלל המדרגים.
+    const reviewsSatisfiedPct = reviewsCount
+      ? Math.round((reviewRatings.filter((n) => n >= 4).length / reviewsCount) * 100)
+      : null;
+    // פירוט לרשימה שנפתחת בלחיצה — שם הלקוח, הדירוג, והסיבה (המשוב החופשי, אם נכתב).
+    const reviewsList = ratedReviews
+      .filter((r) => Number(r.rating) >= 1 && Number(r.rating) <= 5)
+      .map((r) => ({
+        customerId: r.customerId ?? null,
+        customerName: r.customerName || 'לקוח',
+        rating: Number(r.rating),
+        reason: (r.feedback || '').trim() || null,
+        ratedAt: r.ratedAt ? r.ratedAt.toISOString() : null,
+      }));
+
     const openTaskStatuses = new Set<TaskStatus>([TaskStatus.OPEN, TaskStatus.IN_PROGRESS]);
     const overdueCutoff = startOfTodayIsrael(now); // באיחור = לפני תחילת היום (שעון ישראל), לא "כרגע"
     const tasksOpen = tasks.filter((t) => openTaskStatuses.has((t.status as TaskStatus) || TaskStatus.OPEN)).length;
@@ -429,12 +498,21 @@ export class DashboardService {
         leadsInTreatment,
         leadsWon,
         leadsLost,
+        leadsNewThisQuarter,
+        leadsNewPrevQuarter,
+        leadsQuarterChangePct,
         tasksOpen,
         tasksOverdue,
         quotesOpenActive,
         projectsOpen: projectsOpenCount,
         projectsInField: projectsInFieldCount,
         reportsWaiting: reportsWaitingCount,
+      },
+      reviews: {
+        count: reviewsCount,
+        avg: Math.round(reviewsAvg * 10) / 10, // עיגול לספרה אחת אחרי הנקודה (למשל 4.6)
+        satisfiedPct: reviewsSatisfiedPct,
+        list: reviewsList,
       },
       workingNowEmployees,
       assumptions: {
@@ -644,6 +722,9 @@ export class DashboardService {
         leadsInTreatment: 0,
         leadsWon: 0,
         leadsLost: 0,
+        leadsNewThisQuarter: 0,
+        leadsNewPrevQuarter: 0,
+        leadsQuarterChangePct: null,
         tasksOpen: 0,
         tasksOverdue: 0,
         quotesOpenActive: 0,
@@ -651,6 +732,7 @@ export class DashboardService {
         projectsInField: 0,
         reportsWaiting: 0,
       },
+      reviews: { count: 0, avg: 0, satisfiedPct: null, list: [] },
       workingNowEmployees: [],
       assumptions: {
         monthlyRevenueTarget: 'Default 450,000 (settings unavailable in fallback path)',

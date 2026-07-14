@@ -3639,12 +3639,27 @@ type ManagerDashboardPayload = {
     leadsInTreatment: number;
     leadsWon: number;
     leadsLost: number;
+    leadsNewThisQuarter?: number;
+    leadsNewPrevQuarter?: number;
+    leadsQuarterChangePct?: number | null;
     tasksOpen: number;
     tasksOverdue: number;
     quotesOpenActive: number;
     projectsOpen?: number;
     projectsInField?: number;
     reportsWaiting?: number;
+  };
+  reviews?: {
+    count: number;
+    avg: number;
+    satisfiedPct: number | null;
+    list: Array<{
+      customerId: string | null;
+      customerName: string;
+      rating: number;
+      reason: string | null;
+      ratedAt: string | null;
+    }>;
   };
   workingNowEmployees: Array<{
     id: string;
@@ -3893,6 +3908,13 @@ function ManagerDashboard({
   const [data, setData] = useState<ManagerDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // פתיחת רשימת הביקורות (לחיצה על כרטיס "שביעות רצון") — מציג את הלקוחות עם הדירוג והסיבה.
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  // עריכת יעד המכירות השנתי (כרטיס "עמידה ביעד מכירות שנתי").
+  const [targetOpen, setTargetOpen] = useState(false);
+  const [targetInput, setTargetInput] = useState('');
+  const [targetSaving, setTargetSaving] = useState(false);
+  const [targetError, setTargetError] = useState('');
   void customers;
   void navigateSafely;
   void onOpenProjectById;
@@ -3916,6 +3938,39 @@ function ManagerDashboard({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
+
+  // פותח את מודל עריכת היעד השנתי, מאותחל ליעד הנוכחי.
+  const openTargetModal = () => {
+    const currentAnnual = Math.round((data?.kpis?.monthlyRevenueTarget || 0) * 12);
+    setTargetInput(currentAnnual ? String(currentAnnual) : '');
+    setTargetError('');
+    setTargetOpen(true);
+  };
+
+  // שומר יעד שנתי חדש ומרענן את הדשבורד.
+  const saveTarget = async () => {
+    const annual = Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')));
+    if (!Number.isFinite(annual) || annual <= 0) {
+      setTargetError('נא להזין יעד שנתי חיובי');
+      return;
+    }
+    setTargetSaving(true);
+    setTargetError('');
+    try {
+      const res = await apiFetch(apiUrl('/dashboard/target'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ annualRevenueTarget: annual }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setTargetOpen(false);
+      await load();
+    } catch {
+      setTargetError('שמירת היעד נכשלה. נסה שוב.');
+    } finally {
+      setTargetSaving(false);
+    }
+  };
 
   // ── סקשן בדשבורד: לקוחות שסומנו כלא רלוונטי ──
   // טווח ברירת מחדל: שבוע אחרון; ניתן לעבור לחודש אחרון.
@@ -3964,11 +4019,31 @@ function ManagerDashboard({
     </div>
   );
 
+  // ── לידים חדשים ברבעון — נתוני אמת מהשרת (לפי createdAt) + השוואה אמיתית לרבעון הקודם ──
+  const leadsQuarter = data.coreCounts?.leadsNewThisQuarter ?? 0;
+  const leadsQuarterPct = data.coreCounts?.leadsQuarterChangePct ?? null;
+  const leadsQuarterSub =
+    leadsQuarterPct === null
+      ? 'אין נתונים להשוואה מול הרבעון הקודם'
+      : `השוואה לרבעון קודם: ${leadsQuarterPct >= 0 ? '+' : ''}${leadsQuarterPct}%`;
+
+  // ── שביעות רצון לקוחות — נתוני אמת מהביקורות שנאספו (ReviewRequest) ──
+  const rev = data.reviews;
+  const reviewsCount = rev?.count ?? 0;
+  const reviewsHasData = reviewsCount > 0;
+  const csatValue = reviewsHasData
+    ? (rev?.satisfiedPct != null ? `${rev.satisfiedPct}%` : `${rev?.avg ?? 0}★`)
+    : '—';
+  const csatSub = reviewsHasData
+    ? `ממוצע ${rev?.avg ?? 0}★ · ${reviewsCount} ביקורות · לחצו לפירוט`
+    : 'טרם נאספו ביקורות';
+
   const kpiCards = [
     {
       title: 'סה"כ לידים חדשים (ברבעון)',
-      value: (data.coreCounts?.leadsNew ?? 0) * 3,
-      sub: 'השוואה לרבעון קודם: +12%',
+      value: leadsQuarter,
+      sub: leadsQuarterSub,
+      subClass: leadsQuarterPct === null ? 'text-slate-400' : leadsQuarterPct >= 0 ? 'text-green-700' : 'text-red-600',
     },
     {
       title: 'הכנסה רבעונית',
@@ -3978,12 +4053,14 @@ function ManagerDashboard({
     {
       title: 'עמידה ביעד מכירות שנתי',
       value: `${Math.min(100, Math.round((data.kpis.attainmentPct || 0) * 100))}%`,
-      sub: `יעד שנתי: ${formatCurrencyILS(Math.round(data.kpis.monthlyRevenueTarget * 12))}`,
+      sub: `יעד שנתי: ${formatCurrencyILS(Math.round(data.kpis.monthlyRevenueTarget * 12))} · לחצו לעריכה`,
+      onClick: openTargetModal,
     },
     {
       title: 'שביעות רצון לקוחות (CSAT)',
-      value: '94%',
-      sub: 'לפי משובים אחרונים',
+      value: csatValue,
+      sub: csatSub,
+      onClick: reviewsHasData ? () => setReviewsOpen(true) : undefined,
     },
   ];
 
@@ -4028,16 +4105,30 @@ function ManagerDashboard({
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-6" dir="rtl">
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {kpiCards.map((kpi) => (
-            <Card key={kpi.title} className="relative overflow-hidden rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
-              {leavesDecor}
-              <CardContent className="p-6">
-                <div className="text-sm font-semibold text-slate-500">{kpi.title}</div>
-                <div className="mt-3 text-4xl font-black text-slate-900">{kpi.value}</div>
-                <div className="mt-2 text-xs text-green-700">{kpi.sub}</div>
-              </CardContent>
-            </Card>
-          ))}
+          {kpiCards.map((kpi) => {
+            const onClick = (kpi as any).onClick as (() => void) | undefined;
+            return (
+            <div
+              key={kpi.title}
+              onClick={onClick}
+              className={cn(onClick && 'cursor-pointer')}
+            >
+              <Card
+                className={cn(
+                  'relative overflow-hidden rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]',
+                  onClick && 'transition hover:shadow-[0_14px_34px_rgba(15,23,42,0.14)]',
+                )}
+              >
+                {leavesDecor}
+                <CardContent className="p-6">
+                  <div className="text-sm font-semibold text-slate-500">{kpi.title}</div>
+                  <div className="mt-3 text-4xl font-black text-slate-900">{kpi.value}</div>
+                  <div className={cn('mt-2 text-xs', (kpi as any).subClass || 'text-green-700')}>{kpi.sub}</div>
+                </CardContent>
+              </Card>
+            </div>
+            );
+          })}
         </div>
 
         <div className="grid gap-4 xl:grid-cols-3">
@@ -4151,6 +4242,144 @@ function ManagerDashboard({
           </Button>
         </div>
       </div>
+
+      {/* ── מודל עריכת יעד המכירות השנתי ── */}
+      {targetOpen && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !targetSaving && setTargetOpen(false)}
+        >
+          <div
+            className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div className="text-lg font-bold text-slate-900">עדכון יעד מכירות שנתי</div>
+              <button
+                className="rounded-full px-3 py-1 text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                onClick={() => !targetSaving && setTargetOpen(false)}
+                aria-label="סגור"
+              >
+                ×
+              </button>
+            </div>
+            <div className="space-y-4 p-6">
+              <div>
+                <label className="mb-1 block text-sm font-semibold text-slate-600">יעד שנתי (₪)</label>
+                <Input
+                  type="text"
+                  inputMode="numeric"
+                  value={targetInput}
+                  onChange={(e) => setTargetInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !targetSaving) saveTarget(); }}
+                  placeholder="לדוגמה: 5400000"
+                  autoFocus
+                />
+                {Number(String(targetInput).replace(/[^\d.]/g, '')) > 0 && (
+                  <div className="mt-2 text-xs text-slate-500">
+                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, ''))))} לשנה
+                    {' · '}
+                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')) / 12))} לחודש
+                  </div>
+                )}
+              </div>
+              {targetError && <div className="text-sm text-red-600">{targetError}</div>}
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  className="rounded-2xl bg-slate-100 px-5 text-slate-700 hover:bg-slate-200"
+                  onClick={() => { if (!targetSaving) setTargetOpen(false); }}
+                >
+                  ביטול
+                </Button>
+                <Button
+                  style={{ background: galit.primary }}
+                  className="rounded-2xl px-5"
+                  onClick={saveTarget}
+                  disabled={targetSaving}
+                >
+                  {targetSaving ? 'שומר…' : 'שמירה'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── מודל ביקורות: הלקוחות שדירגו + הדירוג והסיבה שכתבו ── */}
+      {reviewsOpen && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setReviewsOpen(false)}
+        >
+          <div
+            className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+              <div>
+                <div className="text-lg font-bold text-slate-900">ביקורות לקוחות</div>
+                <div className="text-xs text-slate-500">
+                  {(data.reviews?.count ?? 0)} ביקורות · ממוצע {data.reviews?.avg ?? 0}★
+                  {data.reviews?.satisfiedPct != null ? ` · ${data.reviews.satisfiedPct}% מרוצים` : ''}
+                </div>
+              </div>
+              <button
+                className="rounded-full px-3 py-1 text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                onClick={() => setReviewsOpen(false)}
+                aria-label="סגור"
+              >
+                ×
+              </button>
+            </div>
+            <div className="max-h-[calc(85vh-72px)] overflow-y-auto p-4">
+              {(data.reviews?.list ?? []).length === 0 ? (
+                <div className="p-8 text-center text-sm text-slate-500">אין ביקורות להצגה.</div>
+              ) : (
+                <ul className="space-y-2">
+                  {(data.reviews?.list ?? []).map((r, i) => {
+                    const face = r.rating >= 4 ? '😄' : r.rating === 3 ? '😐' : '😕';
+                    const ratingColor = r.rating >= 4 ? 'text-green-600' : r.rating === 3 ? 'text-amber-600' : 'text-red-600';
+                    const row = (
+                      <>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 truncate font-semibold text-slate-800">{r.customerName}</div>
+                          <div className={cn('flex shrink-0 items-center gap-1 text-sm font-bold', ratingColor)}>
+                            <span className="text-base">{face}</span>
+                            <span>{r.rating}/5</span>
+                          </div>
+                        </div>
+                        {r.reason ? (
+                          <div className="mt-1 text-sm text-slate-600">{r.reason}</div>
+                        ) : (
+                          <div className="mt-1 text-xs italic text-slate-400">ללא הערה</div>
+                        )}
+                        {r.ratedAt && (
+                          <div className="mt-1 text-[11px] text-slate-400">{fmtDayHe(r.ratedAt)}</div>
+                        )}
+                      </>
+                    );
+                    return r.customerId ? (
+                      <li
+                        key={r.customerId + i}
+                        className="cursor-pointer rounded-2xl border border-slate-100 p-3 transition hover:bg-slate-50"
+                        onClick={() => { setReviewsOpen(false); onOpenCustomerById(r.customerId as string); }}
+                      >
+                        {row}
+                      </li>
+                    ) : (
+                      <li key={'nc' + i} className="rounded-2xl border border-slate-100 p-3">
+                        {row}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
