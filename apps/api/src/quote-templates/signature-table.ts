@@ -70,51 +70,57 @@ function signatureTableXml(): string {
   return `<w:tbl>${tblPr}${grid}${headerRow}${fillRow}</w:tbl>`;
 }
 
-/** פסקת האישור (3 משפטים) — מודגשת, מיושרת לשני הצדדים, David 12pt, RTL. */
+/**
+ * פסקת האישור — מודגשת, David 12pt, RTL. שלושת המשפטים הם *פסקאות נפרדות* (לא שורה
+ * אחת עם <w:br/>). קריטי: מעבר-שורה ידני (<w:br/>) בשילוב justify גורם ל-Word למתוח
+ * את השורה שלפני ה-break לרוחב מלא → "רווחים ענקיים בין המילים". פסקאות נפרדות פותרות
+ * זאת כי Word לא מותח את השורה האחרונה של פסקה. כל פסקה מיושרת justify כמו במקור.
+ */
 function approvalParagraph(): string {
-  const l1 = 'בחתימתי מטה אני מאשר כי קראתי את ההצעה, הבנתי את תוכנה ואני מסכים לכל תנאיה.';
-  const l2 =
-    'ככל שההצעה מאושרת בשם חברה או תאגיד, אני מצהיר כי אני מוסמך לחייב את החברה בהתקשרות זו. בנוסף, אני ערב באופן אישי, מלא ובלתי חוזר, לקיום כל התחייבויות החברה ולתשלום מלוא הסכומים המגיעים לגלית החברה לאיכות הסביבה בע"מ בהתאם להצעה זו.';
-  const l3 = 'במקרה של חברה, יש לצרף חותמת החברה לצד חתימת מורשה החתימה.';
+  const sentences = [
+    'בחתימתי מטה אני מאשר כי קראתי את ההצעה, הבנתי את תוכנה ואני מסכים לכל תנאיה.',
+    'ככל שההצעה מאושרת בשם חברה או תאגיד, אני מצהיר כי אני מוסמך לחייב את החברה בהתקשרות זו. בנוסף, אני ערב באופן אישי, מלא ובלתי חוזר, לקיום כל התחייבויות החברה ולתשלום מלוא הסכומים המגיעים לגלית החברה לאיכות הסביבה בע"מ בהתאם להצעה זו.',
+    'במקרה של חברה, יש לצרף חותמת החברה לצד חתימת מורשה החתימה.',
+  ];
   const rpr = '<w:rPr><w:rFonts w:cs="David" w:hint="cs"/><w:b/><w:bCs/><w:sz w:val="22"/><w:szCs w:val="22"/><w:rtl/></w:rPr>';
-  const run = (t: string) =>
-    `<w:r>${rpr}<w:t xml:space="preserve">${t}</w:t></w:r>` + `<w:r>${rpr}<w:br/></w:r>`;
-  // keepNext — הפסקה נשארת צמודה לטבלה שאחריה (לא נפרדות בין עמודים).
-  return (
+  // כל משפט = פסקה. keepNext בכולן כדי שהבלוק כולו (פסקאות + טבלה) יישאר יחד באותו עמוד.
+  const para = (t: string) =>
     '<w:p><w:pPr><w:keepNext/><w:bidi/><w:jc w:val="both"/>' +
-    '<w:rPr><w:rFonts w:cs="David" w:hint="cs"/><w:b/><w:bCs/><w:sz w:val="22"/><w:szCs w:val="22"/><w:rtl/></w:rPr></w:pPr>' +
-    run(l1) + run(l2) +
-    `<w:r>${rpr}<w:t xml:space="preserve">${l3}</w:t></w:r>` +
-    '</w:p>'
-  );
+    `${rpr}</w:pPr><w:r>${rpr}<w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
+  return sentences.map(para).join('');
 }
 
 /**
- * פסקת-סימון בלתי-נראית (טקסט לבן, גודל 2) שמסמנת את גבולות בלוק החתימה.
- * מכילה את SIGNATURE_TABLE_MARKER כדי שאפשר יהיה לאתר ולהסיר את הבלוק כולו.
+ * סימן-גבול לבלוק החתימה — bookmark ריק, לא פסקת טקסט.
+ * קריטי: פסקת טקסט "מוסתר" (vanish/לבן) *נצרבת כטקסט גלוי* בהמרת ה-DOCX ל-PDF, כי
+ * מנוע ההמרה לא מכבד vanish → הלקוח ראה "GALITSIGTABLE" גלוי. bookmark נושא את המזהה
+ * בתוך תכונה (w:name), אינו מרונדר כלל, ולעולם אינו דולף לשכבת הטקסט של ה-PDF.
+ * מזהה ה-bookmark ניתן לאיתור בחיפוש-מחרוזת ב-XML (לזרימת ההסרה בחתימה הדיגיטלית).
+ * ה-id חייב להיות ייחודי; משתמשים ב-index כדי לתת שני id-ים שונים לפתיחה ולסגירה.
  */
-function markerParagraph(): string {
-  return (
-    '<w:p><w:pPr><w:rPr><w:color w:val="FFFFFF"/><w:sz w:val="2"/><w:szCs w:val="2"/><w:vanish/></w:rPr></w:pPr>' +
-    `<w:r><w:rPr><w:color w:val="FFFFFF"/><w:sz w:val="2"/><w:szCs w:val="2"/><w:vanish/></w:rPr><w:t>${SIGNATURE_TABLE_MARKER}</w:t></w:r></w:p>`
-  );
+function markerBookmark(index: number): string {
+  const id = 987650 + index; // מרחב id גבוה כדי לא להתנגש ב-bookmarks של התבנית
+  return `<w:bookmarkStart w:id="${id}" w:name="${SIGNATURE_TABLE_MARKER}${index}"/><w:bookmarkEnd w:id="${id}"/>`;
 }
 
 /** פסקת רווח קטנה (כדי שהבלוק לא יידבק לשורת "תוקף ההצעה"). */
 const SPACER_PARAGRAPH = '<w:p><w:pPr><w:rPr><w:sz w:val="16"/></w:rPr></w:pPr></w:p>';
 
 /**
- * הבלוק המלא: סימון → רווח → פסקת אישור → טבלה → סימון.
- * אין פסקת-רווח בין פסקת האישור לטבלה — כדי ש-keepNext יחבר ביניהן ישירות וישמור אותן
- * יחד באותו עמוד. אם אין מקום, Word דוחף את שתיהן יחד לעמוד הבא.
+ * הבלוק המלא: bookmark-פתיחה → רווח → פסקת אישור → טבלה → bookmark-סגירה.
+ * ה-bookmarks הם גבולות בלתי-נראים (לא דולפים ל-PDF). אין פסקת-רווח בין פסקת האישור
+ * לטבלה — כדי ש-keepNext יחבר ביניהן ישירות וישמור אותן יחד באותו עמוד.
+ * שים לב: ה-bookmarkStart/End חייבים לשבת *בתוך* פסקה תקינה, ולכן עוטפים אותם בפסקה ריקה.
  */
 function buildBlock(): string {
+  const openMarker = `<w:p><w:pPr><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr>${markerBookmark(0)}</w:p>`;
+  const closeMarker = `<w:p><w:pPr><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr>${markerBookmark(1)}</w:p>`;
   return (
-    markerParagraph() +
+    openMarker +
     SPACER_PARAGRAPH +
     approvalParagraph() +
     signatureTableXml() +
-    markerParagraph()
+    closeMarker
   );
 }
 
@@ -162,16 +168,27 @@ export function appendSignatureTable(documentXml: string): string {
 
 /**
  * מסתיר את הטקסט "SIGNATUREHERE" (סמן מיקום החתימה הדיגיטלית) מ-document.xml, כדי שלא
- * ייצרב כטקסט גלוי בהמרת ה-PDF. מסיר את ה-<w:r> שמכיל את הטקסט (הפסקה נשארת, ריקה).
- * תומך גם בפיצול-runs (SIGNATURE...HERE בכמה tags) ע"י הסרת הטקסט בלבד כנפילה-חזרה.
+ * ייצרב כטקסט גלוי בהמרת ה-PDF. מטפל בשלושה מקרים:
+ *   1) run שלם שמכיל SIGNATUREHERE רציף → מסירים את כל ה-run.
+ *   2) המחרוזת הרציפה שרדה במקום אחר → מסירים אותה.
+ *   3) **פיצול בין runs** (SIGNATURE ב-<w:t> אחד ו-HERE בשני, כפי שנצפה ב-PDF הדוגמה) →
+ *      מסירים את רצף האותיות גם כשמפרידים ביניהן tags/גבולות-run. זה המקרה שגרם ל-
+ *      "SIGNATUREHERE" גלוי בפלט.
  */
 function stripSignatureMarkerText(documentXml: string): string {
   let out = documentXml;
-  // הסרת ה-run השלם שמכיל את הטקסט הרציף.
+  // (1) הסרת ה-run השלם שמכיל את הטקסט הרציף.
   const runRe = /<w:r\b[^>]*>(?:(?!<\/w:r>).)*?SIGNATUREHERE(?:(?!<\/w:r>).)*?<\/w:r>/gs;
   out = out.replace(runRe, '');
-  // נפילה-חזרה: אם הטקסט שרד (פוצל בין tags) — מסירים את התו הרציף עצמו.
+  // (2) המחרוזת הרציפה עדיין קיימת → מסירים אותה.
   if (out.includes('SIGNATUREHERE')) out = out.split('SIGNATUREHERE').join('');
+  // (3) פיצול בין runs: כל אות עשויה להיות מופרדת ע"י XML tags (סגירת/פתיחת run/text).
+  //     בונים regex שמאפשר רצף tags בין כל שתי אותיות ומסיר את כל ההתאמה (כולל ה-tags
+  //     שביניהן — ה-runs עצמם היו ריקים מטקסט אחר כי הם רק סמן המיקום).
+  const MARKER = 'SIGNATUREHERE';
+  const between = '(?:\\s|<[^>]*>)*'; // רווחים או תגי-XML
+  const splitRe = new RegExp(MARKER.split('').join(between), 'g');
+  if (splitRe.test(out)) out = out.replace(splitRe, '');
   return out;
 }
 
