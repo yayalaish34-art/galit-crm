@@ -1242,8 +1242,9 @@ export function QuoteNewScreen({
         setTimeout(() => setStatusMsg(''), 4000);
       } else {
         const e = await r.json().catch(() => null);
+        // חסימת "נסח רק אחרי עריכה" מגיעה מהשרת כהודעה מסבירה — מציגים אותה מעט יותר זמן.
         setStatusMsg(e?.message || 'יצירת ניסוח נכשלה');
-        setTimeout(() => setStatusMsg(''), 4000);
+        setTimeout(() => setStatusMsg(''), 7000);
       }
     } catch {
       setStatusMsg('שגיאה בפנייה ל-AI');

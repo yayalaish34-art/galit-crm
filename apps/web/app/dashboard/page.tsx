@@ -412,17 +412,17 @@ function GlobalSearchBar({
         }}
         onFocus={() => setOpen(true)}
         placeholder="חפש לקוח / איש קשר / טלפון / מייל"
-        className="w-full rounded-2xl bg-white pr-10"
+        className="w-full rounded-xl bg-white pr-10"
       />
       <Search className="pointer-events-none absolute right-3 top-3 h-4 w-4 text-slate-400" />
 
       {open && (
-        <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-2xl border bg-white shadow-lg">
+        <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-xl border bg-white shadow-lg">
           {loading && (
-            <div className="px-4 py-3 text-sm text-slate-500">טוען...</div>
+            <div className="px-4 py-2 text-sm text-slate-500">טוען...</div>
           )}
           {!loading && q.trim().length >= 2 && total === 0 && (
-            <div className="px-4 py-3 text-sm text-slate-500">לא נמצאו תוצאות</div>
+            <div className="px-4 py-2 text-sm text-slate-500">לא נמצאו תוצאות</div>
           )}
 
           {!loading && total > 0 && (
@@ -433,7 +433,7 @@ function GlobalSearchBar({
                   {data.customers.map((c) => (
                     <button
                       key={c.id}
-                      className="flex w-full flex-col gap-1 px-4 py-3 text-right hover:bg-slate-50"
+                      className="flex w-full flex-col gap-1 px-4 py-2 text-right hover:bg-slate-50"
                       onClick={() => {
                         openCustomerById(c.id);
                         setOpen(false);
@@ -464,7 +464,7 @@ function GlobalSearchBar({
                   {data.leads.map((l) => (
                     <button
                       key={l.id}
-                      className="flex w-full flex-col gap-1 px-4 py-3 text-right hover:bg-slate-50"
+                      className="flex w-full flex-col gap-1 px-4 py-2 text-right hover:bg-slate-50"
                       onClick={() => {
                         openLeadById(l.id);
                         setOpen(false);
@@ -495,7 +495,7 @@ function GlobalSearchBar({
                   {data.projects.map((p) => (
                     <button
                       key={p.id}
-                      className="flex w-full flex-col gap-1 px-4 py-3 text-right hover:bg-slate-50"
+                      className="flex w-full flex-col gap-1 px-4 py-2 text-right hover:bg-slate-50"
                       onClick={() => {
                         openProjectById(p.id);
                         setOpen(false);
@@ -772,19 +772,19 @@ function cn(...classes: Array<string | false | null | undefined>) {
 }
 
 function Card({ className = '', children }: React.PropsWithChildren<{ className?: string }>) {
-  return <div className={cn('rounded-3xl border bg-white shadow-sm', className)}>{children}</div>;
+  return <div className={cn('rounded-xl border bg-white shadow-sm', className)}>{children}</div>;
 }
 
 function CardHeader({ className = '', children }: React.PropsWithChildren<{ className?: string }>) {
-  return <div className={cn('px-5 pt-5', className)}>{children}</div>;
+  return <div className={cn('px-4 pt-3', className)}>{children}</div>;
 }
 
 function CardTitle({ className = '', children }: React.PropsWithChildren<{ className?: string }>) {
-  return <h3 className={cn('text-lg font-bold', className)}>{children}</h3>;
+  return <h3 className={cn('text-base font-bold', className)}>{children}</h3>;
 }
 
 function CardContent({ className = '', children }: React.PropsWithChildren<{ className?: string }>) {
-  return <div className={cn('p-5', className)}>{children}</div>;
+  return <div className={cn('p-4', className)}>{children}</div>;
 }
 
 function Button({
@@ -810,7 +810,7 @@ function Button({
       disabled={disabled}
       style={style}
       className={cn(
-        'inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-medium transition',
+        'inline-flex items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition',
         disabled ? 'cursor-not-allowed opacity-60' : '',
         variant === 'outline'
           ? 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50'
@@ -828,7 +828,7 @@ function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        'w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400',
+        'w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-slate-400',
         props.className || '',
       )}
     />
@@ -885,7 +885,7 @@ function EntityTimeline({ items, emptyText = 'אין אירועים להצגה' 
   return (
     <div className="space-y-3">
       {sorted.map((item) => (
-        <div key={item.id} className="rounded-2xl border p-4">
+        <div key={item.id} className="rounded-xl border p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="font-semibold">{item.title}</div>
             <div className="text-xs text-slate-400">{timelineDateLabel(item.at)}</div>
@@ -1201,7 +1201,7 @@ function Textarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
     <textarea
       {...props}
       className={cn(
-        'min-h-[110px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400',
+        'min-h-[110px] w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400',
         props.className || '',
       )}
     />
@@ -1237,7 +1237,7 @@ function Select({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
     >
       {options.map((option) => (
         <option key={option} value={option}>
@@ -1261,7 +1261,7 @@ function TableRow({ children, className = '', onClick }: React.PropsWithChildren
   return <tr onClick={onClick} className={cn('border-b last:border-b-0', className)}>{children}</tr>;
 }
 function TableHead({ children, className }: React.PropsWithChildren<{ className?: string }>) {
-  return <th className={`px-4 py-3 text-right font-semibold text-slate-600 ${className || ''}`}>{children}</th>;
+  return <th className={`px-4 py-2 text-right font-semibold text-slate-600 ${className || ''}`}>{children}</th>;
 }
 function TableCell({
   children,
@@ -1269,7 +1269,7 @@ function TableCell({
   colSpan,
   title,
 }: React.PropsWithChildren<{ className?: string; colSpan?: number; title?: string }>) {
-  return <td colSpan={colSpan} title={title} className={cn('px-4 py-3 align-top', className)}>{children}</td>;
+  return <td colSpan={colSpan} title={title} className={cn('px-4 py-2 align-top', className)}>{children}</td>;
 }
 
 function Modal({
@@ -1292,10 +1292,10 @@ function Modal({
 
   return (
     <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4">
-      <div className={cn('relative flex max-h-[90vh] w-full flex-col rounded-3xl bg-white shadow-2xl', maxWidth)}>
+      <div className={cn('relative flex max-h-[90vh] w-full flex-col rounded-xl bg-white shadow-2xl', maxWidth)}>
         {!hideHeader && (
-          <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
-            <h3 className={cn('text-lg font-bold', titleClassName)}>{title}</h3>
+          <div className="flex shrink-0 items-center justify-between border-b px-4 py-4">
+            <h3 className={cn('text-base font-bold', titleClassName)}>{title}</h3>
             <button onClick={onClose} className="rounded-full p-2 hover:bg-slate-100" aria-label="סגור">
               <X className="h-5 w-5" />
             </button>
@@ -1310,7 +1310,7 @@ function Modal({
             <X className="h-5 w-5" />
           </button>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {children}
         </div>
       </div>
@@ -1367,12 +1367,12 @@ function CustomerSearchModal({
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        className="w-full max-w-5xl rounded-xl bg-white shadow-2xl"
         dir="rtl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
           <h3 className="text-base font-bold text-slate-800">חיפוש לקוח</h3>
           <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="סגור">
             <X className="h-5 w-5" />
@@ -1380,8 +1380,8 @@ function CustomerSearchModal({
         </div>
 
         {/* Large smart search input */}
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
+        <div className="border-b border-slate-100 px-4 py-4">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-2 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
             <Search className="h-5 w-5 shrink-0 text-slate-400" />
             <input
               ref={inputRef}
@@ -1407,7 +1407,7 @@ function CustomerSearchModal({
         {/* Results table */}
         <div className="max-h-[55vh] overflow-y-auto">
           {results.length === 0 ? (
-            <div className="px-5 py-10 text-center">
+            <div className="px-4 py-6 text-center">
               <div className="text-sm text-slate-400">
                 {q ? 'לא נמצאו לקוחות תואמים' : 'אין לקוחות'}
               </div>
@@ -1415,7 +1415,7 @@ function CustomerSearchModal({
                 <button
                   type="button"
                   onClick={() => onNewCustomer(query.trim())}
-                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-green-600 px-5 py-2.5 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
+                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
                 >
                   <Plus className="h-4 w-4" />
                   צור לקוח חדש — &ldquo;{query.trim()}&rdquo;
@@ -1465,7 +1465,7 @@ function CustomerSearchModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-200 px-5 py-2.5 text-left">
+        <div className="border-t border-slate-200 px-4 py-2 text-left">
           <button
             type="button"
             onClick={onClose}
@@ -1549,12 +1549,12 @@ function QuoteSearchModal({
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl"
+        className="w-full max-w-5xl rounded-xl bg-white shadow-2xl"
         dir="rtl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
           <h3 className="text-base font-bold text-slate-800">חיפוש הצעות מחיר</h3>
           <button onClick={onClose} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="סגור">
             <X className="h-5 w-5" />
@@ -1562,8 +1562,8 @@ function QuoteSearchModal({
         </div>
 
         {/* Large smart search input */}
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-3 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
+        <div className="border-b border-slate-100 px-4 py-4">
+          <div className="flex items-center gap-3 rounded-xl border-2 border-slate-300 bg-white px-4 py-2 focus-within:border-green-500 focus-within:ring-2 focus-within:ring-green-200">
             <Search className="h-5 w-5 shrink-0 text-slate-400" />
             <input
               ref={inputRef}
@@ -1589,7 +1589,7 @@ function QuoteSearchModal({
         {/* Results table */}
         <div className="max-h-[50vh] overflow-y-auto">
           {results.length === 0 ? (
-            <div className="px-5 py-10 text-center text-sm text-slate-400">
+            <div className="px-4 py-6 text-center text-sm text-slate-400">
               {q ? 'לא נמצאו הצעות תואמות' : 'אין הצעות'}
             </div>
           ) : (
@@ -1652,7 +1652,7 @@ function QuoteSearchModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-200 px-5 py-2.5 text-left">
+        <div className="border-t border-slate-200 px-4 py-2 text-left">
           <button
             type="button"
             onClick={onClose}
@@ -2051,15 +2051,15 @@ function PipelinePage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>פייפליין לידים</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>פייפליין לידים</h1>
         <p className="mt-1 text-slate-500">צינור לידים לפי שלב (ללא גרירה)</p>
       </div>
 
       <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         {stages.map((stage) => (
-          <div key={stage} className="rounded-2xl border bg-white p-3">
+          <div key={stage} className="rounded-xl border bg-white p-3">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-semibold">{statusLabel(stage)}</span>
               <span className="text-xs text-slate-400">{(leadsByStage[stage] || []).length}</span>
@@ -2067,7 +2067,7 @@ function PipelinePage({
 
             <div className="space-y-2">
               {(leadsByStage[stage] || []).map((lead) => (
-                <div key={lead.id} className="rounded-2xl border bg-slate-50 p-3">
+                <div key={lead.id} className="rounded-xl border bg-slate-50 p-3">
                   <div className="text-sm font-semibold">{lead.name}</div>
                   <div className="mt-1 text-xs text-slate-600">טלפון: {phoneToDisplay(lead.phone) || '-'}</div>
                   <div className="mt-1 text-xs text-slate-600">{lead.service || '-'}</div>
@@ -2077,7 +2077,7 @@ function PipelinePage({
                     <select
                       value={lead.stage || 'NEW'}
                       onChange={(e) => changeStage(lead, e.target.value)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-slate-400"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none transition focus:border-slate-400"
                     >
                       {stages.map((s) => (
                         <option key={s} value={s}>
@@ -2090,7 +2090,7 @@ function PipelinePage({
               ))}
 
               {(leadsByStage[stage] || []).length === 0 && (
-                <div className="rounded-2xl border border-dashed bg-white p-3 text-xs text-slate-400">
+                <div className="rounded-xl border border-dashed bg-white p-3 text-xs text-slate-400">
                   אין לידים בשלב הזה
                 </div>
               )}
@@ -2275,9 +2275,9 @@ function LeadProfile({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>{leadName}</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>{leadName}</h1>
         <p className="text-slate-500">מסע ליד: מאיש קשר → הצעה → פרויקט</p>
       </div>
 
@@ -2314,7 +2314,7 @@ function LeadProfile({
         ].map((t) => (
           <button
             key={t.key}
-            className={cn('rounded-2xl px-4 py-2 text-sm font-semibold', tab === (t.key as any) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
+            className={cn('rounded-xl px-4 py-2 text-sm font-semibold', tab === (t.key as any) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
             onClick={() => setTab(t.key as any)}
           >
             {t.label}
@@ -2324,16 +2324,16 @@ function LeadProfile({
 
       {loading && <div className="text-sm text-slate-500">טוען נתונים מקושרים...</div>}
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-3 xl:grid-cols-3">
         {tab === 'details' && (
           <Card className="xl:col-span-2">
             <CardHeader>
               <CardTitle>פרטים</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">שם מלא</div><div className="font-medium">{leadName}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">חברה</div><div className="font-medium">{lead.company || '-'}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4">
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">שם מלא</div><div className="font-medium">{leadName}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">חברה</div><div className="font-medium">{lead.company || '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4">
                 <div className="text-sm text-slate-400">טלפון</div>
                 <div className="font-medium">
                   {lead.phone ? (
@@ -2362,7 +2362,7 @@ function LeadProfile({
                   </div>
                 )}
               </div>
-              <div className="rounded-2xl bg-slate-50 p-4">
+              <div className="rounded-xl bg-slate-50 p-4">
                 <div className="text-sm text-slate-400">אימייל</div>
                 <div className="font-medium break-all">
                   {lead.email ? (
@@ -2374,11 +2374,11 @@ function LeadProfile({
                   )}
                 </div>
               </div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">עיר</div><div className="font-medium">{lead.city || '-'}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">כתובת</div><div className="font-medium">{lead.address || '-'}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">סוג שירות</div><div className="font-medium">{leadServiceTypeLabelInProfile(String(lead.serviceType || lead.service || ''))}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">מקור</div><div className="font-medium">{leadSourceLabelInProfile(String(lead.source || ''))}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2"><div className="text-sm text-slate-400">מקור שיווק</div><div className="font-medium">{lead.utm_source || '-'} / {lead.utm_medium || '-'} / {lead.utm_campaign || '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">עיר</div><div className="font-medium">{lead.city || '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">כתובת</div><div className="font-medium">{lead.address || '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">סוג שירות</div><div className="font-medium">{leadServiceTypeLabelInProfile(String(lead.serviceType || lead.service || ''))}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">מקור</div><div className="font-medium">{leadSourceLabelInProfile(String(lead.source || ''))}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4 md:col-span-2"><div className="text-sm text-slate-400">מקור שיווק</div><div className="font-medium">{lead.utm_source || '-'} / {lead.utm_medium || '-'} / {lead.utm_campaign || '-'}</div></div>
             </CardContent>
           </Card>
         )}
@@ -2391,7 +2391,7 @@ function LeadProfile({
                 <div className="text-sm text-slate-500">אין אירועים עדיין</div>
               ) : (
                 activities.map((a) => (
-                  <div key={a.id} className="rounded-2xl border p-4">
+                  <div key={a.id} className="rounded-xl border p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="font-medium">{activityTypeLabelInProfile(a.type)}</div>
                       <div className="text-xs text-slate-400">{a.createdAt ? new Date(a.createdAt).toLocaleString() : ''}</div>
@@ -2407,10 +2407,10 @@ function LeadProfile({
         {tab === 'followups' && (
           <Card className="xl:col-span-2">
             <CardHeader><CardTitle>פולואפים</CardTitle></CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">פולואפ 1</div><div className="font-medium">{lead.followUp1Date ? new Date(lead.followUp1Date).toLocaleDateString() : '-'}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4"><div className="text-sm text-slate-400">פולואפ 2</div><div className="font-medium">{lead.followUp2Date ? new Date(lead.followUp2Date).toLocaleDateString() : '-'}</div></div>
-              <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2"><div className="text-sm text-slate-400">פולואפ הבא</div><div className="font-medium">{lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString() : '-'}</div></div>
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">פולואפ 1</div><div className="font-medium">{lead.followUp1Date ? new Date(lead.followUp1Date).toLocaleDateString() : '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4"><div className="text-sm text-slate-400">פולואפ 2</div><div className="font-medium">{lead.followUp2Date ? new Date(lead.followUp2Date).toLocaleDateString() : '-'}</div></div>
+              <div className="rounded-xl bg-slate-50 p-4 md:col-span-2"><div className="text-sm text-slate-400">פולואפ הבא</div><div className="font-medium">{lead.nextFollowUpDate ? new Date(lead.nextFollowUpDate).toLocaleDateString() : '-'}</div></div>
             </CardContent>
           </Card>
         )}
@@ -2423,7 +2423,7 @@ function LeadProfile({
                 <div className="text-sm text-slate-500">אין הצעות</div>
               ) : (
                 linkedQuotes.map((q) => (
-                  <div key={q.id} className="rounded-2xl border p-4">
+                  <div key={q.id} className="rounded-xl border p-4">
                     <div className="font-medium">{q.quoteNumber || '—'}</div>
                     <div className="text-sm text-slate-500">{q.service}</div>
                       <div className="text-xs text-slate-400">סטטוס: {statusLabel(q.status)}</div>
@@ -2439,7 +2439,7 @@ function LeadProfile({
             <CardHeader><CardTitle>פרויקט</CardTitle></CardHeader>
             <CardContent className="space-y-3">
               {linkedProject ? (
-                <div className="rounded-2xl border p-4">
+                <div className="rounded-xl border p-4">
                   <div className="font-medium">{linkedProject.name}</div>
                   <div className="text-sm text-slate-500">{statusLabel(linkedProject.status)}</div>
                   <div className="mt-3">
@@ -2483,12 +2483,12 @@ function LeadProfile({
         </Card>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-3 xl:grid-cols-3">
         <Card>
           <CardHeader><CardTitle>משימות קשורות</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             {relatedTasks.length === 0 ? <div className="text-sm text-slate-500">אין משימות</div> : relatedTasks.map((task) => (
-              <div key={task.id} className="rounded-2xl border p-4">
+              <div key={task.id} className="rounded-xl border p-4">
                 <div className="font-medium">{task.title}</div>
                   <div className="text-sm text-slate-500">{taskStatusLabelForTasks(task.status || '')} · {taskPriorityLabel(task.priority || '')}</div>
               </div>
@@ -2501,9 +2501,9 @@ function LeadProfile({
             {relatedTimeline.length === 0 ? (
               <div className="text-sm text-slate-500">אין אירועים עדיין</div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {relatedTimeline.map((event) => (
-                  <div key={event.id} className="rounded-2xl border p-4">
+                  <div key={event.id} className="rounded-xl border p-4">
                     <div className="flex items-center justify-between gap-3">
                       <div className="font-medium">{event.title}</div>
                       <div className="text-xs text-slate-400">{event.date}</div>
@@ -3090,12 +3090,12 @@ function LeadDetailPage({
   ]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="text-2xl font-bold" style={{ color: galit.text }}>
+              <div className="text-xl font-bold" style={{ color: galit.text }}>
                 ליד
               </div>
               <Badge className={statusBadge(form.leadStatus)}>{leadStatusLabel(form.leadStatus)}</Badge>
@@ -3112,7 +3112,7 @@ function LeadDetailPage({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-2 rounded-2xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">
+            <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 shadow-sm ring-1 ring-slate-200">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-white text-xs font-bold">
                 {radonPool ? 'רדון' : userInitials(assignedUser?.name || '—')}
               </div>
@@ -3135,7 +3135,7 @@ function LeadDetailPage({
         </div>
 
         {radonPool && (
-          <div className="mt-3 rounded-2xl bg-blue-50 px-4 py-3 text-sm text-blue-800">
+          <div className="mt-3 rounded-xl bg-blue-50 px-4 py-2 text-sm text-blue-800">
             ליד זמין להקצאה
           </div>
         )}
@@ -3151,7 +3151,7 @@ function LeadDetailPage({
         ].map((t) => (
           <button
             key={t.key}
-            className={cn('rounded-2xl px-4 py-2 text-sm font-semibold', tab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
+            className={cn('rounded-xl px-4 py-2 text-sm font-semibold', tab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
             onClick={() => setTab(t.key as any)}
           >
             {t.label}
@@ -3160,9 +3160,9 @@ function LeadDetailPage({
       </div>
 
       {sanitizedError && (
-        <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{sanitizedError}</div>
+        <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{sanitizedError}</div>
       )}
-      {success && <div className="rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">{success}</div>}
+      {success && <div className="rounded-xl bg-green-50 px-4 py-2 text-sm text-green-800">{success}</div>}
 
       <div className="flex flex-wrap gap-2">
         <Button style={{ background: galit.primary }} onClick={saveLead} disabled={saving}>
@@ -3197,12 +3197,12 @@ function LeadDetailPage({
       {loading && <div className="text-sm text-slate-500">טוען ליד...</div>}
 
       {tab === 'details' && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <Card className="md:col-span-2">
             <CardHeader>
               <CardTitle>פרטי הליד</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-2">
                 <FormField label="שם">
                   <Input
@@ -3284,7 +3284,7 @@ function LeadDetailPage({
 
                 <FormField label="אחראי">
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                     value={form.assignedUserId || ''}
                     onChange={(e) => setForm((p) => ({ ...p, assignedUserId: e.target.value }))}
                     disabled={radonPool}
@@ -3304,7 +3304,7 @@ function LeadDetailPage({
                   <select
                     value={form.leadStatus || 'NEW'}
                     onChange={(e) => setForm((p) => ({ ...p, leadStatus: e.target.value }))}
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                   >
                     {leadStatusOptions.map((st) => (
                       <option key={st} value={st}>
@@ -3340,7 +3340,7 @@ function LeadDetailPage({
           <CardHeader>
             <CardTitle>נתוני מעקב ומקור</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3">
             <div className="grid gap-3 md:grid-cols-2">
               <FormField label="מקור">
                 <Input value={form.utm_source} onChange={(e) => setForm((p) => ({ ...p, utm_source: e.target.value }))} />
@@ -3370,7 +3370,7 @@ function LeadDetailPage({
           <CardHeader>
             <CardTitle>פעילות ולוג</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3">
             <div className="space-y-3">
               {activities.length === 0 ? (
                 <div className="text-sm text-slate-500">אין פעילויות עדיין</div>
@@ -3378,7 +3378,7 @@ function LeadDetailPage({
                 [...activities]
                   .sort((a, b) => new Date(b.createdAt || '').getTime() - new Date(a.createdAt || '').getTime())
                   .map((a) => (
-                    <div key={a.id} className="rounded-2xl border p-4">
+                    <div key={a.id} className="rounded-xl border p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div className="font-semibold">{actionTypeLabel(a.type)}</div>
                         <div className="text-xs text-slate-400">{a.createdAt ? new Date(a.createdAt).toLocaleString() : '-'}</div>
@@ -3389,7 +3389,7 @@ function LeadDetailPage({
               )}
             </div>
 
-            <div className="rounded-2xl bg-slate-50 p-4 space-y-3">
+            <div className="rounded-xl bg-slate-50 p-4 space-y-3">
               <div className="flex gap-2 items-start">
                 <FormField label="סוג">
                   <Input value={newActionType} onChange={(e) => setNewActionType(e.target.value)} placeholder="סוג פעולה" />
@@ -3411,8 +3411,8 @@ function LeadDetailPage({
           <CardHeader>
             <CardTitle>הערות + קבצים</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-2xl bg-slate-50 p-4 space-y-4">
+          <CardContent className="space-y-3">
+            <div className="rounded-xl bg-slate-50 p-4 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-base font-semibold">סיכום שיחה ומעקב</div>
               </div>
@@ -3478,7 +3478,7 @@ function LeadDetailPage({
               <Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} placeholder="הערות..." />
             </FormField>
             <FormField label="קובץ">
-              <div className="flex items-center gap-3 rounded-2xl border p-4 bg-white">
+              <div className="flex items-center gap-3 rounded-xl border p-4 bg-white">
                 <input
                   type="file"
                   onChange={(e) => setFileName(e.target.files?.[0]?.name || '')}
@@ -3498,8 +3498,8 @@ function LeadDetailPage({
           <CardHeader>
             <CardTitle>קישורים קשורים</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-2xl border p-4 space-y-2">
+          <CardContent className="space-y-3">
+            <div className="rounded-xl border p-4 space-y-2">
                 <div className="text-sm font-semibold">קישור להזדמנות</div>
               {linkedOpportunity ? (
                 <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -3513,7 +3513,7 @@ function LeadDetailPage({
               )}
             </div>
 
-            <div className="rounded-2xl border p-4 space-y-2">
+            <div className="rounded-xl border p-4 space-y-2">
                 <div className="text-sm font-semibold">קישור להצעת מחיר</div>
               {linkedQuotes.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -3527,7 +3527,7 @@ function LeadDetailPage({
               )}
             </div>
 
-            <div className="rounded-2xl border p-4 space-y-2">
+            <div className="rounded-xl border p-4 space-y-2">
                 <div className="text-sm font-semibold">קישור ללקוח</div>
               {localCustomer ? (
                 <div className="flex flex-wrap items-center gap-2 justify-between">
@@ -3560,14 +3560,14 @@ function KpiCard({
 }) {
   return (
     <Card>
-      <CardContent className="flex items-start justify-between p-5">
+      <CardContent className="flex items-start justify-between p-4">
         <div>
           <div className="text-sm text-slate-500">{title}</div>
-          <div className="mt-2 text-3xl font-bold">{value}</div>
+          <div className="mt-2 text-2xl font-bold">{value}</div>
           <div className="mt-2 text-sm text-slate-500">{sub}</div>
         </div>
-        <div className="rounded-2xl p-3" style={{ background: galit.soft }}>
-          <Icon className="h-6 w-6" style={{ color: galit.primary }} />
+        <div className="rounded-lg p-2" style={{ background: galit.soft }}>
+          <Icon className="h-5 w-5" style={{ color: galit.primary }} />
         </div>
       </CardContent>
     </Card>
@@ -3803,7 +3803,7 @@ function ReportsPaymentsSection({
     cn('rounded-xl px-3.5 py-1.5 text-sm font-semibold transition', active ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700');
 
   return (
-    <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+    <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
       <CardHeader className="pb-2">
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-xl font-bold text-slate-900">
           <span className="flex items-center gap-2"><FileCheck className="h-5 w-5 text-emerald-600" /> דוחות שנשלחו — סטטוס תשלום</span>
@@ -3816,12 +3816,12 @@ function ReportsPaymentsSection({
       <CardContent className="p-0">
         {/* ── סרגל סינון: סטטוס · טווח זמן · חיפוש ── */}
         <div className="flex flex-wrap items-center gap-2 px-4 pb-3 pt-1">
-          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
             <button type="button" className={seg(statusFilter === 'unpaid')} onClick={() => setStatusFilter('unpaid')}>טרם שולם</button>
             <button type="button" className={seg(statusFilter === 'paid')} onClick={() => setStatusFilter('paid')}>שולם</button>
             <button type="button" className={seg(statusFilter === 'all')} onClick={() => setStatusFilter('all')}>הכל</button>
           </div>
-          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
             <button type="button" className={seg(rangeDays === 7)} onClick={() => setRangeDays(7)}>7 ימים</button>
             <button type="button" className={seg(rangeDays === 30)} onClick={() => setRangeDays(30)}>30 יום</button>
             <button type="button" className={seg(rangeDays === 90)} onClick={() => setRangeDays(90)}>90 יום</button>
@@ -3839,9 +3839,9 @@ function ReportsPaymentsSection({
         </div>
 
         {loading ? (
-          <div className="py-10 text-center text-sm text-slate-400">טוען דוחות…</div>
+          <div className="py-6 text-center text-sm text-slate-400">טוען דוחות…</div>
         ) : filtered.length === 0 ? (
-          <div className="py-10 text-center text-sm text-slate-400">אין דוחות התואמים לסינון</div>
+          <div className="py-6 text-center text-sm text-slate-400">אין דוחות התואמים לסינון</div>
         ) : (
           <Table>
             <TableHeader>
@@ -4007,9 +4007,9 @@ function ManagerDashboard({
 
   const refresh = () => load();
 
-  if (loading) return <div className="rounded-3xl bg-white p-6 text-sm text-slate-500 shadow-sm">טוען דשבורד...</div>;
-  if (error) return <div className="rounded-3xl bg-red-50 p-6 text-sm text-red-700">{error}</div>;
-  if (!data) return <div className="rounded-3xl bg-white p-6 text-sm text-slate-500">אין נתונים.</div>;
+  if (loading) return <div className="rounded-xl bg-white p-4 text-sm text-slate-500 shadow-sm">טוען דשבורד...</div>;
+  if (error) return <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</div>;
+  if (!data) return <div className="rounded-xl bg-white p-4 text-sm text-slate-500">אין נתונים.</div>;
 
   const leavesDecor = (
     <div className="pointer-events-none absolute -left-3 -top-3 h-20 w-20 opacity-25">
@@ -4102,9 +4102,9 @@ function ManagerDashboard({
   ];
 
   return (
-    <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-6" dir="rtl">
-      <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-4" dir="rtl">
+      <div className="space-y-4">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {kpiCards.map((kpi) => {
             const onClick = (kpi as any).onClick as (() => void) | undefined;
             return (
@@ -4115,14 +4115,14 @@ function ManagerDashboard({
             >
               <Card
                 className={cn(
-                  'relative overflow-hidden rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]',
+                  'relative overflow-hidden rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]',
                   onClick && 'transition hover:shadow-[0_14px_34px_rgba(15,23,42,0.14)]',
                 )}
               >
                 {leavesDecor}
-                <CardContent className="p-6">
+                <CardContent className="p-4">
                   <div className="text-sm font-semibold text-slate-500">{kpi.title}</div>
-                  <div className="mt-3 text-4xl font-black text-slate-900">{kpi.value}</div>
+                  <div className="mt-3 text-2xl font-black text-slate-900">{kpi.value}</div>
                   <div className={cn('mt-2 text-xs', (kpi as any).subClass || 'text-green-700')}>{kpi.sub}</div>
                 </CardContent>
               </Card>
@@ -4131,8 +4131,8 @@ function ManagerDashboard({
           })}
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-3">
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+        <div className="grid gap-3 xl:grid-cols-3">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-xl font-bold text-slate-900">צינור מכירות (שלבים)</CardTitle>
             </CardHeader>
@@ -4149,7 +4149,7 @@ function ManagerDashboard({
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-xl font-bold text-slate-900">צמיחת הכנסה 2025-2026</CardTitle>
             </CardHeader>
@@ -4168,7 +4168,7 @@ function ManagerDashboard({
             </CardContent>
           </Card>
 
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-xl font-bold text-slate-900">פילוח לקוחות</CardTitle>
             </CardHeader>
@@ -4190,8 +4190,8 @@ function ManagerDashboard({
 
         {/* ── מתג טווח תאריכים (שבוע/חודש אחרון) — משפיע על שני הסקשנים שמתחת ── */}
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold text-slate-800">פעילות אחרונה</h2>
-          <div className="inline-flex rounded-2xl bg-slate-100 p-1">
+          <h2 className="text-base font-bold text-slate-800">פעילות אחרונה</h2>
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
             <button type="button" onClick={() => setRangeDays(7)} className={cn('rounded-xl px-4 py-1.5 text-sm font-semibold transition', rangeDays === 7 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>שבוע אחרון</button>
             <button type="button" onClick={() => setRangeDays(30)} className={cn('rounded-xl px-4 py-1.5 text-sm font-semibold transition', rangeDays === 30 ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}>חודש אחרון</button>
           </div>
@@ -4200,9 +4200,9 @@ function ManagerDashboard({
         {/* ── דוחות שנשלחו + סטטוס תשלום (מחליף את סקשן "המשוב") ── */}
         <ReportsPaymentsSection currentUser={currentUser} onOpenCustomerById={onOpenCustomerById} />
 
-        <div className="grid gap-4">
+        <div className="grid gap-3">
           {/* ── לקוחות שסומנו כלא רלוונטי ── */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between gap-2 text-xl font-bold text-slate-900">
                 <span className="flex items-center gap-2"><AlertCircle className="h-5 w-5 text-rose-500" /> לקוחות שסומנו כלא רלוונטי</span>
@@ -4211,7 +4211,7 @@ function ManagerDashboard({
             </CardHeader>
             <CardContent className="p-0">
               {notRelevantRecent.length === 0 ? (
-                <div className="py-10 text-center text-sm text-slate-400">אין לקוחות שסומנו כלא רלוונטי בטווח שנבחר</div>
+                <div className="py-6 text-center text-sm text-slate-400">אין לקוחות שסומנו כלא רלוונטי בטווח שנבחר</div>
               ) : (
                 <Table>
                   <TableHeader>
@@ -4237,7 +4237,7 @@ function ManagerDashboard({
         </div>
 
         <div className="flex justify-end">
-          <Button style={{ background: galit.primary }} className="rounded-2xl px-5" onClick={refresh}>
+          <Button style={{ background: galit.primary }} className="rounded-xl px-4" onClick={refresh}>
             רענון נתונים
           </Button>
         </div>
@@ -4250,21 +4250,21 @@ function ManagerDashboard({
           onClick={() => !targetSaving && setTargetOpen(false)}
         >
           <div
-            className="w-full max-w-md overflow-hidden rounded-3xl bg-white shadow-2xl"
+            className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             dir="rtl"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-              <div className="text-lg font-bold text-slate-900">עדכון יעד מכירות שנתי</div>
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
+              <div className="text-base font-bold text-slate-900">עדכון יעד מכירות שנתי</div>
               <button
-                className="rounded-full px-3 py-1 text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 onClick={() => !targetSaving && setTargetOpen(false)}
                 aria-label="סגור"
               >
                 ×
               </button>
             </div>
-            <div className="space-y-4 p-6">
+            <div className="space-y-3 p-4">
               <div>
                 <label className="mb-1 block text-sm font-semibold text-slate-600">יעד שנתי (₪)</label>
                 <Input
@@ -4287,14 +4287,14 @@ function ManagerDashboard({
               {targetError && <div className="text-sm text-red-600">{targetError}</div>}
               <div className="flex justify-end gap-2 pt-2">
                 <Button
-                  className="rounded-2xl bg-slate-100 px-5 text-slate-700 hover:bg-slate-200"
+                  className="rounded-xl bg-slate-100 px-4 text-slate-700 hover:bg-slate-200"
                   onClick={() => { if (!targetSaving) setTargetOpen(false); }}
                 >
                   ביטול
                 </Button>
                 <Button
                   style={{ background: galit.primary }}
-                  className="rounded-2xl px-5"
+                  className="rounded-xl px-4"
                   onClick={saveTarget}
                   disabled={targetSaving}
                 >
@@ -4313,20 +4313,20 @@ function ManagerDashboard({
           onClick={() => setReviewsOpen(false)}
         >
           <div
-            className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl"
+            className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             dir="rtl"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
               <div>
-                <div className="text-lg font-bold text-slate-900">ביקורות לקוחות</div>
+                <div className="text-base font-bold text-slate-900">ביקורות לקוחות</div>
                 <div className="text-xs text-slate-500">
                   {(data.reviews?.count ?? 0)} ביקורות · ממוצע {data.reviews?.avg ?? 0}★
                   {data.reviews?.satisfiedPct != null ? ` · ${data.reviews.satisfiedPct}% מרוצים` : ''}
                 </div>
               </div>
               <button
-                className="rounded-full px-3 py-1 text-2xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 onClick={() => setReviewsOpen(false)}
                 aria-label="סגור"
               >
@@ -4335,7 +4335,7 @@ function ManagerDashboard({
             </div>
             <div className="max-h-[calc(85vh-72px)] overflow-y-auto p-4">
               {(data.reviews?.list ?? []).length === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-500">אין ביקורות להצגה.</div>
+                <div className="p-5 text-center text-sm text-slate-500">אין ביקורות להצגה.</div>
               ) : (
                 <ul className="space-y-2">
                   {(data.reviews?.list ?? []).map((r, i) => {
@@ -4363,13 +4363,13 @@ function ManagerDashboard({
                     return r.customerId ? (
                       <li
                         key={r.customerId + i}
-                        className="cursor-pointer rounded-2xl border border-slate-100 p-3 transition hover:bg-slate-50"
+                        className="cursor-pointer rounded-xl border border-slate-100 p-3 transition hover:bg-slate-50"
                         onClick={() => { setReviewsOpen(false); onOpenCustomerById(r.customerId as string); }}
                       >
                         {row}
                       </li>
                     ) : (
-                      <li key={'nc' + i} className="rounded-2xl border border-slate-100 p-3">
+                      <li key={'nc' + i} className="rounded-xl border border-slate-100 p-3">
                         {row}
                       </li>
                     );
@@ -4425,15 +4425,15 @@ function EmployeeStatCard({
   accent: { from: string; to: string; ring: string; text: string };
 }) {
   return (
-    <div className="group relative overflow-hidden rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(15,23,42,0.12)]">
+    <div className="group relative overflow-hidden rounded-xl border border-slate-100 bg-white p-4 shadow-[0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_14px_32px_rgba(15,23,42,0.12)]">
       <div className={cn('absolute -left-10 -top-10 h-28 w-28 rounded-full opacity-10 transition-transform duration-500 group-hover:scale-125', accent.ring)} />
       <div className="relative flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[13px] font-semibold text-slate-500">{title}</div>
-          <div className="mt-2 text-[28px] font-black leading-none text-slate-900">{value}</div>
+          <div className="mt-2 text-2xl font-black leading-none text-slate-900">{value}</div>
           {sub ? <div className={cn('mt-2 text-xs font-medium', accent.text)}>{sub}</div> : null}
         </div>
-        <div className={cn('flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-sm', accent.from, accent.to)}>
+        <div className={cn('flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-white shadow-sm', accent.from, accent.to)}>
           <Icon className="h-6 w-6" />
         </div>
       </div>
@@ -4460,7 +4460,7 @@ function MetricProgressRow({ label, value, display, color }: { label: string; va
 function LeadBreakdownBars({ title, icon: Icon, rows, barClass }: { title: string; icon: React.ComponentType<{ className?: string }>; rows: Array<{ name: string; value: number }>; barClass: string }) {
   const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
   return (
-    <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+    <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
           <Icon className="h-4 w-4 text-slate-400" /> {title}
@@ -4468,7 +4468,7 @@ function LeadBreakdownBars({ title, icon: Icon, rows, barClass }: { title: strin
       </CardHeader>
       <CardContent className="space-y-3">
         {rows.length === 0 ? (
-          <div className="py-6 text-center text-sm text-slate-400">אין נתונים עדיין</div>
+          <div className="py-4 text-center text-sm text-slate-400">אין נתונים עדיין</div>
         ) : (
           rows.map((r) => (
             <div key={r.name}>
@@ -4550,30 +4550,30 @@ function DashboardPage({
   const isGalit = (currentUser.name || '').includes('גלית');
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-4" dir="rtl">
       {isGalit && <ReportsPaymentsSection currentUser={currentUser} />}
 
       {/* ── Hero ── */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-7 py-7 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-4 py-4 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
         <div className="pointer-events-none absolute -left-8 -top-10 h-44 w-44 rounded-full bg-white/10" />
         <div className="pointer-events-none absolute right-16 -bottom-16 h-52 w-52 rounded-full bg-white/5" />
         <Leaf className="pointer-events-none absolute -right-2 top-4 h-28 w-28 rotate-12 text-white/10" />
-        <div className="relative flex flex-wrap items-end justify-between gap-4">
+        <div className="relative flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-white/80">
               <Sparkles className="h-4 w-4" /> {todayLabel}
             </div>
-            <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">
+            <h1 className="mt-2 text-2xl font-black tracking-tight md:text-2xl">
               {greeting}{firstName ? `, ${firstName}` : ''}
             </h1>
             <p className="mt-1 text-sm text-white/85">סקירת הביצועים האישית שלך — הנתונים מתעדכנים ישירות ממסד הנתונים.</p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <div className="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+            <div className="rounded-xl bg-white/15 px-4 py-2 backdrop-blur-sm">
               <div className="text-[11px] text-white/75">לידים פעילים</div>
               <div className="text-xl font-black">{(k?.leadsNew ?? 0) + (k?.leadsInTreatment ?? 0)}</div>
             </div>
-            <div className="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur-sm">
+            <div className="rounded-xl bg-white/15 px-4 py-2 backdrop-blur-sm">
               <div className="text-[11px] text-white/75">אחוז זכייה</div>
               <div className="text-xl font-black">{Math.round((k?.winRate ?? 0) * 100)}%</div>
             </div>
@@ -4582,11 +4582,11 @@ function DashboardPage({
       </div>
 
       {loading && !me ? (
-        <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען את הדשבורד שלך…</div>
+        <div className="rounded-xl bg-white p-6 text-center text-sm text-slate-400 shadow-sm">טוען את הדשבורד שלך…</div>
       ) : (
         <>
           {/* ── KPI cards ── */}
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <EmployeeStatCard title="לידים חדשים" value={k?.leadsNew ?? 0} sub="ממתינים לטיפול" icon={Users} accent={{ from: 'from-blue-500', to: 'to-blue-600', ring: 'bg-blue-500', text: 'text-blue-600' }} />
             <EmployeeStatCard title="לידים בטיפול" value={k?.leadsInTreatment ?? 0} sub="בתהליך מכירה" icon={PhoneCall} accent={{ from: 'from-amber-500', to: 'to-orange-500', ring: 'bg-amber-500', text: 'text-amber-600' }} />
             <EmployeeStatCard title="הצעות מחיר פתוחות" value={k?.openQuotes ?? 0} sub="טיוטה / נשלחה" icon={FileText} accent={{ from: 'from-purple-500', to: 'to-fuchsia-600', ring: 'bg-purple-500', text: 'text-purple-600' }} />
@@ -4594,8 +4594,8 @@ function DashboardPage({
           </div>
 
           {/* ── Sales metrics + lead funnel ── */}
-          <div className="grid gap-4 xl:grid-cols-3">
-            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                   <Target className="h-4 w-4 text-slate-400" /> מדדי מכירות אישיים
@@ -4608,7 +4608,7 @@ function DashboardPage({
               </CardContent>
             </Card>
 
-            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                   <BarChart3 className="h-4 w-4 text-slate-400" /> צינור הלידים שלי
@@ -4632,23 +4632,23 @@ function DashboardPage({
                     </div>
                   );
                 })}
-                <div className="mt-2 rounded-2xl bg-slate-50 p-3 text-center">
+                <div className="mt-2 rounded-xl bg-slate-50 p-3 text-center">
                   <div className="text-xs text-slate-500">סה״כ לידים משויכים אליי</div>
-                  <div className="text-2xl font-black text-slate-900">{k?.totalLeads ?? 0}</div>
+                  <div className="text-xl font-black text-slate-900">{k?.totalLeads ?? 0}</div>
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* ── Lead breakdowns ── */}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 md:grid-cols-2">
             <LeadBreakdownBars title="לידים לפי מקור" icon={Radio} rows={me?.leadsBySource ?? []} barClass="bg-gradient-to-l from-teal-400 to-emerald-500" />
             <LeadBreakdownBars title="לידים לפי סוג שירות" icon={FlaskConical} rows={me?.leadsByServiceType ?? []} barClass="bg-gradient-to-l from-sky-400 to-blue-500" />
           </div>
 
           {/* ── Recent leads + my tasks ── */}
-          <div className="grid gap-4 xl:grid-cols-3">
-            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                   <Users className="h-4 w-4 text-slate-400" /> הלידים האחרונים שלי
@@ -4661,13 +4661,13 @@ function DashboardPage({
               </CardHeader>
               <CardContent className="p-0">
                 {(me?.recentLeads ?? []).length === 0 ? (
-                  <div className="py-10 text-center text-sm text-slate-400">אין לידים משויכים אליך עדיין</div>
+                  <div className="py-6 text-center text-sm text-slate-400">אין לידים משויכים אליך עדיין</div>
                 ) : (
                   <div className="divide-y divide-slate-100">
                     {(me?.recentLeads ?? []).map((l) => {
                       const st = LEAD_STATUS_STYLE[l.status] || { label: l.status || '—', cls: 'bg-slate-100 text-slate-600' };
                       return (
-                        <div key={l.id} className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-slate-50">
+                        <div key={l.id} className="flex items-center justify-between gap-3 px-4 py-2 transition-colors hover:bg-slate-50">
                           <div className="min-w-0">
                             <div className="truncate text-sm font-bold text-slate-800">{l.name}</div>
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
@@ -4685,7 +4685,7 @@ function DashboardPage({
               </CardContent>
             </Card>
 
-            <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+            <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                   <ClipboardList className="h-4 w-4 text-slate-400" /> המשימות שלי
@@ -4693,10 +4693,10 @@ function DashboardPage({
               </CardHeader>
               <CardContent className="space-y-2.5">
                 {myTasks.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-slate-400">אין משימות פתוחות 🎉</div>
+                  <div className="py-6 text-center text-sm text-slate-400">אין משימות פתוחות 🎉</div>
                 ) : (
                   myTasks.map((t) => (
-                    <div key={t.id} className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3">
+                    <div key={t.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
                       <div className="text-sm font-semibold text-slate-800">{t.title}</div>
                       <div className="mt-1 flex items-center justify-between">
                         <span className="text-xs text-slate-500">{t.due || '—'}</span>
@@ -4968,15 +4968,15 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
   const hourOptions = Array.from({ length: 24 }, (_, h) => h);
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-4" dir="rtl">
       {/* ── Hero ── */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-7 py-7 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-l from-[#2f5c32] via-[#3c7a3f] to-[#4ba647] px-4 py-4 text-white shadow-[0_18px_40px_rgba(47,92,50,0.35)]">
         <Star className="pointer-events-none absolute -right-2 top-3 h-28 w-28 rotate-12 text-white/10" />
         <div className="relative">
           <div className="flex items-center gap-2 text-sm font-medium text-white/80">
             <MessageCircle className="h-4 w-4" /> משוב ופולואו-אפ
           </div>
-          <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">משוב לקוחות ופולואו-אפ</h1>
+          <h1 className="mt-2 text-2xl font-black tracking-tight md:text-2xl">משוב לקוחות ופולואו-אפ</h1>
           <p className="mt-1 text-sm text-white/85">
             שלח בקשות משוב אישיות, הגדר שליחה אוטומטית אחרי סגירת עבודה, ונהל פולואו-אפ תקופתי ללקוחות.
           </p>
@@ -4995,7 +4995,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
             type="button"
             onClick={() => setTab(t.k)}
             className={cn(
-              'flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold transition',
+              'flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold transition',
               tab === t.k ? 'bg-[#2f5c32] text-white shadow-sm' : 'bg-white text-slate-600 hover:bg-slate-50',
             )}
           >
@@ -5007,11 +5007,11 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
       {/* ════════════ טאב: בקשות משוב ════════════ */}
       {tab === 'customers' && (
         loading ? (
-          <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען לקוחות למשוב…</div>
+          <div className="rounded-xl bg-white p-6 text-center text-sm text-slate-400 shadow-sm">טוען לקוחות למשוב…</div>
         ) : error ? (
-          <div className="rounded-3xl bg-red-50 p-6 text-sm text-red-700">{error}</div>
+          <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</div>
         ) : (
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" /> לקוחות עם עבודות שהסתיימו
@@ -5022,7 +5022,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
             </CardHeader>
             <CardContent className="p-0">
               {rows.length > 0 ? (
-                <div className="flex flex-wrap items-end gap-x-4 gap-y-3 border-b border-slate-100 px-5 py-4">
+                <div className="flex flex-wrap items-end gap-x-4 gap-y-3 border-b border-slate-100 px-4 py-4">
                   <div className="flex items-center gap-1.5 self-center text-slate-500">
                     <Filter className="h-4 w-4" /> <span className="text-xs font-bold">סינון</span>
                   </div>
@@ -5065,7 +5065,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
                   {filteredRows.map((row) => {
                     const sent = isFeedbackSent(row);
                     return (
-                      <div key={row.id} className="flex flex-col gap-3 px-5 py-4 transition-colors hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
+                      <div key={row.id} className="flex flex-col gap-3 px-4 py-4 transition-colors hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <span className="truncate text-sm font-bold text-slate-800">{row.name}</span>
@@ -5125,16 +5125,16 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
 
       {/* ════════════ טאב: פולואו אפ ════════════ */}
       {tab === 'followup' && fu && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* פולואו אפ גלובלי */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <Bell className="h-4 w-4 text-amber-500" /> פולואו-אפ תקופתי
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <label className="flex items-center gap-3 rounded-2xl bg-amber-50 px-4 py-3">
+            <CardContent className="space-y-3">
+              <label className="flex items-center gap-3 rounded-xl bg-amber-50 px-4 py-2">
                 <input type="checkbox" className="h-5 w-5 accent-amber-600" checked={fu.enabledGlobal} onChange={(e) => setFu({ ...fu, enabledGlobal: e.target.checked })} />
                 <div>
                   <div className="text-sm font-bold text-slate-800">פולואו-אפ אוטומטי לכל הלקוחות</div>
@@ -5181,7 +5181,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
           </Card>
 
           {/* בחירת לקוחות לפולואו-אפ */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <Users className="h-4 w-4 text-emerald-500" /> בחירת לקוחות לפולואו-אפ
@@ -5193,13 +5193,13 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
             </CardHeader>
             <CardContent className="p-0">
               {fuLoading ? (
-                <div className="py-10 text-center text-sm text-slate-400">טוען לקוחות…</div>
+                <div className="py-6 text-center text-sm text-slate-400">טוען לקוחות…</div>
               ) : (
                 <div className="max-h-[480px] divide-y divide-slate-100 overflow-auto">
                   {fuCustomers
                     .filter((c) => !fuSearch || (c.name || '').includes(fuSearch) || (c.city || '').includes(fuSearch))
                     .map((c) => (
-                      <div key={c.id} className="flex flex-col gap-2 px-5 py-3 hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
+                      <div key={c.id} className="flex flex-col gap-2 px-4 py-2 hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between">
                         <label className="flex min-w-0 flex-1 items-center gap-3 cursor-pointer">
                           <input type="checkbox" className="h-5 w-5 accent-emerald-600" checked={!!c.autoFollowupEnabled} onChange={(e) => void toggleFuCustomer(c, { autoFollowupEnabled: e.target.checked })} />
                           <div className="min-w-0">
@@ -5236,7 +5236,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
                         </div>
                       </div>
                     ))}
-                  {fuCustomers.length === 0 ? <div className="py-10 text-center text-sm text-slate-400">אין לקוחות להצגה</div> : null}
+                  {fuCustomers.length === 0 ? <div className="py-6 text-center text-sm text-slate-400">אין לקוחות להצגה</div> : null}
                 </div>
               )}
             </CardContent>
@@ -5246,16 +5246,16 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
 
       {/* ════════════ טאב: אוטומציה והגדרות ════════════ */}
       {tab === 'settings' && fb && sms && (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* אוטומציית משוב */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <Send className="h-4 w-4 text-emerald-500" /> שליחת משוב אוטומטית
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <label className="flex items-center gap-3 rounded-2xl bg-emerald-50 px-4 py-3">
+            <CardContent className="space-y-3">
+              <label className="flex items-center gap-3 rounded-xl bg-emerald-50 px-4 py-2">
                 <input type="checkbox" className="h-5 w-5 accent-emerald-600" checked={fb.enabled} onChange={(e) => setFb({ ...fb, enabled: e.target.checked })} />
                 <div>
                   <div className="text-sm font-bold text-slate-800">שלח בקשת משוב לכולם אוטומטית</div>
@@ -5302,17 +5302,17 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
           </Card>
 
           {/* הגדרות SMS */}
-          <Card className="rounded-3xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+          <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
                 <Smartphone className="h-4 w-4 text-blue-500" /> חיבור מספר החברה לשליחת SMS
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl bg-blue-50 px-4 py-3 text-xs text-blue-700">
+            <CardContent className="space-y-3">
+              <div className="rounded-xl bg-blue-50 px-4 py-2 text-xs text-blue-700">
                 חבר את מספר החברה כדי לשלוח ללקוחות בקשות משוב ופולואו-אפ ב-SMS. הזן את פרטי ספק ה-SMS שלך — ברגע שיחובר, אפשר יהיה לבחור SMS כערוץ השליחה האוטומטי.
               </div>
-              <label className="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3">
+              <label className="flex items-center gap-3 rounded-xl bg-slate-50 px-4 py-2">
                 <input type="checkbox" className="h-5 w-5 accent-blue-600" checked={sms.enabled} onChange={(e) => setSms({ ...sms, enabled: e.target.checked })} />
                 <div className="text-sm font-bold text-slate-800">הפעל שליחת SMS</div>
               </label>
@@ -5348,8 +5348,8 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
       {/* ── חלון עריכת טיוטת המשוב ── */}
       {compose && (
         <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => composeState !== 'sending' && setCompose(null)}>
-          <div className="w-full max-w-lg rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-800">
+          <div className="w-full max-w-lg rounded-xl border border-gray-200 bg-white p-4 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-base font-bold text-gray-800">
               <Mail size={20} className="text-emerald-500" /> בקשת משוב ל{compose.row.name}
             </div>
             <div className="mb-4 text-xs text-gray-500" dir="ltr">{compose.row.email}</div>
@@ -5362,12 +5362,12 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
             </div>
             {composeState === 'error' ? <div className="mb-3 text-xs text-rose-500">שליחת המייל נכשלה — ודא שחשבון ה-Outlook מחובר ונסה שוב.</div> : null}
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setCompose(null)} disabled={composeState === 'sending'} className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">ביטול</button>
+              <button type="button" onClick={() => setCompose(null)} disabled={composeState === 'sending'} className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50">ביטול</button>
               <button
                 type="button"
                 onClick={() => void sendCompose()}
                 disabled={composeState === 'sending' || composeState === 'sent'}
-                className="flex items-center gap-2 rounded-xl bg-[#4ba647] px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl bg-[#4ba647] px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
               >
                 {composeState === 'sending' ? <Loader2 size={16} className="animate-spin" /> : composeState === 'sent' ? <CheckCircle2 size={16} /> : <Send size={16} />}
                 {composeState === 'sent' ? 'נשלח' : 'שלח דרך Outlook'}
@@ -5380,8 +5380,8 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
       {/* ── מודל הזנת מספר טלפון ל-WhatsApp / SMS ── */}
       {phoneModal && (
         <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-black/50 p-4" onClick={() => setPhoneModal(null)}>
-          <div className="w-full max-w-sm rounded-3xl border border-gray-200 bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-1 flex items-center gap-2 text-lg font-bold text-gray-800">
+          <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center gap-2 text-base font-bold text-gray-800">
               {phoneModal.channel === 'whatsapp' ? <MessageCircle size={20} className="text-green-500" /> : <Phone size={20} className="text-blue-500" />}
               שליחת משוב ב{phoneModal.channel === 'whatsapp' ? '-WhatsApp' : '-SMS'}
             </div>
@@ -5397,12 +5397,12 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
               className="mb-4 h-11 w-full rounded-xl border border-gray-200 px-4 text-right text-base outline-none focus:border-green-400"
             />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setPhoneModal(null)} className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium hover:bg-gray-50">ביטול</button>
+              <button type="button" onClick={() => setPhoneModal(null)} className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium hover:bg-gray-50">ביטול</button>
               <button
                 type="button"
                 onClick={sendViaPhone}
                 disabled={!phoneModal.phone.replace(/\D/g, '')}
-                className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-50"
                 style={{ background: phoneModal.channel === 'whatsapp' ? '#16a34a' : '#2563eb' }}
               >
                 {phoneModal.channel === 'whatsapp' ? <MessageCircle size={16} /> : <Phone size={16} />} שלח
@@ -5467,15 +5467,15 @@ function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: App
   };
 
   return (
-    <div className="space-y-6" dir="rtl">
+    <div className="space-y-4" dir="rtl">
       {/* ── Hero ── */}
-      <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-l from-[#7f1d1d] via-[#b91c1c] to-[#ef4444] px-7 py-7 text-white shadow-[0_18px_40px_rgba(127,29,29,0.35)]">
+      <div className="relative overflow-hidden rounded-xl bg-gradient-to-l from-[#7f1d1d] via-[#b91c1c] to-[#ef4444] px-4 py-4 text-white shadow-[0_18px_40px_rgba(127,29,29,0.35)]">
         <X className="pointer-events-none absolute -right-2 top-3 h-28 w-28 rotate-12 text-white/10" />
         <div className="relative">
           <div className="flex items-center gap-2 text-sm font-medium text-white/80">
             <AlertCircle className="h-4 w-4" /> סיווג לקוחות
           </div>
-          <h1 className="mt-2 text-3xl font-black tracking-tight md:text-4xl">לקוחות שסווגו כלא רלוונטי</h1>
+          <h1 className="mt-2 text-2xl font-black tracking-tight md:text-2xl">לקוחות שסווגו כלא רלוונטי</h1>
           <p className="mt-1 text-sm text-white/85">
             כל לקוח שעובד סימן כ"לא רלוונטי" מופיע כאן, מקובץ לפי הסיבה. לחץ על סיבה כדי לראות את כל הלקוחות שתחתיה.
           </p>
@@ -5483,11 +5483,11 @@ function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: App
       </div>
 
       {loading ? (
-        <div className="rounded-3xl bg-white p-10 text-center text-sm text-slate-400 shadow-sm">טוען…</div>
+        <div className="rounded-xl bg-white p-6 text-center text-sm text-slate-400 shadow-sm">טוען…</div>
       ) : error ? (
-        <div className="rounded-3xl bg-red-50 p-6 text-sm text-red-700">{error}</div>
+        <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">{error}</div>
       ) : rows.length === 0 ? (
-        <div className="rounded-3xl bg-white p-12 text-center text-sm text-slate-400 shadow-sm">אין עדיין לקוחות שסווגו כלא רלוונטי</div>
+        <div className="rounded-xl bg-white p-12 text-center text-sm text-slate-400 shadow-sm">אין עדיין לקוחות שסווגו כלא רלוונטי</div>
       ) : (
         <div className="space-y-3">
           {NOT_RELEVANT_REASONS.map((reason) => {
@@ -5495,14 +5495,14 @@ function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: App
             const meta = NOT_RELEVANT_META[reason];
             const isOpen = openReason === reason;
             return (
-              <div key={reason} className={cn('overflow-hidden rounded-3xl border bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]', meta.border)}>
+              <div key={reason} className={cn('overflow-hidden rounded-xl border bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]', meta.border)}>
                 <button
                   type="button"
                   onClick={() => setOpenReason(isOpen ? null : reason)}
-                  className="flex w-full items-center justify-between gap-3 px-5 py-4 text-right transition hover:bg-slate-50"
+                  className="flex w-full items-center justify-between gap-3 px-4 py-4 text-right transition hover:bg-slate-50"
                 >
                   <div className="flex items-center gap-3">
-                    <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl', meta.bg, meta.color)}>{meta.icon}</div>
+                    <div className={cn('flex h-8 w-8 items-center justify-center rounded-xl', meta.bg, meta.color)}>{meta.icon}</div>
                     <div>
                       <div className="text-sm font-bold text-slate-800">{reason}</div>
                       <div className="text-[11px] text-slate-400">{list.length} לקוחות</div>
@@ -5523,7 +5523,7 @@ function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: App
                           key={c.id}
                           type="button"
                           onClick={() => onOpenCustomerById(c.id)}
-                          className="flex w-full flex-col gap-1 px-5 py-3 text-right transition hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between"
+                          className="flex w-full flex-col gap-1 px-4 py-2 text-right transition hover:bg-slate-50 lg:flex-row lg:items-center lg:justify-between"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm font-bold text-slate-800">{c.name}</div>
@@ -6168,19 +6168,19 @@ function LeadsPage({
   };
 
   return (
-    <div className="space-y-5" dir="rtl">
+    <div className="space-y-3" dir="rtl">
       {/* ════════════════════════════════════════════════
           HEADER — Big title
          ════════════════════════════════════════════════ */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight" style={{ color: '#1e293b' }}>
+          <h1 className="text-xl md:text-2xl font-extrabold tracking-tight" style={{ color: '#1e293b' }}>
             גלית CRM - מרכז מכירות - לידים
           </h1>
           <p className="text-sm text-slate-400 mt-1">ניהול פניות, לידים, הצעות ומעקב</p>
         </div>
         <button
-          className="flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white shadow-lg transition hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
+          className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white shadow-lg transition hover:shadow-xl hover:scale-[1.02] active:scale-[0.98]"
           style={{ background: 'linear-gradient(135deg, #4ba647, #3d8b3a)' }}
           onClick={() => setOpen(true)}
         >
@@ -6189,9 +6189,9 @@ function LeadsPage({
         </button>
       </div>
 
-      {loadError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-sm text-red-700">{loadError}</div>}
+      {loadError && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-700">{loadError}</div>}
       {(error || success) && (
-        <div className={`rounded-xl border px-4 py-2.5 text-sm font-medium ${error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
+        <div className={`rounded-xl border px-4 py-2 text-sm font-medium ${error ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -6199,14 +6199,14 @@ function LeadsPage({
       {/* ════════════════════════════════════════════════
           KPI CARDS — Clean business style
          ════════════════════════════════════════════════ */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
 
         {/* Card 1: לידים חדשים היום */}
-        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
-          <div className="flex items-center justify-between p-5">
+        <div className="rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-4">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-500 mb-1">לידים חדשים היום</div>
-              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiNewToday}</div>
+              <div className="text-2xl font-extrabold text-slate-900 leading-none">{kpiNewToday}</div>
               <div className="text-[11px] text-slate-400 mt-1.5">טופלו: {kpiContacted} &middot; ממתינים: {kpiWaiting}</div>
             </div>
             <div className="rounded-full bg-blue-100 p-3.5 shrink-0">
@@ -6216,11 +6216,11 @@ function LeadsPage({
         </div>
 
         {/* Card 2: פתוחים */}
-        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
-          <div className="flex items-center justify-between p-5">
+        <div className="rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-4">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-500 mb-1">לידים פתוחים</div>
-              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiOpen}</div>
+              <div className="text-2xl font-extrabold text-slate-900 leading-none">{kpiOpen}</div>
               <div className="text-[11px] text-slate-400 mt-1.5">חמים: {kpiHot}</div>
             </div>
             <div className="rounded-full bg-amber-100 p-3.5 shrink-0">
@@ -6230,11 +6230,11 @@ function LeadsPage({
         </div>
 
         {/* Card 3: נסגרו החודש */}
-        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
-          <div className="flex items-center justify-between p-5">
+        <div className="rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-4">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-500 mb-1">נסגרו החודש</div>
-              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiClosedMonthVal}</div>
+              <div className="text-2xl font-extrabold text-slate-900 leading-none">{kpiClosedMonthVal}</div>
               <div className="text-[11px] text-slate-400 mt-1.5">יחס סגירה: {kpiCloseRate}%</div>
             </div>
             <div className="rounded-full bg-green-100 p-3.5 shrink-0">
@@ -6244,11 +6244,11 @@ function LeadsPage({
         </div>
 
         {/* Card 4: במעקב היום */}
-        <div className="rounded-2xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
-          <div className="flex items-center justify-between p-5">
+        <div className="rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md transition p-0 overflow-hidden">
+          <div className="flex items-center justify-between p-4">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-500 mb-1">במעקב היום</div>
-              <div className="text-3xl font-extrabold text-slate-900 leading-none">{kpiFollowToday}</div>
+              <div className="text-2xl font-extrabold text-slate-900 leading-none">{kpiFollowToday}</div>
               <div className="text-[11px] text-slate-400 mt-1.5">הצעות פתוחות: {leads.filter((l) => (l.leadStatus || l.status || '') === 'QUOTE_SENT').length}</div>
             </div>
             <div className="rounded-full bg-blue-100 p-3.5 shrink-0">
@@ -6262,7 +6262,7 @@ function LeadsPage({
       {/* ════════════════════════════════════════════════
           FILTER BAR — Colorful chips + search
          ════════════════════════════════════════════════ */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* Search */}
           <div className="relative flex-1 min-w-[220px]">
@@ -6338,9 +6338,9 @@ function LeadsPage({
       {/* ════════════════════════════════════════════════
           LEADS TABLE — Full width with expandable rows
          ════════════════════════════════════════════════ */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-md overflow-hidden">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-md overflow-hidden">
         {/* Table title */}
-        <div className="bg-gradient-to-l from-slate-50 to-white border-b border-slate-100 px-5 py-3 flex items-center justify-between">
+        <div className="bg-gradient-to-l from-slate-50 to-white border-b border-slate-100 px-4 py-2 flex items-center justify-between">
           <span className="font-extrabold text-base text-slate-800">טבלת לידים</span>
           <span className="text-xs text-slate-400">{quickFiltered.length} מתוך {leads.length}</span>
         </div>
@@ -6350,23 +6350,23 @@ function LeadsPage({
           <table className="w-full text-sm border-collapse" dir="rtl">
             <thead className="sticky top-0 z-10">
               <tr className="bg-slate-100 border-b-2 border-slate-200">
-                <th className="px-2 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap" style={{ width: '30px' }}>&#128293;</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שם</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">טלפון</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שירות</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">מקור</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">סטטוס</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">נציג</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">קשר אחרון</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">משימה הבאה</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">&#8362;</th>
-                <th className="px-3 py-3 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">פעולות</th>
+                <th className="px-2 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap" style={{ width: '30px' }}>&#128293;</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שם</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">טלפון</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">שירות</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">מקור</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">סטטוס</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">נציג</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">קשר אחרון</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">משימה הבאה</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">&#8362;</th>
+                <th className="px-3 py-2 text-right text-[11px] font-extrabold text-slate-600 uppercase tracking-wider whitespace-nowrap">פעולות</th>
               </tr>
             </thead>
             <tbody>
               {quickFiltered.length === 0 && (
                 <tr><td colSpan={11} className="px-4 py-12 text-center text-slate-400">
-                  <div className="text-lg mb-1">&#128269;</div>
+                  <div className="text-base mb-1">&#128269;</div>
                   <div>לא נמצאו לידים</div>
                 </td></tr>
               )}
@@ -6381,10 +6381,10 @@ function LeadsPage({
                       className={`border-b border-slate-100/80 cursor-pointer transition-colors ${isExpanded ? 'ring-2 ring-inset ring-blue-400 border-b-0' : ''} ${rowBgByStatus(s)} hover:brightness-95`}
                       onClick={() => toggleExpandLead(lead)}
                     >
-                      <td className="px-2 py-2.5 text-center">
+                      <td className="px-2 py-2 text-center">
                         {isHot && <span className="text-base" title="ליד חם">&#128293;</span>}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                           <div>
@@ -6393,29 +6393,29 @@ function LeadsPage({
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2">
                         {lead.phone ? (
                           <span className="text-[13px] font-medium text-slate-700" dir="ltr">{phoneToDisplay(lead.phone)}</span>
                         ) : <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-3 py-2.5 text-[13px] text-slate-700 font-medium">{lead.serviceType || lead.service || '—'}</td>
-                      <td className="px-3 py-2.5 text-[13px] text-slate-600">{lead.source || '—'}</td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2 text-[13px] text-slate-700 font-medium">{lead.serviceType || lead.service || '—'}</td>
+                      <td className="px-3 py-2 text-[13px] text-slate-600">{lead.source || '—'}</td>
+                      <td className="px-3 py-2">
                         <span className={`inline-block rounded-md px-2.5 py-1 text-[11px] font-extrabold shadow-sm ${statusBadge(s)}`}>
                           {statusLabel(s)}
                         </span>
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] text-slate-600 font-medium">{leadAssigneeLabel(lead)}</td>
-                      <td className="px-3 py-2.5 text-[12px] text-slate-500">{timeAgo(lead.updatedAt || lead.createdAt)}</td>
-                      <td className="px-3 py-2.5 text-[12px] text-slate-500">
+                      <td className="px-3 py-2 text-[12px] text-slate-600 font-medium">{leadAssigneeLabel(lead)}</td>
+                      <td className="px-3 py-2 text-[12px] text-slate-500">{timeAgo(lead.updatedAt || lead.createdAt)}</td>
+                      <td className="px-3 py-2 text-[12px] text-slate-500">
                         {lead.nextFollowUpDate
                           ? new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')
                           : <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-3 py-2.5 text-[12px] font-bold text-slate-700" dir="ltr">
+                      <td className="px-3 py-2 text-[12px] font-bold text-slate-700" dir="ltr">
                         {(lead as any).estimatedValue ? `${(lead as any).estimatedValue.toLocaleString()}` : '—'}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-3 py-2">
                         <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                           {lead.phone && <a title="התקשר" href={phoneToTelHref(lead.phone) || undefined} className="rounded-md p-1.5 text-blue-600 hover:bg-blue-100 transition"><Phone className="h-3.5 w-3.5" /></a>}
                           {lead.phone && <a title="WhatsApp" href={phoneToWhatsAppHref(lead.phone) || undefined} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-green-600 hover:bg-green-100 transition"><MessageCircle className="h-3.5 w-3.5" /></a>}
@@ -6435,7 +6435,7 @@ function LeadsPage({
                             <div className="flex flex-col lg:flex-row">
 
                               {/* ═══════════ RIGHT SIDE — Lead info (light bg) ═══════════ */}
-                              <div className="flex-1 min-w-0 bg-white p-6">
+                              <div className="flex-1 min-w-0 bg-white p-4">
 
                                 {/* ── Header: Name + Status ── */}
                                 <div className="flex items-start justify-between mb-5">
@@ -6521,7 +6521,7 @@ function LeadsPage({
                                       <CalendarDays className="h-5 w-5 text-blue-600" />
                                       <span className="text-sm font-bold text-blue-800">פולואפ הבא:</span>
                                       {lead.nextFollowUpDate ? (
-                                        <span className="text-lg font-extrabold text-blue-900">{new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')}</span>
+                                        <span className="text-base font-extrabold text-blue-900">{new Date(lead.nextFollowUpDate).toLocaleDateString('he-IL')}</span>
                                       ) : (
                                         <span className="text-sm text-slate-400">לא נקבע</span>
                                       )}
@@ -6558,7 +6558,7 @@ function LeadsPage({
                               </div>
 
                               {/* ═══════════ LEFT SIDE — Actions (dark bg) ═══════════ */}
-                              <div className="w-full lg:w-[280px] shrink-0 p-5 flex flex-col gap-3" style={{ background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)' }}>
+                              <div className="w-full lg:w-[280px] shrink-0 p-4 flex flex-col gap-3" style={{ background: 'linear-gradient(180deg, #1e293b 0%, #0f172a 100%)' }}>
                                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">פעולות</div>
 
                                 {/* WhatsApp — big green */}
@@ -6602,30 +6602,30 @@ function LeadsPage({
                                 <div className="grid grid-cols-2 gap-2">
                                   {lead.phone && (
                                     <a href={phoneToTelHref(lead.phone) || undefined}
-                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                       <Phone className="h-3.5 w-3.5" />התקשר
                                     </a>
                                   )}
                                   {lead.email && (
                                     <a href={`mailto:${lead.email}`}
-                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                      className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                       <Mail className="h-3.5 w-3.5" />מייל
                                     </a>
                                   )}
                                   <button onClick={() => startEditLead(lead)}
-                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                     <Pencil className="h-3.5 w-3.5" />ערוך
                                   </button>
                                   <button onClick={() => patchLead(lead.id, { leadStatus: 'CONTACTED' })}
-                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                     <CheckCircle2 className="h-3.5 w-3.5" />טופל
                                   </button>
                                   <button onClick={() => convertToCustomer(lead)}
-                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                     <UserPlus className="h-3.5 w-3.5" />לקוח
                                   </button>
                                   <button onClick={() => openProjectFromLead(lead)}
-                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition">
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20 transition">
                                     <FolderKanban className="h-3.5 w-3.5" />פרויקט
                                   </button>
                                 </div>
@@ -6652,7 +6652,7 @@ function LeadsPage({
           const s = (lead.leadStatus || lead.status || 'NEW').toString();
           const isHot = s === 'NEGOTIATION' || s === 'QUOTE_SENT' || s === 'CONTACTED';
           return (
-            <div key={lead.id} onClick={() => onOpenLead(lead)} className={`rounded-2xl border border-slate-200 bg-white p-4 cursor-pointer active:bg-slate-50 shadow-sm ${rowBgByStatus(s)}`}>
+            <div key={lead.id} onClick={() => onOpenLead(lead)} className={`rounded-xl border border-slate-200 bg-white p-4 cursor-pointer active:bg-slate-50 shadow-sm ${rowBgByStatus(s)}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   {isHot && <span>&#128293;</span>}
@@ -6876,7 +6876,7 @@ function CitySearchInput({
   return (
     <div className="relative">
       <Input
-        className={cn('h-11 rounded-2xl border-slate-200', inputClassName)}
+        className={cn('h-11 rounded-xl border-slate-200', inputClassName)}
         placeholder="הקלד לחיפוש או בחר עיר"
         value={value}
         autoComplete="off"
@@ -6895,14 +6895,14 @@ function CitySearchInput({
       {icon}
       {open && (filtered.length > 0 || showAddManual) && (
         <ul
-          className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-2xl border border-slate-200 bg-white py-1 shadow-lg"
+          className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
           role="listbox"
         >
           {showAddManual && (
             <li>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-4 py-2.5 text-right text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                className="flex w-full items-center gap-2 px-4 py-2 text-right text-sm font-semibold text-blue-700 hover:bg-blue-50"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   cancelBlur();
@@ -6919,7 +6919,7 @@ function CitySearchInput({
             <li key={c}>
               <button
                 type="button"
-                className="w-full px-4 py-2.5 text-right text-sm text-slate-800 hover:bg-green-50"
+                className="w-full px-4 py-2 text-right text-sm text-slate-800 hover:bg-green-50"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   cancelBlur();
@@ -7521,10 +7521,10 @@ function CustomersPage({
   }, [customers]);
 
   const customerFormControlClass =
-    '!text-lg h-14 rounded-2xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100';
+    '!text-base h-14 rounded-xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100';
 
   return (
-    <div className="bg-[#f7fbf5] p-4 md:p-6 space-y-4" dir="rtl">
+    <div className="bg-[#f7fbf5] p-4 md:p-4 space-y-3" dir="rtl">
       {loadError && (
         <div className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
           {loadError}
@@ -7609,7 +7609,7 @@ function CustomersPage({
           <TableBody>
             {listLoading && pagedRows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">
+                <TableCell colSpan={7} className="py-6 text-center text-sm text-slate-500">
                   <span className="inline-flex items-center justify-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
                     טוען...
@@ -7704,12 +7704,12 @@ function CustomersPage({
       {/* Mobile card view */}
       <div className="space-y-2 md:hidden">
         {listLoading && pagedRows.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
+          <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-500">
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
             טוען...
           </div>
         ) : !listLoading && pagedRows.length === 0 ? (
-          <div className="rounded-lg border border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 text-center text-sm text-slate-500">
             <div>לא נמצאו לקוחות{debouncedSearch ? ' התואמים לחיפוש' : ''}</div>
             <div className="mt-2">
               <Button
@@ -7814,15 +7814,15 @@ function CustomersPage({
         hideHeader={false}
         titleClassName="text-xl font-bold text-slate-900"
       >
-        <div className="space-y-5" dir="rtl">
-          <div className="rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_4px_24px_rgba(15,23,42,0.07)] md:p-6">
+        <div className="space-y-3" dir="rtl">
+          <div className="rounded-xl border border-slate-200/90 bg-white p-4 shadow-[0_4px_24px_rgba(15,23,42,0.07)] md:p-4">
             <div className="mb-4 border-b border-slate-100 pb-3">
-              <div className="text-lg font-bold text-slate-900">
+              <div className="text-base font-bold text-slate-900">
                 {editingCustomerId ? 'פרטי הלקוח' : 'פרטי לקוח חדש'}
               </div>
               <div className="mt-1 text-base text-slate-500">מלאו את השדות הבאים — כל השדות מוצגים בבירור.</div>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <FormField label="שם הלקוח" labelClassName="text-base font-semibold text-slate-800">
                 <Input
                   className={customerFormControlClass}
@@ -7917,10 +7917,10 @@ function CustomersPage({
             </div>
           </div>
           {createError && (
-            <div className="rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-800">{createError}</div>
+            <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-2 text-sm text-red-800">{createError}</div>
           )}
           <Button
-            className="h-14 w-full rounded-2xl text-lg font-semibold text-white shadow-md"
+            className="h-14 w-full rounded-xl text-base font-semibold text-white shadow-md"
             style={{ background: galit.primary }}
             onClick={saveCustomer}
           >
@@ -8627,16 +8627,16 @@ function QuotesPage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>הצעות מחיר</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>הצעות מחיר</h1>
         <Button style={{ background: galit.primary }} onClick={() => setAiOpen(true)}>
           צור הצעת מחיר עם AI
         </Button>
       </div>
       <p className="mt-1 text-slate-500">ניהול טיוטות, חתימות ותוקף הצעות</p>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         <Card>
           <CardHeader>
             <CardTitle>רשימת הצעות</CardTitle>
@@ -8767,14 +8767,14 @@ function QuotesPage({
           </CardHeader>
           <CardContent className="space-y-3">
             {(error || success) && (
-              <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
+              <div className={`rounded-xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
                 {error || success}
               </div>
             )}
 
             <FormField label="לקוח">
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.customerId}
                 onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}
               >
@@ -8787,7 +8787,7 @@ function QuotesPage({
 
             <FormField label="פריט מחירון (אופציונלי)">
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={catalogSelectedId}
                 onChange={(e) => {
                   const id = e.target.value;
@@ -8824,7 +8824,7 @@ function QuotesPage({
                     }}
                   />
                 </FormField>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   יחידת חיוב: <span className="font-semibold">{catalogItems.find((x) => x.id === catalogSelectedId)?.billingUnit || '—'}</span>
                 </div>
               </div>
@@ -8832,7 +8832,7 @@ function QuotesPage({
 
             <FormField label="הזדמנות (אופציונלי)">
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.opportunityId}
                 onChange={(e) => setForm((p) => ({ ...p, opportunityId: e.target.value }))}
               >
@@ -8848,7 +8848,7 @@ function QuotesPage({
             </FormField>
             <FormField label="שירות">
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 dir="rtl"
                 value={form.service}
                 onChange={(e) => {
@@ -8865,7 +8865,7 @@ function QuotesPage({
               <p className="mt-1 text-xs text-slate-500">תבניות מקושרות לפי ערך שירות זה (זהה לשדה «סוג שירות» בהגדרות תבנית).</p>
             </FormField>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4" dir="rtl">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4" dir="rtl">
               <div className="text-sm font-semibold text-slate-800">תבנית הצעת מחיר</div>
               {(() => {
                 const tplSel =
@@ -8884,7 +8884,7 @@ function QuotesPage({
               {quoteTemplatesList.length > 1 && (
                 <FormField label="בחר תבנית (מספר תבניות לשירות)">
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                     value={selectedTemplateId}
                     onChange={(e) => setSelectedTemplateId(e.target.value)}
                   >
@@ -8956,7 +8956,7 @@ function QuotesPage({
             </FormField>
 
             {templateLineItems.length > 0 && (
-              <div className="rounded-2xl border border-slate-100 p-3 text-sm" dir="rtl">
+              <div className="rounded-xl border border-slate-100 p-3 text-sm" dir="rtl">
                 <div className="mb-2 font-semibold">פריטים (מברירת מחדל של התבנית)</div>
                 <ul className="space-y-1 text-slate-700">
                   {templateLineItems.map((li, idx) => (
@@ -8985,7 +8985,7 @@ function QuotesPage({
               <div>
                 <div className="mb-1 text-xs text-slate-500">סוג הנחה</div>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                   value={form.discountType}
                   onChange={(e) => setForm((p) => ({ ...p, discountType: e.target.value }))}
                 >
@@ -9015,7 +9015,7 @@ function QuotesPage({
             <div>
               <div className="mb-1 text-xs text-slate-500">סטטוס</div>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.status}
                 onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
               >
@@ -9032,7 +9032,7 @@ function QuotesPage({
 
             <div className="text-sm text-slate-600">סה״כ כולל מע״מ: <span className="font-semibold">{formatCurrencyILS(computeTotal)}</span></div>
             {currentQuoteId && (
-              <div className="rounded-2xl border border-green-100 bg-green-50/50 px-3 py-2 text-xs text-green-900">
+              <div className="rounded-xl border border-green-100 bg-green-50/50 px-3 py-2 text-xs text-green-900">
                 מזהה הצעה נוכחית: <span className="font-mono font-semibold">{currentQuoteId}</span>
                 {pdfReady ? ' · PDF זמין' : ' · עדיין ללא PDF'}
               </div>
@@ -9062,7 +9062,7 @@ function QuotesPage({
         <div className="space-y-3" dir="rtl">
           <p className="text-xs text-slate-500">תצוגת HTML כפי שתישמר ב־«תוכן HTML מלא». PDF נוכחי נוצר בשרת מטקסט מנוקה מתגים.</p>
           <div
-            className="max-h-[70vh] overflow-auto rounded-2xl border bg-white p-4 text-sm max-w-none"
+            className="max-h-[70vh] overflow-auto rounded-xl border bg-white p-4 text-sm max-w-none"
             dangerouslySetInnerHTML={{ __html: contentHtml || '<p class="text-slate-400">אין תוכן</p>' }}
           />
           <Button variant="outline" type="button" onClick={() => setPreviewOpen(false)}>
@@ -9097,7 +9097,7 @@ function QuotesPage({
       </Modal>
 
       <Modal open={aiOpen} onClose={() => setAiOpen(false)} title="צור הצעת מחיר עם AI" maxWidth="max-w-3xl">
-        <div className="space-y-4" dir="rtl">
+        <div className="space-y-3" dir="rtl">
           <FormField label="תיאור חופשי של בקשת הלקוח">
             <Textarea
               placeholder="לדוגמה: הלקוח צריך בדיקת קרינה לבית פרטי ברעננה, 5 חדרים, כולל חצר..."
@@ -9114,8 +9114,8 @@ function QuotesPage({
           </div>
 
           {aiDraft && (
-            <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
-              <div className="text-lg font-bold">{aiDraft.title}</div>
+            <div className="space-y-3 rounded-xl border bg-slate-50 p-4">
+              <div className="text-base font-bold">{aiDraft.title}</div>
               {aiDraft.customerNameHint && (
                 <div className="text-sm text-green-800">זיהוי לקוח (הצעה): {aiDraft.customerNameHint}</div>
               )}
@@ -9173,9 +9173,9 @@ function ProjectsPage({
   onOpenProject: (project: Project) => void;
 }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>פרויקטים</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>פרויקטים</h1>
         <p className="mt-1 text-slate-500">ביצוע, אבני דרך ומעקב התקדמות</p>
       </div>
       <Card>
@@ -9212,7 +9212,7 @@ function ProjectsPage({
               ))}
               {projects.length === 0 && (
                 <TableRow>
-                  <TableCell className="py-10 text-center text-slate-500" colSpan={8}>
+                  <TableCell className="py-6 text-center text-slate-500" colSpan={8}>
                     אין פרויקטים להצגה
                   </TableCell>
                 </TableRow>
@@ -9551,10 +9551,10 @@ function ProjectDetailsPage({
   }, [project.id, project.status, project.assignedTechnicianId, project.assignedTechnician?.name, project.name, technicians, quotes]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>פרטי פרויקט</h1>
+          <h1 className="text-2xl font-bold" style={{ color: galit.text }}>פרטי פרויקט</h1>
           <p className="mt-1 text-slate-500">{project.name}</p>
         </div>
         <div className="flex gap-2">
@@ -9568,29 +9568,29 @@ function ProjectDetailsPage({
       </div>
 
       {saveSuccess && (
-        <div className="rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-700">
+        <div className="rounded-xl bg-green-50 px-4 py-2 text-sm text-green-700">
           {saveSuccess}
         </div>
       )}
       {saveError && (
-        <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">
           {saveError}
         </div>
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'details' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('details')}>פרטי פרויקט</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'tasks' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('tasks')}>משימות</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'quotes' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('quotes')}>הצעות מחיר</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'reports' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('reports')}>דוחות</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'docs' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('docs')}>מסמכים</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'lab' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('lab')}>דגימות</button>
-        <button className={cn('rounded-2xl px-3 py-2 text-sm', tab === 'history' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('history')}>היסטוריה</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'details' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('details')}>פרטי פרויקט</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'tasks' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('tasks')}>משימות</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'quotes' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('quotes')}>הצעות מחיר</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'reports' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('reports')}>דוחות</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'docs' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('docs')}>מסמכים</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'lab' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('lab')}>דגימות</button>
+        <button className={cn('rounded-xl px-3 py-2 text-sm', tab === 'history' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700')} onClick={() => setTab('history')}>היסטוריה</button>
       </div>
 
       {tab === 'details' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="grid gap-3 md:grid-cols-2">
               <div>
                 <div className="text-sm text-slate-500">לקוח</div>
@@ -9695,7 +9695,7 @@ function ProjectDetailsPage({
               <div>
                 <div className="text-sm text-slate-500">דחיפות</div>
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                   value={draft.urgency}
                   onChange={(e) => setDraft((prev) => ({ ...prev, urgency: e.target.value }))}
                 >
@@ -9717,7 +9717,7 @@ function ProjectDetailsPage({
 
       {tab === 'tasks' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="font-semibold">משימות</div>
               {canCreateTask && (
@@ -9731,7 +9731,7 @@ function ProjectDetailsPage({
             ) : (
               <div className="space-y-2">
                 {tasks.map((t) => (
-                  <div key={t.id} className="rounded-2xl border p-4">
+                  <div key={t.id} className="rounded-xl border p-4">
                     <div className="font-medium">{t.title}</div>
                     <div className="mt-1 text-xs text-slate-500">{taskStatusLabelForTasks(t.status)} · {taskPriorityLabel(t.priority)}</div>
                   </div>
@@ -9756,12 +9756,12 @@ function ProjectDetailsPage({
           </div>
           <div>
             <div className="mb-1 text-xs text-slate-500">תאריך יעד</div>
-            <input type="date" className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={taskForm.dueDate} onChange={(e) => setTaskForm((p) => ({ ...p, dueDate: e.target.value }))} />
+            <input type="date" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={taskForm.dueDate} onChange={(e) => setTaskForm((p) => ({ ...p, dueDate: e.target.value }))} />
           </div>
           <div>
             <div className="mb-1 text-xs text-slate-500">עדיפות</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={taskForm.priority}
               onChange={(e) => setTaskForm((p) => ({ ...p, priority: e.target.value }))}
             >
@@ -9774,7 +9774,7 @@ function ProjectDetailsPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סטטוס</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={taskForm.status}
               onChange={(e) => setTaskForm((p) => ({ ...p, status: e.target.value }))}
             >
@@ -9787,7 +9787,7 @@ function ProjectDetailsPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סוג</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={taskForm.type}
               onChange={(e) => setTaskForm((p) => ({ ...p, type: e.target.value }))}
             >
@@ -9811,7 +9811,7 @@ function ProjectDetailsPage({
 
       {tab === 'quotes' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="flex items-center justify-between">
               <div className="font-semibold">הצעות מחיר</div>
               {canCreateQuote && (
@@ -9821,7 +9821,7 @@ function ProjectDetailsPage({
               )}
             </div>
             {canCreateQuote && !project.customerId && (
-              <div className="rounded-2xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              <div className="rounded-xl bg-amber-50 px-4 py-2 text-sm text-amber-800">
                 כדי ליצור הצעת מחיר, צריך לשייך לקוח לפרויקט.
               </div>
             )}
@@ -9845,7 +9845,7 @@ function ProjectDetailsPage({
             ) : (
               <div className="space-y-2">
                 {quotes.map((q) => (
-                  <div key={q.id} className="rounded-2xl border p-4">
+                  <div key={q.id} className="rounded-xl border p-4">
                     <div className="font-medium">{q.service}</div>
                     <div className="mt-1 text-xs text-slate-500">
                       {statusLabel(q.status)} · {(currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.canViewFinance) ? formatCurrencyILS(Number(q.amount)) : '-'}
@@ -9860,14 +9860,14 @@ function ProjectDetailsPage({
 
       {tab === 'reports' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div className="font-semibold">דוחות</div>
               {canCreateReport && (
                 <div className="flex gap-2">
                   <Input value={newReportTitle} onChange={(e) => setNewReportTitle(e.target.value)} placeholder="כותרת דוח (אופציונלי)" />
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                     value={newReportType}
                     onChange={(e) => setNewReportType(e.target.value)}
                   >
@@ -9896,7 +9896,7 @@ function ProjectDetailsPage({
             ) : (
               <div className="space-y-2">
                 {reports.map((r) => (
-                  <div key={r.id} className="rounded-2xl border p-4">
+                  <div key={r.id} className="rounded-xl border p-4">
                     <div className="font-medium">{r.title}</div>
                     <div className="mt-1 text-xs text-slate-500">{reportTypeLabel(r.type)}</div>
                   </div>
@@ -9909,7 +9909,7 @@ function ProjectDetailsPage({
 
       {tab === 'docs' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="flex items-center justify-between">
               <div className="font-semibold">מסמכים</div>
               <Button
@@ -9950,7 +9950,7 @@ function ProjectDetailsPage({
             ) : (
               <div className="space-y-2">
                 {documents.map((d) => (
-                  <div key={d.id} className="rounded-2xl border p-4">
+                  <div key={d.id} className="rounded-xl border p-4">
                     <div className="font-medium">{d.name}</div>
                     <div className="mt-1 text-xs text-slate-500">{documentTypeLabel(d.documentType)} · {d.filePath}</div>
                   </div>
@@ -9963,7 +9963,7 @@ function ProjectDetailsPage({
 
       {tab === 'lab' && (
         <Card>
-          <CardContent className="space-y-4 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="flex items-center justify-between">
               <div className="font-semibold">דגימות</div>
               <Button
@@ -10002,7 +10002,7 @@ function ProjectDetailsPage({
             ) : (
               <div className="space-y-2">
                 {labSamples.map((s) => (
-                  <div key={s.id} className="rounded-2xl border p-4">
+                  <div key={s.id} className="rounded-xl border p-4">
                     <div className="font-medium">{s.sampleNumber}</div>
                     <div className="mt-1 text-xs text-slate-500">
                       {labSampleTypeLabel(s.sampleType)} · {labSampleStatusLabel(s.sampleStatus)} · {labSampleResultStatusLabel(s.resultStatus)}
@@ -10017,7 +10017,7 @@ function ProjectDetailsPage({
 
       {tab === 'history' && (
         <Card>
-          <CardContent className="space-y-3 p-5">
+          <CardContent className="space-y-3 p-4">
             <div className="font-semibold">היסטוריה</div>
             <EntityTimeline items={projectTimeline} emptyText="אין אירועים להצגה לפרויקט זה" />
           </CardContent>
@@ -10358,18 +10358,18 @@ function OpportunitiesPage({
   };
 
   return (
-    <div className="space-y-5" dir="rtl">
+    <div className="space-y-3" dir="rtl">
       {/* RTL: עמודה ראשונה ב-DOM = ימין (KPI), אחרונה = שמאל (פרופיל) */}
-      <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)_280px]">
-        <aside className="order-1 space-y-4 lg:order-1">
+      <div className="grid gap-3 lg:grid-cols-[300px_minmax(0,1fr)_280px]">
+        <aside className="order-1 space-y-3 lg:order-1">
           <Card className="rounded-[24px] border-0 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.08)]">
-            <CardContent className="space-y-4 p-5">
+            <CardContent className="space-y-3 p-4">
               <div className="flex items-center justify-between gap-2">
                 <div className="min-w-0 text-right">
                   <div className="font-bold text-slate-900">{currentUser.name}</div>
                   <div className="text-xs text-slate-500">{roleLabel(currentUser.role)}</div>
                 </div>
-                <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-green-50 text-green-700">
+                <div className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-green-50 text-green-700">
                   <Bell className="h-5 w-5" />
                   <span className="absolute -left-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
                     3
@@ -10377,7 +10377,7 @@ function OpportunitiesPage({
                 </div>
               </div>
               <Button
-                className="h-11 w-full rounded-2xl font-semibold shadow-sm"
+                className="h-11 w-full rounded-xl font-semibold shadow-sm"
                 style={{ background: galit.primary }}
                 disabled={saving}
                 onClick={handleCreateQuoteFromPanel}
@@ -10389,7 +10389,7 @@ function OpportunitiesPage({
 
           <Card className="rounded-[24px] border-0 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg font-bold text-slate-900">KPIs</CardTitle>
+              <CardTitle className="text-base font-bold text-slate-900">KPIs</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex justify-between gap-2">
@@ -10474,18 +10474,18 @@ function OpportunitiesPage({
           </Card>
         </aside>
 
-        <div className="order-2 space-y-4 lg:order-2">
-          <div className="rounded-[28px] border border-green-100/80 bg-[#f7fbf5] p-5 shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="order-2 space-y-3 lg:order-2">
+          <div className="rounded-xl border border-green-100/80 bg-[#f7fbf5] p-4 shadow-[0_12px_40px_rgba(15,23,42,0.06)]">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="min-w-0 flex-1 text-center md:text-right">
-                <h1 className="text-2xl font-black leading-tight text-slate-900 md:text-4xl">
+                <h1 className="text-xl font-black leading-tight text-slate-900 md:text-2xl">
                   לוח הזדמנויות מכירה - <span style={{ color: galit.primary }}>גלית</span>
                 </h1>
                 <p className="mt-2 text-sm text-slate-500 md:text-base">סקירת ביצועים והמלצות</p>
               </div>
               <div className="flex flex-shrink-0 flex-col gap-2 sm:flex-row">
                 <Button
-                  className="rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md"
+                  className="rounded-xl px-4 py-2 text-sm font-semibold shadow-md"
                   style={{ background: galit.primary }}
                   onClick={() => setOpen(true)}
                 >
@@ -10493,7 +10493,7 @@ function OpportunitiesPage({
                   הוספת הזדמנות חדשה
                 </Button>
                 <Button
-                  className="rounded-2xl px-5 py-2.5 text-sm font-semibold shadow-md"
+                  className="rounded-xl px-4 py-2 text-sm font-semibold shadow-md"
                   style={{ background: galit.primary }}
                   onClick={() => setOpen(true)}
                 >
@@ -10507,7 +10507,7 @@ function OpportunitiesPage({
               <div className="relative min-w-0">
                 <Search className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <Input
-                  className="h-12 rounded-2xl border-slate-200 bg-white pr-11 text-sm shadow-sm"
+                  className="h-12 rounded-xl border-slate-200 bg-white pr-11 text-sm shadow-sm"
                   placeholder="חיפוש לפי שם הזדמנות, לקוח, שלב או הערות..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -10516,7 +10516,7 @@ function OpportunitiesPage({
               <div className="min-w-[140px]">
                 <div className="mb-1 text-xs text-slate-500">סטטוס / שלב</div>
                 <select
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
                   value={stageFilter}
                   onChange={(e) => setStageFilter(e.target.value)}
                 >
@@ -10531,7 +10531,7 @@ function OpportunitiesPage({
               <div className="min-w-[120px]">
                 <div className="mb-1 text-xs text-slate-500">תאריך</div>
                 <select
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
                   value={datePreset}
                   onChange={(e) => setDatePreset(e.target.value as 'all' | 'month' | 'quarter')}
                 >
@@ -10543,7 +10543,7 @@ function OpportunitiesPage({
               <div className="min-w-[140px]">
                 <div className="mb-1 text-xs text-slate-500">מיון</div>
                 <select
-                  className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm"
+                  className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                 >
@@ -10555,9 +10555,9 @@ function OpportunitiesPage({
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {filteredOpportunities.length === 0 ? (
-              <div className="col-span-full rounded-3xl border border-dashed border-green-200 bg-white/80 py-14 text-center text-sm text-slate-500">
+              <div className="col-span-full rounded-xl border border-dashed border-green-200 bg-white/80 py-14 text-center text-sm text-slate-500">
                 לא נמצאו הזדמנות מתאימות
               </div>
             ) : (
@@ -10570,7 +10570,7 @@ function OpportunitiesPage({
                     key={o.id}
                     type="button"
                     onClick={() => openDetails(o)}
-                    className="group w-full rounded-[22px] border border-slate-100 bg-white p-5 text-right shadow-[0_10px_28px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(15,23,42,0.1)]"
+                    className="group w-full rounded-[22px] border border-slate-100 bg-white p-4 text-right shadow-[0_10px_28px_rgba(15,23,42,0.07)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(15,23,42,0.1)]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -10586,7 +10586,7 @@ function OpportunitiesPage({
                       <span className="font-medium text-slate-700">{o.projectOrServiceName}</span>
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <span className="text-lg font-black text-green-700">{formatCurrencyILS(Number(o.estimatedValue || 0))}</span>
+                      <span className="text-base font-black text-green-700">{formatCurrencyILS(Number(o.estimatedValue || 0))}</span>
                       <span className="text-xs text-slate-500">
                         {o.targetCloseDate ? new Date(o.targetCloseDate).toLocaleDateString('he-IL') : 'ללא תאריך יעד'}
                       </span>
@@ -10610,17 +10610,17 @@ function OpportunitiesPage({
           </div>
         </div>
 
-        <aside className="order-3 space-y-4 lg:order-3">
+        <aside className="order-3 space-y-3 lg:order-3">
           <Card className="overflow-hidden rounded-[24px] border-0 bg-white shadow-[0_12px_36px_rgba(15,23,42,0.08)]">
-            <CardContent className="space-y-4 p-6">
+            <CardContent className="space-y-3 p-4">
               <div className="flex flex-col items-center text-center">
                 <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-green-700 ring-4 ring-green-50">
-                  <UserCircle2 className="h-12 w-12" />
+                  <UserCircle2 className="h-9 w-9" />
                 </div>
-                <div className="mt-3 text-lg font-bold text-slate-900">{currentUser.name}</div>
+                <div className="mt-3 text-base font-bold text-slate-900">{currentUser.name}</div>
                 <div className="text-sm text-slate-500">{roleLabel(currentUser.role)}</div>
               </div>
-              <div className="rounded-2xl bg-slate-50 p-4 text-right">
+              <div className="rounded-xl bg-slate-50 p-4 text-right">
                 <div className="text-xs font-semibold text-slate-400">פרטי קשר</div>
                 <div className="mt-3 space-y-2 text-sm">
                   <div className="flex items-center justify-between gap-2">
@@ -10638,7 +10638,7 @@ function OpportunitiesPage({
                 </div>
               </div>
               <Button
-                className="h-12 w-full rounded-2xl text-base font-semibold shadow-md"
+                className="h-12 w-full rounded-xl text-base font-semibold shadow-md"
                 style={{ background: galit.primary }}
                 disabled={saving}
                 onClick={handleCreateQuoteFromPanel}
@@ -10658,7 +10658,7 @@ function OpportunitiesPage({
               <button
                 key={o.id}
                 type="button"
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-100 bg-white px-4 py-3 text-right text-sm hover:bg-slate-50"
+                className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-white px-4 py-2 text-right text-sm hover:bg-slate-50"
                 onClick={() => {
                   setQuotePickOpen(false);
                   void createQuoteFromOpportunityFor(o);
@@ -10675,7 +10675,7 @@ function OpportunitiesPage({
       <Modal open={open} onClose={() => setOpen(false)} title="הזדמנות חדשה" maxWidth="max-w-xl">
         <div className="space-y-3">
           <select
-            className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             value={form.customerId}
             onChange={(e) => setForm((prev) => ({ ...prev, customerId: e.target.value }))}
           >
@@ -10692,7 +10692,7 @@ function OpportunitiesPage({
           />
           <Select value={form.pipelineStage} onChange={(v) => setForm((p) => ({ ...p, pipelineStage: v }))} options={OPPORTUNITY_STAGES} />
           <select
-            className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
             value={form.assignedUserId}
             onChange={(e) => setForm((prev) => ({ ...prev, assignedUserId: e.target.value }))}
           >
@@ -10703,7 +10703,7 @@ function OpportunitiesPage({
           </select>
           <Input type="date" value={form.targetCloseDate} onChange={(e) => setForm((p) => ({ ...p, targetCloseDate: e.target.value }))} placeholder="תאריך סגירה יעד" />
           <Textarea value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} placeholder="הערות" />
-          {error && <div className="rounded-2xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
+          {error && <div className="rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
           <Button className="w-full" style={{ background: galit.primary }} onClick={createOpportunity}>
             {saving ? 'שומר...' : 'שמור'}
           </Button>
@@ -10717,12 +10717,12 @@ function OpportunitiesPage({
           ) : (
             <>
               {(error || success) && (
-                <div className={`rounded-2xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
+                <div className={`rounded-xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
                   {error || success}
                 </div>
               )}
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.customerId}
                 onChange={(e) => setForm((prev) => ({ ...prev, customerId: e.target.value }))}
               >
@@ -10740,7 +10740,7 @@ function OpportunitiesPage({
               <Select value={form.pipelineStage} onChange={(v) => setForm((p) => ({ ...p, pipelineStage: v }))} options={OPPORTUNITY_STAGES} />
               <Input type="date" value={form.targetCloseDate} onChange={(e) => setForm((p) => ({ ...p, targetCloseDate: e.target.value }))} placeholder="תאריך סגירה יעד" />
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.assignedUserId}
                 onChange={(e) => setForm((prev) => ({ ...prev, assignedUserId: e.target.value }))}
               >
@@ -10763,7 +10763,7 @@ function OpportunitiesPage({
                 </Button>
               </div>
 
-              <div className="rounded-2xl border p-3">
+              <div className="rounded-xl border p-3">
                 <div className="mb-2 font-semibold">הצעות מחיר</div>
                 {Array.isArray((selected as any)?.quotes) && (selected as any).quotes.length > 0 ? (
                   <div className="space-y-2">
@@ -10943,17 +10943,17 @@ function ReportsPage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>דוחות</h1>
+          <h1 className="text-2xl font-bold" style={{ color: galit.text }}>דוחות</h1>
           <p className="mt-1 text-slate-500">דוחות לפי פרויקט, לקוח וסטטוס</p>
         </div>
         <Button style={{ background: galit.primary }} onClick={openCreate}>דוח חדש</Button>
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
+        <div className={`rounded-xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -11003,13 +11003,13 @@ function ReportsPage({
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? 'עריכת דוח' : 'דוח חדש'} maxWidth="max-w-2xl">
         <div className="space-y-3">
           <Input value={form.title} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} placeholder="כותרת" />
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
             <option value="">פרויקט (אופציונלי)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.projectNumber ? `${p.projectNumber} - ${p.name}` : p.name}</option>
             ))}
           </select>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
             <option value="">לקוח (אופציונלי)</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
@@ -11018,7 +11018,7 @@ function ReportsPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סוג דוח</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={form.reportType}
               onChange={(e) => setForm((p) => ({ ...p, reportType: e.target.value }))}
             >
@@ -11032,7 +11032,7 @@ function ReportsPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סטטוס</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={form.status}
               onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
             >
@@ -11043,13 +11043,13 @@ function ReportsPage({
               ))}
             </select>
           </div>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.createdById} onChange={(e) => setForm((p) => ({ ...p, createdById: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.createdById} onChange={(e) => setForm((p) => ({ ...p, createdById: e.target.value }))}>
             <option value="">נוצר ע״י</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>{u.name}</option>
             ))}
           </select>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.reviewedById} onChange={(e) => setForm((p) => ({ ...p, reviewedById: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.reviewedById} onChange={(e) => setForm((p) => ({ ...p, reviewedById: e.target.value }))}>
             <option value="">בודק (אופציונלי)</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>{u.name}</option>
@@ -11179,17 +11179,17 @@ function DocumentsPage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>מסמכים</h1>
+          <h1 className="text-2xl font-bold" style={{ color: galit.text }}>מסמכים</h1>
           <p className="mt-1 text-slate-500">מסמכים לפי פרויקט/דוח (ללא העלאת קבצים בשלב זה)</p>
         </div>
         <Button style={{ background: galit.primary }} onClick={openCreate}>מסמך חדש</Button>
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
+        <div className={`rounded-xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -11235,7 +11235,7 @@ function DocumentsPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סוג מסמך</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={form.documentType}
               onChange={(e) => setForm((p) => ({ ...p, documentType: e.target.value }))}
             >
@@ -11247,19 +11247,19 @@ function DocumentsPage({
             </select>
           </div>
           <Input value={form.filePath} onChange={(e) => setForm((p) => ({ ...p, filePath: e.target.value }))} placeholder="נתיב/קישור לקובץ (טקסט)" />
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
             <option value="">פרויקט (אופציונלי)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.projectNumber ? `${p.projectNumber} - ${p.name}` : p.name}</option>
             ))}
           </select>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
             <option value="">לקוח (אופציונלי)</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.reportId} onChange={(e) => setForm((p) => ({ ...p, reportId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.reportId} onChange={(e) => setForm((p) => ({ ...p, reportId: e.target.value }))}>
             <option value="">דוח (אופציונלי)</option>
             {reports.map((r) => (
               <option key={r.id} value={r.id}>{r.title}</option>
@@ -11426,17 +11426,17 @@ function LabSamplesPage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>מעבדה / דגימות</h1>
+          <h1 className="text-2xl font-bold" style={{ color: galit.text }}>מעבדה / דגימות</h1>
           <p className="mt-1 text-slate-500">ניהול דגימות, סטטוסים ותוצאות בסיסיות</p>
         </div>
         <Button style={{ background: galit.primary }} onClick={openCreate}>דגימה חדשה</Button>
       </div>
 
       {(error || success) && (
-        <div className={`rounded-2xl px-4 py-3 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
+        <div className={`rounded-xl px-4 py-2 text-sm ${error ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-800'}`}>
           {error || success}
         </div>
       )}
@@ -11482,13 +11482,13 @@ function LabSamplesPage({
             <div className="mb-1 text-xs text-slate-500">מספר דגימה</div>
             <Input value={form.sampleNumber} onChange={(e) => setForm((p) => ({ ...p, sampleNumber: e.target.value }))} placeholder="מספר דגימה" />
           </div>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}>
             <option value="">פרויקט (אופציונלי)</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>{p.projectNumber ? `${p.projectNumber} - ${p.name}` : p.name}</option>
             ))}
           </select>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.customerId} onChange={(e) => setForm((p) => ({ ...p, customerId: e.target.value }))}>
             <option value="">לקוח (אופציונלי)</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
@@ -11497,7 +11497,7 @@ function LabSamplesPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סוג דגימה</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={form.sampleType}
               onChange={(e) => setForm((p) => ({ ...p, sampleType: e.target.value }))}
             >
@@ -11512,7 +11512,7 @@ function LabSamplesPage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סטטוס דגימה</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={form.sampleStatus}
               onChange={(e) => setForm((p) => ({ ...p, sampleStatus: e.target.value }))}
             >
@@ -11528,7 +11528,7 @@ function LabSamplesPage({
             <Input type="date" value={form.receivedAt} onChange={(e) => setForm((p) => ({ ...p, receivedAt: e.target.value }))} placeholder="התקבל" />
             <Input type="date" value={form.analyzedAt} onChange={(e) => setForm((p) => ({ ...p, analyzedAt: e.target.value }))} placeholder="נותח" />
           </div>
-          <select className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.collectedById} onChange={(e) => setForm((p) => ({ ...p, collectedById: e.target.value }))}>
+          <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.collectedById} onChange={(e) => setForm((p) => ({ ...p, collectedById: e.target.value }))}>
             <option value="">נאסף ע״י (אופציונלי)</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>{u.name}</option>
@@ -11543,7 +11543,7 @@ function LabSamplesPage({
             <div className="md:col-span-1">
               <div className="mb-1 text-xs text-slate-500">סטטוס תוצאה</div>
               <select
-                className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.resultStatus}
                 onChange={(e) => setForm((p) => ({ ...p, resultStatus: e.target.value }))}
               >
@@ -12658,9 +12658,9 @@ function SettingsPage({
   const sampleStatuses = ['COLLECTED', 'RECEIVED', 'IN_ANALYSIS', 'COMPLETED', 'REPORTED'];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>הגדרות</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>הגדרות</h1>
         <p className="mt-1 text-slate-500">ניהול עובדים, יעדים ותצורת מערכת</p>
       </div>
 
@@ -12668,7 +12668,7 @@ function SettingsPage({
         {enabledTabs.map((t) => (
           <button
             key={t.key}
-            className={cn('rounded-2xl px-4 py-2 text-sm font-semibold', tab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
+            className={cn('rounded-xl px-4 py-2 text-sm font-semibold', tab === t.key ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200')}
             onClick={() => setTab(t.key)}
           >
             {t.label}
@@ -12676,9 +12676,9 @@ function SettingsPage({
         ))}
       </div>
 
-      {empError && <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{empError}</div>}
-      {catalogError && <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{catalogError}</div>}
-      {settingsMsg && <div className="rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">{settingsMsg}</div>}
+      {empError && <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{empError}</div>}
+      {catalogError && <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{catalogError}</div>}
+      {settingsMsg && <div className="rounded-xl bg-green-50 px-4 py-2 text-sm text-green-800">{settingsMsg}</div>}
 
       {tab === 'import' && canDataImport && (
         <DataImportWizard
@@ -12736,7 +12736,7 @@ function SettingsPage({
               הסיווגים נשמרים בשרת (טבלת <span className="font-mono text-xs">CustomerClassification</span>).
               רק מנהל מערכת או מנהל יכולים להוסיף סיווג חדש כאן. משתמשים אחרים יכולים רק לבחור מתוך הרשימה בטופסי לקוח.
             </p>
-            <div className="overflow-x-auto rounded-2xl border border-slate-100">
+            <div className="overflow-x-auto rounded-xl border border-slate-100">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -12767,7 +12767,7 @@ function SettingsPage({
                 </TableBody>
               </Table>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
               <div className="mb-2 text-sm font-semibold text-slate-800">הוספת סיווג חדש</div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="min-w-0 flex-1">
@@ -12801,9 +12801,9 @@ function SettingsPage({
         return (
           <Card>
             <CardHeader><CardTitle>הפרופיל שלי</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-lg font-bold text-slate-800">{currentUser.name}</div>
+            <CardContent className="space-y-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-base font-bold text-slate-800">{currentUser.name}</div>
                 <div className="text-sm text-slate-500">{currentUser.email}</div>
                 <div className="mt-1 text-xs text-slate-400">תפקיד: {employeeRoleLabel(currentUser.role)}</div>
               </div>
@@ -12833,7 +12833,7 @@ function SettingsPage({
           </CardHeader>
           <CardContent className="p-0">
             {empLoading ? (
-              <div className="p-5 text-sm text-slate-500">טוען...</div>
+              <div className="p-4 text-sm text-slate-500">טוען...</div>
             ) : (
               <Table>
                 <TableHeader>
@@ -12918,19 +12918,19 @@ function SettingsPage({
       )}
 
       {tab === 'employeeHandoff' && canEmployeeHandoff && (
-        <div className="space-y-5" dir="rtl">
+        <div className="space-y-3" dir="rtl">
           {handoffError ? (
-            <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{handoffError}</div>
+            <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{handoffError}</div>
           ) : null}
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">העברת אחריות לעובד אחר</h2>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">העברת אחריות לעובד אחר</h2>
             <p className="mt-1 text-sm text-slate-600">
               מעביר שיוכים מהעובד הישן ליעד. לא משנים יוצרים היסטוריים — רק אחריות נוכחית (assigned / owner). פעילויות ליד נשארות עם יוצר
               מקורי ולא מועברות. &quot;לקוחות&quot; = הזדמנויות מכירה; &quot;הצעות מחיר&quot; = הזדמנויות עם הצעה (אם לא סומן
               &quot;לקוחות&quot;, יועברו רק אלה).
             </p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <FormField label="עובד מקור (היוצא)">
                 <select
                   value={transferFromId}
@@ -12939,7 +12939,7 @@ function SettingsPage({
                     setHandoffError('');
                   }}
                   disabled={transferBusy}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="">— בחר —</option>
                   {(employees as any[]).map((e: any) => (
@@ -12957,7 +12957,7 @@ function SettingsPage({
                     setHandoffError('');
                   }}
                   disabled={transferBusy}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="">— בחר —</option>
                   {employeesActiveOnly.map((e: any) => (
@@ -12968,7 +12968,7 @@ function SettingsPage({
                 </select>
               </FormField>
             </div>
-            <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/80 p-4">
               <div className="mb-2 text-sm font-semibold text-slate-800">מה להעביר</div>
               <div className="grid gap-2 sm:grid-cols-2">
                 {(
@@ -12999,12 +12999,12 @@ function SettingsPage({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">העתקת הרשאות</h2>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">העתקת הרשאות</h2>
             <p className="mt-1 text-sm text-slate-600">
               מעתיק לשרת את התפקיד, כל דגלי ההרשאות, מחלקות שירות ושדה מחלקה מהעובד המקור ליעד.
             </p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <FormField label="עובד מקור">
                 <select
                   value={copyPermFromId}
@@ -13013,7 +13013,7 @@ function SettingsPage({
                     setHandoffError('');
                   }}
                   disabled={copyPermBusy}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="">— בחר —</option>
                   {(employees as any[]).map((e: any) => (
@@ -13031,7 +13031,7 @@ function SettingsPage({
                     setHandoffError('');
                   }}
                   disabled={copyPermBusy}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="">— בחר —</option>
                   {employeesActiveOnly.map((e: any) => (
@@ -13053,8 +13053,8 @@ function SettingsPage({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-semibold text-slate-900">סימון עובד כלא פעיל</h2>
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-base font-semibold text-slate-900">סימון עובד כלא פעיל</h2>
             <p className="mt-1 text-sm text-slate-600">
               העובד לא יוכל להתחבר; הרשומה נשמרת במערכת וההיסטוריה לא נמחקת. בחירות רגילות במערכת מציגות בעיקר עובדים פעילים.
             </p>
@@ -13067,7 +13067,7 @@ function SettingsPage({
                     setHandoffError('');
                   }}
                   disabled={inactiveBusy}
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                 >
                   <option value="">— בחר —</option>
                   {employeesActiveOnly.map((e: any) => (
@@ -13100,7 +13100,7 @@ function SettingsPage({
               {['ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN'].map((role) => {
                 const d = rolePermissionDetails(role);
                 return (
-                  <div key={role} className="rounded-3xl border p-4">
+                  <div key={role} className="rounded-xl border p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <div className="font-semibold">{role}</div>
@@ -13193,7 +13193,7 @@ function SettingsPage({
             <div className="text-sm text-slate-500">ניהול קטגוריות ושירותי משנה (נשמר ב־Settings). ישמש בהמשך לידים/פרויקטים/הצעות.</div>
             <div className="space-y-3">
               {services.map((s, idx) => (
-                <div key={s.category} className="rounded-3xl border p-4">
+                <div key={s.category} className="rounded-xl border p-4">
                   <div className="flex items-center justify-between">
                     <div className="font-semibold">{s.category}</div>
                     <button
@@ -13247,12 +13247,12 @@ function SettingsPage({
         <Card>
           <CardHeader><CardTitle>סטטוסים</CardTitle></CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-3xl border p-4"><div className="font-semibold">לידים</div><div className="mt-2 text-sm text-slate-600">{leadStatuses.join(' · ')}</div></div>
-            <div className="rounded-3xl border p-4"><div className="font-semibold">פרויקטים</div><div className="mt-2 text-sm text-slate-600">{projectStatuses.join(' · ')}</div></div>
-            <div className="rounded-3xl border p-4"><div className="font-semibold">משימות</div><div className="mt-2 text-sm text-slate-600">{taskStatuses.join(' · ')}</div></div>
-            <div className="rounded-3xl border p-4"><div className="font-semibold">הצעות מחיר</div><div className="mt-2 text-sm text-slate-600">{quoteStatuses.join(' · ')}</div></div>
-            <div className="rounded-3xl border p-4"><div className="font-semibold">דוחות</div><div className="mt-2 text-sm text-slate-600">{reportStatuses.join(' · ')}</div></div>
-            <div className="rounded-3xl border p-4"><div className="font-semibold">דגימות</div><div className="mt-2 text-sm text-slate-600">{sampleStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">לידים</div><div className="mt-2 text-sm text-slate-600">{leadStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">פרויקטים</div><div className="mt-2 text-sm text-slate-600">{projectStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">משימות</div><div className="mt-2 text-sm text-slate-600">{taskStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">הצעות מחיר</div><div className="mt-2 text-sm text-slate-600">{quoteStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">דוחות</div><div className="mt-2 text-sm text-slate-600">{reportStatuses.join(' · ')}</div></div>
+            <div className="rounded-xl border p-4"><div className="font-semibold">דגימות</div><div className="mt-2 text-sm text-slate-600">{sampleStatuses.join(' · ')}</div></div>
           </CardContent>
         </Card>
       )}
@@ -13292,7 +13292,7 @@ function SettingsPage({
           </CardHeader>
           <CardContent className="p-0">
             {catalogLoading ? (
-              <div className="p-5 text-sm text-slate-500">טוען...</div>
+              <div className="p-4 text-sm text-slate-500">טוען...</div>
             ) : (
               <Table>
                 <TableHeader>
@@ -13342,20 +13342,20 @@ function SettingsPage({
 
       {/* תבניות Word — מוצג באותו טאב "פריטים" מתחת לטבלת הפריטים/מחירון */}
       {tab === 'catalog' && (
-        <div className="space-y-6 mt-6" dir="rtl">
+        <div className="space-y-4 mt-4" dir="rtl">
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
+            <h2 className="text-base font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
             <p className="mt-1 text-sm text-slate-600">העלה קובץ Word מקורי שישמש כתבנית למיזוג הצעות מחיר</p>
           </div>
 
-          {qtError && <div className="rounded-2xl bg-red-50 px-4 py-2 text-sm text-red-700">{qtError}</div>}
+          {qtError && <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">{qtError}</div>}
 
           {canManageQuoteTemplates && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">יצירת תבנית חדשה</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3">
                 <FormField label="שם התבנית">
                   <Input
                     value={qtCreate.name}
@@ -13365,7 +13365,7 @@ function SettingsPage({
                 </FormField>
                 <FormField label="סוג שירות / קטגוריה">
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                     value={qtCreate.serviceType}
                     onChange={(e) => setQtCreate((p) => ({ ...p, serviceType: e.target.value }))}
                   >
@@ -13557,7 +13557,7 @@ function SettingsPage({
             maxWidth="max-w-lg"
           >
             {qtEdit && (
-              <div className="space-y-4" dir="rtl">
+              <div className="space-y-3" dir="rtl">
                 <FormField label="שם התבנית">
                   <Input
                     value={qtEdit.name}
@@ -13567,7 +13567,7 @@ function SettingsPage({
                 </FormField>
                 <FormField label="סוג שירות / קטגוריה">
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                     value={qtEdit.serviceType}
                     onChange={(e) => setQtEdit((p) => (p ? { ...p, serviceType: e.target.value } : p))}
                   >
@@ -13589,7 +13589,7 @@ function SettingsPage({
                     פעיל
                   </label>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
                   <div className="text-sm font-medium">החלפת קובץ Word (DOCX)</div>
                   <p className="text-xs text-slate-600 break-all">
                     קובץ נוכחי:{' '}
@@ -13650,10 +13650,10 @@ function SettingsPage({
                 <EmailInput value={system.mainEmail} onChange={(v) => setSystem((p) => ({ ...p, mainEmail: v }))} placeholder="מייל ראשי" />
               </FormField>
             </div>
-            <div className="rounded-3xl border p-4">
+            <div className="rounded-xl border p-4">
               <div className="text-sm text-slate-500">תצוגה מקדימה</div>
               <div className="mt-3 flex items-center gap-3">
-                <img src={system.logoPath || galitLogo} alt="logo" className="h-10 w-10 rounded-full border object-contain bg-white" />
+                <img src={system.logoPath || galitLogo} alt="logo" className="h-8 w-8 rounded-full border object-contain bg-white" />
                 <div>
                   <div className="font-semibold">{system.companyName || '—'}</div>
                   <div className="text-xs text-slate-500">{system.mainPhone || '—'} · {system.mainEmail || '—'}</div>
@@ -13697,7 +13697,7 @@ function SettingsPage({
             <select
               value={empForm.role}
               onChange={(e) => setEmpForm((p) => ({ ...p, role: e.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
             >
               {(['ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN'] as const).map((r) => (
                 <option key={r} value={r}>
@@ -13713,7 +13713,7 @@ function SettingsPage({
             </select>
           </FormField>
 
-          <div className="rounded-2xl border bg-slate-50 p-4">
+          <div className="rounded-xl border bg-slate-50 p-4">
             <div className="mb-2 text-sm font-semibold">הרשאות בסיסיות</div>
             <div className="mb-3 text-xs text-slate-500">נשמר ב-DB ומשפיע על תצוגה וכפתורים בשלב 1.</div>
             <div className="space-y-3 text-sm">
@@ -13757,7 +13757,7 @@ function SettingsPage({
             <select
               value={empForm.status}
               onChange={(e) => setEmpForm((p) => ({ ...p, status: e.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
             >
               <option value="ACTIVE">פעיל</option>
               <option value="INACTIVE">לא פעיל</option>
@@ -13769,7 +13769,7 @@ function SettingsPage({
           </FormField>
 
           {canManageUsersEffective && (
-          <div className="rounded-2xl border bg-slate-50 p-4">
+          <div className="rounded-xl border bg-slate-50 p-4">
             <div className="mb-2 text-sm font-semibold">מחלקות / תחומי אחריות</div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {SERVICE_DEPARTMENT_OPTIONS.map((opt) => {
@@ -13801,7 +13801,7 @@ function SettingsPage({
           )}
 
           {/* ── מצב תצוגה: בהיר / כהה ── (העדפת ממשק — מוצג תמיד) */}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -13827,7 +13827,7 @@ function SettingsPage({
           </div>
 
           {empEditing && (
-            <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
               <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-blue-800">
                 <Mail className="h-4 w-4" /> חיבור Outlook (מומלץ)
               </div>
@@ -13882,7 +13882,7 @@ function SettingsPage({
 
           {/* חשבון OneDrive נפרד — זמין לכל העובדים. חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד. */}
           {empEditing && (
-            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-4">
               <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-sky-800">
                 <FolderKanban className="h-4 w-4" /> חשבון OneDrive נפרד
               </div>
@@ -13937,7 +13937,7 @@ function SettingsPage({
             </div>
           )}
 
-          <div className="rounded-2xl border border-blue-200 bg-blue-50/50 p-4">
+          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
             <div className="mb-1 text-sm font-semibold text-blue-800">חתימת מייל אישית</div>
             <div className="mb-2 text-xs text-slate-500">תתווסף אוטומטית לתחתית הצעות מחיר שנשלחות במייל (אם תסומן בחלון השליחה).</div>
             <textarea
@@ -14046,19 +14046,19 @@ function SettingsPage({
           <FormField label={'אחוז מע"מ'}>
             <Input value={catalogForm.vatPercent} onChange={(e) => setCatalogForm((p) => ({ ...p, vatPercent: e.target.value }))} placeholder={'אחוז מע"מ'} />
           </FormField>
-          <div className="flex items-center gap-3 rounded-2xl border px-4 py-3">
+          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
             <input type="checkbox" checked={catalogForm.isActive} onChange={(e) => setCatalogForm((p) => ({ ...p, isActive: e.target.checked }))} />
             <span className="text-sm">פעיל</span>
           </div>
-          <div className="flex items-center gap-3 rounded-2xl border px-4 py-3">
+          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
             <input type="checkbox" checked={catalogForm.requiresQuantity} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresQuantity: e.target.checked }))} />
             <span className="text-sm">דורש כמות</span>
           </div>
-          <div className="flex items-center gap-3 rounded-2xl border px-4 py-3">
+          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
             <input type="checkbox" checked={catalogForm.requiresSiteVisit} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresSiteVisit: e.target.checked }))} />
             <span className="text-sm">דורש ביקור שטח</span>
           </div>
-          <div className="flex items-center gap-3 rounded-2xl border px-4 py-3">
+          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
             <input type="checkbox" checked={catalogForm.requiresReport} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresReport: e.target.checked }))} />
             <span className="text-sm">דורש דוח</span>
           </div>
@@ -14194,9 +14194,9 @@ function FieldSchedulePage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>
           יומן שטח
         </h1>
         <p className="mt-1 text-slate-500">תכנון יומי: ביקורי שטח, שיוך טכנאים וסטטוסים</p>
@@ -14208,7 +14208,7 @@ function FieldSchedulePage({
             <div className="mb-1 text-xs text-slate-500">תאריך</div>
             <input
               type="date"
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={filterDate}
               onChange={(e) => setFilterDate(e.target.value)}
             />
@@ -14216,7 +14216,7 @@ function FieldSchedulePage({
           <div>
             <div className="mb-1 text-xs text-slate-500">טכנאי</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={filterTech}
               onChange={(e) => setFilterTech(e.target.value)}
             >
@@ -14229,7 +14229,7 @@ function FieldSchedulePage({
           <div>
             <div className="mb-1 text-xs text-slate-500">עיר</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={filterCity}
               onChange={(e) => setFilterCity(e.target.value)}
             >
@@ -14242,7 +14242,7 @@ function FieldSchedulePage({
           <div>
             <div className="mb-1 text-xs text-slate-500">קטגוריה</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={filterServiceCategory}
               onChange={(e) => setFilterServiceCategory(e.target.value)}
             >
@@ -14255,7 +14255,7 @@ function FieldSchedulePage({
           <div>
             <div className="mb-1 text-xs text-slate-500">סטטוס</div>
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
             >
@@ -14341,7 +14341,7 @@ function FieldSchedulePage({
               ))}
               {sorted.length === 0 && (
                 <TableRow>
-                  <TableCell className="py-10 text-center text-slate-500" colSpan={9}>
+                  <TableCell className="py-6 text-center text-slate-500" colSpan={9}>
                     אין ביקורים בהתאם למסננים
                   </TableCell>
                 </TableRow>
@@ -15984,7 +15984,7 @@ function TasksPage({
 
   /* render snooze popup content (reusable across all 3 locations) */
   const renderSnoozePopup = (taskId: string, positionClass: string) => (
-    <div className={`absolute ${positionClass} z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl py-2 min-w-[260px]`} style={{ direction: 'rtl' }}>
+    <div className={`absolute ${positionClass} z-50 rounded-xl bg-white border border-slate-200 shadow-2xl py-2 min-w-[260px]`} style={{ direction: 'rtl' }}>
       {/* Quick */}
       <div className="px-3 pt-1 pb-1.5">
         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">מהיר</span>
@@ -16258,7 +16258,7 @@ function TasksPage({
       void coachSnoozeToDate(task, d);
     };
     return (
-      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+      <div className="absolute bottom-full mb-3 z-50 rounded-xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
         <button type="button" onClick={() => setCoachActionPopup(null)} className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" style={{ width: 24, height: 24 }}>
           <X className="h-4 w-4" />
         </button>
@@ -16331,7 +16331,7 @@ function TasksPage({
     const busy = !!followupBusy[task.id];
     const otherUsers = users.filter((u) => u.id !== task.ownerId && u.status === 'פעיל');
     return (
-      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[280px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+      <div className="absolute bottom-full mb-3 z-50 rounded-xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[280px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
         <button type="button" onClick={() => setCoachActionPopup(null)} className="absolute top-2 left-2 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors" style={{ width: 24, height: 24 }}>
           <X className="h-4 w-4" />
         </button>
@@ -16344,7 +16344,7 @@ function TasksPage({
                 key={u.id}
                 disabled={busy}
                 onClick={async () => { await saveCustomerForTask(task); await transferTaskToEmployee(task.id, u.id); returnToTasksScreen(); }}
-                className="w-full text-right px-3 py-2.5 rounded-xl text-sm font-bold text-slate-700 border border-slate-100 bg-slate-50 hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors disabled:opacity-40 flex items-center gap-2.5"
+                className="w-full text-right px-3 py-2 rounded-xl text-sm font-bold text-slate-700 border border-slate-100 bg-slate-50 hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors disabled:opacity-40 flex items-center gap-2.5"
               >
                 <span className="flex items-center justify-center rounded-full bg-white border border-slate-200 flex-shrink-0" style={{ width: 28, height: 28, fontSize: 12, fontWeight: 800 }}>{(u.name || '?').trim().charAt(0)}</span>
                 <span className="flex flex-col items-start leading-tight">
@@ -16368,7 +16368,7 @@ function TasksPage({
     const showOtherInput = coachActionPopup?.taskId === task.id && coachActionPopup.type === 'lost' && coachLostOtherReason[task.id] !== undefined;
     const otherVal = coachLostOtherReason[task.id] || '';
     return (
-      <div className="absolute bottom-full mb-3 z-50 rounded-2xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
+      <div className="absolute bottom-full mb-3 z-50 rounded-xl bg-white border border-slate-200 shadow-2xl p-4 min-w-[240px]" style={{ direction: 'rtl', right: '50%', transform: 'translateX(50%)' }}>
         <button
           type="button"
           onClick={() => { setCoachActionPopup(null); setCoachLostOtherReason((p) => { const n = { ...p }; delete n[task.id]; return n; }); }}
@@ -16595,15 +16595,15 @@ function TasksPage({
 
   /* ── render ── */
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       {/* ═══ HEADER ═══ */}
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-extrabold" style={{ color: galit.text }}>משימות</h1>
+          <h1 className="text-2xl font-extrabold" style={{ color: galit.text }}>משימות</h1>
           <p className="mt-1 text-sm text-slate-500">ניהול משימות, פולואפים ומעקב יומי</p>
         </div>
         <button
-          className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
+          className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-md transition-all duration-150 hover:shadow-lg"
           style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
           onClick={() => setOpen(true)}
         >
@@ -16623,14 +16623,14 @@ function TasksPage({
         ].map((kpi) => {
           const KIcon = kpi.icon;
           return (
-            <div key={kpi.title} className="rounded-2xl bg-white p-4 shadow-sm border border-slate-100 transition-all duration-150 hover:shadow-md">
+            <div key={kpi.title} className="rounded-xl bg-white p-4 shadow-sm border border-slate-100 transition-all duration-150 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="text-xs font-medium text-slate-500" style={{ fontSize: 13 }}>{kpi.title}</div>
-                  <div className="mt-1 text-3xl font-extrabold" style={{ color: galit.text }}>{kpi.value}</div>
+                  <div className="mt-1 text-2xl font-extrabold" style={{ color: galit.text }}>{kpi.value}</div>
                   <div className="mt-0.5 text-slate-400" style={{ fontSize: 11 }}>{kpi.sub}</div>
                 </div>
-                <div className="flex h-10 w-10 items-center justify-center rounded-full" style={{ background: `${kpi.color}18` }}>
+                <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: `${kpi.color}18` }}>
                   <KIcon className="h-5 w-5" style={{ color: kpi.color }} />
                 </div>
               </div>
@@ -16640,7 +16640,7 @@ function TasksPage({
       </div>
 
       {/* ═══ FILTERS BAR ═══ */}
-      <div className="rounded-2xl bg-white p-3 shadow-sm border border-slate-100">
+      <div className="rounded-xl bg-white p-3 shadow-sm border border-slate-100">
         <div className="flex flex-wrap items-center gap-2">
           {/* search */}
           <div className="relative flex-1 min-w-[180px] max-w-xs">
@@ -16704,21 +16704,21 @@ function TasksPage({
             .map((c) => ({ key: 'cust-' + c.id, kind: 'customer' as const, name: c.name || '-', phone: c.phone || '', broker: brokerLabel((c as any).leadSource, (c as any).referralCompany), raw: c as Customer })),
         ].sort((a, b) => a.broker.localeCompare(b.broker, 'he'));
         return (
-          <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
+          <div className="rounded-xl bg-white shadow-sm border border-slate-100 overflow-hidden">
             <table className="w-full text-sm" dir="rtl">
               <thead>
                 <tr className="border-b border-slate-100 text-right" style={{ background: '#f8fafb' }}>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500">שם</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500">חברת תיווך / מקור</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 hidden md:table-cell">טלפון</th>
-                  <th className="px-4 py-3 text-xs font-semibold text-slate-500 hidden md:table-cell">סוג</th>
+                  <th className="px-4 py-2 text-xs font-semibold text-slate-500">שם</th>
+                  <th className="px-4 py-2 text-xs font-semibold text-slate-500">חברת תיווך / מקור</th>
+                  <th className="px-4 py-2 text-xs font-semibold text-slate-500 hidden md:table-cell">טלפון</th>
+                  <th className="px-4 py-2 text-xs font-semibold text-slate-500 hidden md:table-cell">סוג</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 && (
-                  <tr><td colSpan={4} className="py-16 text-center text-slate-400">
+                  <tr><td colSpan={4} className="py-8 text-center text-slate-400">
                     <div className="flex flex-col items-center gap-2">
-                      <Building2 className="h-10 w-10 text-slate-300" />
+                      <Building2 className="h-8 w-8 text-slate-300" />
                       <span>אין לקוחות מחברות תיווך להצגה</span>
                     </div>
                   </td></tr>
@@ -16729,16 +16729,16 @@ function TasksPage({
                     className="border-b border-slate-50 cursor-pointer transition-all duration-100 hover:bg-slate-50/80"
                     onClick={() => r.kind === 'lead' ? onOpenLead?.(r.raw as Lead) : onOpenCustomer?.(r.raw as Customer)}
                   >
-                    <td className="px-4 py-3 font-medium text-slate-800">{r.name}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2 font-medium text-slate-800">{r.name}</td>
+                    <td className="px-4 py-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
                         <Building2 className="h-3.5 w-3.5" />{r.broker}
                       </span>
                     </td>
-                    <td className="px-4 py-3 hidden md:table-cell">
+                    <td className="px-4 py-2 hidden md:table-cell">
                       {r.phone ? <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{r.phone}</a> : <span className="text-xs text-slate-400">-</span>}
                     </td>
-                    <td className="px-4 py-3 hidden md:table-cell">
+                    <td className="px-4 py-2 hidden md:table-cell">
                       <span className="text-xs text-slate-500">{r.kind === 'lead' ? 'ליד' : 'לקוח'}</span>
                     </td>
                   </tr>
@@ -16751,29 +16751,29 @@ function TasksPage({
 
       {/* ═══ TASKS TABLE ═══ */}
       {quickFilter !== 'brokerage' && (
-      <div className="rounded-2xl bg-white shadow-sm border border-slate-100 overflow-hidden">
+      <div className="rounded-xl bg-white shadow-sm border border-slate-100 overflow-hidden">
         <table className="w-full text-sm" dir="rtl">
           <thead>
             <tr className="border-b border-slate-100 text-right" style={{ background: '#f8fafb' }}>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 40 }}>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 40 }}>
                 <Hash className="h-3.5 w-3.5 mx-auto text-slate-400" />
               </th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 50 }}>עדיפות</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">משימה</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">קשור ל</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">לקוח / ליד</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">טלפון</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">תאריך יעד</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">סטטוס</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">אחראי</th>
-              <th className="px-3 py-3 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 90 }}>פעולות</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 50 }}>עדיפות</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">משימה</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">קשור ל</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">לקוח / ליד</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">טלפון</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">תאריך יעד</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">סטטוס</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">אחראי</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 90 }}>פעולות</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={10} className="py-16 text-center text-slate-400">
+              <tr><td colSpan={10} className="py-8 text-center text-slate-400">
                 <div className="flex flex-col items-center gap-2">
-                  <ClipboardList className="h-10 w-10 text-slate-300" />
+                  <ClipboardList className="h-8 w-8 text-slate-300" />
                   <span>אין משימות להצגה</span>
                 </div>
               </td></tr>
@@ -16799,13 +16799,13 @@ function TasksPage({
                     onClick={() => toggleExpand(t.id)}
                   >
                     {/* # */}
-                    <td className="px-3 py-3 text-center text-xs text-slate-400">{idx + 1}</td>
+                    <td className="px-3 py-2 text-center text-xs text-slate-400">{idx + 1}</td>
                     {/* priority */}
-                    <td className="px-3 py-3 text-center">
+                    <td className="px-3 py-2 text-center">
                       <div className={`mx-auto h-2.5 w-2.5 rounded-full ${priorityDot(p)}`} title={priorityLabel(p)} />
                     </td>
                     {/* title + type */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2">
                       <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>{(() => {
                         const step = manualStepOverride[t.id] ?? detectStep(t);
                         if (t.incomingLeadId && step === 0) return `ליד חדש נכנס${contactName ? ' — ' + contactName : ''}`;
@@ -16817,35 +16817,35 @@ function TasksPage({
                       <div className="mt-0.5 text-[11px] text-slate-400">{taskTypeLabel(t.type || 'GENERAL')}</div>
                     </td>
                     {/* related to */}
-                    <td className="px-3 py-3 hidden md:table-cell">
+                    <td className="px-3 py-2 hidden md:table-cell">
                       <span className="text-xs text-slate-600">{relatedTo}</span>
                     </td>
                     {/* customer / lead */}
-                    <td className="px-3 py-3 hidden md:table-cell">
+                    <td className="px-3 py-2 hidden md:table-cell">
                       <span className="text-xs font-medium text-slate-700">{contactName || '-'}</span>
                       {t.leadCompany && <div className="text-[10px] text-slate-400">{t.leadCompany}</div>}
                     </td>
                     {/* phone */}
-                    <td className="px-3 py-3 hidden lg:table-cell">
+                    <td className="px-3 py-2 hidden lg:table-cell">
                       {contactPhone ? (
                         <a href={`tel:${phoneClean(contactPhone)}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{contactPhone}</a>
                       ) : <span className="text-xs text-slate-400">-</span>}
                     </td>
                     {/* due date */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2">
                       <div className={`text-xs font-medium ${isOverdue ? 'text-red-600' : 'text-slate-700'}`}>{dueDisplay}</div>
                       {dueTime && dueTime !== '00:00' && <div className="text-[10px] text-slate-400">{dueTime}</div>}
                     </td>
                     {/* status */}
-                    <td className="px-3 py-3 hidden md:table-cell">
+                    <td className="px-3 py-2 hidden md:table-cell">
                       <span className={`inline-block rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
                     </td>
                     {/* owner */}
-                    <td className="px-3 py-3 hidden lg:table-cell">
+                    <td className="px-3 py-2 hidden lg:table-cell">
                       <span className="text-xs text-slate-600">{t.owner || '-'}</span>
                     </td>
                     {/* actions */}
-                    <td className="px-3 py-3">
+                    <td className="px-3 py-2">
                       <div className="flex items-center gap-1">
                         {!isDone && (
                           <button className="rounded-lg p-1.5 text-green-600 hover:bg-green-50 transition-colors" title="סמן הושלם" onClick={(e) => { e.stopPropagation(); markDone(t.id); }}>
@@ -17046,10 +17046,10 @@ function TasksPage({
                             };
                             const bnText = bnTexts[stageKey] || t.title;
                             return (
-                              <div className="flex-shrink-0 flex items-center gap-4 px-5" style={{ height: 68, background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, direction: 'rtl' }}>
+                              <div className="flex-shrink-0 flex items-center gap-3 px-4" style={{ height: 56, background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, direction: 'rtl' }}>
                                 <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                                   <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.65)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 3 }}>שלב נוכחי · {currentStep === QUOTE_STEP_IDX ? 'הצעת מחיר' : (progressSteps[currentStep]?.label || '')}</div>
-                                  <div style={{ fontSize: 17, fontWeight: 800, color: '#fff', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bnText}</div>
+                                  <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bnText}</div>
                                   <span style={{ display: 'inline-flex', alignItems: 'center', marginTop: 3, borderRadius: 20, padding: '1px 8px', fontSize: 10, fontWeight: 700, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
                                 </div>
                                 {contactPhone && stageKey !== 'closed' && (
@@ -17058,7 +17058,7 @@ function TasksPage({
                                     התקשר עכשיו
                                   </a>
                                 )}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '4px 10px', flexShrink: 0 }}>
+                                <div className="hidden md:flex" style={{ alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '4px 10px', flexShrink: 0 }}>
                                   <UserCircle2 style={{ width: 16, height: 16, color: 'rgba(255,255,255,0.8)' }} />
                                   <span style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.9)' }}>{bnAgent}</span>
                                 </div>
@@ -17242,7 +17242,7 @@ function TasksPage({
                             </div>
 
                             {/* ──── CENTER: stage content ──── */}
-                            <div className={`flex-1 min-w-0 flex flex-col gap-3 p-3 ${currentStep === 2 ? 'overflow-hidden' : 'overflow-y-auto'}`} style={{ background: '#f8fafc' }}>
+                            <div className={`flex-1 min-w-0 flex flex-col gap-3 p-3 overflow-x-hidden ${currentStep === 2 ? 'overflow-y-hidden' : 'overflow-y-auto'}`} style={{ background: '#f8fafc' }}>
 
                           {/* ──── HERO ACTION CARD ──── */}
                           {(() => {
@@ -17502,10 +17502,10 @@ function TasksPage({
                             // רשימת מקורות ההגעה מגיעה מה-DB (עם נפילה לברירות מחדל), ו"אחר" תמיד אחרון לצורך הוספה.
                             const CC_LEAD_SOURCES = [...(leadSources.length ? leadSources : LEAD_SOURCE_DEFAULTS), 'אחר'];
                             const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
-                            const ccInp = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
-                            const ccInpIcon = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
-                            const ccSel = 'h-[50px] w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 text-[15px] text-right text-black outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 appearance-none cursor-pointer';
-                            const ccTxt = 'w-full rounded-2xl border border-[#E2E8F0] bg-white px-5 py-3 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 resize-none';
+                            const ccInp = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
+                            const ccInpIcon = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
+                            const ccSel = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 text-[15px] text-right text-black outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 appearance-none cursor-pointer';
+                            const ccTxt = 'w-full rounded-xl border border-[#E2E8F0] bg-white px-4 py-2 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 resize-none';
                             const ccLbl = 'block text-[13px] font-semibold text-black mb-1.5';
                             // contacts state helpers (use early-computed values for consistency)
                             const ccContacts = ccContacts0;
@@ -17535,14 +17535,14 @@ function TasksPage({
                               setTaskContactsMap((p) => (!p[t.id] || p[t.id].length === 0) ? { ...p, [t.id]: [prefillContact] } : p);
                             }
                             return (
-                              <div className="px-8 pb-6" style={{ direction: 'rtl', background: '#F8FAFC' }}>
+                              <div className="px-8 pb-4" style={{ direction: 'rtl', background: '#F8FAFC' }}>
                                 {/* ── ליד נכנס מהמייל: פרטי הליד + טופס "התחל / העבר" ── */}
                                 {(() => {
                                   const lead = t.incomingLeadId ? leadByTaskId[t.id] : null;
                                   if (!lead) return null;
                                   return (
-                                    <div className="pt-5">
-                                      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-6 mb-3">
+                                    <div className="pt-3">
+                                      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 mb-3">
                                         <div className="flex items-center gap-2 mb-5">
                                           <span className="inline-flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
                                           <span className="text-[18px] font-extrabold text-blue-900">פרטי הליד</span>
@@ -17611,7 +17611,7 @@ function TasksPage({
                                             }).slice(0, 8)
                                           : [];
                                         const reassignPicker = (
-                                          <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                          <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2" onClick={(e) => e.stopPropagation()}>
                                             <div className="text-[13px] font-bold text-blue-800 mb-2">שייך ללקוח קיים אחר:</div>
                                             <input
                                               autoFocus
@@ -17668,7 +17668,7 @@ function TasksPage({
                                           if (linked) {
                                             return (
                                               <div className="mb-4">
-                                                <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                                <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 flex flex-wrap items-center justify-between gap-3">
                                                   <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
                                                     <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                                                     מקושר ללקוח קיים: <span className="underline">{linked.name}</span>
@@ -17700,7 +17700,7 @@ function TasksPage({
                                         if (decision === '__none__') {
                                           return (
                                             <div className="mb-4">
-                                              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 flex flex-wrap items-center justify-between gap-3">
                                                 <div className="text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
                                                   <AlertTriangle className="h-4 w-4 flex-shrink-0" />
                                                   <span className="underline">{p.fullName || 'הליד'}</span> מטופל כליד חדש
@@ -17722,7 +17722,7 @@ function TasksPage({
                                         if (matched) {
                                           return (
                                             <div className="mb-4">
-                                              <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                              <div className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 flex flex-wrap items-center justify-between gap-3">
                                                 <div className="text-[14px] font-bold text-emerald-800 flex items-center gap-1.5">
                                                   <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
                                                   נמצא <span className="underline">{matched.name || p.fullName}</span> ברשימת הלקוחות — האם זה אותו אחד?
@@ -17757,7 +17757,7 @@ function TasksPage({
                                         }
                                         return (
                                           <div className="mb-4">
-                                            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                                            <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 flex flex-wrap items-center justify-between gap-3">
                                               <div className="text-[14px] font-bold text-amber-800 flex items-center gap-1.5">
                                                 <AlertTriangle className="h-4 w-4 flex-shrink-0" />
                                                 <span className="underline">{p.fullName || 'הליד'}</span> לא נמצא כלקוח קיים — אנא התחל תהליך
@@ -17775,13 +17775,13 @@ function TasksPage({
                                         );
                                       })()}
                                       {/* פעולות ליד: "התחל טיפול" רק לליד חדש, אך "העבר ל:" נשאר פתוח תמיד. */}
-                                      <div className="rounded-2xl border border-slate-200 bg-white p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3">
+                                      <div className="rounded-xl border border-slate-200 bg-white p-4 mb-4 shadow-sm flex flex-wrap items-center gap-3">
                                         {lead.status === 'NEW' && (
                                           <>
                                             <button
                                               type="button"
                                               onClick={() => startLead(lead.id)}
-                                              className="flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white transition hover:brightness-110"
+                                              className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:brightness-110"
                                               style={{ background: '#16a34a' }}
                                             >
                                               <CheckCircle2 className="h-4 w-4" /> התחל טיפול בליד
@@ -17802,7 +17802,7 @@ function TasksPage({
                                           type="button"
                                           disabled={!leadTransferSel[lead.id]}
                                           onClick={() => transferLead(lead.id, leadTransferSel[lead.id])}
-                                          className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
+                                          className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-40"
                                           style={{ background: '#2563eb' }}
                                         >
                                           <UserPlus className="h-4 w-4" /> העבר
@@ -17812,8 +17812,8 @@ function TasksPage({
                                   );
                                 })()}
                                 {/* ── header ── */}
-                                <div className="flex items-center gap-3.5 py-5">
-                                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: '#1E293B' }}>
+                                <div className="flex items-center gap-3.5 py-3">
+                                  <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#1E293B' }}>
                                     <UserCircle2 className="h-6 w-6 text-slate-400" />
                                   </div>
                                   <div>
@@ -17821,11 +17821,11 @@ function TasksPage({
                                     <div className="text-[12px] text-slate-400 mt-0.5">{isExistingCustomer ? 'עדכון פרטי הלקוח לפני המשך התהליך' : 'כרטיס לקוח מהיר'}</div>
                                   </div>
                                 </div>
-                                <div className="rounded-3xl overflow-hidden bg-white" style={{ boxShadow: '0 8px 28px rgba(0,0,0,0.1)' }}>
-                                  <div className="px-7 py-5 space-y-4" style={{ background: '#F8FAFC' }}>
+                                <div className="rounded-xl overflow-hidden bg-white" style={{ boxShadow: '0 8px 28px rgba(0,0,0,0.1)' }}>
+                                  <div className="px-4 py-3 space-y-3" style={{ background: '#F8FAFC' }}>
                                     {/* Row 0: שם חברה (עסקי בלבד) — שם הלקוח/חברה בפועל, נפרד משם איש הקשר */}
                                     {!isPrivate0 && (
-                                      <div className="grid grid-cols-2 gap-4">
+                                      <div className="grid grid-cols-2 gap-3">
                                         <div className="col-span-2">
                                           <label className={ccLbl}>שם החברה / העסק *</label>
                                           <input className={ccInp} placeholder='לדוגמה: אינפורו בע"מ' value={fd.company || ''} onChange={(e) => setF('company', e.target.value)} />
@@ -17833,7 +17833,7 @@ function TasksPage({
                                       </div>
                                     )}
                                     {/* Row 1: שם מלא + ח.פ/ת.ז */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-2 gap-3">
                                       <div>
                                         <label className={ccLbl}>{isPrivate0 ? 'שם מלא *' : 'שם איש קשר *'}</label>
                                         <input className={ccInp} placeholder="לדוגמה: ענבל כהן" value={fd.fullName} onChange={(e) => { const v = e.target.value; setF('fullName', v); setF('firstName', v.split(' ')[0] || ''); setF('lastName', v.split(' ').slice(1).join(' ')); }} />
@@ -17844,7 +17844,7 @@ function TasksPage({
                                       </div>
                                     </div>
                                     {/* Row 2: נייד + אימייל */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-2 gap-3">
                                       <div>
                                         <label className={ccLbl}>נייד ליצירת קשר *</label>
                                         <div className="relative">
@@ -17861,7 +17861,7 @@ function TasksPage({
                                       </div>
                                     </div>
                                     {/* Row 3: סיווג + מקור הגעה */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-2 gap-3">
                                       <div>
                                         <label className={ccLbl}>סיווג לקוח</label>
                                         <select className={ccSel} value={fd.customerType || ''} onChange={(e) => setF('customerType', e.target.value)}>
@@ -17899,7 +17899,7 @@ function TasksPage({
                                                 if (!name) return;
                                                 if (await addLeadSource(name)) { setF('leadSource', name); setNewLeadSourceText(''); }
                                               }}
-                                              className="flex h-[50px] w-[50px] flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white transition-colors hover:bg-blue-700"
+                                              className="flex h-[50px] w-[50px] flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white transition-colors hover:bg-blue-700"
                                             >
                                               <Plus className="h-5 w-5" />
                                             </button>
@@ -17908,7 +17908,7 @@ function TasksPage({
                                       </div>
                                     </div>
                                     {/* Row 4: עיר + כתובת */}
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-2 gap-3">
                                       <div>
                                         <label className={ccLbl}>עיר *</label>
                                         <CitySearchInput
@@ -17939,7 +17939,7 @@ function TasksPage({
                                       </div>
                                       {/* Auto-contact for PRIVATE — מוצג ומולא אוטומטית מהפרטים שהוזנו למעלה */}
                                       {isPrivate && (
-                                        <div className="rounded-2xl border border-green-200 bg-green-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
+                                        <div className="rounded-xl border border-green-200 bg-green-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
                                           <div className="flex items-center justify-between mb-3">
                                             <span className="text-[13px] font-semibold text-green-700 flex items-center gap-2">
                                               <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
@@ -17964,7 +17964,7 @@ function TasksPage({
                                         </div>
                                       )}
                                       {ccContacts.map((pc, idx) => (
-                                        <div key={pc.id} className="rounded-2xl border border-[#E2E8F0] bg-white p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
+                                        <div key={pc.id} className="rounded-xl border border-[#E2E8F0] bg-white p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
                                           <div className="flex items-center justify-between mb-3">
                                             <span className="text-[13px] font-semibold text-black">
                                               איש קשר {idx + 1}
@@ -17998,21 +17998,21 @@ function TasksPage({
                                       <button
                                         type="button"
                                         onClick={addContact}
-                                        className="w-full flex items-center justify-center gap-2 h-[46px] rounded-2xl border border-dashed border-blue-300 bg-blue-50/50 text-[13px] font-bold text-blue-600 hover:bg-blue-50 hover:border-blue-400 transition-all"
+                                        className="w-full flex items-center justify-center gap-2 h-[46px] rounded-xl border border-dashed border-blue-300 bg-blue-50/50 text-[13px] font-bold text-blue-600 hover:bg-blue-50 hover:border-blue-400 transition-all"
                                       >
                                         <UserPlus className="h-4 w-4" /> הוסף איש קשר
                                       </button>
                                     </div>
                                   </div>
                                   {/* ── footer ── */}
-                                  <div className="px-7 py-4 bg-white space-y-3" style={{ borderTop: '1px solid #E8EFF6' }}>
+                                  <div className="px-4 py-4 bg-white space-y-3" style={{ borderTop: '1px solid #E8EFF6' }}>
                                     {!!ccCardError[t.id] && (
-                                      <div className="flex items-center gap-2 rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-[13px] font-bold text-red-700">
+                                      <div className="flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-2 text-[13px] font-bold text-red-700">
                                         <AlertCircle className="h-4 w-4 flex-shrink-0" />
                                         {ccCardError[t.id]}
                                       </div>
                                     )}
-                                    <button onClick={() => saveCustomerCard()} disabled={!canSaveCard} className="w-full h-[50px] rounded-2xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
+                                    <button onClick={() => saveCustomerCard()} disabled={!canSaveCard} className="w-full h-[50px] rounded-xl flex items-center justify-center gap-2 text-[15px] font-bold text-white disabled:opacity-50 transition-all hover:brightness-105" style={{ background: '#22C55E', boxShadow: '0 4px 16px rgba(34,197,94,0.3)' }}>
                                       <CheckCircle2 className="h-5 w-5" />
                                       {(() => {
                                         const noName = !derivedFullName.trim();
@@ -18034,9 +18034,9 @@ function TasksPage({
                                   {renderStageActionBar(t)}
                                 </div>
                                 {linkedLead && (
-                                  <div className="mt-5 rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+                                  <div className="mt-5 rounded-xl border border-slate-200 bg-white shadow-sm p-4">
                                     <div className="flex items-center gap-3 mb-5">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fef3c7' }}>
+                                      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 44, height: 44, background: '#fef3c7' }}>
                                         <Radio className="h-6 w-6 text-amber-600" />
                                       </div>
                                       <div>
@@ -18044,7 +18044,7 @@ function TasksPage({
                                         <div className="text-[13px] text-slate-400 font-medium">המידע שהתקבל עם הליד — לפני שהוא הומר לכרטיס לקוח</div>
                                       </div>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-5">
+                                    <div className="grid grid-cols-2 gap-3">
                                       <div>
                                         <div className={ccLbl}>מאיפה הגיע הליד</div>
                                         <div className="flex items-center gap-2 text-[15px] font-semibold text-slate-700">
@@ -18063,7 +18063,7 @@ function TasksPage({
                                     </div>
                                     <div className="mt-5">
                                       <div className={ccLbl}>ההודעה שהשאיר/ה</div>
-                                      <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-[15px] font-medium text-slate-600 leading-relaxed flex items-start gap-2">
+                                      <div className="rounded-xl bg-slate-50 border border-slate-200 px-4 py-2 text-[15px] font-medium text-slate-600 leading-relaxed flex items-start gap-2">
                                         <MessagesSquare className="h-4 w-4 text-slate-300 mt-0.5 flex-shrink-0" />
                                         <span>{linkedLead.notes?.trim() || 'לא הושארה הודעה'}</span>
                                       </div>
@@ -18134,8 +18134,8 @@ function TasksPage({
                                 const activeCatId = openCategoryId === '__none__' ? null : (openCategoryId ?? derivedCatId);
                                 const activeCat = SERVICE_CATEGORIES.find((c) => c.id === activeCatId);
                                 return (
-                                  <div className="px-8 pb-6">
-                                    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6" style={{ direction: 'rtl' }}>
+                                  <div className="px-8 pb-4">
+                                    <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4" style={{ direction: 'rtl' }}>
                                       {activeCat ? (() => {
                                         /* ── category selected: replace the categories grid with that category's services ── */
                                         const meta = catMeta[activeCat.id] ?? { color: '#2563eb', light: '#eff6ff', Icon: ClipboardList };
@@ -18158,7 +18158,7 @@ function TasksPage({
                                           <>
                                             {/* ── Category header bar ── */}
                                             <div
-                                              className="flex items-center gap-3 mb-4 -mx-6 -mt-6 px-4 py-3 rounded-t-2xl"
+                                              className="flex items-center gap-3 mb-4 -mx-6 -mt-6 px-4 py-2 rounded-t-2xl"
                                               style={{ background: `linear-gradient(135deg, ${meta.color}18 0%, ${meta.color}08 100%)`, borderBottom: `1px solid ${meta.color}22` }}
                                             >
                                               <button
@@ -18199,7 +18199,7 @@ function TasksPage({
                                                       key={sub.id}
                                                       type="button"
                                                       onClick={() => selectService(sub.id, sub.name)}
-                                                      className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                      className="group w-full text-right px-3.5 py-2 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
                                                       style={{
                                                         background: isSelected ? `linear-gradient(135deg, ${meta.color} 0%, ${meta.color}dd 100%)` : `${meta.color}10`,
                                                         color: isSelected ? '#fff' : '#334155',
@@ -18233,7 +18233,7 @@ function TasksPage({
                                                         key={svc.id}
                                                         type="button"
                                                         onClick={() => setOpenSubServiceId(svc.id)}
-                                                        className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-semibold hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                        className="group w-full text-right px-3.5 py-2 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-semibold hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
                                                         style={{
                                                           background: `${meta.color}12`,
                                                           color: '#1e293b',
@@ -18256,7 +18256,7 @@ function TasksPage({
                                                       key={svc.id}
                                                       type="button"
                                                       onClick={() => selectService(svc.id, svc.name)}
-                                                      className="group w-full text-right px-3.5 py-2.5 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
+                                                      className="group w-full text-right px-3.5 py-2 rounded-xl text-[12px] flex items-center gap-2.5 transition-all duration-200 font-medium hover:scale-[1.01] hover:shadow-sm active:scale-[0.99]"
                                                       style={{
                                                         background: isSelected ? `linear-gradient(135deg, ${meta.color} 0%, ${meta.color}dd 100%)` : `${meta.color}10`,
                                                         color: isSelected ? '#fff' : '#334155',
@@ -18311,7 +18311,7 @@ function TasksPage({
                                                 key={cat.id}
                                                 type="button"
                                                 onClick={() => { setOpenCategoryId(cat.id); setOpenSubServiceId(null); }}
-                                                className="group flex flex-col items-center gap-2 p-3 rounded-2xl transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
+                                                className="group flex flex-col items-center gap-2 p-3 rounded-xl transition-all duration-200 hover:scale-105 hover:shadow-lg active:scale-95"
                                                 style={{ background: '#fff', border: '1.5px solid #e2e8f0' }}
                                               >
                                                 <div
@@ -18330,7 +18330,7 @@ function TasksPage({
                                             <>
                                               <div className="text-sm font-bold text-slate-700 mb-4">על איזה שירות מדובר?</div>
                                               {/* Main categories grid */}
-                                              <div className="grid grid-cols-4 gap-3 mb-3">
+                                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                                                 {mainCats.map(renderCatCard)}
                                               </div>
                                               {/* More services section */}
@@ -18354,7 +18354,7 @@ function TasksPage({
                                                   transition: 'max-height 0.3s ease, opacity 0.25s ease',
                                                 }}
                                               >
-                                                <div className="grid grid-cols-4 gap-3 pt-3">
+                                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3">
                                                   {extraCats.map(renderCatCard)}
                                                 </div>
                                               </div>
@@ -18367,7 +18367,7 @@ function TasksPage({
                                 );
                               })()}
 
-                              <div className="px-8 pb-6 pt-2">
+                              <div className="px-8 pb-4 pt-2">
                                 {renderStageActionBar(t, {
                                   label: 'מעבר לשיחת מכירה',
                                   circleBg: '#16a34a',
@@ -18463,7 +18463,7 @@ function TasksPage({
                               await onReloadTasks?.();
                             };
                             /* ── helper: input class ── */
-                            const inp = 'w-full rounded-2xl border border-slate-200 bg-white px-6 py-5 text-2xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder:text-slate-300 placeholder:font-normal';
+                            const inp = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent placeholder:text-slate-300 placeholder:font-normal';
                             const lbl = 'block text-xl font-semibold text-slate-600 mb-2.5';
                             /* ── need categories state (comma-separated) ── */
                             const needCats = (fd.needCategories || '').split(',').filter(Boolean);
@@ -18485,10 +18485,10 @@ function TasksPage({
                             <div className="px-3 flex flex-col" style={{ direction: 'rtl', gap: '4px', paddingBottom: '2px' }}>
 
                               {/* ═══ AI SALES COACH ═══ */}
-                              <div className="px-6 pt-4 pb-3">
-                                <div className="rounded-2xl overflow-hidden border border-slate-200/70 shadow-xl" style={{ direction: 'rtl' }}>
+                              <div className="px-4 pt-4 pb-3">
+                                <div className="rounded-xl overflow-hidden border border-slate-200/70 shadow-xl" style={{ direction: 'rtl' }}>
                                   {/* Header */}
-                                  <div className="flex items-center gap-3 px-7 py-4" style={{ background: 'linear-gradient(135deg,#3b82f6 0%,#2563eb 55%,#2563eb 100%)' }}>
+                                  <div className="flex items-center gap-3 px-4 py-4" style={{ background: 'linear-gradient(135deg,#3b82f6 0%,#2563eb 55%,#2563eb 100%)' }}>
                                     <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 52, height: 52, background: 'rgba(255,255,255,0.18)' }}>
                                       <Sparkles className="h-7 w-7 text-white" />
                                     </div>
@@ -18653,38 +18653,38 @@ function TasksPage({
                             const coach = aiCoach[t.id];
                             const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
-                              <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
+                              <div className="px-8 pb-4 space-y-3" style={{ direction: 'rtl' }}>
                                 {/* ── באנר שם + טלפון (הועבר לכאן משלב הצעת המחיר) ── */}
                                 {(followupCustomerName || fu3Phone) && (
-                                  <div className="rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-3">
-                                    {followupCustomerName && <div className="text-2xl font-extrabold text-blue-900 leading-tight">{followupCustomerName}</div>}
+                                  <div className="rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-2">
+                                    {followupCustomerName && <div className="text-xl font-extrabold text-blue-900 leading-tight">{followupCustomerName}</div>}
                                     {fu3Phone && (
                                       <a href={`tel:${fu3Phone}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3Phone}</a>
                                     )}
                                   </div>
                                 )}
                                 {/* ── כותרת פולואפ + טיימר + פעולות יצירת קשר ── */}
-                                <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 shadow-sm">
-                                  <div className="flex flex-wrap items-start justify-between gap-4">
-                                    <div className="flex items-start gap-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
+                                <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
                                         <Timer className="h-7 w-7 text-blue-500" />
                                       </div>
                                       <div>
-                                        <div className="text-xl md:text-2xl font-extrabold text-blue-900 leading-snug">
+                                        <div className="text-xl md:text-xl font-extrabold text-blue-900 leading-snug">
                                           {followupCustomerName} מחכה להצעה שלו כבר{waitingSince ? ':' : ''}
                                         </div>
                                         {waitingSince ? (
                                           <div className="flex items-baseline gap-1.5 mt-1.5 flex-wrap">
                                             {waitingDays! >= 1 && (
                                               <>
-                                                <span className="text-3xl font-extrabold text-blue-600">{waitingDays}</span>
+                                                <span className="text-2xl font-extrabold text-blue-600">{waitingDays}</span>
                                                 <span className="text-sm font-bold text-blue-700">{waitingDays === 1 ? 'יום' : 'ימים'}</span>
                                               </>
                                             )}
                                             {waitingHours! > 0 && (
                                               <>
-                                                <span className="text-2xl font-extrabold text-blue-600">{waitingHours}</span>
+                                                <span className="text-xl font-extrabold text-blue-600">{waitingHours}</span>
                                                 <span className="text-sm font-bold text-blue-700">שעות</span>
                                               </>
                                             )}
@@ -18778,9 +18778,9 @@ function TasksPage({
                                 };
 
                                 return (
-                                  <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+                                  <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
                                     <div className="flex items-center gap-3 mb-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 44, height: 44, background: '#eff6ff' }}>
+                                      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 44, height: 44, background: '#eff6ff' }}>
                                         <HelpCircle className="h-6 w-6 text-blue-600" />
                                       </div>
                                       <div>
@@ -18850,7 +18850,7 @@ function TasksPage({
                                             </div>
                                             <button
                                               onClick={() => copyPhrase(item.response)}
-                                              className="w-full text-right rounded-lg px-3 py-2.5 text-[14px] font-semibold text-slate-700 bg-green-50 border border-green-100 hover:bg-green-100 hover:border-green-300 hover:shadow-sm active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-2 group"
+                                              className="w-full text-right rounded-lg px-3 py-2 text-[14px] font-semibold text-slate-700 bg-green-50 border border-green-100 hover:bg-green-100 hover:border-green-300 hover:shadow-sm active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-2 group"
                                             >
                                               <span>{item.response}</span>
                                               {copiedPhrase === item.response
@@ -18871,7 +18871,7 @@ function TasksPage({
                                             key={p}
                                             onClick={() => copyPhrase(p)}
                                             style={{ animation: `fadeSlideIn 0.35s ease-out ${i * 0.05}s both` }}
-                                            className="text-right rounded-xl px-4 py-3 text-base font-semibold text-green-800 bg-white border border-green-200 hover:bg-green-50 hover:border-green-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
+                                            className="text-right rounded-xl px-4 py-2 text-base font-semibold text-green-800 bg-white border border-green-200 hover:bg-green-50 hover:border-green-400 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all duration-200 flex items-center justify-between gap-3 group"
                                           >
                                             <span>{p}</span>
                                             {copiedPhrase === p
@@ -18943,7 +18943,7 @@ function TasksPage({
                             return (
                               <div style={{ direction: 'rtl' }}>
                                 {/* ═══ תזמון פולואפ + העברה/שיתוף — compact strip at top ═══ */}
-                                <div className="px-5 py-3 flex flex-wrap items-center gap-x-5 gap-y-2.5" style={{ background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
+                                <div className="px-4 py-2 flex flex-wrap items-center gap-x-5 gap-y-2.5" style={{ background: '#f8fafc', borderBottom: '1px solid #e5e7eb' }}>
                                   {/* מתי להזכיר לך שוב */}
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <Timer className="h-4 w-4 text-blue-500 flex-shrink-0" />
@@ -19255,16 +19255,16 @@ function TasksPage({
                             const labelCls = 'text-[11px] font-bold text-slate-500 mb-1 block';
 
                             return (
-                              <div className="px-8 pb-6 space-y-5" style={{ direction: 'rtl' }}>
+                              <div className="px-8 pb-4 space-y-3" style={{ direction: 'rtl' }}>
                                 {/* ── כותרת + סטטוס חיבור Outlook ── */}
-                                <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-blue-50 to-blue-50 px-6 py-5 shadow-sm">
-                                  <div className="flex flex-wrap items-start justify-between gap-4">
-                                    <div className="flex items-start gap-4">
-                                      <div className="flex items-center justify-center rounded-2xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
+                                <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 via-blue-50 to-blue-50 px-4 py-3 shadow-sm">
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div className="flex items-start gap-3">
+                                      <div className="flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 52, height: 52, background: '#eff6ff' }}>
                                         <CalendarPlus className="h-7 w-7" style={{ color: '#3b82f6' }} />
                                       </div>
                                       <div>
-                                        <div className="text-xl md:text-2xl font-extrabold text-blue-900 leading-snug">
+                                        <div className="text-xl md:text-xl font-extrabold text-blue-900 leading-snug">
                                           {meetingTitle}
                                         </div>
                                         <div className="text-sm font-bold text-blue-700 mt-1">
@@ -19297,7 +19297,7 @@ function TasksPage({
 
                                 {/* ── תוצאה: פגישה נוצרה ── */}
                                 {result && (
-                                  <div className="rounded-2xl border border-green-200 bg-green-50 px-6 py-4 shadow-sm">
+                                  <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-4 shadow-sm">
                                     <div className="flex items-center gap-2 text-green-800 font-extrabold text-base mb-1">
                                       <CheckCircle2 className="h-5 w-5" /> הפגישה נוצרה ביומן Outlook
                                     </div>
@@ -19322,7 +19322,7 @@ function TasksPage({
                                 )}
 
                                 {/* ── טופס הפגישה ── */}
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6 space-y-4">
+                                <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4 space-y-3">
                                   <div>
                                     <div className="flex items-center justify-between mb-1">
                                       <label className={`${labelCls} mb-0`}>כותרת הפגישה</label>
@@ -19451,7 +19451,7 @@ function TasksPage({
                                     {attachments.length > 0 ? (
                                       <div className="space-y-2">
                                         {attachments.map((a) => (
-                                          <div key={`${a.fileName}-${a.sizeBytes}`} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                                          <div key={`${a.fileName}-${a.sizeBytes}`} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                                             <div className="flex min-w-0 items-center gap-2">
                                               <FileText className="h-4 w-4 shrink-0 text-blue-500" />
                                               <span className="truncate text-[13px] font-medium text-slate-700">{a.fileName}</span>
@@ -19477,7 +19477,7 @@ function TasksPage({
                                 </div>
 
                                 {/* ── בורר משתתפים: שאר העובדים + הלקוח ── */}
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-6">
+                                <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4">
                                   <div className="flex items-center gap-2 mb-3">
                                     <Users className="h-5 w-5 text-blue-500" />
                                     <div className="text-base font-extrabold text-slate-800">מי מבצע את הבדיקה?</div>
@@ -19522,7 +19522,7 @@ function TasksPage({
                                         <button
                                           type="button"
                                           onClick={() => setCoordEmpDropdownOpen((prev) => ({ ...prev, [t.id]: !prev[t.id] }))}
-                                          className={`w-full flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-right transition-colors ${open ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 hover:border-blue-200'}`}
+                                          className={`w-full flex items-center justify-between gap-2 rounded-xl border px-3.5 py-2 text-right transition-colors ${open ? 'border-blue-400 bg-blue-50/40' : 'border-slate-200 hover:border-blue-200'}`}
                                         >
                                           <span className={`text-[13px] font-bold ${selectedEmployees.length > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
                                             {selectedEmployees.length > 0 ? `${selectedEmployees.length} עובדים נבחרו — ניתן להוסיף עוד` : 'בחר עובד/ים להזמנה…'}
@@ -19562,14 +19562,14 @@ function TasksPage({
                                 </div>
 
                                 {err && (
-                                  <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2.5 text-[13px] font-semibold text-red-700">{err}</div>
+                                  <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-2 text-[13px] font-semibold text-red-700">{err}</div>
                                 )}
 
                                 {/* ── כפתור יצירה ── */}
                                 <button
                                   onClick={createMeeting}
                                   disabled={busy || !coordOutlook.connected || employeeIds.length === 0}
-                                  className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
+                                  className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01] disabled:opacity-60 disabled:hover:scale-100"
                                   style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
                                 >
                                   {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <CalendarPlus className="h-5 w-5" />}
@@ -19592,7 +19592,7 @@ function TasksPage({
                             );
                           })() : currentStep === 5 ? (
                           /* ── שלב ביצוע: צירוף הדוח ושליחתו ללקוח במייל (שליחה → המשימה DONE) ── */
-                          <div className="px-6 py-6 space-y-5" style={{ direction: 'rtl' }}>
+                          <div className="px-4 py-4 space-y-3" style={{ direction: 'rtl' }}>
                             <div className="text-center">
                               <div className="text-xl font-extrabold text-slate-800 mb-1">שליחת הדוח ללקוח</div>
                               <div className="text-sm text-slate-500">צרף את הדוח שהופק ושלח אותו ללקוח במייל — בשליחה המשימה תיסגר אוטומטית.</div>
@@ -19600,7 +19600,7 @@ function TasksPage({
                             <button
                               type="button"
                               onClick={() => setReportModalTaskId(t.id)}
-                              className="w-full flex items-center justify-center gap-2 rounded-2xl px-6 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01]"
+                              className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-base font-extrabold text-white shadow-md transition-all hover:scale-[1.01]"
                               style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }}
                             >
                               <Mail className="h-5 w-5" /> צרף דוח ושלח במייל
@@ -19608,7 +19608,7 @@ function TasksPage({
                             <button
                               type="button"
                               onClick={() => setAlreadySentTaskId(t.id)}
-                              className="w-full flex items-center justify-center gap-2 rounded-2xl border-2 border-emerald-500 bg-white px-6 py-3 text-base font-extrabold text-emerald-700 transition-all hover:bg-emerald-50"
+                              className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-emerald-500 bg-white px-4 py-2 text-base font-extrabold text-emerald-700 transition-all hover:bg-emerald-50"
                             >
                               <CheckCircle2 className="h-5 w-5" /> שלחתי כבר דוח
                             </button>
@@ -19670,16 +19670,16 @@ function TasksPage({
                             )}
                           </div>
                           ) : (
-                          <div className="px-8 py-10 flex flex-col items-center justify-center text-center" style={{ direction: 'rtl' }}>
-                            <div className="flex items-center justify-center rounded-2xl mb-4" style={{ width: 56, height: 56, background: '#f0fdf4' }}>
+                          <div className="px-8 py-6 flex flex-col items-center justify-center text-center" style={{ direction: 'rtl' }}>
+                            <div className="flex items-center justify-center rounded-xl mb-4" style={{ width: 56, height: 56, background: '#f0fdf4' }}>
                               <CheckCircle2 className="h-8 w-8" style={{ color: '#16a34a' }} />
                             </div>
                             <div className="text-xl font-extrabold text-slate-800 mb-1">סיום הטיפול</div>
-                            <div className="text-sm text-slate-500 mb-6">סיים את השירות וסגור את המשימה</div>
+                            <div className="text-sm text-slate-500 mb-4">סיים את השירות וסגור את המשימה</div>
                             <button
                               type="button"
                               onClick={() => { void updateTaskField(t.id, { status: 'DONE' }); setExpandedTaskId(null); }}
-                              className="flex items-center gap-2 rounded-xl px-8 py-3 text-base font-bold text-white transition hover:brightness-110 active:scale-95"
+                              className="flex items-center gap-2 rounded-xl px-8 py-2 text-base font-bold text-white transition hover:brightness-110 active:scale-95"
                               style={{ background: '#16a34a' }}
                             >
                               <CheckCircle2 className="h-5 w-5" /> סגור משימה
@@ -19712,25 +19712,25 @@ function TasksPage({
           className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 p-4"
           onClick={() => setQuoteCloseWarnTaskId(null)}
         >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col items-center text-center gap-3">
-              <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-2xl">⚠️</span>
-              <h3 className="text-lg font-bold text-gray-800">שים לב שלא ביצעת מעקב להצעת מחיר</h3>
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-600 text-xl">⚠️</span>
+              <h3 className="text-base font-bold text-gray-800">שים לב שלא ביצעת מעקב להצעת מחיר</h3>
               <p className="text-sm text-gray-500 leading-relaxed">
                 לא נקבע מעקב להצעה זו. קביעת מעקב עוזרת לוודא שההצעה לא תישכח. לחזור ולקבוע מעקב?
               </p>
             </div>
-            <div className="mt-6 flex gap-3">
+            <div className="mt-4 flex gap-3">
               <button
                 type="button"
-                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-base font-bold text-white hover:bg-blue-700 transition-colors"
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-2 text-base font-bold text-white hover:bg-blue-700 transition-colors"
                 onClick={() => setQuoteCloseWarnTaskId(null)}
               >
                 חזור למעקב
               </button>
               <button
                 type="button"
-                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-base font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-600 hover:bg-gray-50 transition-colors"
                 onClick={() => { setQuoteCloseWarnTaskId(null); setExpandedTaskId(null); }}
               >
                 סגור בכל זאת
@@ -19821,7 +19821,7 @@ function TasksPage({
           {error && <div className="md:col-span-2 rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">{error}</div>}
           <div className="md:col-span-2">
             <button
-              className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md transition-all"
+              className="w-full rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-md transition-all"
               style={{ background: `linear-gradient(135deg, ${galit.primary} 0%, ${galit.dark} 100%)` }}
               onClick={createTask}
             >
@@ -19842,9 +19842,9 @@ function EnvironmentalTestsPage() {
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>בדיקות סביבתיות</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>בדיקות סביבתיות</h1>
         <p className="mt-1 text-slate-500">ניהול בדיקות קרינה, ראדון, אקוסטיקה ואיכות אוויר</p>
       </div>
 
@@ -19888,9 +19888,9 @@ function AlertsPage() {
   ];
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div>
-        <h1 className="text-3xl font-bold" style={{ color: galit.text }}>התראות</h1>
+        <h1 className="text-2xl font-bold" style={{ color: galit.text }}>התראות</h1>
         <p className="mt-1 text-slate-500">אירועים חכמים, חתימות ותזכורות</p>
       </div>
       <div className="space-y-3">
@@ -19898,8 +19898,8 @@ function AlertsPage() {
           const Icon = a.icon;
           return (
             <Card key={idx}>
-              <CardContent className="flex items-center gap-4 p-5">
-                <div className="rounded-2xl p-3" style={{ background: galit.soft }}>
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="rounded-xl p-3" style={{ background: galit.soft }}>
                   <Icon className="h-5 w-5" style={{ color: galit.primary }} />
                 </div>
                 <div className="font-medium">{a.title}</div>
@@ -20033,19 +20033,19 @@ function UsersPage({
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold" style={{ color: galit.text }}>משתמשים והרשאות</h1>
+          <h1 className="text-2xl font-bold" style={{ color: galit.text }}>משתמשים והרשאות</h1>
           <p className="mt-1 text-slate-500">ניהול עובדים, תפקידים והרשאות במערכת</p>
         </div>
-        <Button className="rounded-2xl" style={{ background: galit.primary }} onClick={startCreate}>
+        <Button className="rounded-xl" style={{ background: galit.primary }} onClick={startCreate}>
           <Plus className="ml-2 h-4 w-4" />
           עובד חדש
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard title="סה״כ משתמשים" value={users.length} sub="במערכת" icon={Users} />
         <KpiCard title="מנהלי מערכת" value={users.filter((u) => u.role === 'admin').length} sub="גישה מלאה" icon={UserCircle2} />
         <KpiCard title="טכנאים" value={users.filter((u) => u.role === 'technician').length} sub="בדיקות ושטח" icon={AlertTriangle} />
@@ -20121,7 +20121,7 @@ function UsersPage({
           </FormField>
           <FormField label="תפקיד">
             <select
-              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value as AppUserRole })}
             >
@@ -20140,7 +20140,7 @@ function UsersPage({
             />
           </FormField>
           {formError && (
-            <div className="rounded-2xl bg-red-50 px-4 py-2 text-xs text-red-700">
+            <div className="rounded-xl bg-red-50 px-4 py-2 text-xs text-red-700">
               {formError}
             </div>
           )}
@@ -20168,7 +20168,7 @@ function LoginPage({
       <div className="grid w-full max-w-6xl overflow-hidden rounded-[32px] bg-white shadow-2xl lg:grid-cols-2">
         {/* Left hero / brand panel */}
         <div
-          className="hidden bg-slate-900 p-10 text-white lg:flex lg:flex-col lg:justify-between"
+          className="hidden bg-slate-900 p-6 text-white lg:flex lg:flex-col lg:justify-between"
           style={{ background: `linear-gradient(135deg, ${galit.dark}, ${galit.primary})` }}
         >
           <div className="space-y-8">
@@ -20178,7 +20178,7 @@ function LoginPage({
               className="h-32 w-auto"
             />
             <div>
-              <div className="text-3xl font-bold">מערכת ניהול גלית</div>
+              <div className="text-2xl font-bold">מערכת ניהול גלית</div>
               <div className="mt-3 max-w-md text-sm text-white/85">
                 ניהול לקוחות, בדיקות, משימות, הצעות מחיר ודוחות במקום אחד – לחברות סביבתיות ומהנדסים.
               </div>
@@ -20202,7 +20202,7 @@ function LoginPage({
               </li>
             </ul>
           </div>
-          <div className="mt-8 space-y-2 text-xs text-white/75">
+          <div className="mt-5 space-y-2 text-xs text-white/75">
             <div>מנהל מערכת — גישה מלאה לכל המערכת</div>
             <div>טכנאי — בדיקות, פרויקטים ומשימות</div>
             <div>מכירות — לידים, לקוחות, הצעות מחיר</div>
@@ -20211,16 +20211,16 @@ function LoginPage({
         </div>
 
         {/* Right login card */}
-        <div className="p-4 sm:p-8 md:p-10">
+        <div className="p-4 sm:p-5 md:p-6">
           <div className="mx-auto w-full max-w-md">
-            <div className="rounded-3xl border border-slate-100 bg-white/90 p-6 shadow-sm sm:p-8">
+            <div className="rounded-xl border border-slate-100 bg-white/90 p-4 shadow-sm sm:p-5">
               <div className="flex flex-col items-center text-center">
                 <img
                   src={galitLogo}
                   alt="גלית - החברה לאיכות הסביבה"
                   className="mb-4 h-16 w-auto sm:h-20"
                 />
-                <h1 className="text-2xl font-bold sm:text-3xl" style={{ color: galit.text }}>
+                <h1 className="text-xl font-bold sm:text-2xl" style={{ color: galit.text }}>
                   מערכת ניהול גלית
                 </h1>
                 <p className="mt-2 text-sm text-slate-500">
@@ -20228,7 +20228,7 @@ function LoginPage({
                 </p>
               </div>
 
-              <div className="mt-8 space-y-4">
+              <div className="mt-5 space-y-3">
                 <FormField label="אימייל">
                   <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="אימייל" />
                 </FormField>
@@ -20236,12 +20236,12 @@ function LoginPage({
                   <Input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="סיסמה" type="password" />
                 </FormField>
                 {error && (
-                  <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">
                     {error}
                   </div>
                 )}
                 <Button
-                  className="w-full rounded-2xl py-2.5 text-base font-semibold"
+                  className="w-full rounded-xl py-2 text-base font-semibold"
                   style={{ background: galit.primary }}
                   onClick={() => onLogin(email, password)}
                 >
@@ -21839,7 +21839,7 @@ export default function GalitCRMPrototype() {
       {leadToasts.length > 0 && (
         <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72, left: 16 }} dir="rtl">
           {leadToasts.map((lt) => (
-            <div key={lt.id} className="flex items-start gap-3 rounded-2xl border border-blue-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+            <div key={lt.id} className="flex items-start gap-3 rounded-xl border border-blue-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
               <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
               <div className="flex-1 min-w-0">
                 <div className="text-[13px] font-extrabold text-blue-900">ליד חדש התקבל!</div>
@@ -21877,11 +21877,11 @@ export default function GalitCRMPrototype() {
               />
             </>
           )}
-          <div className={cn("min-h-0 flex-1 overflow-y-auto", (current === 'customer-profile' || current === 'interaction-new' || current === 'order-new') ? 'p-2 sm:p-3 lg:p-4' : 'p-4 sm:p-6 lg:p-8')}>
+          <div className="min-h-0 flex-1 overflow-y-auto p-2 sm:p-3 lg:p-4">
           {/* Header bar removed — page starts directly from the green toolbar */}
 
           {topNotice && (
-            <div className="mb-4 rounded-2xl bg-green-50 px-4 py-3 text-sm text-green-800">
+            <div className="mb-4 rounded-xl bg-green-50 px-4 py-2 text-sm text-green-800">
               {topNotice}
             </div>
           )}
@@ -21983,7 +21983,7 @@ export default function GalitCRMPrototype() {
               </FormField>
               <FormField label="מטפל אחראי">
                 <select
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-slate-400"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
                   value={quickCreateForm.assignedUserId}
                   onChange={(e) => setQuickCreateForm((p) => ({ ...p, assignedUserId: e.target.value }))}
                 >
@@ -22010,12 +22010,12 @@ export default function GalitCRMPrototype() {
               </FormField>
 
               {quickCreateSuccess && (
-                <div className="rounded-2xl bg-green-50 px-4 py-2 text-sm text-green-800">
+                <div className="rounded-xl bg-green-50 px-4 py-2 text-sm text-green-800">
                   {quickCreateSuccess}
                 </div>
               )}
               {quickCreateError && (
-                <div className="rounded-2xl bg-red-50 px-4 py-2 text-sm text-red-700">
+                <div className="rounded-xl bg-red-50 px-4 py-2 text-sm text-red-700">
                   {quickCreateError}
                 </div>
               )}
@@ -22045,9 +22045,9 @@ export default function GalitCRMPrototype() {
             title="מצאנו לקוח קיים"
             maxWidth="max-w-md"
           >
-            <div className="space-y-4 text-sm">
+            <div className="space-y-3 text-sm">
               <div>מצאנו {quickCreatePhoneMatchCustomer ? 'לקוח' : 'ליד'} קיים עם מספר טלפון זהה:</div>
-              <div className="space-y-1 rounded-2xl bg-slate-50 px-4 py-3">
+              <div className="space-y-1 rounded-xl bg-slate-50 px-4 py-2">
                 <div><span className="text-slate-500">שם: </span>{(quickCreatePhoneMatchCustomer || quickCreatePhoneMatchLead)?.name}</div>
                 <div><span className="text-slate-500">טלפון: </span>{phoneToDisplay((quickCreatePhoneMatchCustomer || quickCreatePhoneMatchLead)?.phone)}</div>
               </div>
@@ -22223,7 +22223,7 @@ export default function GalitCRMPrototype() {
                     type="button"
                     onClick={() => setWorkspaceTab('card')}
                     className={cn(
-                      'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
+                      'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all',
                       workspaceTab === 'card'
                         ? 'bg-green-600 text-white shadow-sm'
                         : 'text-slate-600 hover:bg-slate-100'
@@ -22236,7 +22236,7 @@ export default function GalitCRMPrototype() {
                     type="button"
                     onClick={() => setWorkspaceTab(workspaceQuoteId ? 'quote-edit' : 'quote-new')}
                     className={cn(
-                      'flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all',
+                      'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition-all',
                       (workspaceTab === 'quote-new' || workspaceTab === 'quote-edit')
                         ? 'bg-green-600 text-white shadow-sm'
                         : 'text-slate-600 hover:bg-slate-100'
@@ -22265,7 +22265,7 @@ export default function GalitCRMPrototype() {
               {!isNewCustomerMode && !newlyCreatedTaskId && workspaceTab === 'card' && (() => {
                 const openTask = tasks.find((t) => t.customerId === selectedCustomer.id && ['OPEN', 'IN_PROGRESS'].includes(String(t.status || '').toUpperCase()));
                 return (
-                <div className="mb-3 flex items-center justify-between rounded-2xl px-5 py-3 shadow-sm border border-slate-200 bg-white" style={{ direction: 'rtl' }}>
+                <div className="mb-3 flex items-center justify-between rounded-xl px-4 py-2 shadow-sm border border-slate-200 bg-white" style={{ direction: 'rtl' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: '#dbeafe' }}>
                       <PlayCircle className="h-5 w-5 text-blue-600" />
@@ -22303,7 +22303,7 @@ export default function GalitCRMPrototype() {
 
               {/* Banner: newly created task ready */}
               {newlyCreatedTaskId && workspaceTab === 'card' && (
-                <div className="mb-3 flex items-center justify-between rounded-2xl px-5 py-3 shadow-sm" style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', direction: 'rtl' }}>
+                <div className="mb-3 flex items-center justify-between rounded-xl px-4 py-2 shadow-sm" style={{ background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)', direction: 'rtl' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -22513,7 +22513,7 @@ export default function GalitCRMPrototype() {
             />
           )}
           {current === 'lead-profile' && selectedLead && (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <Button variant="outline" onClick={closeProfilePage}>חזרה</Button>
               <LeadDetailPage
                 lead={selectedLead}

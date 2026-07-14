@@ -21,6 +21,12 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
+/* גודל בסיס מוקטן (במקום 16px) — כל הריווחים/הטקסטים ב-Tailwind מבוססי rem,
+   כך שהמסך כולו נהיה קומפקטי ואחיד בלי לגעת בכל קומפוננטה. */
+html {
+  font-size: 15px;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -136,6 +142,15 @@ body {
   /* טבלאות רחבות: אם ההורה לא כבר עוטף בגלילה — לפחות שהטבלה עצמה תגלול */
   table {
     max-width: 100%;
+  }
+  /* טקסט ארוך (כתובות מייל, קישורים, שמות ארוכים) נשבר לשורה במקום לדחוף את הרוחב */
+  body {
+    overflow-wrap: break-word;
+  }
+  /* רשתות עם מספר עמודות קבוע (ללא וריאנט רספונסיבי) מתקפלות ל-2 עמודות בטלפון */
+  .grid-cols-4,
+  .grid-cols-5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

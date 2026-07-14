@@ -137,9 +137,21 @@ export class AiMailService {
     // ── שליפת נתונים אמיתיים מההצעה (סכום / תנאי תשלום / מספר) ──
     const facts = await this.resolveFacts(ctx);
 
-    // ── תוכן ההצעה (פריטי שורה + טקסט המסמך הממוזג) — המקור שממנו ה-AI גוזר את תיאור העבודה,
+    // ── תוכן ההצעה (פריטי שורה + טקסט המסמך הערוך) — המקור שממנו ה-AI גוזר את תיאור העבודה,
     //    במקום שאלון שהמשתמש ממלא ידנית. נשלח כטקסט בלבד (לא הקובץ עצמו). ──
     const quoteContent = await this.gatherQuoteContent(ctx.quoteId);
+
+    // ── חסימה מוחלטת: לא מנסחים על התבנית הגולמית ──
+    // ניסוח מייל הצעת מחיר מותר רק אחרי שהעובד ערך את המסמך ב-Word ושמר (סונכרן מ-OneDrive).
+    // אם לא קיימת גרסה ערוכה כזו — חוסמים, כדי שה-AI לעולם לא ינסח על המיזוג הראשוני/הגולמי.
+    // חל רק על ניסוח מייל *ראשוני*; בקשת תיקון מפורשת של המשתמש (instruction/previousBody) עוברת.
+    const isEmailQuoteDraft = ctx.channel !== 'whatsapp' && !!ctx.quoteId;
+    const isRefinement = !!(ctx.instruction || ctx.previousBody || ctx.previousSubject);
+    if (isEmailQuoteDraft && !isRefinement && !quoteContent.hasEditedDoc) {
+      throw new BadRequestException(
+        'הניסוח מתבצע רק אחרי עריכת ההצעה ב-Word ושמירתה. ערכו את המסמך, שמרו, וחזרו ל-CRM — הניסוח יופק אוטומטית על בסיס הגרסה הערוכה.',
+      );
+    }
 
     // הפנייה במייל היא בשם הפרטי בלבד — לוקחים את המילה הראשונה מהשם המלא.
     const firstName = this.firstNameOf(ctx.contactName);
@@ -473,12 +485,27 @@ export class AiMailService {
   }
 
   /**
-   * אוסף את "תוכן ההצעה" כטקסט (לא הקובץ עצמו): תיאורי פריטי השורה מה-DB +
-   * הטקסט של המסמך הממוזג האחרון (אם הוא DOCX). זה מחליף את השאלון הידני — ה-AI
-   * גוזר את תיאור העבודה מהתוכן האמיתי של ההצעה. הכל best-effort: בכישלון מחזיר ריק.
+   * מזהה גרסה של מסמך ההצעה שנערכה בפועל ע"י העובד. **הגרסה הערוכה היחידה הקבילה
+   * לניסוח היא זו שסונכרנה מ-OneDrive** אחרי שהעובד ערך ושמר ב-Word — היא נשמרת ב-
+   * syncFromOneDrive עם documentDescription המכיל "סונכרן אוטומטית".
+   * המיזוג האוטומטי הראשוני (documentDescription="מסמך ממוזג") וכן צירוף ידני של קובץ
+   * *אינם* נחשבים "ערוך" ואסור לנסח על בסיסם — כדי שה-AI לעולם לא ינסח על התבנית הגולמית.
    */
-  private async gatherQuoteContent(quoteId?: string): Promise<{ itemsText: string; docText: string }> {
-    const result = { itemsText: '', docText: '' };
+  private isEditedFromWord(doc: { documentDescription?: string | null } | null | undefined): boolean {
+    return /סונכרן אוטומטית/.test(String(doc?.documentDescription || ''));
+  }
+
+  /**
+   * אוסף את "תוכן ההצעה" כטקסט (לא הקובץ עצמו): תיאורי פריטי השורה מה-DB +
+   * הטקסט של הגרסה **הערוכה** של המסמך (רק אם סונכרנה מ-OneDrive אחרי עריכת העובד).
+   * מחזיר גם hasEditedDoc — האם קיימת גרסה ערוכה קבילה. אם אין, docText יישאר ריק
+   * וה-caller (generateDraft) חוסם את הניסוח כדי לא לנסח על המסמך הגולמי/הראשוני.
+   * הכל best-effort: בכישלון מחזיר ריק.
+   */
+  private async gatherQuoteContent(
+    quoteId?: string,
+  ): Promise<{ itemsText: string; docText: string; hasEditedDoc: boolean }> {
+    const result = { itemsText: '', docText: '', hasEditedDoc: false };
     if (!quoteId) return result;
 
     // פריטי שורה (lineItemsJson) — תיאור + כמות.
@@ -500,19 +527,23 @@ export class AiMailService {
       this.logger.warn(`gatherQuoteContent items failed: ${e?.message || e}`);
     }
 
-    // טקסט המסמך הממוזג האחרון — רק אם זה DOCX (PDF איננו ניתן לחילוץ כאן).
+    // הגרסה הערוכה מ-OneDrive בלבד — לא המיזוג הגולמי ולא צירוף ידני.
+    // בוחרים את הגרסה הערוכה העדכנית ביותר לפי createdAt; אם אין כזו — אין docText.
     try {
       const doc: any = await (this.prisma as any).quoteDocument
         .findFirst({
-          where: { quoteId },
+          where: { quoteId, documentDescription: { contains: 'סונכרן אוטומטית' } },
           orderBy: { createdAt: 'desc' },
-          select: { data: true, mimeType: true, fileName: true },
+          select: { data: true, mimeType: true, fileName: true, documentDescription: true },
         })
         .catch(() => null);
-      const mime = String(doc?.mimeType || '');
-      const isDocx = /word|officedocument/i.test(mime) || /\.docx$/i.test(String(doc?.fileName || ''));
-      if (doc?.data && isDocx) {
-        result.docText = this.extractDocxText(Buffer.from(doc.data));
+      if (this.isEditedFromWord(doc)) {
+        result.hasEditedDoc = true;
+        const mime = String(doc?.mimeType || '');
+        const isDocx = /word|officedocument/i.test(mime) || /\.docx$/i.test(String(doc?.fileName || ''));
+        if (doc?.data && isDocx) {
+          result.docText = this.extractDocxText(Buffer.from(doc.data));
+        }
       }
     } catch (e: any) {
       this.logger.warn(`gatherQuoteContent docx failed: ${e?.message || e}`);
