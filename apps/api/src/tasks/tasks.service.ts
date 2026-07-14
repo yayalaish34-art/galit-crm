@@ -34,20 +34,9 @@ export class TasksService {
       }
     }
 
-    // ── "לידים משותפים": משימה של ליד נכנס שעדיין לא נתפס (IncomingLead.status=NEW) גלויה
-    //    לכל אנשי המכירות — לא רק לבעלים — כדי שכולם יראו ליד עד שמישהו יתפוס אותו. ──
-    let where: any = Object.keys(baseWhere).length ? baseWhere : undefined;
-    if (restrictToOwner) {
-      const sharedNewLeads = await this.prisma.incomingLead.findMany({
-        where: { status: 'NEW', taskId: { not: null } },
-        select: { taskId: true },
-      });
-      const sharedTaskIds = sharedNewLeads.map((l) => l.taskId).filter((x): x is string => !!x);
-      if (sharedTaskIds.length) {
-        where = { OR: [{ ownerId: user!.id }, { id: { in: sharedTaskIds } }] };
-        if (projectId) where = { AND: [{ projectId }, where] };
-      }
-    }
+    // הערה: במודל הנוכחי ליד נכנס שטרם נתפס אינו מחזיק משימה כלל (המשימה נוצרת רק
+    // בתפיסה, ישירות על שם התופס) — לכן אין יותר "משימות לידים משותפות" להזריק לכולם.
+    const where: any = Object.keys(baseWhere).length ? baseWhere : undefined;
 
     return this.prisma.task.findMany({
       where,

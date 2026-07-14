@@ -16,12 +16,30 @@ export class IncomingLeadsService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    // ניקוי חד-פעמי (אידמפוטנטי): לידים שטרם נתפסו לא מחזיקים יותר משימה — המשימה נוצרת
+    // רק בתפיסה. מוחק משימות "ליד חדש נכנס" של לידים NEW ישנים ומאפס להם את taskId.
+    void this.cleanupUnclaimedLeadTasks().catch((e) =>
+      this.logger.warn(`cleanup unclaimed lead tasks failed: ${e?.message || e}`),
+    );
     // Polling פנימי (בלי תלות ב-@nestjs/schedule): כל דקה סורקים תיבות דואר מחוברות.
     if (process.env.LEAD_POLLING_DISABLED === '1') return;
     setInterval(() => {
       void this.pollAll().catch((e) => this.logger.error(`poll error: ${e?.message || e}`));
     }, POLL_INTERVAL_MS);
     this.logger.log('Incoming-lead mailbox polling started (every 60s)');
+  }
+
+  /** מיגרציה רכה: מוחק משימות של לידים שעדיין NEW (לא נתפסו) ומנתק אותן מהליד. */
+  private async cleanupUnclaimedLeadTasks(): Promise<void> {
+    const stale = await this.prisma.incomingLead.findMany({
+      where: { status: 'NEW', taskId: { not: null } },
+      select: { id: true, taskId: true },
+    });
+    for (const l of stale) {
+      if (l.taskId) await this.prisma.task.delete({ where: { id: l.taskId } }).catch(() => undefined);
+      await this.prisma.incomingLead.update({ where: { id: l.id }, data: { taskId: null } }).catch(() => undefined);
+    }
+    if (stale.length) this.logger.log(`Detached ${stale.length} unclaimed incoming leads from their tasks`);
   }
 
   /** סורק את כל המשתמשים המחוברים ל-Outlook ויוצר לידים חדשים. */
@@ -90,7 +108,9 @@ export class IncomingLeadsService implements OnModuleInit {
       return;
     }
 
-    const lead = await this.prisma.incomingLead.create({
+    // ליד נכנס *לא* יוצר משימה — הוא ממתין ב"לידים נכנסים" (פופ-אפ + רשימה) עד שעובד
+    // לוחץ "התחל טיפול"/"העבר". המשימה נוצרת רק בתפיסה, ישירות על שם התופס.
+    await this.prisma.incomingLead.create({
       data: {
         messageId: m.id,
         internetMessageId: m.internetMessageId || null,
@@ -103,11 +123,18 @@ export class IncomingLeadsService implements OnModuleInit {
         status: 'NEW',
       },
     });
+    this.logger.log(`New incoming lead "${m.subject}" (mailbox owner ${ownerId}) — waiting to be claimed`);
+  }
 
+  /** יוצר את משימת התהליך לליד ברגע התפיסה — על שם התופס בלבד. */
+  private async createTaskForClaimedLead(
+    lead: { id: string; body: string | null },
+    ownerId: string,
+  ): Promise<string> {
     const task = await this.prisma.task.create({
       data: {
         title: 'ליד חדש נכנס',
-        description: m.bodyText || null,
+        description: lead.body || null,
         type: 'step1', // פתיחת פנייה
         status: 'OPEN',
         priority: 'HIGH',
@@ -116,9 +143,8 @@ export class IncomingLeadsService implements OnModuleInit {
         incomingLeadId: lead.id,
       },
     });
-
     await this.prisma.incomingLead.update({ where: { id: lead.id }, data: { taskId: task.id } });
-    this.logger.log(`New incoming lead "${m.subject}" → task ${task.id} (owner ${ownerId})`);
+    return task.id;
   }
 
   /**
@@ -189,19 +215,10 @@ export class IncomingLeadsService implements OnModuleInit {
    */
   async pending(user: { id?: string; role?: string }) {
     // מגבילים ל-24 השעות האחרונות כדי שלא יוצף בלידים ישנים שלא נתפסו בכל רענון.
+    // במודל החדש ליד NEW לא מחזיק משימה כלל (היא נוצרת רק בתפיסה) — אין צורך בסינון "יתומים".
     const since = new Date(Date.now() - 24 * 60 * 60_000);
     const where = { status: 'NEW' as const, receivedAt: { gte: since } };
-    const leads = await this.prisma.incomingLead.findMany({ where, orderBy: { receivedAt: 'desc' } });
-    if (!leads.length) return leads;
-    // סינון לידים "יתומים": אם המשימה המקושרת נמחקה ידנית (taskId הוא מחרוזת חופשית בלי FF),
-    // הליד נשאר NEW וממשיך להקפיץ פופ-אפ ש"פתח את הליד" לא מצליח לפתוח. מחזירים רק לידים
-    // עם משימה חיה — כך כל פופ-אפ ניתן לפתיחה, ולידים יתומים מפסיקים לקפוץ.
-    const taskIds = leads.map((l) => l.taskId).filter((x): x is string => !!x);
-    const liveTasks = taskIds.length
-      ? await this.prisma.task.findMany({ where: { id: { in: taskIds } }, select: { id: true } })
-      : [];
-    const liveTaskIds = new Set(liveTasks.map((t) => t.id));
-    return leads.filter((l) => l.taskId && liveTaskIds.has(l.taskId));
+    return this.prisma.incomingLead.findMany({ where, orderBy: { receivedAt: 'desc' } });
   }
 
   /** מסמן לידים כ"הוצגה עליהם התראה" כדי לא להקפיץ שוב. */
@@ -234,9 +251,12 @@ export class IncomingLeadsService implements OnModuleInit {
     });
     if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
-    // המשימה עוברת לבעלות התופס — כדי שתופיע ברשימת המשימות שלו (ותיעלם מהאחרים).
+    // המשימה נוצרת רק עכשיו — ישירות על שם התופס. (לידים ישנים שעוד נושאים משימה
+    // מתקופת המודל הקודם: מעבירים את הבעלות במקום ליצור כפולה.)
     if (lead.taskId) {
       await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: claimerId } }).catch(() => {});
+    } else {
+      await this.createTaskForClaimedLead(lead, claimerId);
     }
     // ניקוי אחים ישנים (מנתונים שקדמו לאיחוד-בכניסה) — best-effort, לא חוסם.
     await this.dismissSiblings(lead).catch(() => undefined);
@@ -257,8 +277,11 @@ export class IncomingLeadsService implements OnModuleInit {
     });
     if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
+    // המשימה נוצרת רק עכשיו — ישירות על שם עובד היעד.
     if (lead.taskId) {
       await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: toUserId } }).catch(() => {});
+    } else {
+      await this.createTaskForClaimedLead(lead, toUserId);
     }
     await this.dismissSiblings(lead).catch(() => undefined);
     return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });

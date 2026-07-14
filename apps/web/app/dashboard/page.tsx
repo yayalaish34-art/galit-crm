@@ -14549,7 +14549,30 @@ function TasksPage({
       void onReloadTasks?.();
       return;
     }
-    setIncomingLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: 'ACTIVE' } : l))); // רק אחרי הצלחה
+    // השרת יוצר את המשימה רק עכשיו (בתפיסה) — קוראים את הליד המעודכן כדי לקבל את taskId,
+    // מרעננים את רשימת המשימות ופותחים את המשימה החדשה ישר לתופס.
+    let updated: any = null;
+    try { updated = await r.json(); } catch { /* ignore */ }
+    setIncomingLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, ...(updated || {}), status: 'ACTIVE' } : l))); // רק אחרי הצלחה
+    try { await Promise.resolve(onReloadTasks?.()); } catch { /* ignore */ }
+    if (updated?.taskId) setExpandedTaskId(updated.taskId);
+  };
+  /** דחיית ליד נכנס (לא רלוונטי) — מסיר אותו מהרשימה אצל כולם. */
+  const dismissIncomingLead = async (leadId: string) => {
+    if (!window.confirm('לדחות את הליד? הוא יוסר מרשימת הלידים הנכנסים אצל כולם.')) return;
+    let r: Response;
+    try {
+      r = await apiFetch(apiUrl(`/incoming-leads/${leadId}/dismiss`), { method: 'POST', authUser: currentUser });
+    } catch {
+      alert('אירעה שגיאה בדחיית הליד. נסה שוב.');
+      return;
+    }
+    if (!r.ok) {
+      alert(await leadTakenMessage(r));
+      void loadIncomingLeads();
+      return;
+    }
+    setIncomingLeads((prev) => prev.filter((l) => l.id !== leadId));
   };
   const transferLead = async (leadId: string, toUserId: string) => {
     if (!toUserId) return;
@@ -16611,6 +16634,79 @@ function TasksPage({
           משימה חדשה
         </button>
       </div>
+
+      {/* ═══ לידים נכנסים — ממתינים לתפיסה (עדיין לא משימות; המשימה נוצרת ב"התחל טיפול") ═══ */}
+      {(() => {
+        const newLeads = incomingLeads.filter((l) => l.status === 'NEW');
+        if (newLeads.length === 0) return null;
+        return (
+          <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <span className="inline-flex items-center justify-center rounded-lg" style={{ width: 28, height: 28, background: '#dbeafe' }}>
+                <Mail className="h-4 w-4 text-blue-600" />
+              </span>
+              <span className="text-sm font-extrabold text-blue-900">לידים נכנסים — ממתינים לטיפול</span>
+              <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-bold text-white">{newLeads.length}</span>
+              <span className="hidden text-[11px] text-blue-500 sm:inline">הראשון שלוחץ "התחל טיפול" לוקח את הליד — רק אז נוצרת משימה</span>
+            </div>
+            <div className="space-y-2">
+              {newLeads.map((lead) => {
+                const p = parseLeadBody(lead.body);
+                const recv = lead.receivedAt ? new Date(lead.receivedAt) : null;
+                return (
+                  <div key={lead.id} className="rounded-lg border border-blue-100 bg-white p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-bold text-slate-800">{p.fullName || lead.fromName || lead.subject || 'ליד חדש'}</div>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                          {p.phone ? <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} dir="ltr" className="font-semibold text-blue-600 hover:underline">{p.phone}</a> : null}
+                          {p.serviceType ? <span className="truncate">{p.serviceType}</span> : null}
+                          {recv && !isNaN(recv.getTime()) ? <span>{recv.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })} {recv.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span> : null}
+                        </div>
+                        {p.message ? <div className="mt-1 max-h-10 overflow-hidden text-[12px] leading-snug text-slate-600">{p.message}</div> : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void startLead(lead.id)}
+                          className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110"
+                          style={{ background: '#16a34a' }}
+                        >
+                          <CheckCircle2 className="h-4 w-4" /> התחל טיפול
+                        </button>
+                        <select
+                          value={leadTransferSel[lead.id] || ''}
+                          onChange={(e) => setLeadTransferSel((prev) => ({ ...prev, [lead.id]: e.target.value }))}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-blue-400"
+                        >
+                          <option value="">העבר ל…</option>
+                          {users.filter((u) => u.id !== currentUser.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={!leadTransferSel[lead.id]}
+                          onClick={() => void transferLead(lead.id, leadTransferSel[lead.id])}
+                          className="rounded-lg px-3 py-1.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-40"
+                          style={{ background: '#2563eb' }}
+                        >
+                          העבר
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void dismissIncomingLead(lead.id)}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-rose-600"
+                        >
+                          דחה
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ KPI CARDS ═══ */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
