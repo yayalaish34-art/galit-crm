@@ -22,6 +22,12 @@ export const metadata = {
 
 export const viewport = {
   themeColor: '#5a9c2e',
+  // חובה כדי שהאתר יוצג נכון בטלפון (רוחב אמיתי של המכשיר במקום ~980px של דסקטופ).
+  // בלי זה הדפדפן בטלפון מקטין את הכל ונראה "שבור" עד שמסובבים לרוחב.
+  width: 'device-width',
+  initialScale: 1,
+  // מאפשר למשתמש עדיין לזום ידני (נגישות) — לא נועלים.
+  maximumScale: 5,
 };
 
 export default function RootLayout({

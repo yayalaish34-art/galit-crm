@@ -14217,9 +14217,13 @@ function TasksPage({
    * When parent IS provided, we read/write directly to parent — no local copy. */
   const [_localExpandedTaskId, _setLocalExpandedTaskId] = useState<string | null>(null);
   const expandedRowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  /* בטלפון: סרגל "פרטי לקוח" הימני מוסתר כברירת מחדל (תופס מדי מהמסך הצר),
+   * ונפתח כשכבה מרחפת בלחיצה על כפתור "פרטים". בדסקטופ הוא תמיד מוצג (md:block). */
+  const [taskSidebarOpen, setTaskSidebarOpen] = useState(false);
 
   const expandedTaskId = extSetExpandedTaskId ? (extExpandedTaskId ?? null) : _localExpandedTaskId;
   const setExpandedTaskId = useCallback((v: string | null) => {
+    setTaskSidebarOpen(false); // פתיחת/סגירת משימה תמיד מתחילה עם סרגל הפרטים סגור (רלוונטי לטלפון)
     if (extSetExpandedTaskId) {
       extSetExpandedTaskId(v);
     } else {
@@ -16694,6 +16698,8 @@ function TasksPage({
 
                           {/* ──── COMPACT NAV HEADER ──── */}
                           <div className="flex-shrink-0 border-b border-slate-300" style={{ height: 44, direction: 'rtl', display: 'flex', alignItems: 'stretch', background: '#e2e8f0', padding: '0 6px', gap: 2 }}>
+                            {/* קיצורי הניווט — מוסתרים בטלפון (חוסכים מקום במסך צר); כפתור "סגור" ממילא מחזיר לרשימה */}
+                            <div className="hidden md:flex" style={{ alignItems: 'stretch', gap: 2 }}>
                             {([
                               { label: 'לקוח',   icon: <UserCircle2 className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNavigate?.('customers'); } },
                               { label: 'חדש',    icon: <Plus        className="h-4 w-4 shrink-0 text-slate-600" />, onClick: () => { setExpandedTaskId(null); onNewCustomer?.(); } },
@@ -16708,11 +16714,22 @@ function TasksPage({
                                 <span>{btn.label}</span>
                               </button>
                             ))}
-                            <div className="self-stretch shrink-0" style={{ width: 1, background: '#cbd5e1', margin: '6px 4px' }} />
+                            </div>
+                            <div className="hidden md:block self-stretch shrink-0" style={{ width: 1, background: '#cbd5e1', margin: '6px 4px' }} />
                             <div className="flex-1 flex items-center min-w-0 px-2">
                               <span className="text-[12px] font-semibold text-slate-600 truncate">{t.title || 'לא צוין'}</span>
                             </div>
                             <div className="flex items-center gap-2 pr-1">
+                              {/* בטלפון בלבד: כפתור לפתיחת סרגל "פרטי לקוח" (מוסתר בדסקטופ) */}
+                              <button
+                                type="button"
+                                onClick={() => setTaskSidebarOpen((v) => !v)}
+                                className="md:hidden flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 font-semibold text-slate-700 transition hover:bg-slate-50 active:scale-95"
+                                style={{ height: 30, fontSize: 12 }}
+                              >
+                                <UserCircle2 className="h-4 w-4" />
+                                פרטים
+                              </button>
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${taskStatusBadge(s)}`}>{taskStatusLabel(s)}</span>
                               <button
                                 type="button"
@@ -16735,7 +16752,8 @@ function TasksPage({
                           </div>
 
                           {/* ──── STEPPER (50px) ──── */}
-                          <div className="flex-shrink-0 bg-white border-b border-slate-100" style={{ height: 50, direction: 'rtl', display: 'flex', alignItems: 'center', padding: '0 20px', overflow: 'hidden' }}>
+                          {/* בטלפון: גלילה אופקית במקום חיתוך, כדי שכל השלבים יהיו נגישים במסך צר */}
+                          <div className="flex-shrink-0 bg-white border-b border-slate-100" style={{ height: 50, direction: 'rtl', display: 'flex', alignItems: 'center', padding: '0 20px', overflowX: 'auto', overflowY: 'hidden' }}>
                             {visibleProgressStepsExtended.map((step, vi) => {
                               const origIdx = step.origIdx;
                               const currentStepPos = visibleProgressStepsExtended.findIndex((s) => s.origIdx === currentStep);
@@ -16820,10 +16838,23 @@ function TasksPage({
                           })()}
 
                           {/* ──── 3-COL PANEL: right sidebar + center + left notes ──── */}
-                          <div className="flex-1 flex min-h-0 overflow-hidden" style={{ direction: 'rtl' }}>
+                          <div className="flex-1 flex min-h-0 overflow-hidden relative" style={{ direction: 'rtl' }}>
 
-                            {/* RIGHT SIDEBAR: פרטי לקוח */}
-                            <div className="flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto" style={{ width: 248, direction: 'rtl', padding: 12 }}>
+                            {/* שכבת רקע כהה מאחורי הסרגל כשהוא פתוח בטלפון (לחיצה סוגרת) */}
+                            {taskSidebarOpen && (
+                              <div
+                                className="absolute inset-0 z-20 bg-black/40 md:hidden"
+                                onClick={() => setTaskSidebarOpen(false)}
+                              />
+                            )}
+
+                            {/* RIGHT SIDEBAR: פרטי לקוח —
+                                בטלפון: מוסתר כברירת מחדל; כשנפתח מוצג ככבה מרחפת מימין.
+                                בדסקטופ (md+): תמיד גלוי, ברוחב קבוע 248px בתוך הזרימה. */}
+                            <div
+                              className={`${taskSidebarOpen ? 'absolute inset-y-0 right-0 z-30 w-[248px] shadow-2xl' : 'hidden'} flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto md:static md:z-auto md:block md:w-[248px] md:shadow-none`}
+                              style={{ direction: 'rtl', padding: 12 }}
+                            >
                               <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {(() => {
