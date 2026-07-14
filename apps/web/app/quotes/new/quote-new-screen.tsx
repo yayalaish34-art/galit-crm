@@ -1357,6 +1357,34 @@ export function QuoteNewScreen({
     }
   }
 
+  // תצוגה מקדימה של קובץ ה-PDF שיישלח ללקוח (בדיוק אותו PDF עם כפתור החתימה המוטמע).
+  // משתמש באותו endpoint של השליחה — /public/sign/:token/pdf?btn=1 — עם markRequested:false
+  // כדי לא לסמן את ההצעה כ"נשלחה לחתימה" רק בגלל צפייה. פותח חלון ריק סינכרונית (לפני ה-await)
+  // כדי לא להיחסם ע"י חוסם ה-popup, ומפנה אותו ל-PDF אחרי הכנת הטוקן.
+  async function previewQuotePdf() {
+    if (previewPdfBusy) return;
+    const win = window.open('', '_blank');
+    setPreviewPdfBusy(true);
+    setStatusMsg('מכין תצוגה מקדימה…');
+    try {
+      const { token, error } = await ensureSignToken({ markRequested: false });
+      if (!token) {
+        if (win) win.close();
+        setStatusMsg(error || 'הכנת התצוגה המקדימה נכשלה');
+        return;
+      }
+      const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
+      if (win) win.location.href = pdfUrl;
+      else window.open(pdfUrl, '_blank'); // חוסם popup חסם — ניסיון נוסף
+      setStatusMsg('');
+    } catch {
+      if (win) win.close();
+      setStatusMsg('הכנת התצוגה המקדימה נכשלה — בעיית תקשורת');
+    } finally {
+      setPreviewPdfBusy(false);
+    }
+  }
+
   // פותח וואטסאפ באופן אמין: פותחים חלון ריק *סינכרונית* בתוך ה-click (לפני ה-await) כדי לא
   // להיחסם ע"י חוסם ה-popup, ומפנים אותו לקישור אחרי הכנתו. הקישור נבנה ב-whatsAppLink המשותף
   // (wa.me עם מספר → מעביר לאפליקציית WhatsApp Desktop הקיימת; בלי מספר → בורר נמען).
@@ -1531,6 +1559,7 @@ export function QuoteNewScreen({
   // ── חלון עריכת מייל לפני שליחה ──
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
+  const [previewPdfBusy, setPreviewPdfBusy] = useState(false);
   const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
   const [bccDropdownOpen, setBccDropdownOpen] = useState(false);
   const [emailForm, setEmailForm] = useState({
@@ -3837,12 +3866,19 @@ export function QuoteNewScreen({
                       </div>
                     )}
 
-                    {/* כפתור "צפייה בהצעת מחיר" — נשלח במקום קובץ מצורף, מפנה לעמוד הצפייה/חתימה */}
+                    {/* כפתור "צפייה בהצעת מחיר" — לחיצה פותחת תצוגה מקדימה של ה-PDF שיישלח ללקוח */}
                     <div className="mt-5 border-t border-gray-100 pt-4">
-                      <span className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white" style={{ background: '#2563eb' }}>
-                        📄 צפייה בהצעת מחיר
-                      </span>
-                      <div className="mt-2 text-[11px] text-gray-400">הלקוח יקבל כפתור שמוביל לעמוד צפייה וחתימה בהצעה (במקום קובץ מצורף).</div>
+                      <button
+                        type="button"
+                        onClick={() => void previewQuotePdf()}
+                        disabled={previewPdfBusy}
+                        title="לחצו לתצוגה מקדימה של קובץ ההצעה (PDF)"
+                        className="inline-flex items-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white transition hover:brightness-110 disabled:opacity-60 disabled:cursor-wait"
+                        style={{ background: '#2563eb' }}
+                      >
+                        {previewPdfBusy ? '⏳ מכין תצוגה…' : '📄 צפייה בהצעת מחיר'}
+                      </button>
+                      <div className="mt-2 text-[11px] text-gray-400">לחיצה תפתח תצוגה מקדימה של ה-PDF שיישלח. הלקוח יקבל כפתור זהה שמוביל לעמוד צפייה וחתימה.</div>
                       {emailForm.includeSignature && emailSigImage && (
                         <span className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
                           🖼️ חתימה (תמונה)
