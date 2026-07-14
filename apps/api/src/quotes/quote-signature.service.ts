@@ -10,6 +10,7 @@ import { GraphFilesService } from '../microsoft/graph-files.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { stampQuoteButtons } from './pdf-buttons.util';
 import { stripSignatureTableFromDocx } from '../quote-templates/signature-table';
+import { buildQuoteDocName } from './quote-file-name';
 
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -93,6 +94,7 @@ export class QuoteSignatureService {
       include: {
         customer: { select: { id: true, name: true, email: true, phone: true } },
         quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
       },
     });
     if (!quote) throw new NotFoundException('הצעת מחיר לא נמצאה');
@@ -251,7 +253,7 @@ export class QuoteSignatureService {
       data: {
         id: randomUUID(),
         customerId: quote.customerId,
-        name: `הצעת מחיר${quote.quoteNumber ? ' ' + quote.quoteNumber : ''} - חתומה דיגיטלית.pdf`,
+        name: `${buildQuoteDocName(quote)} - חתומה דיגיטלית.pdf`,
         filePath: 'signature:digital',
         documentType: 'SIGNED_QUOTE',
         mimeType: 'application/pdf',
@@ -349,7 +351,7 @@ export class QuoteSignatureService {
 <p style="color:#64748b;">גלית – החברה לאיכות הסביבה</p>
 </div>`;
 
-      const fileName = `הצעת מחיר${quoteNumber ? ' ' + quoteNumber : ''} - חתומה.pdf`;
+      const fileName = `${buildQuoteDocName(quote)} - חתומה.pdf`;
       await this.graphMail.sendMailAsUser(requesterId, {
         to: user.email,
         subject: `✔ הצעה${quoteNumber ? ' ' + quoteNumber : ''} נחתמה${customerName ? ' — ' + customerName : ''}`,
@@ -375,7 +377,10 @@ export class QuoteSignatureService {
 
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
-      include: { customer: { select: { id: true, name: true, email: true, phone: true, type: true } } },
+      include: {
+        customer: { select: { id: true, name: true, email: true, phone: true, type: true } },
+        quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
+      },
     });
     const meta = (quote?.digitalCertificateMeta as SignatureMeta | null) || null;
     if (!quote || !meta?.secret || meta.secret !== secret) {
@@ -427,17 +432,19 @@ export class QuoteSignatureService {
   }
 
   private resolveQuoteDoc(quote: any): { content: Buffer; fileName: string; isPdf: boolean } {
+    // שם קנוני אחיד: "{שם לקוח} - הצעת מחיר ל: {שם השירות}" — לא השם הטכני מהדיסק/DB.
+    const baseName = buildQuoteDocName(quote);
     const latest = quote.quoteDocuments?.[0];
     if (latest?.data) {
-      const fileName = latest.fileName || 'הצעת מחיר.docx';
-      return { content: Buffer.from(latest.data), fileName, isPdf: /\.pdf$/i.test(fileName) || latest.mimeType === 'application/pdf' };
+      const isPdf = /\.pdf$/i.test(latest.fileName || '') || latest.mimeType === 'application/pdf';
+      return { content: Buffer.from(latest.data), fileName: `${baseName}${isPdf ? '.pdf' : '.docx'}`, isPdf };
     }
     const relPath = latest?.filePath || quote.lastMergedDocPath;
     if (relPath) {
       const abs = path.resolve(process.cwd(), relPath);
       if (fs.existsSync(abs)) {
-        const fileName = path.basename(relPath);
-        return { content: fs.readFileSync(abs), fileName, isPdf: /\.pdf$/i.test(fileName) };
+        const isPdf = /\.pdf$/i.test(relPath);
+        return { content: fs.readFileSync(abs), fileName: `${baseName}${isPdf ? '.pdf' : '.docx'}`, isPdf };
       }
     }
     throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');

@@ -9,6 +9,7 @@ import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { CompanyProfileService } from './company-profile.service';
 import { QuoteSignatureService } from './quote-signature.service';
+import { buildQuoteDocName } from './quote-file-name';
 
 @Injectable()
 export class QuoteMailService {
@@ -100,7 +101,11 @@ export class QuoteMailService {
 
     const quote: any = await this.prisma.quote.findUnique({
       where: { id: quoteId },
-      include: { quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 } },
+      include: {
+        quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
+        quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
+        customer: { select: { name: true } },
+      },
     });
     if (!quote) {
       throw new BadRequestException('הצעת מחיר לא נמצאה');
@@ -116,8 +121,7 @@ export class QuoteMailService {
     // מצב חתימה: מצרפים את קובץ ה-PDF של ההצעה כשבתוכו כבר מוטמע כפתור "לחץ כאן לחתימה"
     // (נשלף משירות החתימה לפי הטוקן) — במקום כפתור-קישור בגוף המייל.
     const signMode = !!opts?.signToken;
-    const quoteNumberForName = quote.quoteNumber || quote.importLegacyId || '';
-    const baseDocName = `הצעת מחיר${quoteNumberForName ? ' ' + quoteNumberForName : ''}`;
+    const baseDocName = buildQuoteDocName(quote);
 
     // מצב חתימה: מצרפים את ה-PDF (עם כפתור החתימה מוטמע בפנים) — נשלף ישירות משירות החתימה.
     if (signMode) {

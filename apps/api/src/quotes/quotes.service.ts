@@ -5,6 +5,7 @@ import { GraphFilesService } from '../microsoft/graph-files.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument = require('pdfkit');
+import { buildQuoteDocName } from './quote-file-name';
 
 // Columns present in the Prisma schema (migration 20260328190000) that do NOT
 // exist in the actual DB table yet. Pre-emptively excluded from every Prisma
@@ -721,15 +722,7 @@ export class QuotesService {
    * העלאה (uploadEditable) ממילא מנקה תווים לא-חוקיים; כאן רק מקצצים ומאחדים רווחים.
    */
   private buildQuoteFileName(quote: any): string {
-    const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
-    const customer = clean(quote?.customerName) || clean(quote?.customer?.name) || 'לקוח';
-    const firstItem =
-      clean(quote?.quoteItems?.[0]?.productDescription) ||
-      clean(Array.isArray(quote?.lineItemsJson) ? (quote.lineItemsJson[0]?.productDescription ?? quote.lineItemsJson[0]?.description ?? quote.lineItemsJson[0]?.name) : '') ||
-      clean(quote?.service);
-    const name = firstItem ? `${customer} - הצעת מחיר ל: ${firstItem}` : `${customer} - הצעת מחיר`;
-    // גבול שם קובץ סביר (uploadEditable חותך ל-120 בכל מקרה); מונע שמות ענק אם התיאור ארוך.
-    return name.slice(0, 120).trim();
+    return buildQuoteDocName(quote);
   }
 
   /**
