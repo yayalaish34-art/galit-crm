@@ -11,7 +11,7 @@ export class TasksService {
     private readonly quotesService: QuotesService,
   ) {}
 
-  findAll({
+  async findAll({
     projectId,
     scope,
     user,
@@ -26,15 +26,31 @@ export class TasksService {
     const baseWhere: any = projectId ? { projectId } : {};
     // מנהל מערכת רואה את כל המשימות. כל שאר העובדים רואים כברירת מחדל
     // רק את המשימות שלהם, אך יכולים לבקש את כולן באמצעות scope=all.
+    const restrictToOwner = role !== 'ADMIN' && (scope || '').toLowerCase() !== 'all';
     if (role !== 'ADMIN') {
       if (!user?.id) throw new UnauthorizedException('Missing user id');
-      if ((scope || '').toLowerCase() !== 'all') {
+      if (restrictToOwner) {
         baseWhere.ownerId = user.id;
       }
     }
 
+    // ── "לידים משותפים": משימה של ליד נכנס שעדיין לא נתפס (IncomingLead.status=NEW) גלויה
+    //    לכל אנשי המכירות — לא רק לבעלים — כדי שכולם יראו ליד עד שמישהו יתפוס אותו. ──
+    let where: any = Object.keys(baseWhere).length ? baseWhere : undefined;
+    if (restrictToOwner) {
+      const sharedNewLeads = await this.prisma.incomingLead.findMany({
+        where: { status: 'NEW', taskId: { not: null } },
+        select: { taskId: true },
+      });
+      const sharedTaskIds = sharedNewLeads.map((l) => l.taskId).filter((x): x is string => !!x);
+      if (sharedTaskIds.length) {
+        where = { OR: [{ ownerId: user!.id }, { id: { in: sharedTaskIds } }] };
+        if (projectId) where = { AND: [{ projectId }, where] };
+      }
+    }
+
     return this.prisma.task.findMany({
-      where: Object.keys(baseWhere).length ? baseWhere : undefined,
+      where,
       include: {
         owner: { select: { id: true, name: true, email: true } },
         project: { select: { id: true, name: true, projectNumber: true } },

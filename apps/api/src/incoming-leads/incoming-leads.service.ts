@@ -49,7 +49,19 @@ export class IncomingLeadsService implements OnModuleInit {
     }
   }
 
-  /** יוצר IncomingLead + Task עבור הודעה אחת (dedup לפי messageId). */
+  /** נרמול טקסט להשוואת "אותו ליד" (גיבוי כשאין internetMessageId זהה). */
+  private normalizeForMatch(s?: string | null): string {
+    return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  /**
+   * יוצר IncomingLead + Task עבור הודעה אחת — עם *איחוד* של אותו ליד שהגיע לכמה תיבות.
+   * dedup בשתי שכבות:
+   *   1. messageId (פר-תיבה) — מונע יצירה כפולה לאותו משתמש (כמו קודם).
+   *   2. אותו ליד בין עובדים שונים — לפי internetMessageId (זהה בכל התיבות), ובגיבוי
+   *      לפי אותו גוף+שולח שהתקבל ב-10 הדקות האחרונות (למקרה שהמערכת הישנה שולחת עם
+   *      מזהים שונים). אם כבר קיים ליד תואם — לא יוצרים עותק חדש כלל (ליד אחד משותף).
+   */
   private async ingest(
     ownerId: string,
     m: {
@@ -69,6 +81,12 @@ export class IncomingLeadsService implements OnModuleInit {
     // (מיילים אוטומטיים/סטטיסטיקות) — לא מכניסים אותם לבסיס הנתונים כלל.
     if ((m.bodyText || '').includes('Want More Stats?')) {
       this.logger.log(`Skipping non-lead email "${m.subject}" (contains "Want More Stats?")`);
+      return;
+    }
+
+    // ── איחוד "ליד אחד משותף": אם אותו מייל כבר נקלט (לאותו עובד או לאחר) — לא יוצרים עותק. ──
+    if (await this.duplicateOfExistingLead(m)) {
+      this.logger.log(`Skipping duplicate lead "${m.subject}" (already ingested for another mailbox)`);
       return;
     }
 
@@ -103,30 +121,76 @@ export class IncomingLeadsService implements OnModuleInit {
     this.logger.log(`New incoming lead "${m.subject}" → task ${task.id} (owner ${ownerId})`);
   }
 
-  /** לידים פעילים של המשתמש (NEW/ACTIVE) — לצורך הצגת הטופס/פרטי הליד. */
+  /**
+   * האם ההודעה הזו היא עותק של ליד שכבר נקלט (אותו מייל שהגיע לתיבה אחרת)?
+   * ראשי: לפי internetMessageId (זהה בכל תיבות הנמענים). גיבוי: אותו גוף+שולח מנורמל
+   * שהתקבל ב-10 הדקות האחרונות (למקרה שהמערכת הישנה שולחת עותקים עם מזהים שונים).
+   * לא כולל לידים שכבר נדחו (DISMISSED) — כדי שדחייה לא תחסום ליד חדש אמיתי בעתיד.
+   */
+  private async duplicateOfExistingLead(m: {
+    internetMessageId: string;
+    subject: string;
+    bodyText: string;
+    fromEmail: string;
+    receivedDateTime: string;
+  }): Promise<boolean> {
+    // 1) לפי internetMessageId — המפתח האמין (זהה בכל התיבות שקיבלו את אותו מייל).
+    if (m.internetMessageId) {
+      const byImi = await this.prisma.incomingLead.findFirst({
+        where: { internetMessageId: m.internetMessageId, status: { not: 'DISMISSED' } },
+        select: { id: true },
+      });
+      if (byImi) return true;
+    }
+
+    // 2) גיבוי: אותו גוף+שולח שהתקבל ב-10 הדקות האחרונות (חלון קצר → מזעור false-positive).
+    const body = this.normalizeForMatch(m.bodyText);
+    const from = this.normalizeForMatch(m.fromEmail);
+    if (body && from) {
+      const recvAt = m.receivedDateTime ? new Date(m.receivedDateTime) : new Date();
+      const windowStart = new Date(recvAt.getTime() - 10 * 60_000);
+      const windowEnd = new Date(recvAt.getTime() + 10 * 60_000);
+      const candidates = await this.prisma.incomingLead.findMany({
+        where: {
+          fromEmail: m.fromEmail,
+          status: { not: 'DISMISSED' },
+          receivedAt: { gte: windowStart, lte: windowEnd },
+        },
+        select: { body: true },
+      });
+      if (candidates.some((c) => this.normalizeForMatch(c.body) === body)) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * לידים להצגה למשתמש: לידים חדשים (NEW) משותפים שכל אחד יכול לתפוס — לכל אנשי המכירות
+   * והמנהלים, בלי קשר לבעלים (מודל "ליד אחד משותף, ראשון תופס"). בנוסף, הלידים שכבר
+   * בטיפול (ACTIVE) שהמשתמש הזה הבעלים שלהם. כך כל אנשי המכירות רואים ליד נכנס עד שנתפס,
+   * ולאחר התפיסה הוא נשאר רק אצל התופס.
+   */
   listForOwner(ownerId: string) {
     return this.prisma.incomingLead.findMany({
-      where: { ownerId, status: { in: ['NEW', 'ACTIVE'] } },
+      where: {
+        OR: [
+          { status: 'NEW' }, // ליד משותף שלא נתפס — כל אחד רואה
+          { ownerId, status: 'ACTIVE' }, // הליד שאני מטפל בו
+        ],
+      },
       orderBy: { receivedAt: 'desc' },
     });
   }
 
   /**
-   * לידים חדשים להצגה כהתראה צידית (פופ-אפ).
-   * - מנהל/אדמין: כל ליד שעדיין לא נתפס (status=NEW), בלי קשר לבעלים — כדי שמנהלים יקבלו
-   *   התראה על כל ליד נכנס. ה-dedup לכל מנהל נעשה בצד הלקוח (סגירה ידנית) כדי לא לדרוס את
-   *   ה-notifiedAt של הבעלים.
-   * - עובד רגיל: רק הלידים שלו שטרם הוצגה עליהם התראה (notifiedAt=null).
+   * לידים חדשים להצגה כהתראה צידית (פופ-אפ) — לכל המשתמשים (מכירות + מנהלים):
+   * כל ליד NEW שעדיין לא נתפס מ-24 השעות האחרונות. מודל "ליד משותף": כולם מקבלים התראה
+   * וראשון שלוחץ "התחל טיפול" תופס. ה-dedup (אותו מייל = פופ-אפ אחד) והסגירה נעשים בצד הלקוח.
    */
   async pending(user: { id?: string; role?: string }) {
-    const role = (user?.role || '').toUpperCase();
-    const isManager = role === 'ADMIN' || role === 'MANAGER';
-    // למנהל אין "אישור" נשמר בשרת (הסגירה מקומית), לכן מגבילים ל-24 השעות האחרונות
-    // כדי שלא יוצף בלידים ישנים שלא נתפסו בכל רענון. לעובד — כל הלידים שלו שטרם הוצגו.
+    // מגבילים ל-24 השעות האחרונות כדי שלא יוצף בלידים ישנים שלא נתפסו בכל רענון.
     const since = new Date(Date.now() - 24 * 60 * 60_000);
-    const where = isManager
-      ? { status: 'NEW' as const, receivedAt: { gte: since } }
-      : { ownerId: user?.id, status: 'NEW' as const, notifiedAt: null };
+    const where = { status: 'NEW' as const, receivedAt: { gte: since } };
     const leads = await this.prisma.incomingLead.findMany({ where, orderBy: { receivedAt: 'desc' } });
     if (!leads.length) return leads;
     // סינון לידים "יתומים": אם המשימה המקושרת נמחקה ידנית (taskId הוא מחרוזת חופשית בלי FF),
@@ -149,70 +213,72 @@ export class IncomingLeadsService implements OnModuleInit {
     });
   }
 
-  /** "התחל טיפול" — הליד עובר ל-ACTIVE (הטופס נעלם, מוצגים פרטי הליד). */
+  /**
+   * "התחל טיפול" — התופס (actor) לוקח בעלות על הליד המשותף: הליד + המשימה עוברים אליו
+   * ומסומנים ACTIVE (הטופס נעלם אצל כולם, מוצגים פרטי הליד רק אצל התופס).
+   *
+   * תפיסה אטומית ובטוחה ל-race דרך updateMany מותנה ב-status:'NEW': רק *הראשון* מצליח לשנות
+   * את השורה (count=1); כל שאר המנסים מקבלים count=0 → 403. זה עובד גם כשיש שורה אחת משותפת
+   * (המודל החדש) וגם כשנשארו אחים ישנים (המנצח מנקה אותם ב-claimGroup אחרי התפיסה).
+   */
   async start(id: string, actor: { id?: string }) {
     const lead = await this.assertOwner(id, actor);
+    if (lead.status === 'ACTIVE') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
-    await this.claimGroup(lead); // תפיסה אטומית של כל קבוצת ההודעה (race-safe)
-    await this.prisma.incomingLead.update({
-      where: { id: lead.id },
-      data: { status: 'ACTIVE', notifiedAt: lead.notifiedAt ?? new Date() },
+    const claimerId = actor?.id || lead.ownerId;
+
+    // תפיסה אטומית: רק אם השורה עדיין NEW. count=0 → מישהו הקדים אותי.
+    const claimed = await this.prisma.incomingLead.updateMany({
+      where: { id: lead.id, status: 'NEW' },
+      data: { ownerId: claimerId, status: 'ACTIVE', notifiedAt: lead.notifiedAt ?? new Date() },
     });
+    if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+
+    // המשימה עוברת לבעלות התופס — כדי שתופיע ברשימת המשימות שלו (ותיעלם מהאחרים).
+    if (lead.taskId) {
+      await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: claimerId } }).catch(() => {});
+    }
+    // ניקוי אחים ישנים (מנתונים שקדמו לאיחוד-בכניסה) — best-effort, לא חוסם.
+    await this.dismissSiblings(lead).catch(() => undefined);
     return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
   }
 
-  /** "העבר ל" — מחליף owner של הליד ושל ה-Task, מסמן ACTIVE (למקבל אין טופס). */
+  /** "העבר ל" — תפיסה אטומית (כמו start) ואז שיוך הליד+המשימה לעובד היעד. */
   async transfer(id: string, toUserId: string, actor: { id?: string }) {
     const lead = await this.assertOwner(id, actor);
+    if (lead.status === 'ACTIVE') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     if (!toUserId) throw new ForbiddenException('חסר עובד יעד');
-    await this.claimGroup(lead); // תפיסה אטומית של כל קבוצת ההודעה (race-safe)
-    const updated = await this.prisma.incomingLead.update({
-      where: { id: lead.id },
+
+    // תפיסה אטומית מותנית ב-NEW — כמו ב-start; המנצח הוא זה שהעביר.
+    const claimed = await this.prisma.incomingLead.updateMany({
+      where: { id: lead.id, status: 'NEW' },
       data: { ownerId: toUserId, transferredToId: toUserId, status: 'ACTIVE', notifiedAt: null },
     });
+    if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+
     if (lead.taskId) {
       await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: toUserId } }).catch(() => {});
     }
-    return updated;
+    await this.dismissSiblings(lead).catch(() => undefined);
+    return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
   }
 
   /**
-   * תפיסה אטומית של קבוצת ההודעה (כל העותקים עם אותו internetMessageId): מסמן את כל האחים
-   * (השורות של שאר העובדים) כ-DISMISSED ומוחק את המשימות שלהם — בעסקת Serializable יחידה, בתנאי
-   * שאף אח עדיין לא נתפס (ACTIVE). זו נקודת הסריאליזציה: ב-race של שני עובדים שלוחצים בו-זמנית,
-   * או שהשני רואה אח ACTIVE ונדחה, או ששתי העסקאות מתנגשות וה-DB דוחה את השנייה (P2034 → 403).
-   * הליד עצמו (של המנצח) לא נכלל בדחייה — הוא מסומן ACTIVE ע"י הקורא (start/transfer).
+   * ניקוי אחים ישנים: אם בנתונים שקדמו לאיחוד-בכניסה נותרו עוד עותקים NEW עם אותו
+   * internetMessageId (השורות של שאר העובדים) — מסמן אותם DISMISSED ומוחק את המשימות שלהם,
+   * כדי שהליד ייעלם אצל כולם אחרי שנתפס. best-effort; התפיסה עצמה כבר אטומית ב-start/transfer.
+   * במודל החדש (שורה אחת משותפת) אין אחים והפונקציה היא no-op.
    */
-  private async claimGroup(lead: { id: string; internetMessageId: string | null }) {
-    if (!lead.internetMessageId) return; // אין קבוצה (מייל לתיבה אחת) — אין race בין עובדים
-    const msgId = lead.internetMessageId;
-    try {
-      await this.prisma.$transaction(
-        async (tx) => {
-          // אם כבר יש אח (לא אני) שנתפס (ACTIVE) — הפסדתי ב-race.
-          const alreadyClaimed = await tx.incomingLead.count({
-            where: { internetMessageId: msgId, id: { not: lead.id }, status: 'ACTIVE' },
-          });
-          if (alreadyClaimed > 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
-          // דוחים את כל האחים שעדיין NEW. תחת Serializable, שתי תפיסות מקבילות מתנגשות
-          // וה-DB דוחה את השנייה (P2034) — מתורגם ל-403. כך אין דריסה כפולה גם ב-race מדויק.
-          const siblings = await tx.incomingLead.findMany({
-            where: { internetMessageId: msgId, id: { not: lead.id }, status: 'NEW' },
-            select: { id: true, taskId: true },
-          });
-          for (const s of siblings) {
-            if (s.taskId) await tx.task.delete({ where: { id: s.taskId } }).catch(() => undefined);
-            await tx.incomingLead.update({ where: { id: s.id }, data: { status: 'DISMISSED' } });
-          }
-        },
-        { isolationLevel: 'Serializable' },
-      );
-    } catch (e: any) {
-      if (e instanceof ForbiddenException) throw e;
-      // P2034 = כשל סריאליזציה/deadlock: עסקה מקבילה תפסה את הליד קודם → הפסדתי ב-race.
-      if (e?.code === 'P2034') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
-      throw e;
+  private async dismissSiblings(lead: { id: string; internetMessageId: string | null }) {
+    if (!lead.internetMessageId) return;
+    const siblings = await this.prisma.incomingLead.findMany({
+      where: { internetMessageId: lead.internetMessageId, id: { not: lead.id }, status: 'NEW' },
+      select: { id: true, taskId: true },
+    });
+    for (const s of siblings) {
+      if (s.taskId) await this.prisma.task.delete({ where: { id: s.taskId } }).catch(() => undefined);
+      await this.prisma.incomingLead.update({ where: { id: s.id }, data: { status: 'DISMISSED' } }).catch(() => undefined);
     }
   }
 
