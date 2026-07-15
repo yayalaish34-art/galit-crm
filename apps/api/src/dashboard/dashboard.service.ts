@@ -113,6 +113,8 @@ export class DashboardService {
       tasks,
       reportsWaitingCount,
       ratedReviews,
+      customerTypeCounts,
+      classifications,
     ] = await Promise.all([
       this.prisma.user.findMany({
         where: {
@@ -160,6 +162,17 @@ export class DashboardService {
         where: { rating: { not: null } },
         select: { rating: true, feedback: true, ratedAt: true, customerId: true, customerName: true },
         orderBy: [{ ratedAt: 'desc' }],
+      }),
+
+      // פילוח לקוחות — ספירת לקוחות אמיתית לפי קוד הסיווג (Customer.type).
+      this.prisma.customer.groupBy({
+        by: ['type'],
+        _count: { _all: true },
+      }),
+      // תוויות הסיווגים (COMPANY/PUBLIC/PRIVATE + סיווגים שנוספו בהגדרות) — למיפוי קוד→שם בעברית.
+      this.prisma.customerClassification.findMany({
+        select: { code: true, labelHe: true, sortOrder: true },
+        orderBy: [{ sortOrder: 'asc' }, { labelHe: 'asc' }],
       }),
     ]);
 
@@ -264,6 +277,29 @@ export class DashboardService {
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 8);
+
+    // פילוח לקוחות אמיתי — כמות לקוחות לכל סיווג, ממופה לתווית העברית מטבלת הסיווגים.
+    // מוצגים כל הסיווגים שקיימים בטבלה (כולל כאלה שנוספו בהגדרות); קודים ללא תווית מקבלים "אחר".
+    const classificationLabel = new Map<string, string>(
+      (classifications as { code: string; labelHe: string }[]).map((c) => [c.code, c.labelHe]),
+    );
+    const segmentPalette = ['#16a34a', '#22c55e', '#4ade80', '#86efac', '#65a30d', '#15803d', '#bbf7d0'];
+    const customerSegments = (customerTypeCounts as { type: string | null; _count: { _all: number } }[])
+      .map((row) => {
+        const code = (row.type || '').trim();
+        const name = classificationLabel.get(code) || (code ? code : 'אחר');
+        return { name, value: row._count._all };
+      })
+      // איחוד רשומות שנופלות לאותה תווית (למשל קודים לא ממופים → "אחר").
+      .reduce<{ name: string; value: number }[]>((acc, cur) => {
+        const hit = acc.find((s) => s.name === cur.name);
+        if (hit) hit.value += cur.value;
+        else acc.push({ ...cur });
+        return acc;
+      }, [])
+      .filter((s) => s.value > 0)
+      .sort((a, b) => b.value - a.value)
+      .map((s, i) => ({ ...s, color: segmentPalette[i % segmentPalette.length] }));
 
     // Quota progress: approximate cumulative by week from won quotes updatedAt
     const days = [1, 8, 15, 22, 29];
@@ -483,6 +519,7 @@ export class DashboardService {
         leadSourcesPie,
         quotaProgress,
         conversionFunnel,
+        customerSegments,
       },
       alerts: {
         agingDeals,
@@ -713,6 +750,7 @@ export class DashboardService {
           { step: 'הצעה נשלחה', value: 0 },
           { step: 'זכייה', value: 0 },
         ],
+        customerSegments: [],
       },
       alerts: { agingDeals: [], inactiveLeads: [] },
       breakdowns: { leadsByServiceType: [], openProjects: [] },

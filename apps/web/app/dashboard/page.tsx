@@ -3605,6 +3605,7 @@ type ManagerDashboardPayload = {
     leadSourcesPie: Array<{ name: string; value: number }>;
     quotaProgress: Array<any>;
     conversionFunnel: Array<{ step: string; value: number }>;
+    customerSegments?: Array<{ name: string; value: number; color: string }>;
   };
   alerts: {
     agingDeals: Array<{ rep: string; deal: string; ageDays: number; value: number; stage: string; level: 'red' | 'yellow' | 'green' }>;
@@ -4093,13 +4094,13 @@ function ManagerDashboard({
     { month: 'יונ', y2025: 196, y2026: 235 },
   ];
 
-  const customerSegmentationData = [
-    { name: 'תעשייה', value: 30, color: '#16a34a' },
-    { name: 'רשויות מקומיות', value: 22, color: '#22c55e' },
-    { name: 'עסקים קטנים', value: 18, color: '#4ade80' },
-    { name: 'חינוך', value: 16, color: '#86efac' },
-    { name: 'אחר', value: 14, color: '#d1d5db' },
-  ];
+  // פילוח לקוחות אמיתי — ספירת לקוחות לפי סיווג, מגיע מ-/dashboard/manager (charts.customerSegments).
+  const segmentFallbackPalette = ['#16a34a', '#22c55e', '#4ade80', '#86efac', '#65a30d', '#15803d', '#bbf7d0'];
+  const customerSegmentationData = (data?.charts?.customerSegments ?? []).map((s, i) => ({
+    name: s.name,
+    value: s.value,
+    color: s.color || segmentFallbackPalette[i % segmentFallbackPalette.length],
+  }));
 
   return (
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-4" dir="rtl">
@@ -4173,17 +4174,23 @@ function ManagerDashboard({
               <CardTitle className="text-xl font-bold text-slate-900">פילוח לקוחות</CardTitle>
             </CardHeader>
             <CardContent className="h-[290px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={customerSegmentationData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={96} paddingAngle={2}>
-                    {customerSegmentationData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+              {customerSegmentationData.length === 0 ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-400">
+                  אין נתוני לקוחות להצגה
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={customerSegmentationData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={96} paddingAngle={2}>
+                      {customerSegmentationData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -15069,7 +15076,9 @@ function TasksPage({
       referralCompany: linkedLead?.referralCompany || '',
       companySize: '',
       inquiryDate: new Date().toISOString().slice(0, 10),
-      customerType: linkedLead?.company ? 'עסקי' : (linkedCustomer ? (linkedCustomer.type === 'PRIVATE' ? 'פרטי' : 'עסקי') : 'פרטי'),
+      // סיווג הלקוח נשמר כקוד (COMPANY / PRIVATE / C_...) והוא ה-value של ה-<option>.
+      // חובה לטעון חזרה את הקוד האמיתי מהלקוח — אחרת ה-select לא מוצא option תואם ומופיע ריק ("נעלם") אחרי refresh.
+      customerType: linkedCustomer?.type || (linkedLead?.company ? 'COMPANY' : ''),
       serviceType: leadPrefill?.serviceType || linkedLead?.serviceType || linkedLead?.service || '',
       contactName: linkedCustomer?.contactName || '',
       assignedUserId: task.ownerId || currentUser?.id || '',
@@ -17568,11 +17577,20 @@ function TasksPage({
                                  * לא עברו למיזוג הוורד גם אחרי שהלקוח עדכן אותם.
                                  * שגיאה כאן נחשפת למשתמש ועוצרת קידום שלב — אחרת נראה כאילו נשמר אבל המסד לא עודכן. */
                                 try {
+                                  // סיווג הלקוח (type) — חובה לשלוח גם כאן, אחרת שינוי סיווג ללקוח קיים
+                                  // לא נשמר במסד ו"נעלם" אחרי refresh. מחשבים את הקוד כמו במסלול היצירה.
+                                  const presetCodesU = ['PRIVATE', 'COMPANY', 'PUBLIC'];
+                                  const classificationCodesU = ccClassifications.map((cl: any) => cl.code);
+                                  const rawTypeU = (fd.customerType || '').trim();
+                                  const customerTypeU = isPrivate0
+                                    ? 'PRIVATE'
+                                    : (presetCodesU.includes(rawTypeU) || classificationCodesU.includes(rawTypeU) ? rawTypeU : 'COMPANY');
                                   const res = await apiFetch(apiUrl(`/customers/${t.customerId}`), {
                                     method: 'PATCH',
                                     authUser: currentUser,
                                     body: JSON.stringify({
                                       contactName: saveFullName || undefined,
+                                      type: customerTypeU,
                                       phone: fd.phone || '',
                                       city: fd.city || '',
                                       address: fd.address || null,
