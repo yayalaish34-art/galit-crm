@@ -145,6 +145,10 @@ const galit = {
 
 const galitLogo = '/logo.png';
 
+/** קידומת כותרת למשימת "תזכורת שליחת דוח חוזר" — משמשת גם לזיהוי כדי להסתיר את המשימה
+ *  מהרשימה עד שמגיע תאריך היעד שלה (ראה filtered ב-DashboardPage). */
+const REPORT_REMINDER_PREFIX = '🔁 תזכורת: שליחת דוח חוזר —';
+
 type CustomerClassificationDto = {
   id: string;
   code: string;
@@ -162,9 +166,9 @@ const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
 };
 
 const REMINDER_QUICK_OPTIONS: { key: string; label: string; minutes?: number; days?: number }[] = [
-  { key: '15m', label: '15 דק׳', minutes: 15 },
   { key: '1h', label: 'שעה', minutes: 60 },
   { key: '4h', label: '4 שעות', minutes: 240 },
+  { key: '1d', label: 'יום', days: 1 },
   { key: '3d', label: '3 ימים', days: 3 },
 ];
 
@@ -15213,6 +15217,9 @@ function TasksPage({
             email: c.email || cust?.email || '',
             role: c.roleTitle || '',
             contactName: c.fullName || '',
+            // שומרים גם את מזהה איש הקשר הנבחר — כדי שהצעת המחיר תסמן *אותו* ב"פרטי פנייה"
+            // (prefillContactId) במקום ליפול חזרה לאיש הקשר הראשי/הראשון של הלקוח.
+            contactId: c.id || '',
           },
         }));
       }
@@ -15428,6 +15435,18 @@ function TasksPage({
         return s !== 'DONE' && s !== 'CANCELLED' && tp !== 'DONE';
       });
     }
+    // תזכורת שליחת דוח חוזר: מוסתרת מהרשימה עד שמגיע תאריך היעד שלה — אין סיבה שהמשתמש
+    // יראה אותה כל עוד אין תוצאות לדוח (למשל 60 יום). ברגע שהתאריך הגיע (dueDate <= עכשיו)
+    // המשימה כבר לא מסוננת וקופצת חזרה כמשימת שליחת דוח רגילה. חל על כל התצוגות למעט "הושלמו".
+    if (quickFilter !== 'done') {
+      const nowMs = Date.now();
+      list = list.filter((t) => {
+        const isReminder = (t.title || '').startsWith(REPORT_REMINDER_PREFIX);
+        if (!isReminder) return true;
+        const dueMs = t.dueDate ? new Date(t.dueDate).getTime() : 0;
+        return !(dueMs && dueMs > nowMs); // עתידית → מוסתרת; הגיעה/עברה → מוצגת
+      });
+    }
     return list;
   }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
 
@@ -15495,7 +15514,7 @@ function TasksPage({
       'מתאימה לבתים, גני ילדים, משרדים ומבנים הסמוכים לתשתיות חשמל',
       'נותן ללקוח תמונת מצב קצרה וברורה על רמת החשיפה והצורך בהמשך טיפול',
     ],
-    '56': [ // בדיקת קרינה משולבת מדוח רשת החשמל
+    '56': [ // בדיקת קרינה משולבת לתדרי רדיו ורשת החשמל
       'בדיקת קרינה אלקטרומגנטית בשילוב נתוני העומס מחברת החשמל, לתמונה מדויקת לאורך זמן',
       'מאפשרת להעריך לא רק את הרגע הנוכחי אלא גם את החשיפה הצפויה בשעות העומס',
       'מספקת הערכה אמינה יותר ממדידה רגעית בלבד, ומסמך מסודר להגשה לרשויות',
@@ -15906,6 +15925,39 @@ function TasksPage({
       if (!res.ok) throw new Error();
       await onReloadTasks?.();
     } catch { void onReloadTasks?.(); }
+  };
+
+  /* ── תזכורת לשליחת דוח חוזר ──
+     כשמשתמש קובע תזכורת בסוף זרימת הביצוע (שליחת דוח / "שלחתי כבר דוח"), נוצרת משימת
+     "שליחת דוח" חדשה עם תאריך יעד עתידי. היא מזוהה לפי קידומת הכותרת REPORT_REMINDER_PREFIX
+     ומוסתרת מהרשימה עד למועד היעד (ראה filtered) — ואז קופצת שוב כמשימת שליחת דוח רגילה. */
+  const createReportReminderTask = async (task: Task, days: number) => {
+    const due = new Date();
+    due.setDate(due.getDate() + days);
+    due.setHours(9, 0, 0, 0);
+    const who = task.customerName || task.leadName || 'הלקוח';
+    try {
+      // ודא שהלקוח נשמר/מקושר לפני יצירת התזכורת, אחרת המשימה החדשה תיווצר בלי לקוח.
+      const savedCustomerId = (await saveCustomerForTask(task)) || task.customerId || undefined;
+      await apiFetch(apiUrl('/tasks'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          title: `${REPORT_REMINDER_PREFIX} ${who}`,
+          description: `תזכורת אוטומטית לשליחת דוח חוזר ל${who}.`,
+          ownerId: task.ownerId || currentUser.id,
+          customerId: savedCustomerId,
+          leadId: task.leadId || undefined,
+          projectId: task.projectId || undefined,
+          priority: 'MEDIUM',
+          status: 'OPEN',
+          // step6 → detectStep מחזיר 5 = מסך "שליחת הדוח ללקוח", כך שהתזכורת נפתחת ישירות שם.
+          type: 'step6',
+          dueDate: due.toISOString(),
+        }),
+      });
+      await onReloadTasks?.();
+    } catch { /* silent — כישלון יצירת תזכורת לא מפיל את סגירת המשימה */ }
   };
 
   /* ── הערות על התהליך/הלקוח: מאוחסנות ב-Task.processNotes כמערך JSON של { text, at } (הכי חדש בראש) ── */
@@ -19207,6 +19259,7 @@ function TasksPage({
                                 <QuoteNewScreen
                                   embedded={true}
                                   prefillCustomer={quotePrefillCust}
+                                  prefillContactId={(cf0.contactId || '').trim() || null}
                                   prefillServiceName={quotePrefillSvc}
                                   taskId={t.id}
                                   onExit={(info?: { advanceToFollowUp?: boolean }) => {
@@ -19819,7 +19872,7 @@ function TasksPage({
                                 open
                                 customerName={t.customerName || t.leadName || ''}
                                 onClose={() => setAlreadySentTaskId(null)}
-                                onDone={async ({ paymentStatus }) => {
+                                onDone={async ({ paymentStatus, reportReminderDays }) => {
                                   setAlreadySentTaskId(null);
                                   // אותו רישום כמו בשליחת הדוח: הערת תהליך לפי סטטוס התשלום,
                                   // סימון המשימה DONE, ואז פתיחת פופ-אפ "שליחת משוב".
@@ -19829,6 +19882,10 @@ function TasksPage({
                                     : '⏳ דוח נשלח (סומן ידנית) — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
+                                  // נבחרה תזכורת לשליחת דוח חוזר → יצירת משימת שליחת דוח עתידית (מוסתרת עד המועד).
+                                  if (reportReminderDays && reportReminderDays >= 1) {
+                                    await createReportReminderTask(t, reportReminderDays);
+                                  }
                                   // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח — אין יותר פופ-אפ משוב ידני.
                                   setExpandedTaskId(null);
                                 }}
@@ -19850,7 +19907,7 @@ function TasksPage({
                                 isPrivateCustomer={((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
                                 employees={users.filter((u) => u.email).map((u) => ({ id: u.id, name: u.name, email: u.email }))}
                                 onClose={() => setReportModalTaskId(null)}
-                                onSent={async ({ paymentStatus }) => {
+                                onSent={async ({ paymentStatus, reportReminderDays }) => {
                                   setReportModalTaskId(null);
                                   // רישום שליחת הדוח + סטטוס התשלום כהערת תהליך. תמיד נשמרת הערה כדי
                                   // שהדוח יופיע במעקב "דוחות שנשלחו — סטטוס תשלום" (אדמין/גלית). אם שאלת
@@ -19861,6 +19918,10 @@ function TasksPage({
                                     : '⏳ דוח נשלח — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
+                                  // נבחרה תזכורת לשליחת דוח חוזר → יצירת משימת שליחת דוח עתידית (מוסתרת עד המועד).
+                                  if (reportReminderDays && reportReminderDays >= 1) {
+                                    await createReportReminderTask(t, reportReminderDays);
+                                  }
                                   // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח מיד אחרי הדוח —
                                   // אין יותר פופ-אפ "שליחת משוב" ידני בסוף הזרימה.
                                   setExpandedTaskId(null);

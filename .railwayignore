@@ -1,0 +1,18 @@
+# Heavy local-only artifacts excluded from `railway up` uploads (cause upload timeouts).
+# These are backups / diagnostics / scratch files, never needed by the deployed API.
+apps/api/templates/_backup-*/
+apps/api/_*.mjs
+apps/api/_*.json
+**/node_modules/
+**/.next/
+**/dist/
+
+# Large local-only working dirs & backups (were bloating the upload to ~330MB → upload timeout)
+ole files/
+templates-backup-with-certs.zip
+tpl-kol-holem/
+agents/
+
+# Root-level scratch / merge-test documents (not used at runtime)
+merge-test-*.docx
+merged-test-*.docx

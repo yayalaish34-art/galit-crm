@@ -7,5 +7,6 @@ import { PrismaModule } from '../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [AiMailController],
   providers: [AiMailService],
+  exports: [AiMailService],
 })
 export class AiMailModule {}

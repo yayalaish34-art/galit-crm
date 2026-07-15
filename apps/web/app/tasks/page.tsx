@@ -137,10 +137,14 @@ export default function TasksLegacyPage() {
     return { fromDate: '', toDate: '' };
   };
 
-  const loadTasks = async () => {
+  const loadTasks = async ({ background = false }: { background?: boolean } = {}) => {
     if (!session) return;
-    setLoading(true);
-    setError('');
+    // ברענון-רקע (polling) לא מדליקים spinner ולא מנקים את הרשימה — כדי שהמסך לא יהבהב
+    // ולא ייעלם תוכן קיים אם קריאת רקע נכשלת. ה-spinner נשמר רק לטעינה הראשונה/שינוי פילטר.
+    if (!background) {
+      setLoading(true);
+      setError('');
+    }
     try {
       const dates = applyDatePreset();
       const params = new URLSearchParams();
@@ -171,18 +175,24 @@ export default function TasksLegacyPage() {
       setRows(Array.isArray(data) ? data : []);
       setSelectedId((prev) => (prev && data.some((r) => r.id === prev) ? prev : data[0]?.id ?? null));
     } catch (e) {
+      // כישלון בקריאת רקע — משאירים את התוכן הקיים ולא מציגים שגיאה מהבהבת; ננסה שוב בסבב הבא.
+      if (background) return;
       const msg = e instanceof Error ? e.message : '';
       setError(msg || 'טעינת מטלות נכשלה');
       setRows([]);
       setSelectedId(null);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
   useEffect(() => {
     if (!session) return;
     void loadTasks();
+    // Polling קצר כדי שמשימות שנוצרו במקור אחר (מערכת חיצונית שכותבת ל-Task ישירות, בוט)
+    // יופיעו ברשימה בלי רענון ידני — אותו קצב כמו הפופ-אפ של הלידים הנכנסים (dashboard).
+    const t = window.setInterval(() => void loadTasks({ background: true }), 20_000);
+    return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, taskScope]);
 

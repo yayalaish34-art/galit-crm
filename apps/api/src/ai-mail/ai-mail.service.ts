@@ -356,6 +356,82 @@ export class AiMailService {
     return { title };
   }
 
+  // ── חילוץ פרטי ליד מתוך מייל טקסט-חופשי (למשל office@inspect-in.co.il) ──
+  private readonly LEAD_EXTRACT_SYSTEM = `אתה מחלץ פרטי "ליד" (פנייה של לקוח פוטנציאלי) מתוך מייל בעברית שהתקבל אצל "גלית – החברה לאיכות הסביבה", המספקת בדיקות ושירותים סביבתיים (קרינה, רעש, אוויר, אסבסט, ראדון, ריח ועוד).
+תקבל את נושא המייל ואת גוף המייל (טקסט חופשי, לרוב כולל את שם הפונה, טלפון, ולעיתים מייל, וכן את מהות הפנייה / השירות המבוקש). המשימה: לחלץ מהם את השדות המובנים.
+
+החזר JSON תקין בלבד עם המפתחות הבאים (כל ערך מחרוזת; אם שדה לא קיים במייל — החזר מחרוזת ריקה ""):
+- "fullName": שם מלא של הפונה (אדם ליצירת קשר). לא שם החברה השולחת ולא "גלית". אם יש רק שם חברה — השאר ריק.
+- "phone": מספר טלפון ליצירת קשר, ספרות בלבד (אפשר עם + בהתחלה). בחר את הטלפון הנייד/הישיר של הפונה. בלי מקפים, רווחים או סוגריים.
+- "email": כתובת אימייל של הפונה אם מופיעה בגוף (לא כתובת השולח האוטומטית).
+- "serviceType": סוג השירות/הבדיקה המבוקש בקצרה (למשל "בדיקת קרינה", "בדיקת אסבסט", "מדידת רעש"). אם לא ברור — ריק.
+- "essence": משפט אחד קצר וברור המסכם את מהות הפנייה / מה הלקוח צריך (עד ~20 מילים).
+
+כללים:
+- אל תמציא נתונים. אם פרט לא מופיע במפורש — החזר "" עבורו (חוץ מ-essence שתמיד ננסה לסכם ממה שיש).
+- אל תכלול תוויות או טקסט נוסף — רק אובייקט ה-JSON.`;
+
+  /**
+   * מחלץ פרטי ליד (שם/טלפון/מייל/שירות/מהות) ממייל טקסט-חופשי דרך ה-GPT API.
+   * משמש בקליטת לידים שאין להם פורמט תוויות (למשל office@inspect-in.co.il).
+   * best-effort: אם אין OPENAI_API_KEY או שהקריאה נכשלה — מחזיר שדות ריקים ולא זורק,
+   * כדי שקליטת הליד תימשך גם בלי החילוץ.
+   */
+  async extractLeadFields(
+    subject: string,
+    body: string,
+  ): Promise<{ fullName: string; phone: string; email: string; serviceType: string; essence: string }> {
+    const empty = { fullName: '', phone: '', email: '', serviceType: '', essence: '' };
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      this.logger.warn('extractLeadFields skipped — missing OPENAI_API_KEY');
+      return empty;
+    }
+    const userPrompt = `נושא המייל:\n${subject || '(ללא נושא)'}\n\nגוף המייל:\n${body || '(ריק)'}\n\nחלץ את השדות והחזר JSON בלבד.`;
+
+    let res: Response;
+    try {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          messages: [
+            { role: 'system', content: this.LEAD_EXTRACT_SYSTEM },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        }),
+      });
+    } catch (e: any) {
+      this.logger.warn(`extractLeadFields request failed: ${e?.message || e}`);
+      return empty;
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      this.logger.warn(`extractLeadFields OpenAI ${res.status}: ${detail.slice(0, 200)}`);
+      return empty;
+    }
+
+    try {
+      const data = (await res.json()) as any;
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) return empty;
+      const parsed = JSON.parse(content);
+      return {
+        fullName: String(parsed.fullName || '').trim(),
+        phone: String(parsed.phone || '').replace(/[^\d+]/g, ''),
+        email: String(parsed.email || '').trim(),
+        serviceType: String(parsed.serviceType || '').trim(),
+        essence: String(parsed.essence || '').trim(),
+      };
+    } catch (e: any) {
+      this.logger.warn(`extractLeadFields parse failed: ${e?.message || e}`);
+      return empty;
+    }
+  }
+
   /** ניסוח (או שיפור) מייל ללוויית דוח שהופק — נושא + גוף. בלי שליפת/הזרקת נתוני הצעה. */
   async generateReportDraft(ctx: DraftContext): Promise<DraftResult> {
     const apiKey = process.env.OPENAI_API_KEY;

@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
 
@@ -50,8 +50,28 @@ export class TasksService {
     });
   }
 
-  findOne(id: string) {
-    return this.prisma.task.findUnique({ where: { id } });
+  /**
+   * שליפת משימה בודדת לפי id — משמש בין היתר את הסוכן הקולי לשליפת פרטי משימת משרד.
+   * מחזיר בדיוק את שדות ה-CrmTract (אותו shape שמוחזר מ-create/update). 404 אם לא קיימת.
+   */
+  async findOne(id: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        dueDate: true,
+        priority: true,
+        status: true,
+        ownerId: true,
+        customerId: true,
+        productName: true,
+        createdAt: true,
+      },
+    });
+    if (!task) throw new NotFoundException('משימה לא נמצאה');
+    return task;
   }
 
   async create(data: any, user?: { id?: string; role?: string }) {

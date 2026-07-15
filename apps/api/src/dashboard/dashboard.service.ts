@@ -103,6 +103,8 @@ export class DashboardService {
     const sow = startOfWeek(now);
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    // חלון שביעות רצון מתגלגל — תמיד 30 הימים האחרונים, לא "לכל החיים".
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     const [
       users,
@@ -158,8 +160,9 @@ export class DashboardService {
       }),
 
       // ביקורות שנקלטו בפועל (הלקוח בחר פרצוף) — rating לא-null. משמש לכרטיס "שביעות רצון".
+      // חלון מתגלגל: רק דירוגים מ-30 הימים האחרונים (ratedAt >= thirtyDaysAgo), כך שהמדד תמיד מתעדכן.
       this.prisma.reviewRequest.findMany({
-        where: { rating: { not: null } },
+        where: { rating: { not: null }, ratedAt: { gte: thirtyDaysAgo } },
         select: { rating: true, feedback: true, ratedAt: true, customerId: true, customerName: true },
         orderBy: [{ ratedAt: 'desc' }],
       }),

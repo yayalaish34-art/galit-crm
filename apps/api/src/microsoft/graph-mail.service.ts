@@ -28,8 +28,19 @@ export class GraphMailService {
   private readonly folderIdCache = new Map<string, { id: string | null; ts: number }>();
   /** תיקיות נוספות לסריקה מעבר ל-/me/messages (לידים שמסוננים לתיקייה) */
   private static readonly EXTRA_LEAD_FOLDERS = ['עומס'];
-  /** רק מיילים מאחת הכתובות האלה נחשבים לידים אמיתיים (טופס האתר / web3forms). */
-  private static readonly LEAD_SENDER_ALLOWLIST = ['noreply@galit.co.il', 'no-reply@galit.co.il', 'notify@web3forms.com'];
+  /**
+   * רק מיילים מאחת הכתובות האלה נחשבים לידים אמיתיים:
+   * - טופס האתר / web3forms (noreply@galit.co.il, notify@web3forms.com)
+   * - office@inspect-in.co.il — פניות משותף/מקור נוסף. אין להן פורמט תוויות קבוע (נושא + גוף
+   *   טקסט חופשי עם פרטי הפונה ומהות הפנייה), לכן פרטיהן מחולצים ב-GPT בזמן הקליטה
+   *   (ראה IncomingLeadsService.ingest → AiMailService.extractLeadFields).
+   */
+  private static readonly LEAD_SENDER_ALLOWLIST = [
+    'noreply@galit.co.il',
+    'no-reply@galit.co.il',
+    'notify@web3forms.com',
+    'office@inspect-in.co.il',
+  ];
 
   constructor(private readonly auth: MicrosoftAuthService) {}
 

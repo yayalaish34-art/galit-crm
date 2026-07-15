@@ -2,9 +2,17 @@ import { ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/co
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { AiMailService } from '../ai-mail/ai-mail.service';
 
 const POLL_INTERVAL_MS = 60_000; // כל דקה
 const LOOKBACK_MS = 15 * 60_000; // חלון בדיקה: 15 דקות אחורה (overlap; dedup לפי messageId)
+
+/**
+ * שולחים שאין להם פורמט תוויות קבוע — המייל הוא נושא + גוף טקסט-חופשי. עבורם מחלצים את
+ * פרטי הליד (שם/טלפון/מייל/שירות/מהות) ב-GPT בזמן הקליטה ומזריקים בראש הגוף בלוק תוויות
+ * שאותו ה-frontend (parseLeadBody) כבר יודע לקרוא — כך שדות השם/הטלפון מתמלאים אוטומטית.
+ */
+const FREE_TEXT_LEAD_SENDERS = ['office@inspect-in.co.il'];
 
 @Injectable()
 export class IncomingLeadsService implements OnModuleInit {
@@ -14,6 +22,7 @@ export class IncomingLeadsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly graphMail: GraphMailService,
+    private readonly aiMail: AiMailService,
   ) {}
 
   onModuleInit() {
@@ -109,6 +118,11 @@ export class IncomingLeadsService implements OnModuleInit {
       return;
     }
 
+    // עבור שולחים בטקסט-חופשי (למשל office@inspect-in.co.il) — מחלצים את פרטי הליד ב-GPT
+    // ומזריקים בראש הגוף בלוק תוויות שה-frontend כבר יודע לקרוא (parseLeadBody), כדי ששדות
+    // השם/הטלפון/השירות יתמלאו אוטומטית. best-effort: בכישלון הגוף המקורי נשמר כמות שהוא.
+    const body = await this.enrichFreeTextLeadBody(m);
+
     // ליד נכנס *לא* יוצר משימה — הוא ממתין ב"לידים נכנסים" (פופ-אפ + רשימה) עד שעובד
     // לוחץ "התחל טיפול"/"העבר". המשימה נוצרת רק בתפיסה, ישירות על שם התופס.
     await this.prisma.incomingLead.create({
@@ -116,7 +130,7 @@ export class IncomingLeadsService implements OnModuleInit {
         messageId: m.id,
         internetMessageId: m.internetMessageId || null,
         subject: m.subject,
-        body: m.bodyText || null,
+        body: body || null,
         fromName: m.fromName || null,
         fromEmail: m.fromEmail || null,
         receivedAt: m.receivedDateTime ? new Date(m.receivedDateTime) : new Date(),
@@ -125,6 +139,42 @@ export class IncomingLeadsService implements OnModuleInit {
       },
     });
     this.logger.log(`New incoming lead "${m.subject}" (mailbox owner ${ownerId}) — waiting to be claimed`);
+  }
+
+  /**
+   * לשולחים בטקסט-חופשי (FREE_TEXT_LEAD_SENDERS): מריץ חילוץ GPT על הנושא+גוף ומחזיר גוף
+   * מועשר — בלוק תוויות ("שם מלא: ...", "טלפון נייד: ...", "סוג השירות: ...", "תוכן הפנייה: ...")
+   * שאותו parseLeadBody ב-frontend קורא, ואחריו הגוף המקורי במלואו. לשולחים אחרים (טפסים עם
+   * תוויות מובנות) מחזיר את הגוף כמו שהוא. best-effort: בכישלון החילוץ מוחזר הגוף המקורי.
+   */
+  private async enrichFreeTextLeadBody(m: {
+    subject: string;
+    bodyText: string;
+    fromEmail: string;
+  }): Promise<string> {
+    const original = m.bodyText || '';
+    const from = String(m.fromEmail || '').trim().toLowerCase();
+    if (!FREE_TEXT_LEAD_SENDERS.includes(from)) return original;
+
+    let fields: { fullName: string; phone: string; email: string; serviceType: string; essence: string };
+    try {
+      fields = await this.aiMail.extractLeadFields(m.subject, original);
+    } catch (e: any) {
+      this.logger.warn(`extractLeadFields failed for "${m.subject}": ${e?.message || e}`);
+      return original;
+    }
+
+    // בונים בלוק תוויות בדיוק בשמות ש-parseLeadBody מזהה (שם מלא / טלפון נייד / כתובת אימייל /
+    // סוג השירות / תוכן הפנייה). אם לא חולץ כלום — לא מוסיפים בלוק, מחזירים גוף מקורי.
+    const labeled: string[] = [];
+    if (fields.fullName) labeled.push(`שם מלא: ${fields.fullName}`);
+    if (fields.phone) labeled.push(`טלפון נייד: ${fields.phone}`);
+    if (fields.email) labeled.push(`כתובת אימייל: ${fields.email}`);
+    if (fields.serviceType) labeled.push(`סוג השירות: ${fields.serviceType}`);
+    if (fields.essence) labeled.push(`תוכן הפנייה: ${fields.essence}`);
+    if (!labeled.length) return original;
+
+    return `${labeled.join('\n')}\n\n--- תוכן המייל המקורי ---\n${original}`.trim();
   }
 
   /**

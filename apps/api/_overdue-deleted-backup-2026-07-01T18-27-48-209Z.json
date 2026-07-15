@@ -1,0 +1,1596 @@
+{
+  "deletedTasks": [
+    {
+      "id": "502273fe-7c10-4e96-b38c-94c033c817e2",
+      "title": "ליד משותף – קרינה לפני בנייה בנתניה",
+      "description": "יזם שצריך בדיקת קרינה לפני תחילת חפירות.",
+      "dueDate": "2026-07-01T08:45:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:12.999Z",
+      "updatedAt": "2026-07-01T09:15:12.999Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": "05450f2e-46b4-48dd-ad6d-c0bdb5fc01ac",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "c5c13eab-edb1-46a4-ac5c-9551a6170dfd",
+      "title": "ליד מגוגל – בדיקות למרפאה ברחובות",
+      "description": "צריכה בדיקות סביבתיות לחידוש רישיון מרפאה.",
+      "dueDate": "2026-07-01T07:30:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:21.395Z",
+      "updatedAt": "2026-07-01T09:15:21.395Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": "ad64c9af-6836-42dc-8fbd-2d7715e954d0",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "fb8c7231-2ce3-4c0b-be04-33015a957bbf",
+      "title": "לחזור ללקוח לגבי הצעת מחיר לבדיקת קרינה בבית",
+      "description": "הצעה נשלחה לפני 3 ימים, הלקוח ביקש לחשוב. לחזור ולבדוק אם יש שאלות.",
+      "dueDate": "2026-07-01T07:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "SALES_FOLLOWUP",
+      "createdAt": "2026-07-01T09:15:02.416Z",
+      "updatedAt": "2026-07-01T09:15:02.416Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "059bf518-2d9b-4114-bd46-096fd6a29319",
+      "leadId": "35aa0545-4c41-4cb0-8b20-e7405e74c4ee",
+      "projectId": "P-3103",
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "260bfa3d-d521-4009-844d-a76c0fd7e443",
+      "title": "ליד מהאתר – רעש מזגן בפתח תקווה",
+      "description": "רעש מזגן מרכזי מטריד בשעות הלילה.",
+      "dueDate": "2026-07-01T07:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:10.818Z",
+      "updatedAt": "2026-07-01T09:15:10.818Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": "babbb801-5f22-4f0e-86fd-deb2e592e35b",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "632d39ca-a908-49e9-8315-98552c90cb8a",
+      "title": "ליד חדש נכנס",
+      "description": "סוג לקוח: PRIVATE",
+      "dueDate": "2026-07-01T06:00:00.000Z",
+      "priority": "HIGH",
+      "status": "IN_PROGRESS",
+      "type": "stepQuote",
+      "createdAt": "2026-06-27T23:08:37.623Z",
+      "updatedAt": "2026-06-30T19:27:30.347Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "108dd201-e155-4850-a9e8-74f70eb8ab71",
+      "leadId": null,
+      "projectId": null,
+      "productName": "10120",
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-06-30T19:27:27.155Z",
+      "incomingLeadId": "333d21f8-f6dc-43a4-9561-c5a7548a0076",
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "56ca552e-d30c-4daa-8318-c7f0608ba57d",
+      "title": "ליד מהמלצה – רעש מזגן בחולון",
+      "description": "מזגן חיצוני של שכן רועש מאוד.",
+      "dueDate": "2026-07-01T05:45:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:19.337Z",
+      "updatedAt": "2026-07-01T09:15:19.337Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": "aaef0026-5907-4967-91ee-c58f97a3c7e9",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "ff2fab61-9984-491a-a996-66ded41699ee",
+      "title": "ליד מגוגל – רעש שכנים בכפר סבא",
+      "description": "חיפשה בגוגל \"בדיקת רעש כפר סבא\". רעש ממזגן שכן.",
+      "dueDate": "2026-07-01T05:15:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:08.696Z",
+      "updatedAt": "2026-07-01T09:15:08.696Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": "107bc3eb-1fdc-4b3b-8b23-3e3f0c4aa768",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "dd710856-3816-4db6-a628-383e9738c227",
+      "title": "לבדוק אם הלקוח קיבל דוח ראדון",
+      "description": "דוח נשלח במייל, לא אושרה קבלה. לחזור ללקוח.",
+      "dueDate": "2026-06-30T08:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "REVIEW",
+      "createdAt": "2026-07-01T09:15:04.554Z",
+      "updatedAt": "2026-07-01T09:15:04.554Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "9bdc2023-50c0-4227-8a06-278fc2ffcba4",
+      "leadId": "4a77fc2e-0266-4d48-a027-16dea0eaee30",
+      "projectId": "P-3106",
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "5bd8876f-63a3-4a5b-ba3c-7abc3c0b996b",
+      "title": "SEED:דוח עובש - אחוזת כרמל",
+      "description": null,
+      "dueDate": "2026-06-28T09:14:06.315Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step7",
+      "createdAt": "2026-07-01T09:15:25.975Z",
+      "updatedAt": "2026-07-01T09:15:25.975Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "321ac92d-6454-426a-97a4-0d0de376e901",
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"📄 דוח נשלח ללקוח — טרם שולם\",\"at\":\"2026-06-28T09:14:06.315Z\"}]",
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "bbc5f3fa-2385-4858-acb1-0acd324f26b4",
+      "title": "כרטיס לקוח חדש",
+      "description": "סוג לקוח: PRIVATE",
+      "dueDate": "2026-06-22T14:19:23.937Z",
+      "priority": "HIGH",
+      "status": "IN_PROGRESS",
+      "type": "stepQuote",
+      "createdAt": "2026-06-10T09:06:36.588Z",
+      "updatedAt": "2026-06-28T05:18:48.194Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "60fcb95e-92ae-4617-a5a3-4063e8994f19",
+      "leadId": null,
+      "projectId": null,
+      "productName": "002",
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-06-24T05:35:56.272Z",
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"כהקר\",\"at\":\"2026-06-28T05:18:48.667Z\"}]",
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "f6b81d90-7ab4-43be-901c-3defc045b597",
+      "title": "פנייה - יא",
+      "description": "סוג לקוח: פרטי",
+      "dueDate": "2026-06-22T07:26:13.401Z",
+      "priority": "HIGH",
+      "status": "IN_PROGRESS",
+      "type": "stepQuote",
+      "createdAt": "2026-06-11T08:08:11.443Z",
+      "updatedAt": "2026-06-24T05:35:55.736Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "c7529acd-bdda-4e04-a2d8-0520227e76e7",
+      "leadId": null,
+      "projectId": null,
+      "productName": "10026",
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-06-24T05:35:56.272Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "2a672334-f306-43a0-b57c-13386c8ed970",
+      "title": "כרטיס לקוח — שלום עמרני",
+      "description": "סוג לקוח: PUBLIC",
+      "dueDate": "2026-06-17T06:00:00.000Z",
+      "priority": "HIGH",
+      "status": "IN_PROGRESS",
+      "type": "step6",
+      "createdAt": "2026-06-14T09:23:10.081Z",
+      "updatedAt": "2026-07-01T07:49:46.182Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "29dca39f-b2bd-42db-8391-c9170eb8587a",
+      "leadId": null,
+      "projectId": null,
+      "productName": "83",
+      "currentStage": 5,
+      "currentStageChangedAt": "2026-07-01T07:49:45.930Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "0e047fbf-11ef-4645-af40-65612a435568",
+      "title": "כרטיס לקוח חדש",
+      "description": "סוג לקוח: PRIVATE\nפעולה הבאה: שליחת הצעה",
+      "dueDate": "2026-06-16T06:20:44.110Z",
+      "priority": "MEDIUM",
+      "status": "IN_PROGRESS",
+      "type": "stepQuote",
+      "createdAt": "2026-06-16T06:05:27.662Z",
+      "updatedAt": "2026-07-01T12:50:40.831Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": "bc9f4a3f-5685-4987-acc0-fa0b8b4886f1",
+      "leadId": null,
+      "projectId": null,
+      "productName": "83",
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-07-01T12:50:40.435Z",
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"גגג\",\"at\":\"2026-06-28T05:34:47.922Z\"}]",
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "07960868-42fa-4add-a78e-7ef92133ab47",
+      "title": "כרטיס לקוח — rrr",
+      "description": null,
+      "dueDate": "2026-06-15T07:30:16.819Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step1",
+      "createdAt": "2026-06-15T07:14:51.410Z",
+      "updatedAt": "2026-06-24T05:35:55.740Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": 0,
+      "currentStageChangedAt": "2026-06-24T05:35:56.272Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "4e84aa14-2998-4fc0-a1e6-18c7ffe65fa0",
+      "title": "כרטיס לקוח חדש",
+      "description": null,
+      "dueDate": "2026-06-15T06:28:52.890Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step1",
+      "createdAt": "2026-06-15T06:13:00.178Z",
+      "updatedAt": "2026-06-24T05:35:55.740Z",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "customerId": null,
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": 0,
+      "currentStageChangedAt": "2026-06-24T05:35:56.271Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "יורם"
+      }
+    },
+    {
+      "id": "ab337656-0170-41ef-8643-2a1f8b1f76da",
+      "title": "ליד מהאתר – רעש תשתיות בירושלים",
+      "description": "רעש רציף מצנרת או מערכת חימום מרכזית.",
+      "dueDate": "2026-07-01T09:15:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:13.565Z",
+      "updatedAt": "2026-07-01T09:15:13.565Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": "815975c5-2a63-41d1-ae90-d81e0f4f87c5",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "0927ba03-6645-40b3-b6ba-aa3327b565a4",
+      "title": "ליד מהמלצה – איכות אוויר בגבעתיים",
+      "description": "הופנתה מרופאה. חשד לזיהום אוויר בדירה.",
+      "dueDate": "2026-07-01T08:00:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:22.011Z",
+      "updatedAt": "2026-07-01T09:15:22.011Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": "a6822592-52ff-48fc-9479-cddefb44078f",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "12ea2686-83a4-474d-9b44-805dd7d1784b",
+      "title": "ליד מפייסבוק – ראדון ברעננה",
+      "description": "שמעה על סכנת ראדון, רוצה בדיקה לפני אכלוס.",
+      "dueDate": "2026-07-01T07:30:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:11.380Z",
+      "updatedAt": "2026-07-01T09:15:11.380Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": "55f4f38f-ea78-4d9d-a1c3-8317862a632b",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "d57d5cfb-beca-496f-b039-4e74d6dee5eb",
+      "title": "ליד משותף – אקוסטיקה ברמת השרון",
+      "description": "מהנדס צריך בדיקות אקוסטיות לפרויקט של 4 בניינים.",
+      "dueDate": "2026-07-01T06:15:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:19.898Z",
+      "updatedAt": "2026-07-01T09:15:19.898Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": "a3a564c3-0831-418c-95f8-e95a4b4fe0ce",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "0ad06823-5463-4121-94ad-c326a3158aaf",
+      "title": "לתאם הגעה למדידת רעש - בניין משרדים רמת גן",
+      "description": "לאשר שעת הגעה ולוודא שיש גישה לקומות 3-5.",
+      "dueDate": "2026-07-01T06:00:00.000Z",
+      "priority": "HIGH",
+      "status": "IN_PROGRESS",
+      "type": "COORDINATION",
+      "createdAt": "2026-07-01T09:15:03.043Z",
+      "updatedAt": "2026-07-01T09:15:03.043Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": "cb22ff67-c6f3-48e3-ae90-7d035238b0b7",
+      "leadId": "55499f14-bb2a-404c-bee9-7aae773f7e19",
+      "projectId": "P-3107",
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "ef2cfcd2-776c-4cb2-aba9-b4a565332689",
+      "title": "ליד מ-WhatsApp – איכות אוויר במשרד בתל אביב",
+      "description": "שלח הודעה ב-WhatsApp. ריח מוזר ממיזוג.",
+      "dueDate": "2026-07-01T05:45:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:09.257Z",
+      "updatedAt": "2026-07-01T09:15:09.257Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": "38d9e94e-6c41-4a9b-8a10-e51a791d62c4",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "9c718737-7209-423a-9167-eef8e3b8a48e",
+      "title": "TEST",
+      "description": "ביצוע משימות בזמן אמת",
+      "dueDate": "2026-06-30T00:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "step1",
+      "createdAt": "2026-06-17T14:55:16.956Z",
+      "updatedAt": "2026-06-22T12:45:39.499Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "5bdcfae6-5273-4522-beea-5f55432440a5",
+      "title": "אפיון מערכת",
+      "description": null,
+      "dueDate": "2026-06-28T10:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step1",
+      "createdAt": "2026-06-22T09:47:48.342Z",
+      "updatedAt": "2026-06-24T05:35:55.761Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": 0,
+      "currentStageChangedAt": "2026-06-24T05:35:56.273Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "aa17e2f9-1732-486f-84be-97fb4fccb375",
+      "title": "להתקשר לשני",
+      "description": null,
+      "dueDate": "2026-06-18T13:45:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step1",
+      "createdAt": "2026-06-18T12:38:36.230Z",
+      "updatedAt": "2026-07-01T13:35:31.389Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": null,
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": 0,
+      "currentStageChangedAt": "2026-07-01T13:35:24.001Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "ba55e2cc-fd67-49ba-b8ab-6e70af68da82",
+      "title": "SEED:דוח איכות אוויר - מרכז רפואי גליל ים",
+      "description": null,
+      "dueDate": "2026-06-13T09:14:06.315Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step7",
+      "createdAt": "2026-07-01T09:15:26.585Z",
+      "updatedAt": "2026-07-01T09:15:26.585Z",
+      "ownerId": "940243d2-8888-463c-81fe-2d93ee01d53c",
+      "customerId": "40f3a06f-98db-4584-90ee-bafa7a50623e",
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"📄 דוח נשלח ללקוח — טרם שולם\",\"at\":\"2026-06-13T09:14:06.315Z\"}]",
+      "owner": {
+        "name": "גיא פרנסס"
+      }
+    },
+    {
+      "id": "97a0e046-4e27-4476-9e83-31cc12db8f31",
+      "title": "ליד מהמלצה – רעש בדירה חדשה בהוד השרון",
+      "description": "נכנסה לדירה חדשה ושומעת רעש מהדירה מעל.",
+      "dueDate": "2026-07-01T09:45:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:14.203Z",
+      "updatedAt": "2026-07-01T09:15:14.203Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "9bab6226-842c-49e2-9901-504ce950cca9",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "3980e492-8106-4451-90b7-b75fed6e5db6",
+      "title": "ליד מהאתר – רעש תשתיות במודיעין",
+      "description": "רעש ממערכת מים חמים מרכזית בבניין.",
+      "dueDate": "2026-07-01T08:30:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:22.647Z",
+      "updatedAt": "2026-07-01T09:15:22.647Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "f249d7bc-1290-42d4-885a-6dbe3ed9055a",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "95d9d48e-5ff2-4b5e-802b-49a2dc946f41",
+      "title": "ליד מהמלצה – בדיקות לבית ספר בכפר סבא",
+      "description": "הורים לוחצים. בדיקת קרינה ורעש בכיתות.",
+      "dueDate": "2026-07-01T08:00:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:12.049Z",
+      "updatedAt": "2026-07-01T09:15:12.049Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "c86f7801-6d0b-439d-9ffa-931a10205626",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "4c1bfd93-0723-4e13-85ad-72e8127ab354",
+      "title": "לקוח חוזר – עובש בבניין באשקלון",
+      "description": "עובש בלובי ובמרתף בניין שהוא מנהל.",
+      "dueDate": "2026-07-01T06:45:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:20.474Z",
+      "updatedAt": "2026-07-01T09:15:20.474Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "a47d8bc6-4a69-46a9-b232-341ad1a39ffa",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "eddad60c-b9fa-4b9f-a5ae-879c3dc3176f",
+      "title": "ליד מגוגל – דוח אקוסטי להיתר בנתניה",
+      "description": "קבלן צריך דוח אקוסטי לוועדה המקומית.",
+      "dueDate": "2026-07-01T06:15:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:09.898Z",
+      "updatedAt": "2026-07-01T09:15:09.898Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "d9e42eeb-c4de-4f34-ba9c-936da4527d34",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "af5fd488-63d9-4273-a164-e45a9fc10b48",
+      "title": "ליד מהאתר – עובש ברחובות",
+      "description": "עובש חוזר בחדר ילדים למרות טיפולים קודמים.",
+      "dueDate": "2026-07-01T05:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:18.497Z",
+      "updatedAt": "2026-07-01T09:15:18.497Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": null,
+      "leadId": "0140ee46-9c7b-41ba-b46a-4e086d2650b9",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "3d498c25-6f88-47a7-8481-7a78d50501a5",
+      "title": "SEED:דוח אסבסט - אורן בנייה",
+      "description": null,
+      "dueDate": "2026-06-23T09:14:06.315Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "step7",
+      "createdAt": "2026-07-01T09:15:25.026Z",
+      "updatedAt": "2026-07-01T09:15:25.026Z",
+      "ownerId": "20765019-6ea6-4e37-8521-19efceadbcd6",
+      "customerId": "7ff08926-2860-4eb2-b9b7-ba6204ce6b56",
+      "leadId": null,
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"📄 דוח נשלח ללקוח — טרם שולם\",\"at\":\"2026-06-23T09:14:06.315Z\"}]",
+      "owner": {
+        "name": "Sales"
+      }
+    },
+    {
+      "id": "950a86c3-a5fe-4f7f-9f3d-9d4c5a2937c5",
+      "title": "ליד מגוגל – ניטור פליטות ברמת השרון",
+      "description": "ממונה סביבה דורש דוח שנתי לפליטות.",
+      "dueDate": "2026-07-01T08:45:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:22.931Z",
+      "updatedAt": "2026-07-01T09:15:22.931Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": null,
+      "leadId": "e20f3ac5-ab19-429c-bd5d-e1a0d3312e14",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "97939bc8-9ec6-49d9-932a-55fcb836d8c2",
+      "title": "ליד מ-WhatsApp – ריח חריג בהרצליה",
+      "description": "ריח ביוב חזק בחדר שינה. מבקש בדיקה דחופה.",
+      "dueDate": "2026-07-01T08:15:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:12.330Z",
+      "updatedAt": "2026-07-01T09:15:12.330Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": null,
+      "leadId": "392ac174-3a52-4538-bcb3-2aebbd9b4f51",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "afdd3a1c-0a9f-4c96-9767-8a507c8a4122",
+      "title": "ליד מהאתר – ריח חריג בחיפה",
+      "description": "ריח חריג מחדר המדרגות חודר לדירה.",
+      "dueDate": "2026-07-01T07:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:20.750Z",
+      "updatedAt": "2026-07-01T09:15:20.750Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": null,
+      "leadId": "5588d2d4-0039-4314-a772-b5be2464780c",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "c809c304-b3e1-4190-8efb-99aa85423f32",
+      "title": "ליד מפייסבוק – בדיקת מים ביבנה",
+      "description": "גרה עם באר פרטית, רוצה לבדוק איכות מים.",
+      "dueDate": "2026-07-01T06:30:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:10.179Z",
+      "updatedAt": "2026-07-01T09:15:10.179Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": null,
+      "leadId": "984230d9-375e-4738-84b2-48358b85380b",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "88bcaec4-6f1e-4e89-a12b-03533e5ed8bf",
+      "title": "ליד מ-WhatsApp – ראדון באשדוד",
+      "description": "דירת קרקע, חושש מריכוז ראדון גבוה.",
+      "dueDate": "2026-07-01T05:15:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:18.777Z",
+      "updatedAt": "2026-07-01T09:15:18.777Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": null,
+      "leadId": "cc36060b-2cba-42bb-8357-428138da6cb6",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "e73c8c5f-0590-440a-ab54-ec6e97ea07ca",
+      "title": "שיחה חוזרת אחרי אין מענה - סקר אסבסט",
+      "description": "ניסיתי 3 פעמים, לא ענה. לנסות שוב או לשלוח WhatsApp.",
+      "dueDate": "2026-06-29T07:00:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "SALES_FOLLOWUP",
+      "createdAt": "2026-07-01T09:15:03.990Z",
+      "updatedAt": "2026-07-01T09:15:03.990Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": "7ff08926-2860-4eb2-b9b7-ba6204ce6b56",
+      "leadId": "86f6a26d-12b1-4767-9857-2dc9d079242e",
+      "projectId": "P-3104",
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "c19bbd13-f9ad-41e6-b9e5-a7b6517aa437",
+      "title": "SEED:דוח ליווי סביבתי - הדר ניהול",
+      "description": "סוג לקוח: PRIVATE",
+      "dueDate": "2026-06-16T09:14:06.315Z",
+      "priority": "MEDIUM",
+      "status": "IN_PROGRESS",
+      "type": "stepQuote",
+      "createdAt": "2026-07-01T09:15:25.351Z",
+      "updatedAt": "2026-07-01T18:15:06.941Z",
+      "ownerId": "627fc7b7-2f50-4dcc-a5b4-dd81d6e260c1",
+      "customerId": "ce956966-a750-45b6-97b0-a1e8301b2e94",
+      "leadId": null,
+      "projectId": null,
+      "productName": "10064",
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-07-01T18:15:06.633Z",
+      "incomingLeadId": null,
+      "processNotes": "[{\"text\":\"📄 דוח נשלח ללקוח — טרם שולם\",\"at\":\"2026-06-16T09:14:06.315Z\"}]",
+      "owner": {
+        "name": "Manager"
+      }
+    },
+    {
+      "id": "173a9d0c-4c77-4536-908d-f8bf2c43e4ae",
+      "title": "ליד מפייסבוק – בדיקת מים באשקלון",
+      "description": "מים עם צבע חלודה מהברז. רוצה בדיקה מקיפה.",
+      "dueDate": "2026-07-01T09:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:23.212Z",
+      "updatedAt": "2026-07-01T09:15:23.212Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "97ed1dce-93ba-45b4-b524-d44b54e75764",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "32fec753-2920-4838-a6ee-0c402aeccc49",
+      "title": "ליד מגוגל – דיגום עובש ברמת גן",
+      "description": "כתמי עובש על הקירות. מבקשת דוח לביטוח.",
+      "dueDate": "2026-07-01T08:30:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:12.611Z",
+      "updatedAt": "2026-07-01T09:15:12.611Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "86aeb191-6dcb-46fd-a621-0638beb8539f",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "9a10c096-81da-40e6-99c2-1415c0b401f7",
+      "title": "ליד מ-WhatsApp – רעש בדירה חדשה בראשון לציון",
+      "description": "נכנס לדירה חדשה, רעשים ממערכות הבניין.",
+      "dueDate": "2026-07-01T07:15:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:21.029Z",
+      "updatedAt": "2026-07-01T09:15:21.029Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "f858a324-a353-4427-af48-9271e8184123",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "cfeaf6f4-879a-489d-8f9c-f70d63e1ab2e",
+      "title": "לקוח חוזר – מדידת קרינה בירושלים",
+      "description": "לקוח חוזר, רוצה מדידה אחרי שינויי תשתית חשמל.",
+      "dueDate": "2026-07-01T06:45:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:10.543Z",
+      "updatedAt": "2026-07-01T09:15:10.543Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "0a12bea0-2704-4ff4-b2c0-46b0b8b9eedd",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "dc0b2a35-83ee-4663-9988-3fe17574609a",
+      "title": "ליד מגוגל – איכות אוויר בגבעתיים",
+      "description": "עובדים מדווחים על עייפות וכאבי ראש במשרד.",
+      "dueDate": "2026-07-01T05:30:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:19.058Z",
+      "updatedAt": "2026-07-01T09:15:19.058Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "1a9eea2b-3a88-42fb-9010-fa7f556f1bc2",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "d28abd1a-49ea-45ee-b0bd-69aea517f24e",
+      "title": "ליד חדש מפייסבוק – בדיקת קרינה ברעננה",
+      "description": "פנייה מפייסבוק. מעוניין בבדיקת קרינה בדירה חדשה.",
+      "dueDate": "2026-07-01T05:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:08.392Z",
+      "updatedAt": "2026-07-01T09:15:08.392Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": null,
+      "leadId": "21de99ba-1b5a-4d54-a80b-f4ac274a9a07",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "be591da3-78ec-49b3-9fdf-eae1d7fd759a",
+      "title": "פולואפ אחרי שליחת הצעה לבית ספר",
+      "description": "הצעה לבדיקות סביבתיות נשלחה לפני שבוע. לוודא שדנה קיבלה.",
+      "dueDate": "2026-06-28T06:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "QUOTE_PREPARATION",
+      "createdAt": "2026-07-01T09:15:04.274Z",
+      "updatedAt": "2026-07-01T09:15:04.274Z",
+      "ownerId": "dbe1737d-3a84-4301-a023-e80fe75af16c",
+      "customerId": "a289acac-b3bf-47eb-b9c7-6662280be30a",
+      "leadId": "f5637ae4-27a3-40de-9467-1f8bbba21fca",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Expert"
+      }
+    },
+    {
+      "id": "6f32f2cf-afda-45e8-913f-4ecbcbc25830",
+      "title": "שליחת מסמכים - דוח אקוסטי להיתר בנייה",
+      "description": "להעביר דוח מסכם + נספחים לוועדה המקומית. הלקוח מחכה.",
+      "dueDate": "2026-07-01T11:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "REPORT_WRITING",
+      "createdAt": "2026-07-01T09:15:03.358Z",
+      "updatedAt": "2026-07-01T09:15:03.358Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": "e8a96c3f-923d-45d0-bb24-8ee3f1565b51",
+      "leadId": "512ec509-23e3-4260-b4f1-8ffe2d06fc81",
+      "projectId": "P-3101",
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "907d9e65-38da-4a03-8a3b-7131dc818363",
+      "title": "ליד מגוגל – ניטור פליטות למפעל בפתח תקווה",
+      "description": "ממונה בטיחות דורש דוח תקופתי.",
+      "dueDate": "2026-07-01T09:30:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:13.920Z",
+      "updatedAt": "2026-07-01T09:15:13.920Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": null,
+      "leadId": "e78647fc-fa47-42b2-8afa-959df3110ce2",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "6677965e-cce7-40cc-aec2-41acf3f35e58",
+      "title": "ליד משותף – קרינה לפני בנייה בחולון",
+      "description": "יזם צריך בדיקת קרינה סביבתית לפרויקט חדש.",
+      "dueDate": "2026-07-01T08:15:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:22.291Z",
+      "updatedAt": "2026-07-01T09:15:22.291Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": null,
+      "leadId": "3c71c56e-7203-4c0b-a40e-0872a6e83c98",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "f775008f-c7e9-4491-b98e-649e5db94edf",
+      "title": "ליד מגוגל – ניטור איכות אוויר בתל אביב",
+      "description": "דורש ניטור שוטף ב-3 קומות במגדל משרדים.",
+      "dueDate": "2026-07-01T07:45:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:11.770Z",
+      "updatedAt": "2026-07-01T09:15:11.770Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": null,
+      "leadId": "cb18e0d4-370e-4825-aa39-d71e0994693b",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "7d45f4d8-5345-4b1c-af30-0bf02c8d4f50",
+      "title": "ליד מגוגל – קרינה סלולרית באילת",
+      "description": "אנטנה חדשה על גג הבניין, רוצה למדוד קרינה.",
+      "dueDate": "2026-07-01T06:30:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:20.178Z",
+      "updatedAt": "2026-07-01T09:15:20.178Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": null,
+      "leadId": "f1ce5feb-2237-49ef-ab24-5ba9054c41d8",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "3f38d199-e776-474b-ae5d-b784412ec74a",
+      "title": "ליד מהמלצה – עובש בדירה ברמת גן",
+      "description": "הופנתה ע\"י חברה. עובש בחדר רחצה וחדר שינה.",
+      "dueDate": "2026-07-01T06:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:09.619Z",
+      "updatedAt": "2026-07-01T09:15:09.619Z",
+      "ownerId": "28f16ef4-8e31-4163-bd93-d87b391ccd2e",
+      "customerId": null,
+      "leadId": "7435b9d6-0acc-4395-89de-98aaa80dac5e",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "Admin"
+      }
+    },
+    {
+      "id": "fb0db3c9-4172-4267-bdd4-601311fa4d6e",
+      "title": "ליד מפייסבוק – בדיקת מים ביבנה",
+      "description": "מים עם טעם מוזר מהברז. רוצה בדיקה מקיפה.",
+      "dueDate": "2026-07-01T09:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:13.282Z",
+      "updatedAt": "2026-07-01T09:15:13.282Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "0ef27663-6870-4637-959f-509d2337832b",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "577e35c6-4a7d-4606-b36f-cc373ffddc73",
+      "title": "שיחה חוזרת אחרי פנייה מפייסבוק - בדיקת ראדון",
+      "description": "ליד חם מפייסבוק, לא ענתה בשיחה ראשונה. לנסות שוב היום.",
+      "dueDate": "2026-07-01T08:30:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "SALES_FOLLOWUP",
+      "createdAt": "2026-07-01T09:15:02.759Z",
+      "updatedAt": "2026-07-01T09:15:02.759Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "f8cfc0b5-ed9e-4a54-82c2-16347905d1dd",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "49596983-9072-46cc-bc57-d9315b7bf5b6",
+      "title": "ליד מפייסבוק – ראדון בבאר שבע",
+      "description": "בנה בית חדש, רוצה בדיקת ראדון לפני אכלוס.",
+      "dueDate": "2026-07-01T07:45:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:21.670Z",
+      "updatedAt": "2026-07-01T09:15:21.670Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "3f43c083-d765-4535-b5e1-b755184d1264",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "661c8d73-07ce-431f-97b4-93bdfda8c19e",
+      "title": "ליד משותף – בדיקות אקוסטיות בהוד השרון",
+      "description": "קבלן שותף, צריך בדיקות ל-3 בניינים.",
+      "dueDate": "2026-07-01T07:15:00.000Z",
+      "priority": "URGENT",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:11.099Z",
+      "updatedAt": "2026-07-01T09:15:11.099Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "b3928636-83a7-4100-a201-56bb74ec05fc",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "10c9132c-e8cf-45ce-80d4-149eeec35ae5",
+      "title": "ליד מפייסבוק – בדיקת מים במודיעין",
+      "description": "מים עכורים מהברז אחרי עבודות תשתית.",
+      "dueDate": "2026-07-01T06:00:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:19.617Z",
+      "updatedAt": "2026-07-01T09:15:19.617Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "496d9cff-09e2-407e-b3d6-9f814a0aaa9e",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "478b8140-ad21-426a-a17d-f316677fec08",
+      "title": "ליד מהאתר – בדיקת ראדון בהרצליה",
+      "description": "מילא טופס באתר. דירת קרקע, חושש מראדון.",
+      "dueDate": "2026-07-01T05:30:00.000Z",
+      "priority": "MEDIUM",
+      "status": "OPEN",
+      "type": "GENERAL",
+      "createdAt": "2026-07-01T09:15:08.976Z",
+      "updatedAt": "2026-07-01T09:15:08.976Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": null,
+      "leadId": "95f7c414-678e-4b39-b8d7-89847f30e806",
+      "projectId": null,
+      "productName": null,
+      "currentStage": null,
+      "currentStageChangedAt": null,
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    },
+    {
+      "id": "40a35c3c-0fec-417d-bcff-48413565c17a",
+      "title": "לעדכן לקוח לגבי זמינות צוות - מדידת קרינה",
+      "description": "הלקוח מחכה לתאריך. צוות שטח עמוס, צריך לתת צפי.",
+      "dueDate": "2026-06-27T10:00:00.000Z",
+      "priority": "HIGH",
+      "status": "OPEN",
+      "type": "stepQuote",
+      "createdAt": "2026-07-01T09:15:04.832Z",
+      "updatedAt": "2026-07-01T13:36:28.362Z",
+      "ownerId": "9ffcb6b0-dde6-45ba-9bc2-0887e27de31e",
+      "customerId": "92a291fa-a609-45df-9343-618eda6af379",
+      "leadId": "be4e300a-2392-405a-93cf-3c644a015bee",
+      "projectId": "P-3102",
+      "productName": null,
+      "currentStage": 99,
+      "currentStageChangedAt": "2026-07-01T13:36:27.973Z",
+      "incomingLeadId": null,
+      "processNotes": null,
+      "owner": {
+        "name": "גיא גבאי"
+      }
+    }
+  ],
+  "deletedReminderLogs": [
+    {
+      "taskId": "07960868-42fa-4add-a78e-7ef92133ab47",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:01.813Z"
+    },
+    {
+      "taskId": "0e047fbf-11ef-4645-af40-65612a435568",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:02.015Z"
+    },
+    {
+      "taskId": "2a672334-f306-43a0-b57c-13386c8ed970",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:02.117Z"
+    },
+    {
+      "taskId": "4e84aa14-2998-4fc0-a1e6-18c7ffe65fa0",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:01.711Z"
+    },
+    {
+      "taskId": "5bdcfae6-5273-4522-beea-5f55432440a5",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-29T05:00:01.606Z"
+    },
+    {
+      "taskId": "5bdcfae6-5273-4522-beea-5f55432440a5",
+      "kind": "DUE_1H",
+      "sentAt": "2026-06-22T08:55:02.660Z"
+    },
+    {
+      "taskId": "632d39ca-a908-49e9-8315-98552c90cb8a",
+      "kind": "DUE_1H",
+      "sentAt": "2026-07-01T04:55:01.473Z"
+    },
+    {
+      "taskId": "9c718737-7209-423a-9167-eef8e3b8a48e",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-30T05:00:01.502Z"
+    },
+    {
+      "taskId": "9c718737-7209-423a-9167-eef8e3b8a48e",
+      "kind": "DUE_1H",
+      "sentAt": "2026-06-29T22:55:01.498Z"
+    },
+    {
+      "taskId": "aa17e2f9-1732-486f-84be-97fb4fccb375",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:02.219Z"
+    },
+    {
+      "taskId": "aa17e2f9-1732-486f-84be-97fb4fccb375",
+      "kind": "DUE_1H",
+      "sentAt": "2026-06-18T09:45:02.890Z"
+    },
+    {
+      "taskId": "bbc5f3fa-2385-4858-acb1-0acd324f26b4",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:02.523Z"
+    },
+    {
+      "taskId": "f6b81d90-7ab4-43be-901c-3defc045b597",
+      "kind": "DEADLINE_EXCEEDED",
+      "sentAt": "2026-06-25T05:00:02.422Z"
+    }
+  ],
+  "nulledAuditLogs": [
+    {
+      "id": "93ce1865-3d23-4f40-836f-47d2cd9f39c6",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "8ad3ce89-c9c7-400f-84f8-76a7b0346fd8",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "13402fe8-59f5-4f5f-ad4d-14b872be031f",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "c43ea16c-2d6e-4322-ab9f-9cc46f38e39e",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "478bb07f-4ff7-4f1a-bbd5-10036e283fda",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "6ce4f6e6-e6ac-48f0-896c-5393aea7a12f",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "aae760ab-bffe-4728-9914-2304ddca8c96",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "5cef9609-0e3b-4787-893d-2051ac059c91",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "5844d63e-6d53-43b5-bd51-6a2aa09fc22a",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "e2dae3ad-5ab7-48a9-9637-9aeefcf68f96",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "986d0c35-3d8c-4ce2-a100-ae8b09dc3b3e",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "9ecda66d-e820-4525-8628-748f4a15b494",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "65e9960b-ff7a-43dd-94da-e0a11bec49c0",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "01e68767-c15e-49ee-b885-76499f432e67",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "ed92cafe-c82c-4f85-ad33-a2b67c5af25d",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "815adc98-26a0-47cf-80e4-e5262d444bb5",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "0c580bdd-dcd3-4e34-97b6-d9a00fce8011",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "a45fc9bb-6378-4b65-8205-80d6d7a1e171",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "1e9ca6dd-6c6b-4b5c-b5e5-6706b8146701",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "7f88351d-9eb9-4d68-b9ea-3507fd9bc151",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "695eaaa8-f1d2-4b60-9499-e200698a54ff",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "d9ae407d-5d35-4182-b704-5061f8f3b41f",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "642a2f41-2c12-4597-8caf-878462447845",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "429b5efd-f902-42c5-84b3-373897dbb4a1",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "660bb299-1aa6-406f-a9df-a5b5b662cf69",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "c10430cc-0459-4de4-a187-e0dbac3d08bf",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    }
+  ],
+  "nulledPendingActions": [
+    {
+      "id": "a24b30b9-69ca-4da1-8fcf-cbc520565455",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "2353f75f-3757-4846-9037-38bf786e7e31",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    },
+    {
+      "id": "79c6efed-2da4-4315-82fd-e10f06edff0f",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "4739e759-a2a0-4718-ac7f-c06a6404ecdf",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "26ed2f46-f7d4-4958-b83d-70f1f9e87a8f",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "142f0223-7a58-4b98-8f4a-a2ea583973ad",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "18b98fc1-48b2-4619-adf5-fa61eb6c5434",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "0132bdde-9e9b-448d-8a62-5610c4fa2a9e",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "1c1bcbae-ee7e-4ae7-9448-42e6f731e09d",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "a2ba61f0-34e1-46e1-8c74-dd29944c0d07",
+      "targetTaskId": "5bdcfae6-5273-4522-beea-5f55432440a5"
+    },
+    {
+      "id": "146d7ad4-6135-40b2-a081-05cf42d288fb",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "00a5b571-3439-47b4-b766-a56a50d38931",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "3d02049d-dd1a-41a1-b5e4-0c53f13e29f0",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "fc1402ab-388f-481c-ac58-d5692a2846ce",
+      "targetTaskId": "9c718737-7209-423a-9167-eef8e3b8a48e"
+    },
+    {
+      "id": "6cc1c36b-20f9-4601-8675-55d8c39dfe9c",
+      "targetTaskId": "aa17e2f9-1732-486f-84be-97fb4fccb375"
+    }
+  ]
+}
