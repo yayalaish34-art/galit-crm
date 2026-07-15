@@ -6,6 +6,7 @@ import { CustomerPagedQueryDto } from './dto/customer-paged-query.dto';
 import {
   CreateCustomerDocumentDto,
   ReplaceAdditionalDataDto,
+  ReplaceBlocksDto,
   ReplaceExternalDataDto,
   ReplaceQuestionnairesDto,
   ReplaceReferralSourcesDto,
@@ -73,6 +74,11 @@ export class CustomersController {
   @Put(':id/external-data-rows')
   replaceExternalData(@Param('id') id: string, @Body() body: ReplaceExternalDataDto) {
     return this.customersService.replaceExternalDataRows(id, body);
+  }
+
+  @Put(':id/blocks')
+  replaceBlocks(@Param('id') id: string, @Body() body: ReplaceBlocksDto) {
+    return this.customersService.replaceBlocks(id, body);
   }
 
   @Get(':id/documents')

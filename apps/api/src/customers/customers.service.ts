@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import type {
   CreateCustomerDocumentDto,
   ReplaceAdditionalDataDto,
+  ReplaceBlocksDto,
   ReplaceExternalDataDto,
   ReplaceQuestionnairesDto,
   ReplaceReferralSourcesDto,
@@ -273,6 +274,7 @@ export class CustomersService {
         customerRelations,
         additionalDataRows,
         externalDataRows,
+        blocks,
       ] = await Promise.all([
         this.prisma.lead.findMany({ where: { customerId: id } }),
         this.prisma.quote.findMany({ where: { customerId: id } }),
@@ -314,6 +316,10 @@ export class CustomersService {
           where: { customerId: id },
           orderBy: [{ rowOrder: 'asc' }, { createdAt: 'asc' }],
         }),
+        this.prisma.customerBlock.findMany({
+          where: { customerId: id },
+          orderBy: [{ channel: 'asc' }],
+        }),
       ]);
 
       return {
@@ -329,6 +335,7 @@ export class CustomersService {
         relations: customerRelations,
         additionalDataRows,
         externalDataRows,
+        blocks,
       };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2022') {
@@ -351,6 +358,7 @@ export class CustomersService {
           relations: [],
           additionalDataRows: [],
           externalDataRows: [],
+          blocks: [],
         };
       }
       throw e;
@@ -466,6 +474,35 @@ export class CustomersService {
       return tx.customerReferralSource.findMany({
         where: { customerId },
         orderBy: [{ rowOrder: 'asc' }, { createdAt: 'asc' }],
+      });
+    });
+  }
+
+  /** חסימות ערוצי תקשורת ("חסום ל:") — replace-all לפי הערוצים שנשלחו מכרטיס הלקוח. */
+  async replaceBlocks(customerId: string, body: ReplaceBlocksDto) {
+    await this.ensureCustomer(customerId);
+    const valid = new Set(['MAILING', 'WHATSAPP', 'EMAIL', 'SMS']);
+    // מנרמלים: ערוצים ייחודיים, רק ערכים חוקיים.
+    const items = (body.items ?? []).filter((it) => valid.has((it.channel ?? '').toUpperCase()));
+    const seen = new Set<string>();
+    return this.prisma.$transaction(async (tx) => {
+      await tx.customerBlock.deleteMany({ where: { customerId } });
+      for (const it of items) {
+        const channel = (it.channel ?? '').toUpperCase();
+        if (seen.has(channel)) continue; // לא חוסמים פעמיים לאותו ערוץ
+        seen.add(channel);
+        await tx.customerBlock.create({
+          data: {
+            id: randomUUID(),
+            customerId,
+            channel: channel as any,
+            reason: it.reason?.trim() || null,
+          },
+        });
+      }
+      return tx.customerBlock.findMany({
+        where: { customerId },
+        orderBy: [{ channel: 'asc' }],
       });
     });
   }

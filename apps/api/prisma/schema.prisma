@@ -355,10 +355,35 @@ model Customer {
   customerRelations      CustomerRelation[]
   additionalDataRows     CustomerAdditionalDataRow[]
   externalDataRows       CustomerExternalDataRow[]
+  blocks                 CustomerBlock[]
 
   @@index([importLegacyId])
   @@index([name])
   @@index([phone])
+}
+
+/// ערוצי תקשורת שניתן לחסום ("חסום ל:") — נפרד מהעדפות הדיוור (allow*).
+enum BlockChannel {
+  MAILING  // דיוור
+  WHATSAPP // ווצאפ
+  EMAIL    // דוא"ל
+  SMS      // SMS
+}
+
+/// חסימת ערוץ תקשורת ללקוח — שורה אחת לכל ערוץ חסום. מוצג בכרטיס הלקוח.
+model CustomerBlock {
+  id         String       @id @default(uuid())
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  channel    BlockChannel
+  /// סיבת החסימה (אופציונלי)
+  reason     String?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  /// לקוח לא יכול להיחסם פעמיים לאותו ערוץ.
+  @@unique([customerId, channel])
+  @@index([customerId])
 }
 
 /// מקור הגעה (טאב מקור הגעה)

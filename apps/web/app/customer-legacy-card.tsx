@@ -124,6 +124,8 @@ type CustomerFull = {
   relations?: unknown[];
   additionalDataRows?: unknown[];
   externalDataRows?: unknown[];
+  /** ערוצים חסומים ("חסום ל:") — [{ channel, reason }] */
+  blocks?: unknown[];
 };
 
 type CustomerLegacyContact = {
@@ -350,6 +352,27 @@ function buildFinanceFormFromCustomer(c: CustomerCardCustomer): CustomerFinanceT
     return { ...fromDb, ...(raw as Partial<CustomerFinanceTabForm>) };
   }
   return fromDb;
+}
+
+/** ערוצי "חסום ל:" — קוד ↔ תווית עברית. נשמרים ב־PUT /customers/:id/blocks. */
+const BLOCK_CHANNELS: readonly { code: string; label: string }[] = [
+  { code: 'MAILING', label: 'דיוור' },
+  { code: 'WHATSAPP', label: 'ווצאפ' },
+  { code: 'EMAIL', label: 'דוא"ל' },
+  { code: 'SMS', label: 'SMS' },
+];
+
+/** טוען את הערוצים החסומים מ־GET /customers/:id/full → blocks. */
+function buildBlockedChannelsFromFull(full: CustomerFull | null): Set<string> {
+  const raw = full?.blocks;
+  const set = new Set<string>();
+  if (!Array.isArray(raw)) return set;
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const ch = (item as Record<string, unknown>).channel;
+    if (typeof ch === 'string' && ch) set.add(ch.toUpperCase());
+  }
+  return set;
 }
 
 /** טאב מקור הגעה — תאריך ושם מקור; נשמר ב־PUT /customers/:id/referral-sources */
@@ -1223,6 +1246,13 @@ export function CustomerLegacyCard({
     setMailingExtras(buildMailingExtrasFromCustomer(customer));
   }, [customer]);
 
+  // "חסום ל:" — ערוצי תקשורת חסומים (נטענים מ-GET /full → blocks, נשמרים ב-PUT /blocks).
+  const [blockedChannels, setBlockedChannels] = useState<Set<string>>(() => buildBlockedChannelsFromFull(full));
+
+  useEffect(() => {
+    setBlockedChannels(buildBlockedChannelsFromFull(full));
+  }, [full]);
+
   const [notesTabExtras, setNotesTabExtras] = useState<CustomerNotesTabExtras>(() => buildNotesTabExtrasFromCustomer(customer));
 
   useEffect(() => {
@@ -1600,6 +1630,15 @@ export function CustomerLegacyCard({
             })),
           },
           'נתונים חיצוניים',
+        );
+        await putTab(
+          `/customers/${customer.id}/blocks`,
+          {
+            items: BLOCK_CHANNELS
+              .filter((c) => blockedChannels.has(c.code))
+              .map((c) => ({ channel: c.code })),
+          },
+          'חסימות ערוצים',
         );
 
         for (const row of documentRows) {
@@ -3240,6 +3279,42 @@ export function CustomerLegacyCard({
                         onChange={(e) => setMailingExtras((p) => ({ ...p, [key]: e.target.checked }))}
                       />
                       <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* חסום ל: — ערוצי תקשורת חסומים (do-not-contact). נפרד מהעדפות הדיוור שמעל. */}
+              <div className="mt-4 space-y-2 border-t border-rose-200 pt-4">
+                <div className="mb-2 flex items-center gap-2 text-right">
+                  <span className="text-sm font-bold text-rose-700">חסום ל:</span>
+                  {blockedChannels.size > 0 && (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">
+                      {BLOCK_CHANNELS.filter((c) => blockedChannels.has(c.code)).map((c) => c.label).join(', ')}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                  {BLOCK_CHANNELS.map((c) => (
+                    <label
+                      key={c.code}
+                      className="flex cursor-pointer items-center gap-2 text-right text-sm font-medium text-slate-800"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 rounded border-slate-400 accent-rose-600"
+                        disabled={!isEdit}
+                        checked={blockedChannels.has(c.code)}
+                        onChange={(e) =>
+                          setBlockedChannels((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(c.code);
+                            else next.delete(c.code);
+                            return next;
+                          })
+                        }
+                      />
+                      <span>{c.label}</span>
                     </label>
                   ))}
                 </div>

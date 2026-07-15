@@ -122,6 +122,19 @@ export class ReplaceReferralSourcesDto {
   items!: ReferralSourceRowDto[];
 }
 
+export class BlockRowDto {
+  /** ערוץ חסום: MAILING / WHATSAPP / EMAIL / SMS */
+  @IsString() channel!: string;
+  @IsOptional() @IsString() reason?: string | null;
+}
+
+export class ReplaceBlocksDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BlockRowDto)
+  items!: BlockRowDto[];
+}
+
 export class QuestionnaireRowDto {
   @IsOptional() @IsString() questionnaireCode?: string | null;
   @IsOptional() @IsString() questionnaireName?: string | null;
