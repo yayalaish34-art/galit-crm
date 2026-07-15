@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { apiFetch, apiUrl } from './lib/api-base';
 import {
   User,
   Plus,
@@ -27,6 +28,7 @@ import {
   Target,
   TrendingUp,
   Bot,
+  Mic,
 } from 'lucide-react';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
@@ -307,6 +309,29 @@ export function CrmLegacyTopNav({
 }) {
   const role = currentUserRole;
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>('main');
+  const [voiceLoading, setVoiceLoading] = useState(false);
+
+  // Open the Hebrew voice assistant ("גלי") for the logged-in user: ask the CRM
+  // API for a personal link (it bridges to the bot), then open it in a new tab.
+  const openVoiceAssistant = useCallback(async () => {
+    if (voiceLoading) return;
+    setVoiceLoading(true);
+    // Open a tab synchronously so mobile Safari doesn't block the async popup.
+    const tab = window.open('', '_blank');
+    try {
+      const res = await apiFetch(apiUrl('/voice-assistant/link'));
+      if (!res.ok) throw new Error('link failed');
+      const data = (await res.json()) as { url?: string };
+      if (!data.url) throw new Error('no url');
+      if (tab) tab.location.href = data.url;
+      else window.location.href = data.url;
+    } catch {
+      if (tab) tab.close();
+      alert('לא הצלחתי לפתוח את העוזרת הקולית כרגע. נסו שוב בעוד רגע.');
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [voiceLoading]);
   const [filePanelOpen, setFilePanelOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<MenuKind | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -843,6 +868,14 @@ export function CrmLegacyTopNav({
                   Icon={Bot}
                   title="סוכן פיתוח — ניהול משימות והפעלת Claude Code"
                   onClick={() => window.open('/dev-assistant', '_blank')}
+                />
+                <Sep />
+                <NavBtn
+                  label={voiceLoading ? 'פותח…' : 'עוזרת קולית'}
+                  Icon={Mic}
+                  disabled={voiceLoading}
+                  title="גלי — עוזרת קולית: דברו איתה בעברית לניהול משימות, בדיקות, יומן ולקוחות"
+                  onClick={openVoiceAssistant}
                 />
               </>
             )}
