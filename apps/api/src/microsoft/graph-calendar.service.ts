@@ -50,6 +50,25 @@ export interface GraphCalendarEventResult {
   invited: string[];
 }
 
+export interface ListEventsOptions {
+  /** ISO 8601 UTC, e.g. "2026-07-15T00:00:00Z". When both start+end are given, uses calendarView. */
+  startIso?: string;
+  endIso?: string;
+  /** default 25, clamped to [1, 100] */
+  top?: number;
+}
+
+export interface CalendarEventSummary {
+  id: string;
+  subject: string | null;
+  start: { dateTime: string; timeZone: string } | null;
+  end: { dateTime: string; timeZone: string } | null;
+  location: string | null;
+  isOnlineMeeting: boolean;
+  isAllDay: boolean;
+  webLink: string | null;
+}
+
 /**
  * יצירת אירועי יומן ב-Outlook בשם המשתמש המחובר, דרך Microsoft Graph.
  * האירוע נוצר ביומן של המארגן (POST /me/events). כל עובד/לקוח שנכלל ב-attendees
@@ -165,6 +184,162 @@ export class GraphCalendarService {
       joinUrl: data.onlineMeeting?.joinUrl ?? null,
       invited: attendees.map((a) => a.email),
     };
+  }
+
+  /**
+   * קריאת אירועי היומן של המשתמש המחובר דרך Microsoft Graph.
+   * כשמסופקים גם startIso וגם endIso — משתמש ב-calendarView (חלון תאריכים);
+   * אחרת /me/events. דורש את ההרשאה Calendars.ReadWrite (כלולה ב-SCOPES).
+   */
+  async listEventsAsUser(userId: string, opts: ListEventsOptions = {}): Promise<CalendarEventSummary[]> {
+    const accessToken = await this.auth.getAccessToken(userId);
+    const top = Math.min(Math.max(opts.top ?? 25, 1), 100);
+    const select = 'id,subject,start,end,location,isOnlineMeeting,isAllDay,webLink';
+
+    let url: string;
+    if (opts.startIso && opts.endIso) {
+      url =
+        'https://graph.microsoft.com/v1.0/me/calendarView' +
+        `?startDateTime=${encodeURIComponent(opts.startIso)}` +
+        `&endDateTime=${encodeURIComponent(opts.endIso)}` +
+        `&$orderby=${encodeURIComponent('start/dateTime')}` +
+        `&$top=${top}&$select=${encodeURIComponent(select)}`;
+    } else {
+      url =
+        'https://graph.microsoft.com/v1.0/me/events' +
+        `?$orderby=${encodeURIComponent('start/dateTime')}` +
+        `&$top=${top}&$select=${encodeURIComponent(select)}`;
+    }
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+
+    if (!res.ok) {
+      const detail = await res.text();
+      this.logger.error(`Graph list events failed for user ${userId}: ${res.status} ${detail}`);
+      if (res.status === 403) {
+        throw new BadRequestException(
+          'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+        );
+      }
+      throw new BadRequestException('קריאת היומן מ-Outlook נכשלה');
+    }
+
+    const data = (await res.json()) as { value?: unknown[] };
+    const items = Array.isArray(data.value) ? data.value : [];
+    return items.map((raw) => {
+      const r = (raw ?? {}) as Record<string, any>;
+      const start = r.start && typeof r.start === 'object'
+        ? { dateTime: String(r.start.dateTime ?? ''), timeZone: String(r.start.timeZone ?? '') }
+        : null;
+      const end = r.end && typeof r.end === 'object'
+        ? { dateTime: String(r.end.dateTime ?? ''), timeZone: String(r.end.timeZone ?? '') }
+        : null;
+      const location =
+        r.location && typeof r.location === 'object' && typeof r.location.displayName === 'string'
+          ? r.location.displayName || null
+          : null;
+      return {
+        id: typeof r.id === 'string' ? r.id : '',
+        subject: typeof r.subject === 'string' ? r.subject : null,
+        start,
+        end,
+        location,
+        isOnlineMeeting: r.isOnlineMeeting === true,
+        isAllDay: r.isAllDay === true,
+        webLink: typeof r.webLink === 'string' ? r.webLink : null,
+      };
+    });
+  }
+
+  /**
+   * עדכון אירוע קיים ביומן ה-Outlook של המשתמש (PATCH — רק השדות שסופקו).
+   * משמש את העוזרת "גלי" לעריכת פגישות. דורש Calendars.ReadWrite.
+   */
+  async updateEventAsUser(
+    userId: string,
+    eventId: string,
+    patch: {
+      subject?: string;
+      start?: string;
+      end?: string;
+      timeZone?: string;
+      location?: string;
+      body?: string;
+    },
+  ): Promise<{ id: string; webLink: string | null }> {
+    const accessToken = await this.auth.getAccessToken(userId);
+    const tz = patch.timeZone || 'Asia/Jerusalem';
+
+    // Build a minimal PATCH body — only the provided fields are sent.
+    const payload: Record<string, unknown> = {};
+    if (patch.subject !== undefined) payload.subject = patch.subject;
+    if (patch.start !== undefined) payload.start = { dateTime: patch.start, timeZone: tz };
+    if (patch.end !== undefined) payload.end = { dateTime: patch.end, timeZone: tz };
+    if (patch.location !== undefined) payload.location = { displayName: patch.location };
+    if (patch.body !== undefined) payload.body = { contentType: 'text', content: patch.body };
+
+    if (Object.keys(payload).length === 0) {
+      throw new BadRequestException('לא צוין מה לעדכן באירוע');
+    }
+
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(eventId)}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+
+    if (!res.ok) {
+      const detail = await res.text();
+      this.logger.error(`Graph update event failed for user ${userId}: ${res.status} ${detail}`);
+      if (res.status === 403) {
+        throw new BadRequestException(
+          'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+        );
+      }
+      if (res.status === 404) throw new BadRequestException('האירוע לא נמצא ביומן');
+      throw new BadRequestException('עדכון הפגישה ב-Outlook נכשל');
+    }
+
+    const data = (await res.json()) as { id: string; webLink?: string };
+    return { id: data.id, webLink: data.webLink ?? null };
+  }
+
+  /**
+   * מחיקת אירוע מהיומן של המשתמש (DELETE). Graph מחזיר 204 בהצלחה.
+   * משמש את העוזרת "גלי" למחיקת פגישות (אחרי אישור המשתמש). דורש Calendars.ReadWrite.
+   */
+  async deleteEventAsUser(userId: string, eventId: string): Promise<{ deleted: true }> {
+    const accessToken = await this.auth.getAccessToken(userId);
+
+    const res = await fetch(
+      `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(eventId)}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      },
+    );
+
+    // 204 No Content on success; 404 if already gone — treat as success (idempotent).
+    if (res.status === 404) return { deleted: true };
+    if (!res.ok) {
+      const detail = await res.text();
+      this.logger.error(`Graph delete event failed for user ${userId}: ${res.status} ${detail}`);
+      if (res.status === 403) {
+        throw new BadRequestException(
+          'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+        );
+      }
+      throw new BadRequestException('מחיקת הפגישה מ-Outlook נכשלה');
+    }
+    return { deleted: true };
   }
 
   /**
