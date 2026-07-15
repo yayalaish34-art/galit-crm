@@ -141,8 +141,9 @@ export class DashboardService {
         },
         orderBy: [{ updatedAt: 'desc' }],
       }),
-      this.prisma.lead.findMany({
-        orderBy: [{ updatedAt: 'desc' }],
+      // מקור הלידים האמיתי = IncomingLead (לידים שנכנסו מהמייל), לא טבלת Lead שנשארת ריקה.
+      this.prisma.incomingLead.findMany({
+        orderBy: [{ createdAt: 'desc' }],
       }),
       this.prisma.project.findMany({
         include: {
@@ -209,8 +210,8 @@ export class DashboardService {
     const lostOpps = opportunities.filter((o) => o.pipelineStage === OpportunityStage.LOST);
     const teamWinRate = (wonOpps.length + lostOpps.length) === 0 ? 0 : wonOpps.length / (wonOpps.length + lostOpps.length);
 
-    // Leads stages (Wave 2 leadStatus)
-    const openLeads = leads.filter((l) => ['NEW', 'FU_1', 'FU_2'].includes((l.leadStatus as any) || l.status));
+    // לידים פתוחים = חדשים שממתינים או בטיפול (IncomingLead: NEW / ACTIVE).
+    const openLeads = leads.filter((l) => ['NEW', 'ACTIVE'].includes((l.status as any) || ''));
 
     // Leaderboard: group by assigned user (opps assignedUserId; leads assignedUserId)
     const reps = users.filter((u) => u.role === UserRole.SALES || u.role === UserRole.EXPERT);
@@ -226,8 +227,8 @@ export class DashboardService {
 
       const repPipelineValue = repOpenOpps.reduce((a, o) => a + Number(o.estimatedValue ?? 0), 0);
 
-      const repOpenLeads = openLeads.filter((l) => l.assignedUserId === rep.id);
-      const weeklyActivity = leads.filter((l) => l.assignedUserId === rep.id && l.updatedAt >= sow && ['FU_1', 'FU_2'].includes((l.leadStatus as any) || '')).length;
+      const repOpenLeads = openLeads.filter((l) => l.ownerId === rep.id);
+      const weeklyActivity = leads.filter((l) => l.ownerId === rep.id && l.updatedAt >= sow && l.status === 'ACTIVE').length;
 
       const stuckDeals14 = repOpenOpps.filter((o) => o.createdAt < fourteenDaysAgo).length;
 
@@ -250,10 +251,11 @@ export class DashboardService {
         weeklyActivity,
         stuckDealsOver14: stuckDeals14,
         stages: {
-          NEW: repOpenLeads.filter((l) => (l.leadStatus as any) === 'NEW').length,
-          FU_1: repOpenLeads.filter((l) => (l.leadStatus as any) === 'FU_1').length,
-          FU_2: repOpenLeads.filter((l) => (l.leadStatus as any) === 'FU_2').length,
-          QUOTE_SENT: repOpenLeads.filter((l) => (l.leadStatus as any) === 'QUOTE_SENT').length,
+          // IncomingLead תומך רק ב-NEW/ACTIVE. ACTIVE = "בטיפול" → מוצג תחת FU_1.
+          NEW: repOpenLeads.filter((l) => (l.status as any) === 'NEW').length,
+          FU_1: repOpenLeads.filter((l) => (l.status as any) === 'ACTIVE').length,
+          FU_2: 0,
+          QUOTE_SENT: 0,
           WON: repWonOpps.length,
           LOST: repLostOpps.length,
         },
@@ -273,7 +275,9 @@ export class DashboardService {
 
     const leadSourcesMap = new Map<string, number>();
     for (const l of leads) {
-      const key = (l.utm_source || l.source || 'לא ידוע').toString();
+      // אין UTM ב-IncomingLead — מקור = דומיין המייל השולח (best-effort).
+      const domain = (l.fromEmail || '').split('@')[1];
+      const key = (domain || 'לא ידוע').toString();
       leadSourcesMap.set(key, (leadSourcesMap.get(key) || 0) + 1);
     }
     const leadSourcesPie = Array.from(leadSourcesMap.entries())
@@ -343,13 +347,13 @@ export class DashboardService {
 
     // Leads with no activity: use updatedAt (best approximation until full activity log exists)
     const inactiveLeads = leads
-      .filter((l) => l.updatedAt < sevenDaysAgo && ['NEW', 'FU_1', 'FU_2', 'QUOTE_SENT'].includes((l.leadStatus as any) || l.status))
+      .filter((l) => l.updatedAt < sevenDaysAgo && ['NEW', 'ACTIVE'].includes((l.status as any) || ''))
       .slice(0, 10)
       .map((l) => ({
-        rep: users.find((u) => u.id === l.assignedUserId)?.name || 'לא משויך',
-        leadName: l.fullName || `${l.firstName || ''} ${l.lastName || ''}`.trim() || l.company || 'ליד',
-        phone: l.phone || '',
-        serviceType: l.serviceType || l.service || '',
+        rep: users.find((u) => u.id === l.ownerId)?.name || 'לא משויך',
+        leadName: l.fromName || l.subject || 'ליד',
+        phone: '',
+        serviceType: l.subject || '',
         lastActivity: l.updatedAt.toISOString().slice(0, 10),
         inactiveDays: Math.ceil((now.getTime() - l.updatedAt.getTime()) / (24 * 60 * 60 * 1000)),
         level: l.updatedAt < new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000) ? 'red' : 'yellow',
@@ -358,7 +362,8 @@ export class DashboardService {
     // Breakdowns
     const leadsByServiceMap = new Map<string, number>();
     for (const l of leads) {
-      const key = (l.serviceType || l.service || 'אחר').toString();
+      // אין שדה שירות ב-IncomingLead — נגזר מנושא המייל (subject).
+      const key = (l.subject || 'אחר').toString();
       leadsByServiceMap.set(key, (leadsByServiceMap.get(key) || 0) + 1);
     }
     const leadsByServiceType = Array.from(leadsByServiceMap.entries())
@@ -388,32 +393,33 @@ export class DashboardService {
       })
       .slice(0, 10);
 
-    const leadStatusOf = (l: any) => ((l?.leadStatus || l?.status || l?.stage || '') as string).toUpperCase();
+    // IncomingLead.status = NEW / ACTIVE / DISMISSED. ממפים למונחי הדשבורד.
+    const leadStatusOf = (l: any) => ((l?.status || '') as string).toUpperCase();
 
     // Incoming leads feed + who took each one (which employee). Most recent first.
     const recentLeadsTaken = [...leads]
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, 15)
       .map((l) => {
-        const owner = l.assignedUserId ? users.find((u) => u.id === l.assignedUserId) : null;
+        const owner = l.ownerId ? users.find((u) => u.id === l.ownerId) : null;
         return {
           id: l.id,
-          name: l.fullName || `${l.firstName || ''} ${l.lastName || ''}`.trim() || l.company || 'ליד',
-          phone: l.phone || '',
-          source: (l.utm_source || l.source || '').toString() || '—',
-          serviceType: (l.serviceType || l.service || '').toString() || '—',
+          name: l.fromName || l.subject || 'ליד',
+          phone: '',
+          source: l.fromEmail || '—',
+          serviceType: l.subject || '—',
           createdAt: l.createdAt.toISOString(),
           status: leadStatusOf(l),
-          assignedUserId: l.assignedUserId || null,
+          assignedUserId: l.ownerId || null,
           assignedUserName: owner?.name || null,
         };
       });
 
     const leadStatuses = leads.map(leadStatusOf);
     const leadsNew = leadStatuses.filter((s) => s === 'NEW').length;
-    const leadsInTreatment = leadStatuses.filter((s) => ['CONTACTED', 'FU_1', 'FU_2', 'QUOTE_SENT', 'NEGOTIATION'].includes(s)).length;
-    const leadsWon = leadStatuses.filter((s) => s === 'WON').length;
-    const leadsLost = leadStatuses.filter((s) => s === 'LOST').length;
+    const leadsInTreatment = leadStatuses.filter((s) => s === 'ACTIVE').length;
+    const leadsWon = 0; // אין סטטוס "נסגר בהצלחה" ב-IncomingLead — ליד שנסגר הופך ללקוח/הזמנה במקום אחר.
+    const leadsLost = leadStatuses.filter((s) => s === 'DISMISSED').length;
 
     // ── לידים חדשים ברבעון (נתוני אמת לפי createdAt) + השוואה לרבעון הקודם ──
     // רבעון = 3 חודשים קלנדריים. סופרים לפי מועד יצירת הליד, לא לפי הסטטוס הנוכחי.
@@ -586,8 +592,8 @@ export class DashboardService {
 
       const [me, leads, opportunities, quotes, tasks] = await Promise.all([
         this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true } }),
-        this.prisma.lead.findMany({
-          where: { assignedUserId: userId },
+        this.prisma.incomingLead.findMany({
+          where: { ownerId: userId },
           orderBy: [{ createdAt: 'desc' }],
         }),
         this.prisma.opportunity.findMany({
@@ -613,12 +619,12 @@ export class DashboardService {
         }),
       ]);
 
-      const leadStatusOf = (l: any) => ((l?.leadStatus || l?.status || l?.stage || '') as string).toUpperCase();
+      const leadStatusOf = (l: any) => ((l?.status || '') as string).toUpperCase();
       const statuses = leads.map(leadStatusOf);
       const leadsNew = statuses.filter((s) => s === 'NEW').length;
-      const leadsInTreatment = statuses.filter((s) => ['CONTACTED', 'FU_1', 'FU_2', 'QUOTE_SENT', 'NEGOTIATION'].includes(s)).length;
-      const leadsWon = statuses.filter((s) => s === 'WON').length;
-      const leadsLost = statuses.filter((s) => s === 'LOST').length;
+      const leadsInTreatment = statuses.filter((s) => s === 'ACTIVE').length;
+      const leadsWon = 0; // אין סטטוס WON ב-IncomingLead.
+      const leadsLost = statuses.filter((s) => s === 'DISMISSED').length;
       const totalLeads = leads.length;
 
       const isWon = (q: any) => q.status === QuoteStatus.APPROVED || q.status === (QuoteStatus as any).SIGNED;
@@ -651,9 +657,10 @@ export class DashboardService {
       const bySource = new Map<string, number>();
       const byService = new Map<string, number>();
       for (const l of leads) {
-        const src = ((l as any).utm_source || (l as any).source || 'לא ידוע').toString();
+        const domain = ((l as any).fromEmail || '').split('@')[1];
+        const src = (domain || 'לא ידוע').toString();
         bySource.set(src, (bySource.get(src) || 0) + 1);
-        const svc = ((l as any).serviceType || (l as any).service || 'אחר').toString();
+        const svc = ((l as any).subject || 'אחר').toString();
         byService.set(svc, (byService.get(svc) || 0) + 1);
       }
       const leadsBySource = Array.from(bySource.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8);
@@ -661,10 +668,10 @@ export class DashboardService {
 
       const recentLeads = leads.slice(0, 8).map((l) => ({
         id: l.id,
-        name: l.fullName || `${l.firstName || ''} ${l.lastName || ''}`.trim() || l.company || 'ליד',
-        phone: l.phone || '',
-        serviceType: l.serviceType || l.service || '',
-        source: (l as any).source || '',
+        name: l.fromName || l.subject || 'ליד',
+        phone: '',
+        serviceType: l.subject || '',
+        source: l.fromEmail || '',
         status: leadStatusOf(l),
         createdAt: l.createdAt ? l.createdAt.toISOString() : null,
       }));
