@@ -1269,6 +1269,45 @@ export function QuoteNewScreen({
     }
   }
 
+  // ניסוח טרי לרגע-השליחה: שולח את ה-quoteId (השרת מחלץ את ההצעה המעודכנת מה-DB) ל-GPT
+  // ומחזיר {subject, body} ישירות — כדי ש-"שלח במייל" ינסח על הגרסה העדכנית *ואז* ישלח.
+  // מחזיר null בכישלון (השולח ייפול חזרה לנוסח שכבר בטופס). מעדכן גם את הטופס להצגה חיה.
+  async function draftFreshForSend(quoteId: string): Promise<{ subject: string; body: string } | null> {
+    setAiBusy(true);
+    setStatusMsg('✨ מנסח מייל…');
+    try {
+      const r = await apiFetch(apiUrl('/ai-mail/quote-draft'), {
+        method: 'POST',
+        authUser: getSessionUser(),
+        body: JSON.stringify({
+          quoteId, // השרת שולף מה-DB את הסכום/תנאי תשלום/מספר + פריטים + טקסט המסמך המעודכן
+          customerName: customer || '',
+          contactName: contact || '',
+          serviceName: (reference || quoteNo || '').trim(),
+          quoteNumber: (reference || quoteNo || '').trim(),
+        }),
+      });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const subject = d.subject || '';
+      const rawBody = d.body || '';
+      const ATTACH_NOTE = 'מצורפות\nתעודות הסמכה ופרופיל החברה';
+      const body = rawBody
+        ? (rawBody.includes('תעודות הסמכה ופרופיל החברה') ? rawBody : `${rawBody.replace(/\s+$/, '')}\n\n${ATTACH_NOTE}`)
+        : '';
+      if (!subject && !body) return null;
+      emailDraftEditedRef.current = false;
+      setAiDraft({ quoteId, subject, body });
+      // עדכון חי של הטופס כדי שהמשתמש יראה את הניסוח הטרי שנשלח
+      setEmailForm((p) => (p.quoteId === quoteId ? { ...p, subject: subject || p.subject, body: body || p.body } : p));
+      return { subject, body };
+    } catch {
+      return null;
+    } finally {
+      setAiBusy(false);
+    }
+  }
+
   // ניסוח הודעת וואטסאפ קצרה (channel: 'whatsapp') — בלי נושא, רק תוכן
   // שליחת המייל מתוך חלון העריכה — Outlook/Graph עם נמענים, חתימה וקובץ מצורף
   async function sendQuoteEmail() {
@@ -1286,6 +1325,13 @@ export function QuoteNewScreen({
     if (!token) { setEmailSending(false); setStatusMsg(tokErr || 'הכנת הקובץ לחתימה נכשלה'); return; }
     // קישור ישיר ל-PDF (עם כפתור החתימה) — לשימוש בנפילה-חזרה ל-Outlook Web בלבד.
     const viewUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
+    // ניסוח טרי ב-GPT ברגע הלחיצה על הגרסה המעודכנת, ואז שולחים איתו (נפילה-חזרה לטופס בכישלון).
+    let freshSubject = f.subject;
+    let freshBody = f.body;
+    if (f.quoteId) {
+      const fresh = await draftFreshForSend(f.quoteId);
+      if (fresh) { freshSubject = fresh.subject || freshSubject; freshBody = fresh.body || freshBody; }
+    }
     setStatusMsg('שולח…');
     // נמען ראשי = הראשון; שאר הנמענים ב-toList + ccList הופכים ל-CC
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
@@ -1320,9 +1366,9 @@ export function QuoteNewScreen({
       setStatusMsg(`מייל נשלח ל-${to}`);
       setTimeout(() => setStatusMsg(''), 5000);
     } else {
-      // נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web (כשהשרת לא הצליח)
-      const subject = f.subject;
-      const body = `${f.body}${viewUrl ? '\n\nצפייה בהצעת מחיר:\n' + viewUrl : ''}`;
+      // נפילה-חזרה: פתיחת חלון כתיבה ב-Outlook Web (כשהשרת לא הצליח) — עם הניסוח הטרי
+      const subject = freshSubject;
+      const body = `${freshBody}${viewUrl ? '\n\nצפייה בהצעת מחיר:\n' + viewUrl : ''}`;
       const ccParam = ccList.length ? `&cc=${encodeURIComponent(ccList.join(','))}` : '';
       const bccParam = bccList.length ? `&bcc=${encodeURIComponent(bccList.join(','))}` : '';
       const owaUrl = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(to)}${ccParam}${bccParam}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -1414,6 +1460,14 @@ export function QuoteNewScreen({
     const to = allTo[0]?.trim() || '';
     if (!to) { setStatusMsg('חסר נמען'); return; }
     setEmailSending(true);
+    // ניסוח טרי ב-GPT *ברגע הלחיצה* על הגרסה המעודכנת של ההצעה, ואז שולחים איתו. אם הניסוח
+    // נכשל — נופלים חזרה לנושא/גוף שכבר בטופס כדי לא לחסום את השליחה.
+    let subject = f.subject;
+    let body = f.body;
+    if (f.quoteId) {
+      const fresh = await draftFreshForSend(f.quoteId);
+      if (fresh) { subject = fresh.subject || subject; body = fresh.body || body; }
+    }
     setStatusMsg('שולח…');
     const ccList = Array.from(new Set([...allTo.slice(1), ...allCc])).filter((e) => e && e !== to);
     // עותק מוסתר — נשאר נפרד מ-CC כדי שיהיה "מוסתר" באמת
@@ -1429,8 +1483,8 @@ export function QuoteNewScreen({
           email: to,
           cc: ccList,
           bcc: bccList,
-          subject: f.subject,
-          messageBody: f.body,
+          subject,
+          messageBody: body,
           includeSignature: f.includeSignature,
           signatureId: f.signatureId || undefined,
           // בלי signToken → ההצעה מצורפת כקובץ (PDF). הפרופיל+רישיונות מצורף תמיד ע"י השרת.
@@ -1561,6 +1615,8 @@ export function QuoteNewScreen({
   const quoteIdRef = useRef<string | null>(null);
   // Keep ref in sync so async closures always see the latest id
   function setQuoteId(id: string | null) { quoteIdRef.current = id; _setQuoteId(id); }
+  // מונע יצירת משימת "מעקב" כפולה עבור אותה הצעה (מיפתח = מזהה ההצעה שכבר נוצרה לה משימה)
+  const followupTaskCreatedForQuoteRef = useRef<string | null>(null);
   const [customerId, setCustomerId] = useState<string>('');
   const [quoteContactRows, setQuoteContactRows] = useState<QuoteContactRow[]>([]);
   const [customerContactId, setCustomerContactId] = useState('');
@@ -2098,6 +2154,38 @@ export function QuoteNewScreen({
     }
   }
 
+  /**
+   * יצירת משימת "פולואפ" מתאריך "למעקב" של ההצעה (רק כשאין taskId מקושר).
+   * המשימה נכנסת בשלב "פולואפ" (step4), עם dueDate = תאריך המעקב, ומקושרת ללקוח וההצעה.
+   * מונע כפילות דרך followupTaskCreatedForQuoteRef.
+   */
+  async function maybeCreateFollowupTask(savedQuoteId: string, user: ReturnType<typeof getSessionUser>): Promise<void> {
+    let followIso: string | null = null;
+    if (follow && follow.trim()) {
+      try { const d = new Date(follow); followIso = isNaN(d.getTime()) ? null : d.toISOString(); } catch { followIso = null; }
+    }
+    if (!followIso) return; // לא מולא תאריך מעקב תקין
+    if (!customerId) return;
+    if (!user) return;
+    if (followupTaskCreatedForQuoteRef.current === savedQuoteId) return; // כבר נוצרה
+    const productName = (prefillServiceName || lineItems.find((li) => li.description.trim())?.description || '').trim();
+    const title = [customer.trim(), productName].filter(Boolean).join(' — ') || 'מעקב הצעת מחיר';
+    const body: Record<string, unknown> = {
+      title,
+      description: `מעקב להצעת מחיר${quoteNo && quoteNo !== 'חדש' ? ` מס' ${quoteNo}` : ''}`,
+      dueDate: followIso,
+      customerId,
+      ownerId: user.id, // SALES/TECHNICIAN → נכפה בשרת ל-user; ADMIN/MANAGER → נדרש במפורש
+      type: 'step4',
+      currentStage: 4,
+      productName: productName || null,
+    };
+    const r = await apiFetch(apiUrl('/tasks'), { method: 'POST', body: JSON.stringify(body), authUser: user });
+    if (r.ok) {
+      followupTaskCreatedForQuoteRef.current = savedQuoteId;
+    }
+  }
+
   async function doSave(opts?: { advanceStage?: boolean }): Promise<string | null> {
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
     if (customerContactId.trim() && !quoteContactRows.some((r) => r.id === customerContactId)) {
@@ -2167,6 +2255,13 @@ export function QuoteNewScreen({
       }
       setStatusMsg('');
       if (savedId) setSavedOnce(true);
+      // ── "למעקב" → יצירת משימת פולואפ ──
+      // כשההצעה נפתחה מ"חדש → הצעת מחיר חדשה" (ללא taskId) ומולא תאריך "למעקב",
+      // נוצרת משימת פולואפ לאותו תאריך. כשההצעה נפתחה מתוך משימה קיימת (taskId),
+      // הקידום לשלב "פולואפ" מטופל ע"י מסך המשימות — לכן לא יוצרים כאן משימה כפולה.
+      if (savedId && !taskId) {
+        try { await maybeCreateFollowupTask(savedId, user); } catch { /* לא פוגע בשמירת ההצעה */ }
+      }
       if (savedId && (opts?.advanceStage ?? true) && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
     } catch {
