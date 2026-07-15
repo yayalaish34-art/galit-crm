@@ -1,4 +1,5 @@
 import { ForbiddenException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 
@@ -126,12 +127,17 @@ export class IncomingLeadsService implements OnModuleInit {
     this.logger.log(`New incoming lead "${m.subject}" (mailbox owner ${ownerId}) — waiting to be claimed`);
   }
 
-  /** יוצר את משימת התהליך לליד ברגע התפיסה — על שם התופס בלבד. */
+  /**
+   * יוצר את משימת התהליך לליד ברגע התפיסה — על שם התופס בלבד.
+   * מקבל client (tx) כדי שהיצירה תרוץ *באותה טרנזקציה* של החלפת הסטטוס: אם היצירה נכשלת,
+   * החלפת ה-NEW→ACTIVE מתגלגלת אחורה והליד חוזר להיות זמין לתפיסה (לא נשאר תקוע בלי משימה).
+   */
   private async createTaskForClaimedLead(
+    tx: Prisma.TransactionClient,
     lead: { id: string; body: string | null },
     ownerId: string,
   ): Promise<string> {
-    const task = await this.prisma.task.create({
+    const task = await tx.task.create({
       data: {
         title: 'ליד חדש נכנס',
         description: lead.body || null,
@@ -143,7 +149,7 @@ export class IncomingLeadsService implements OnModuleInit {
         incomingLeadId: lead.id,
       },
     });
-    await this.prisma.incomingLead.update({ where: { id: lead.id }, data: { taskId: task.id } });
+    await tx.incomingLead.update({ where: { id: lead.id }, data: { taskId: task.id } });
     return task.id;
   }
 
@@ -244,20 +250,31 @@ export class IncomingLeadsService implements OnModuleInit {
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     const claimerId = actor?.id || lead.ownerId;
 
-    // תפיסה אטומית: רק אם השורה עדיין NEW. count=0 → מישהו הקדים אותי.
-    const claimed = await this.prisma.incomingLead.updateMany({
-      where: { id: lead.id, status: 'NEW' },
-      data: { ownerId: claimerId, status: 'ACTIVE', notifiedAt: lead.notifiedAt ?? new Date() },
-    });
-    if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+    // תפיסה + יצירת משימה *באותה טרנזקציה*: אם יצירת המשימה נכשלת, החלפת ה-NEW→ACTIVE
+    // מתגלגלת אחורה והליד חוזר להיות זמין לתפיסה — במקום להישאר ACTIVE-תקוע בלי משימה.
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // תפיסה אטומית: רק אם השורה עדיין NEW. count=0 → מישהו הקדים אותי (זורק → rollback).
+        const claimed = await tx.incomingLead.updateMany({
+          where: { id: lead.id, status: 'NEW' },
+          data: { ownerId: claimerId, status: 'ACTIVE', notifiedAt: lead.notifiedAt ?? new Date() },
+        });
+        if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
-    // המשימה נוצרת רק עכשיו — ישירות על שם התופס. (לידים ישנים שעוד נושאים משימה
-    // מתקופת המודל הקודם: מעבירים את הבעלות במקום ליצור כפולה.)
-    if (lead.taskId) {
-      await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: claimerId } }).catch(() => {});
-    } else {
-      await this.createTaskForClaimedLead(lead, claimerId);
+        // המשימה נוצרת רק עכשיו — ישירות על שם התופס. (לידים ישנים שעוד נושאים משימה
+        // מתקופת המודל הקודם: מעבירים את הבעלות במקום ליצור כפולה.)
+        if (lead.taskId) {
+          await tx.task.update({ where: { id: lead.taskId }, data: { ownerId: claimerId } });
+        } else {
+          await this.createTaskForClaimedLead(tx, lead, claimerId);
+        }
+      });
+    } catch (e) {
+      if (e instanceof ForbiddenException) throw e;
+      this.logger.error(`start(${lead.id}) transaction failed — lead stays NEW: ${(e as any)?.message || e}`);
+      throw new ForbiddenException('תפיסת הליד נכשלה. נסה שוב.');
     }
+
     // ניקוי אחים ישנים (מנתונים שקדמו לאיחוד-בכניסה) — best-effort, לא חוסם.
     await this.dismissSiblings(lead).catch(() => undefined);
     return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
@@ -270,19 +287,30 @@ export class IncomingLeadsService implements OnModuleInit {
     if (lead.status === 'DISMISSED') throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
     if (!toUserId) throw new ForbiddenException('חסר עובד יעד');
 
-    // תפיסה אטומית מותנית ב-NEW — כמו ב-start; המנצח הוא זה שהעביר.
-    const claimed = await this.prisma.incomingLead.updateMany({
-      where: { id: lead.id, status: 'NEW' },
-      data: { ownerId: toUserId, transferredToId: toUserId, status: 'ACTIVE', notifiedAt: null },
-    });
-    if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+    // תפיסה + יצירת משימה באותה טרנזקציה (כמו start) — כשל ביצירת המשימה מגלגל אחורה את
+    // ההעברה והליד נשאר NEW/זמין, במקום להישאר ACTIVE-תקוע בלי משימה אצל עובד היעד.
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // תפיסה אטומית מותנית ב-NEW — כמו ב-start; המנצח הוא זה שהעביר. count=0 → rollback.
+        const claimed = await tx.incomingLead.updateMany({
+          where: { id: lead.id, status: 'NEW' },
+          data: { ownerId: toUserId, transferredToId: toUserId, status: 'ACTIVE', notifiedAt: null },
+        });
+        if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
-    // המשימה נוצרת רק עכשיו — ישירות על שם עובד היעד.
-    if (lead.taskId) {
-      await this.prisma.task.update({ where: { id: lead.taskId }, data: { ownerId: toUserId } }).catch(() => {});
-    } else {
-      await this.createTaskForClaimedLead(lead, toUserId);
+        // המשימה נוצרת רק עכשיו — ישירות על שם עובד היעד.
+        if (lead.taskId) {
+          await tx.task.update({ where: { id: lead.taskId }, data: { ownerId: toUserId } });
+        } else {
+          await this.createTaskForClaimedLead(tx, lead, toUserId);
+        }
+      });
+    } catch (e) {
+      if (e instanceof ForbiddenException) throw e;
+      this.logger.error(`transfer(${lead.id}) transaction failed — lead stays NEW: ${(e as any)?.message || e}`);
+      throw new ForbiddenException('העברת הליד נכשלה. נסה שוב.');
     }
+
     await this.dismissSiblings(lead).catch(() => undefined);
     return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
   }
@@ -306,20 +334,43 @@ export class IncomingLeadsService implements OnModuleInit {
   }
 
 
-  /** דחיית ליד (לא רלוונטי). */
-  async dismiss(id: string, actor: { id?: string }) {
+  /**
+   * דחיית ליד (לא רלוונטי).
+   * - ליד NEW הוא *משותף* — כל עובד רשאי לדחות אותו (זה "לא רלוונטי" לכולם). דחייה אטומית
+   *   מותנית ב-NEW כדי לא לדרוס תפיסה שקרתה באותו רגע (race → 403).
+   * - ליד ACTIVE כבר נתפס ושייך לעובד ספציפי — רק *הבעלים* או מנהל/אדמין רשאי לדחות אותו,
+   *   אחרת כל עובד היה יכול "להרוג" ליד שעמית עובד עליו בפועל.
+   */
+  async dismiss(id: string, actor: { id?: string; role?: string }) {
     const lead = await this.assertOwner(id, actor);
-    return this.prisma.incomingLead.update({ where: { id: lead.id }, data: { status: 'DISMISSED' } });
+    const role = (actor?.role || '').toUpperCase();
+    const isManager = role === 'ADMIN' || role === 'MANAGER';
+
+    if (lead.status === 'DISMISSED') return lead; // כבר נדחה — idempotent
+
+    if (lead.status === 'ACTIVE') {
+      // ליד בטיפול — רק הבעלים או מנהל רשאי לדחות.
+      if (!isManager && actor?.id && lead.ownerId !== actor.id) {
+        throw new ForbiddenException('הליד בטיפול עובד אחר — רק הבעלים או מנהל יכולים לדחות אותו');
+      }
+      return this.prisma.incomingLead.update({ where: { id: lead.id }, data: { status: 'DISMISSED' } });
+    }
+
+    // ליד NEW משותף — דחייה אטומית מותנית ב-NEW (לא דורסת תפיסה מקבילה).
+    const dismissed = await this.prisma.incomingLead.updateMany({
+      where: { id: lead.id, status: 'NEW' },
+      data: { status: 'DISMISSED' },
+    });
+    if (dismissed.count === 0) {
+      // מישהו תפס את הליד בין הקריאה לעדכון — לא דורסים ACTIVE של אחר.
+      throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
+    }
+    return this.prisma.incomingLead.findUnique({ where: { id: lead.id } });
   }
 
   private async assertOwner(id: string, actor: { id?: string }) {
     const lead = await this.prisma.incomingLead.findUnique({ where: { id } });
     if (!lead) throw new ForbiddenException('ליד לא נמצא');
-    // הבעלים, או מנהל, רשאים. (בדיקה בסיסית — owner בלבד; מנהלים עוברים דרך ה-RolesGuard ברמת הנתיב)
-    if (actor?.id && lead.ownerId !== actor.id) {
-      // מתירים גם למנהלים — נבדק בשכבת ה-controller (Roles). כאן רק לוג.
-      this.logger.debug(`actor ${actor.id} acting on lead of ${lead.ownerId}`);
-    }
     return lead;
   }
 }
