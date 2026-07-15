@@ -38,6 +38,20 @@ function roundMoney2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * שם קנוני להצעת מחיר, זהה לפורמט של הבקאנד (buildQuoteDocName):
+ *   "{שם לקוח/חברה} - הצעת מחיר ל: {שם השירות}"
+ * שם השירות = תיאור הפריט הראשון. אם אין שירות — נופל חזרה ל-"שירות" כדי שהשם
+ * תמיד יסתיים ב-"ל: ...", לבקשת המשתמש (לעולם לא להציג שם בלי שירות בסוף).
+ * ללא סיומת קובץ; נחתך ל-120 תווים.
+ */
+function buildQuoteDocName(customerName?: string, firstService?: string): string {
+  const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+  const customer = clean(customerName) || 'לקוח';
+  const service = clean(firstService) || 'שירות';
+  return `${customer} - הצעת מחיר ל: ${service}`.slice(0, 120).trim();
+}
+
 function newLineItem(): LineItem {
   return {
     id: `${Date.now()}-${Math.random()}`,
@@ -1374,7 +1388,8 @@ export function QuoteNewScreen({
         setStatusMsg(error || 'הכנת התצוגה המקדימה נכשלה');
         return;
       }
-      const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
+      // profile=0 — תצוגה מקדימה בלבד: בלי כפתור "לחץ כאן להסמכות שלנו" (הוא מיועד רק לקובץ שנשלח ללקוח).
+      const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1&profile=0`);
       if (win) win.location.href = pdfUrl;
       else window.open(pdfUrl, '_blank'); // חוסם popup חסם — ניסיון נוסף
       setStatusMsg('');
@@ -2653,9 +2668,7 @@ export function QuoteNewScreen({
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const safeName = (customer || 'quote').replace(/[^\u0590-\u05FFa-zA-Z0-9 _-]/g, '').trim() || 'quote';
-      void safeName;
-      const fileName = `הצעת מחיר${customer ? ' - ' + customer.trim() : ''}.docx`;
+      const fileName = buildQuoteDocName(customer, lineItems[0]?.description) + '.docx';
       a.href = url;
       a.download = fileName;
       document.body.appendChild(a);

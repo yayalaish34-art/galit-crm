@@ -1,7 +1,8 @@
 /**
  * בונה את השם הקנוני של מסמך/קובץ הצעת מחיר, בפורמט אחיד בכל המערכת:
  *   "{שם לקוח/חברה} - הצעת מחיר ל: {שם השירות}"
- * ואם אין שם שירות כלל — "{שם לקוח/חברה} - הצעת מחיר".
+ * השם *תמיד* מסתיים ב-"ל: {שירות}" (לבקשת המשתמש — לעולם לא להציג שם בלי
+ * שם השירות בסוף). אם אין שם שירות כלל — נופל חזרה למילה "שירות".
  *
  * שם הלקוח/חברה: quote.customerName, ואם ריק — שם הלקוח מהיחס (quote.customer.name).
  * שם השירות: תיאור הפריט הראשון (quoteItems לפי rowOrder), עם נפילה-חזרה
@@ -22,9 +23,8 @@ export function buildQuoteDocName(quote: any): string {
             quote.lineItemsJson[0]?.name)
         : '',
     ) ||
-    clean(quote?.service);
-  const name = firstItem
-    ? `${customer} - הצעת מחיר ל: ${firstItem}`
-    : `${customer} - הצעת מחיר`;
+    clean(quote?.service) ||
+    'שירות';
+  const name = `${customer} - הצעת מחיר ל: ${firstItem}`;
   return name.slice(0, 120).trim();
 }

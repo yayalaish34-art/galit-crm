@@ -83,9 +83,10 @@ function approvalParagraph(): string {
     'במקרה של חברה, יש לצרף חותמת החברה לצד חתימת מורשה החתימה.',
   ];
   const rpr = '<w:rPr><w:rFonts w:cs="David" w:hint="cs"/><w:b/><w:bCs/><w:sz w:val="22"/><w:szCs w:val="22"/><w:rtl/></w:rPr>';
-  // כל משפט = פסקה. keepNext בכולן כדי שהבלוק כולו (פסקאות + טבלה) יישאר יחד באותו עמוד.
+  // כל משפט = פסקה, ממורכזת (jc=center). keepNext בכולן כדי שהבלוק כולו
+  // (פסקאות + טבלה) יישאר יחד באותו עמוד.
   const para = (t: string) =>
-    '<w:p><w:pPr><w:keepNext/><w:bidi/><w:jc w:val="both"/>' +
+    '<w:p><w:pPr><w:keepNext/><w:bidi/><w:jc w:val="center"/>' +
     `${rpr}</w:pPr><w:r>${rpr}<w:t xml:space="preserve">${t}</w:t></w:r></w:p>`;
   return sentences.map(para).join('');
 }
@@ -107,9 +108,18 @@ function markerBookmark(index: number): string {
 const SPACER_PARAGRAPH = '<w:p><w:pPr><w:rPr><w:sz w:val="16"/></w:rPr></w:pPr></w:p>';
 
 /**
- * הבלוק המלא: bookmark-פתיחה → רווח → פסקת אישור → טבלה → bookmark-סגירה.
- * ה-bookmarks הם גבולות בלתי-נראים (לא דולפים ל-PDF). אין פסקת-רווח בין פסקת האישור
- * לטבלה — כדי ש-keepNext יחבר ביניהן ישירות וישמור אותן יחד באותו עמוד.
+ * פסקאות רווח בין פסקת האישור לטבלה — מספר שורות ריקות כדי להפריד ויזואלית.
+ * keepNext בכל פסקה כדי שהבלוק כולו (פסקאות + רווח + טבלה) יישאר יחד באותו עמוד.
+ */
+const GAP_BEFORE_TABLE = Array.from(
+  { length: 3 },
+  () => '<w:p><w:pPr><w:keepNext/><w:rPr><w:rtl/></w:rPr></w:pPr></w:p>',
+).join('');
+
+/**
+ * הבלוק המלא: bookmark-פתיחה → רווח → פסקת אישור → רווח (שורות ריקות) → טבלה → bookmark-סגירה.
+ * ה-bookmarks הם גבולות בלתי-נראים (לא דולפים ל-PDF). פסקאות הרווח שלפני הטבלה נושאות
+ * keepNext, ולכן הבלוק כולו (פסקאות + רווח + טבלה) נשאר יחד באותו עמוד.
  * שים לב: ה-bookmarkStart/End חייבים לשבת *בתוך* פסקה תקינה, ולכן עוטפים אותם בפסקה ריקה.
  */
 function buildBlock(): string {
@@ -119,6 +129,7 @@ function buildBlock(): string {
     openMarker +
     SPACER_PARAGRAPH +
     approvalParagraph() +
+    GAP_BEFORE_TABLE +
     signatureTableXml() +
     closeMarker
   );

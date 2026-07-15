@@ -31,14 +31,22 @@ export class QuoteSignatureController {
   }
 
   /** ה-PDF להצגה/הורדה (הקישור שנשלח בוואטסאפ). btn=1 — צורב על-הדרך את כפתור "לחץ כאן לחתימה".
-   *  כפתור "להסמכות שלנו" (קישור לפרופיל+רישיונות) נצרב תמיד בקבצי הוואטסאפ, בסוף המסמך. */
+   *  כפתור "להסמכות שלנו" (קישור לפרופיל+רישיונות) נצרב בקבצי הוואטסאפ בלבד, בסוף המסמך.
+   *  profile=0 — משמש את התצוגה המקדימה בלבד: מדלגים על כפתור ההסמכות (שהוא מיועד רק לקובץ הנשלח ללקוח). */
   @Get(':token/pdf')
-  async getPdf(@Param('token') token: string, @Query('btn') btn: string, @Req() req: any, @Res() res: Response) {
+  async getPdf(
+    @Param('token') token: string,
+    @Query('btn') btn: string,
+    @Query('profile') profile: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
     try {
       const apiBase = resolvePublicApiBase(req?.headers?.host);
+      const withProfile = profile !== '0';
       const { buffer, fileName } = await this.signature.getPdf(token, {
         withButton: btn === '1',
-        profileUrl: apiBase ? `${apiBase}/public/company-profile.pdf` : undefined,
+        profileUrl: withProfile && apiBase ? `${apiBase}/public/company-profile.pdf` : undefined,
       });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);

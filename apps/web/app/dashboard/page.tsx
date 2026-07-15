@@ -14494,6 +14494,8 @@ function TasksPage({
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
   const [incomingLeads, setIncomingLeads] = useState<any[]>([]);
   const [leadTransferSel, setLeadTransferSel] = useState<Record<string, string>>({});
+  /* פר-ליד נכנס: האם כרטיס הפרטים ("מהות הפנייה" + מקור מלא) פתוח (כפתור "הצג פרטים"). */
+  const [expandedIncomingLead, setExpandedIncomingLead] = useState<Record<string, boolean>>({});
   /* פר-ליד: האם פתוח מצב "שנה שיוך" (בחירת לקוח קיים מחדש), ומחרוזת החיפוש בבורר. */
   const [leadReassignOpen, setLeadReassignOpen] = useState<Record<string, boolean>>({});
   const [leadReassignSearch, setLeadReassignSearch] = useState<Record<string, string>>({});
@@ -15055,6 +15057,30 @@ function TasksPage({
     out.phone = out.phone.replace(/[^\d+]/g, '');
     if (out.email && !out.email.includes('@')) out.email = '';
     return out;
+  };
+
+  /**
+   * מזהה "מאיזה עמוד/אתר הגיע הליד" מתוך הנושא + גוף המייל, כדי שהעובד יוכל לשייך אותו נכון.
+   * מנסה בסדר יורד: תווית מפורשת ("מקור"/"עמוד"/"אתר"/"דף נחיתה"/utm_source) → כתובת URL של
+   * אחד מאתרי גלית (galit-radon וכו') → שם דומיין galit-* שמופיע כטקסט. מחזיר מחרוזת ריקה אם לא נמצא.
+   */
+  const leadSourcePage = (subject?: string | null, body?: string | null): string => {
+    const hay = `${subject || ''}\n${body || ''}`;
+    // 1) תווית מפורשת בגוף/נושא: "מקור: ...", "עמוד: ...", "אתר: ...", "דף נחיתה: ...", "utm_source=..."
+    const labelRe = /(?:^|\n)\s*(?:מקור(?:\s*הפנייה|\s*הליד)?|עמוד(?:\s*מקור)?|אתר|דף\s*נחיתה|landing\s*page|source|utm_source)\s*[:=：]\s*([^\n<>]+)/i;
+    const lbl = hay.match(labelRe);
+    if (lbl && lbl[1].trim()) return lbl[1].trim().replace(/^https?:\/\//i, '').replace(/[.,;]\s*$/, '').slice(0, 80);
+    // 2) כתובת URL מלאה של אחד מאתרי גלית — מציגים את הדומיין + הנתיב הראשון.
+    const url = hay.match(/https?:\/\/([a-z0-9.-]*galit[a-z0-9.-]*)(\/[a-z0-9\-_/]*)?/i);
+    if (url) {
+      const host = url[1].replace(/^www\./i, '');
+      const firstSeg = (url[2] || '').split('/').filter(Boolean)[0] || '';
+      return (firstSeg ? `${host}/${firstSeg}` : host).slice(0, 80);
+    }
+    // 3) שם דומיין galit-* כטקסט חופשי (למשל "galit-radon.co.il" או "galit-radon").
+    const dom = hay.match(/\bgalit[a-z0-9-]*(?:\.co\.il|\.com|\.net)?\b/i);
+    if (dom) return dom[0].replace(/^www\./i, '').slice(0, 80);
+    return '';
   };
 
   const getCallForm = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any, leadPrefill?: { fullName?: string; phone?: string; email?: string; serviceType?: string; message?: string } | null) => {
@@ -16686,17 +16712,52 @@ function TasksPage({
               {newLeads.map((lead) => {
                 const p = parseLeadBody(lead.body);
                 const recv = lead.receivedAt ? new Date(lead.receivedAt) : null;
+                const src = leadSourcePage(lead.subject, lead.body);
+                // "מהות הפנייה" — סוג השירות ואם אין, תוכן ההודעה; זה מה שמאפשר לשייך את הליד.
+                const essence = (p.serviceType || p.message || '').trim();
+                const isOpen = !!expandedIncomingLead[lead.id];
                 return (
                   <div key={lead.id} className="rounded-lg border border-blue-100 bg-white p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-bold text-slate-800">{p.fullName || lead.fromName || lead.subject || 'ליד חדש'}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate text-sm font-bold text-slate-800">{p.fullName || lead.fromName || lead.subject || 'ליד חדש'}</span>
+                          {/* מקור — מאיזה עמוד/אתר הגיע הליד (כדי שיהיה אפשר לשייך) */}
+                          {src ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-700" title="מקור הפנייה">
+                              <ExternalLink className="h-3 w-3" /> <span dir="ltr">{src}</span>
+                            </span>
+                          ) : null}
+                        </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
                           {p.phone ? <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} dir="ltr" className="font-semibold text-blue-600 hover:underline">{p.phone}</a> : null}
-                          {p.serviceType ? <span className="truncate">{p.serviceType}</span> : null}
                           {recv && !isNaN(recv.getTime()) ? <span>{recv.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })} {recv.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span> : null}
                         </div>
-                        {p.message ? <div className="mt-1 max-h-10 overflow-hidden text-[12px] leading-snug text-slate-600">{p.message}</div> : null}
+                        {/* מהות הפנייה — שורה קצרה תמיד גלויה; הכפתור פותח את הפירוט המלא */}
+                        {essence ? (
+                          <div className="mt-1 flex items-start gap-1.5 text-[12px] leading-snug text-slate-700">
+                            <span className="shrink-0 font-semibold text-slate-500">מהות הפנייה:</span>
+                            <span className={isOpen ? '' : 'line-clamp-2'}>{essence}</span>
+                          </div>
+                        ) : null}
+                        {(essence || src || lead.subject || lead.body) ? (
+                          <button
+                            type="button"
+                            onClick={() => setExpandedIncomingLead((prev) => ({ ...prev, [lead.id]: !prev[lead.id] }))}
+                            className="mt-1 inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 hover:text-blue-700"
+                          >
+                            {isOpen ? <><ChevronUp className="h-3.5 w-3.5" /> הסתר פרטים</> : <><ChevronDown className="h-3.5 w-3.5" /> הצג פרטים</>}
+                          </button>
+                        ) : null}
+                        {isOpen ? (
+                          <div className="mt-2 space-y-1.5 rounded-lg bg-slate-50 p-2.5 text-[12px] leading-relaxed text-slate-700">
+                            {src ? <div><span className="font-semibold text-slate-500">מקור: </span><span dir="ltr">{src}</span></div> : null}
+                            {p.serviceType ? <div><span className="font-semibold text-slate-500">סוג שירות: </span>{p.serviceType}</div> : null}
+                            {p.email ? <div><span className="font-semibold text-slate-500">אימייל: </span><a href={`mailto:${p.email}`} dir="ltr" className="text-blue-600 hover:underline">{p.email}</a></div> : null}
+                            {lead.subject ? <div><span className="font-semibold text-slate-500">נושא המייל: </span>{lead.subject}</div> : null}
+                            {p.message ? <div className="whitespace-pre-wrap"><span className="font-semibold text-slate-500">תוכן הפנייה: </span>{p.message}</div> : null}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
