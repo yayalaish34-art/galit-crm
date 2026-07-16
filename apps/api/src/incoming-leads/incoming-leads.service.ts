@@ -204,6 +204,29 @@ export class IncomingLeadsService implements OnModuleInit {
   }
 
   /**
+   * מבטיח שלליד תהיה משימה על שם הבעלים החדש, בתפיסה/העברה:
+   *  - אם הליד מחזיק taskId והמשימה *עדיין קיימת* → מעדכן לה את הבעלים.
+   *  - אם taskId ריק, או שהוא מצביע על משימה שכבר *נמחקה* (מודל ישן / ניקוי אחים) → יוצר משימה
+   *    חדשה ומקשר אותה לליד. זה מונע את הבאג שבו tx.task.update על משימה מחוקה זרק והתגלגל
+   *    אחורה, והשאיר ליד ACTIVE בלי שום משימה אצל העובד.
+   */
+  private async assignOrCreateTask(
+    tx: Prisma.TransactionClient,
+    lead: { id: string; body: string | null; taskId: string | null },
+    ownerId: string,
+  ): Promise<void> {
+    if (lead.taskId) {
+      const existing = await tx.task.findUnique({ where: { id: lead.taskId }, select: { id: true } });
+      if (existing) {
+        await tx.task.update({ where: { id: lead.taskId }, data: { ownerId } });
+        return;
+      }
+      // taskId מצביע על משימה שנמחקה — מנתקים ויוצרים חדשה במקום להיכשל.
+    }
+    await this.createTaskForClaimedLead(tx, lead, ownerId);
+  }
+
+  /**
    * האם ההודעה הזו היא עותק של ליד שכבר נקלט (אותו מייל שהגיע לתיבה אחרת)?
    * ראשי: לפי internetMessageId (זהה בכל תיבות הנמענים). גיבוי: אותו גוף+שולח מנורמל
    * שהתקבל ב-10 הדקות האחרונות (למקרה שהמערכת הישנה שולחת עותקים עם מזהים שונים).
@@ -311,13 +334,9 @@ export class IncomingLeadsService implements OnModuleInit {
         });
         if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
-        // המשימה נוצרת רק עכשיו — ישירות על שם התופס. (לידים ישנים שעוד נושאים משימה
-        // מתקופת המודל הקודם: מעבירים את הבעלות במקום ליצור כפולה.)
-        if (lead.taskId) {
-          await tx.task.update({ where: { id: lead.taskId }, data: { ownerId: claimerId } });
-        } else {
-          await this.createTaskForClaimedLead(tx, lead, claimerId);
-        }
+        // המשימה נוצרת/משויכת עכשיו — ישירות על שם התופס. (לידים ישנים שעוד נושאים משימה
+        // מתקופת המודל הקודם: מעבירים את הבעלות; אם המשימה הישנה נמחקה — יוצרים חדשה במקום להיכשל.)
+        await this.assignOrCreateTask(tx, lead, claimerId);
       });
     } catch (e) {
       if (e instanceof ForbiddenException) throw e;
@@ -348,12 +367,8 @@ export class IncomingLeadsService implements OnModuleInit {
         });
         if (claimed.count === 0) throw new ForbiddenException('הליד כבר נתפס על ידי עובד אחר');
 
-        // המשימה נוצרת רק עכשיו — ישירות על שם עובד היעד.
-        if (lead.taskId) {
-          await tx.task.update({ where: { id: lead.taskId }, data: { ownerId: toUserId } });
-        } else {
-          await this.createTaskForClaimedLead(tx, lead, toUserId);
-        }
+        // המשימה נוצרת/משויכת עכשיו — ישירות על שם עובד היעד (יוצר חדשה אם המשימה הישנה נמחקה).
+        await this.assignOrCreateTask(tx, lead, toUserId);
       });
     } catch (e) {
       if (e instanceof ForbiddenException) throw e;

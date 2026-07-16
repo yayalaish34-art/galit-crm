@@ -65,6 +65,8 @@ export function SendReportModal({
     paymentStatus: 'paid' | 'unpaid' | null;
     /** תזכורת לשליחת דוח חוזר: מספר ימים קדימה, או null אם לא נבחרה תזכורת. */
     reportReminderDays: number | null;
+    /** true כשנקרא מ"קבע תזכורת בלבד" — לא נשלח מייל (רק סגירת משימה + תזכורת). */
+    reminderOnly?: boolean;
   }) => void;
 }) {
   const customerId = task.customerId || null;
@@ -313,6 +315,16 @@ export function SendReportModal({
     return days >= 1 ? days : null;
   };
 
+  // "קבע תזכורת בלבד" — סוגר את המשימה וקובע תזכורת לדוח חוזר *בלי לשלוח מייל* ובלי לדרוש
+  // דוח מצורף/נמען. שקול ל"שלחתי כבר דוח": onSent מסמן DONE ויוצר את משימת התזכורת העתידית.
+  const reminderDays = computeReminderDays();
+  const reminderOnly = () => {
+    if (reminderDays === null) { setErr('יש לבחור תזכורת (שבוע / 30 / 60 / 90 / ידני) לפני "קבע תזכורת בלבד"'); return; }
+    setSending(true);
+    setErr('');
+    onSent({ paymentStatus, reportReminderDays: reminderDays, reminderOnly: true });
+  };
+
   const send = async () => {
     if (!attached) {
       setErr('יש לצרף דוח לפני השליחה');
@@ -356,7 +368,7 @@ export function SendReportModal({
       });
       if (r.ok) {
         setStatus('נשלח ✓');
-        onSent({ paymentStatus, reportReminderDays: computeReminderDays() });
+        onSent({ paymentStatus, reportReminderDays: computeReminderDays(), reminderOnly: false });
       } else {
         let msg = 'שליחת הדוח נכשלה';
         try {
@@ -805,6 +817,16 @@ export function SendReportModal({
             onClick={onClose}
           >
             ביטול
+          </button>
+          {/* קבע תזכורת בלבד — סוגר את המשימה + קובע תזכורת לדוח חוזר, בלי לשלוח מייל */}
+          <button
+            type="button"
+            disabled={sending || reminderDays === null}
+            title={reminderDays === null ? 'בחר תזכורת (שבוע / 30 / 60 / 90 / ידני) כדי לאפשר' : 'סוגר את המשימה וקובע תזכורת — בלי לשלוח מייל'}
+            className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-6 py-3 text-base font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+            onClick={reminderOnly}
+          >
+            {sending ? 'שומר…' : '🔁 קבע תזכורת בלבד'}
           </button>
           <button
             type="button"

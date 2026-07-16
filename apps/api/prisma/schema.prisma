@@ -1064,7 +1064,9 @@ model QuoteItemCatalog {
   description      String?
   serviceCategory  String?
   serviceSubType   String?
+  costPrice        Float    @default(0)
   basePrice        Float    @default(0)
+  profitPercent    Float?
   billingUnit      String
   vatPercent       Float    @default(17)
   isActive         Boolean  @default(true)

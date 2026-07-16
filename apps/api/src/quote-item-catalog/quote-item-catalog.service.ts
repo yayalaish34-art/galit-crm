@@ -21,7 +21,12 @@ export class QuoteItemCatalogService {
         description: data?.description ?? null,
         serviceCategory: data?.serviceCategory ?? null,
         serviceSubType: data?.serviceSubType ?? null,
+        costPrice: Number(data?.costPrice) || 0,
         basePrice: Number(data?.basePrice) || 0,
+        profitPercent:
+          data?.profitPercent === undefined || data?.profitPercent === null || data?.profitPercent === ''
+            ? null
+            : Number(data.profitPercent),
         billingUnit: String(data?.billingUnit || 'יחידה'),
         vatPercent: Number(data?.vatPercent) || 0,
         isActive: data?.isActive !== false,
@@ -42,7 +47,14 @@ export class QuoteItemCatalogService {
         description: data?.description !== undefined ? (data.description ?? null) : undefined,
         serviceCategory: data?.serviceCategory !== undefined ? (data.serviceCategory ?? null) : undefined,
         serviceSubType: data?.serviceSubType !== undefined ? (data.serviceSubType ?? null) : undefined,
+        costPrice: data?.costPrice !== undefined ? (Number(data.costPrice) || 0) : undefined,
         basePrice: data?.basePrice !== undefined ? (Number(data.basePrice) || 0) : undefined,
+        profitPercent:
+          data?.profitPercent === undefined
+            ? undefined
+            : data.profitPercent === null || data.profitPercent === ''
+              ? null
+              : Number(data.profitPercent),
         billingUnit: data?.billingUnit !== undefined ? String(data.billingUnit || 'יחידה') : undefined,
         vatPercent: data?.vatPercent !== undefined ? (Number(data.vatPercent) || 0) : undefined,
         isActive: data?.isActive !== undefined ? !!data.isActive : undefined,

@@ -12432,13 +12432,17 @@ function SettingsPage({
   const [catalogError, setCatalogError] = useState('');
   const [catalogModalOpen, setCatalogModalOpen] = useState(false);
   const [catalogEditing, setCatalogEditing] = useState<any | null>(null);
+  const [showQuoteTemplates, setShowQuoteTemplates] = useState(false);
+  const [catalogImporting, setCatalogImporting] = useState(false);
   const [catalogForm, setCatalogForm] = useState({
     itemCode: '',
     name: '',
     description: '',
     serviceCategory: '',
     serviceSubType: '',
+    costPrice: '0',
     basePrice: '0',
+    profitPercent: '',
     billingUnit: 'יחידה',
     vatPercent: '17',
     isActive: true,
@@ -12500,7 +12504,9 @@ function SettingsPage({
       description: '',
       serviceCategory: '',
       serviceSubType: '',
+      costPrice: '0',
       basePrice: '0',
+      profitPercent: '',
       billingUnit: 'יחידה',
       vatPercent: '17',
       isActive: true,
@@ -12520,7 +12526,9 @@ function SettingsPage({
       description: it.description || '',
       serviceCategory: it.serviceCategory || '',
       serviceSubType: it.serviceSubType || '',
+      costPrice: String(it.costPrice ?? 0),
       basePrice: String(it.basePrice ?? 0),
+      profitPercent: it.profitPercent === null || it.profitPercent === undefined ? '' : String(it.profitPercent),
       billingUnit: it.billingUnit || 'יחידה',
       vatPercent: String(it.vatPercent ?? 17),
       isActive: it.isActive !== false,
@@ -12545,7 +12553,9 @@ function SettingsPage({
         description: catalogForm.description || null,
         serviceCategory: catalogForm.serviceCategory || null,
         serviceSubType: catalogForm.serviceSubType || null,
+        costPrice: Number(catalogForm.costPrice) || 0,
         basePrice: Number(catalogForm.basePrice) || 0,
+        profitPercent: catalogForm.profitPercent.trim() === '' ? null : Number(catalogForm.profitPercent) || 0,
         billingUnit: catalogForm.billingUnit || 'יחידה',
         vatPercent: Number(catalogForm.vatPercent) || 0,
         isActive: !!catalogForm.isActive,
@@ -12567,6 +12577,73 @@ function SettingsPage({
       window.setTimeout(() => setSettingsMsg(''), 2000);
     } catch {
       setCatalogError('שמירת פריט נכשלה.');
+    }
+  };
+
+  const importPriceListFromServices = async () => {
+    if (!window.confirm('לייבא את כל השירותים מהמחירון? פריטים קיימים (לפי קוד) לא ישוכפלו.')) return;
+    setCatalogImporting(true);
+    setCatalogError('');
+    try {
+      // כל השירותים (עלים בלבד) מתוך רשימת השירותים, עם שם הקטגוריה
+      const rows: Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> = [];
+      for (const cat of SERVICE_CATEGORIES) {
+        for (const svc of cat.services) {
+          const leaves = svc.subServices && svc.subServices.length > 0 ? svc.subServices : [svc];
+          for (const leaf of leaves) {
+            if (leaf.subServices && leaf.subServices.length > 0) continue; // קבוצת אב — לא פריט
+            const code = String(leaf.sku || leaf.id || '').trim();
+            if (!code) continue;
+            rows.push({
+              itemCode: code,
+              name: leaf.name,
+              basePrice: Number(leaf.price) || 0, // מחיר ללקוח = העלות הסופית
+              serviceCategory: cat.name,
+              billingUnit: leaf.unit || 'יחידה',
+            });
+          }
+        }
+      }
+
+      const existingCodes = new Set(catalog.map((c) => String(c.itemCode || '').trim()));
+      const toCreate = rows.filter((r) => !existingCodes.has(r.itemCode));
+      if (toCreate.length === 0) {
+        setSettingsMsg('כל השירותים כבר קיימים במחירון');
+        window.setTimeout(() => setSettingsMsg(''), 2500);
+        return;
+      }
+
+      let created = 0;
+      for (const r of toCreate) {
+        try {
+          const res = await apiFetch(apiUrl('/quote-item-catalog'), {
+            method: 'POST',
+            authUser: currentUser,
+            body: JSON.stringify({
+              itemCode: r.itemCode,
+              name: r.name,
+              serviceCategory: r.serviceCategory,
+              costPrice: 0, // מחיר עלות — למילוי ידני
+              basePrice: r.basePrice, // מחיר ללקוח (העלות הסופית)
+              profitPercent: null,
+              billingUnit: r.billingUnit,
+              vatPercent: 18,
+              isActive: true,
+            }),
+          });
+          if (res.ok) created++;
+        } catch {
+          /* דלג על פריט בודד שנכשל */
+        }
+      }
+
+      await loadCatalog();
+      setSettingsMsg(`יובאו ${created} שירותים למחירון`);
+      window.setTimeout(() => setSettingsMsg(''), 3000);
+    } catch {
+      setCatalogError('ייבוא המחירון נכשל.');
+    } finally {
+      setCatalogImporting(false);
     }
   };
 
@@ -13299,7 +13376,17 @@ function SettingsPage({
         <Card>
           <CardHeader className="flex items-center justify-between">
             <CardTitle>פריטים / מחירון</CardTitle>
-            <Button style={{ background: galit.primary }} onClick={openNewCatalog}>פריט חדש</Button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={importPriceListFromServices}
+                disabled={catalogImporting}
+                className="rounded-xl border px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                {catalogImporting ? 'מייבא…' : 'ייבוא מחירון'}
+              </button>
+              <Button style={{ background: galit.primary }} onClick={openNewCatalog}>פריט חדש</Button>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             {catalogLoading ? (
@@ -13309,10 +13396,11 @@ function SettingsPage({
                 <TableHeader>
                   <TableRow>
                     <TableHead>קוד פריט</TableHead>
-                    <TableHead>שם פריט</TableHead>
+                    <TableHead>שם שירות</TableHead>
                     <TableHead>קטגוריה</TableHead>
-                    <TableHead>תת קטגוריה</TableHead>
-                    <TableHead>מחיר בסיס</TableHead>
+                    <TableHead>מחיר עלות</TableHead>
+                    <TableHead>מחיר ללקוח</TableHead>
+                    <TableHead>אחוז רווח</TableHead>
                     <TableHead>יחידת חיוב</TableHead>
                     <TableHead>פעיל</TableHead>
                     <TableHead>פעולות</TableHead>
@@ -13324,8 +13412,16 @@ function SettingsPage({
                       <TableCell className="font-medium">{it.itemCode}</TableCell>
                       <TableCell>{it.name}</TableCell>
                       <TableCell>{it.serviceCategory || '-'}</TableCell>
-                      <TableCell>{it.serviceSubType || '-'}</TableCell>
+                      <TableCell>{Number(it.costPrice ?? 0) > 0 ? formatCurrencyILS(Number(it.costPrice)) : '—'}</TableCell>
                       <TableCell>{formatCurrencyILS(Number(it.basePrice ?? 0))}</TableCell>
+                      <TableCell>{(() => {
+                        const cost = Number(it.costPrice ?? 0);
+                        const base = Number(it.basePrice ?? 0);
+                        const pct = it.profitPercent !== null && it.profitPercent !== undefined
+                          ? Number(it.profitPercent)
+                          : (cost > 0 ? ((base - cost) / cost) * 100 : null);
+                        return pct === null ? '—' : `${Math.round(pct * 10) / 10}%`;
+                      })()}</TableCell>
                       <TableCell>{it.billingUnit}</TableCell>
                       <TableCell>{it.isActive ? 'כן' : 'לא'}</TableCell>
                       <TableCell>
@@ -13351,8 +13447,20 @@ function SettingsPage({
         </Card>
       )}
 
-      {/* תבניות Word — מוצג באותו טאב "פריטים" מתחת לטבלת הפריטים/מחירון */}
+      {/* תבניות Word — מוסתרות כברירת מחדל; ניתן לפתוח לניהול קבצי המיזוג בלבד */}
       {tab === 'catalog' && (
+        <div className="mt-4" dir="rtl">
+          <button
+            type="button"
+            onClick={() => setShowQuoteTemplates((v) => !v)}
+            className="text-xs text-slate-400 hover:text-slate-600 underline"
+          >
+            {showQuoteTemplates ? 'הסתר ניהול תבניות Word' : 'ניהול תבניות Word (מתקדם)'}
+          </button>
+        </div>
+      )}
+
+      {tab === 'catalog' && showQuoteTemplates && (
         <div className="space-y-4 mt-4" dir="rtl">
           <div>
             <h2 className="text-base font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
@@ -14044,8 +14152,45 @@ function SettingsPage({
           <FormField label="תת סוג שירות">
             <Input value={catalogForm.serviceSubType} onChange={(e) => setCatalogForm((p) => ({ ...p, serviceSubType: e.target.value }))} placeholder="תת סוג שירות" />
           </FormField>
-          <FormField label="מחיר בסיס">
-            <Input value={catalogForm.basePrice} onChange={(e) => setCatalogForm((p) => ({ ...p, basePrice: e.target.value }))} placeholder="מחיר בסיס" />
+          <FormField label="מחיר עלות (₪)">
+            <Input
+              type="number"
+              value={catalogForm.costPrice}
+              onChange={(e) => {
+                const cost = e.target.value;
+                setCatalogForm((p) => {
+                  const c = Number(cost) || 0;
+                  const cust = Number(p.basePrice) || 0;
+                  const profit = c > 0 && cust > 0 ? String(Math.round(((cust - c) / c) * 1000) / 10) : p.profitPercent;
+                  return { ...p, costPrice: cost, profitPercent: profit };
+                });
+              }}
+              placeholder="כמה עולה לנו"
+            />
+          </FormField>
+          <FormField label="מחיר ללקוח (₪)">
+            <Input
+              type="number"
+              value={catalogForm.basePrice}
+              onChange={(e) => {
+                const cust = e.target.value;
+                setCatalogForm((p) => {
+                  const c = Number(p.costPrice) || 0;
+                  const cu = Number(cust) || 0;
+                  const profit = c > 0 && cu > 0 ? String(Math.round(((cu - c) / c) * 1000) / 10) : p.profitPercent;
+                  return { ...p, basePrice: cust, profitPercent: profit };
+                });
+              }}
+              placeholder="המחיר הסופי ללקוח"
+            />
+          </FormField>
+          <FormField label="אחוז רווח (%)">
+            <Input
+              type="number"
+              value={catalogForm.profitPercent}
+              onChange={(e) => setCatalogForm((p) => ({ ...p, profitPercent: e.target.value }))}
+              placeholder="מחושב אוטומטית מעלות ומחיר"
+            />
           </FormField>
           <FormField label="יחידת חיוב">
             <Select
@@ -14520,6 +14665,7 @@ function TasksPage({
     });
   }, []);
   const prevLeadIdsRef = useRef<Set<string>>(new Set());
+  const prevMyActiveLeadIdsRef = useRef<Set<string> | null>(null);
   const loadIncomingLeads = useCallback(async () => {
     try {
       const r = await apiFetch(apiUrl('/incoming-leads'), { authUser: currentUser });
@@ -14531,8 +14677,18 @@ function TasksPage({
       let lost = false;
       prevLeadIdsRef.current.forEach((id) => { if (!newIds.has(id)) lost = true; });
       prevLeadIdsRef.current = newIds;
+      // אם ליד עבר לבעלותי כ-ACTIVE (מישהו העביר/הקצה אותי) — נוצרה לי משימה חדשה בשרת.
+      // הליד לא "נעלם" מהרשימה שלי (הוא רק שינה סטטוס ל-ACTIVE), ולכן lost=false ולא היה
+      // מרענן משימות — התיקון: מזהים מעבר-ל-ACTIVE-בבעלותי ומרעננים כדי שהמשימה תופיע בלי refresh.
+      const myActiveIds = new Set<string>(
+        list.filter((l: any) => l.status === 'ACTIVE' && l.ownerId === currentUser?.id).map((l: any) => l.id),
+      );
+      const prevMyActive = prevMyActiveLeadIdsRef.current; // null בסבב הראשון — לא מרעננים על טעינה ראשונית
+      let gainedActive = false;
+      if (prevMyActive) myActiveIds.forEach((id) => { if (!prevMyActive.has(id)) gainedActive = true; });
+      prevMyActiveLeadIdsRef.current = myActiveIds;
       setIncomingLeads(list);
-      if (lost) void onReloadTasks?.();
+      if (lost || gainedActive) void onReloadTasks?.();
     } catch { /* ignore */ }
   }, [currentUser, onReloadTasks]);
   useEffect(() => {
@@ -19907,13 +20063,18 @@ function TasksPage({
                                 isPrivateCustomer={((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
                                 employees={users.filter((u) => u.email).map((u) => ({ id: u.id, name: u.name, email: u.email }))}
                                 onClose={() => setReportModalTaskId(null)}
-                                onSent={async ({ paymentStatus, reportReminderDays }) => {
+                                onSent={async ({ paymentStatus, reportReminderDays, reminderOnly }) => {
                                   setReportModalTaskId(null);
                                   // רישום שליחת הדוח + סטטוס התשלום כהערת תהליך. תמיד נשמרת הערה כדי
                                   // שהדוח יופיע במעקב "דוחות שנשלחו — סטטוס תשלום" (אדמין/גלית). אם שאלת
                                   // התשלום דולגה (paymentStatus=null) — נרשם כ"טרם שולם" לצורך מעקב גבייה.
+                                  // reminderOnly = "קבע תזכורת בלבד": לא נשלח מייל — נרשם בהתאם כדי לא להטעות.
                                   const existing = parseProcessNotes(t.processNotes);
-                                  const noteText = paymentStatus === 'paid'
+                                  const noteText = reminderOnly
+                                    ? (paymentStatus === 'paid'
+                                        ? '🔁 נקבעה תזכורת לדוח חוזר (לא נשלח מייל) — שולם'
+                                        : '🔁 נקבעה תזכורת לדוח חוזר (לא נשלח מייל)')
+                                    : paymentStatus === 'paid'
                                     ? '💰 דוח נשלח — שולם'
                                     : '⏳ דוח נשלח — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
@@ -22088,11 +22249,13 @@ export default function GalitCRMPrototype() {
   // שנמצא כרגע ברשימת המשימות. כשליד שהיה NEW אצל העובד נעלם מ-/incoming-leads (עבר
   // ל-DISMISSED כי מישהו תפס אותו), מרעננים את המשימות — המשימה התלויה כבר נמחקה בשרת.
   const globalPrevLeadIdsRef = useRef<Set<string>>(new Set());
+  const globalPrevMyActiveLeadIdsRef = useRef<Set<string> | null>(null);
   useEffect(() => {
     if (!currentUser) return;
     if (!canAccess(currentUser.role, 'tasks')) return;
     let cancelled = false;
     globalPrevLeadIdsRef.current = new Set();
+    globalPrevMyActiveLeadIdsRef.current = null;
     const watch = async () => {
       try {
         const r = await apiFetch(apiUrl('/incoming-leads'), { authUser: currentUser });
@@ -22103,7 +22266,16 @@ export default function GalitCRMPrototype() {
         let lost = false;
         globalPrevLeadIdsRef.current.forEach((id) => { if (!newIds.has(id)) lost = true; });
         globalPrevLeadIdsRef.current = newIds;
-        if (lost) void reloadTasks(); // ליד נתפס ע"י אחר → רענון כדי שהמשימה תיעלם
+        // ליד שהועבר/הוקצה אלי הופך ל-ACTIVE-בבעלותי (לא נעלם מהרשימה שלי) — נוצרה לי משימה
+        // חדשה בשרת. מזהים את המעבר ומרעננים כדי שהמשימה תופיע מיד בלי refresh ידני.
+        const myActiveIds = new Set<string>(
+          list.filter((l: any) => l.status === 'ACTIVE' && l.ownerId === currentUser.id).map((l: any) => l.id),
+        );
+        const prevMyActive = globalPrevMyActiveLeadIdsRef.current; // null בסבב ראשון — לא מרעננים על טעינה ראשונית
+        let gainedActive = false;
+        if (prevMyActive) myActiveIds.forEach((id) => { if (!prevMyActive.has(id)) gainedActive = true; });
+        globalPrevMyActiveLeadIdsRef.current = myActiveIds;
+        if (lost || gainedActive) void reloadTasks(); // ליד נתפס/הועבר → רענון כדי שהמשימה תיעלם/תופיע
       } catch { /* ignore */ }
     };
     void watch();
