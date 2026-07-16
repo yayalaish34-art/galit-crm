@@ -40,16 +40,18 @@ function roundMoney2(n: number): number {
 
 /**
  * שם קנוני להצעת מחיר, זהה לפורמט של הבקאנד (buildQuoteDocName):
- *   "{שם לקוח/חברה} - הצעת מחיר ל: {שם השירות}"
+ *   "{שם לקוח/חברה} - הצעת מחיר ל: {שם השירות} - {כתובת}"
  * שם השירות = תיאור הפריט הראשון. אם אין שירות — נופל חזרה ל-"שירות" כדי שהשם
- * תמיד יסתיים ב-"ל: ...", לבקשת המשתמש (לעולם לא להציג שם בלי שירות בסוף).
+ * תמיד יכיל "ל: ...", לבקשת המשתמש (לעולם לא להציג שם בלי שירות).
+ * הכתובת נוספת בסוף רק אם קיימת.
  * ללא סיומת קובץ; נחתך ל-120 תווים.
  */
-function buildQuoteDocName(customerName?: string, firstService?: string): string {
+function buildQuoteDocName(customerName?: string, firstService?: string, address?: string): string {
   const clean = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
   const customer = clean(customerName) || 'לקוח';
   const service = clean(firstService) || 'שירות';
-  return `${customer} - הצעת מחיר ל: ${service}`.slice(0, 120).trim();
+  const loc = clean(address);
+  return `${customer} - הצעת מחיר ל: ${service}${loc ? ` - ${loc}` : ''}`.slice(0, 120).trim();
 }
 
 function newLineItem(): LineItem {
@@ -2763,7 +2765,7 @@ export function QuoteNewScreen({
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const fileName = buildQuoteDocName(customer, lineItems[0]?.description) + '.docx';
+      const fileName = buildQuoteDocName(customer, lineItems[0]?.description, customerAddress) + '.docx';
       a.href = url;
       a.download = fileName;
       document.body.appendChild(a);

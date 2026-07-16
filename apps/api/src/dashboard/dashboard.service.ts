@@ -290,12 +290,13 @@ export class DashboardService {
     const classificationLabel = new Map<string, string>(
       (classifications as { code: string; labelHe: string }[]).map((c) => [c.code, c.labelHe]),
     );
-    // צבעי הפילוח: ארבע גוונים נפרדים (כחול/ירוק/מג'נטה/צהוב) במקום שבעה גווני ירוק שנראו זהים.
-    // הסדר קבוע ומאומת: בעוגה כל פרוסה מושווית לכל פרוסה אחרת, ומעל ארבעה גוונים אי אפשר
-    // להבטיח הפרדה (גם לעיוורון-צבעים) — לכן הזנב מתאחד ל"אחר" אפור במקום לקבל גוון חמישי.
-    const SEGMENT_PALETTE = ['#2a78d6', '#008300', '#e87ba4', '#eda100'];
-    const SEGMENT_OTHER_COLOR = '#898781'; // אפור ניטרלי — "אחר" אינו קטגוריה אמיתית
-    const MAX_SEGMENT_SLICES = 4;
+    // צבעי הפילוח: משפחת ירוק→צהוב (ירוק עמוק / ירוק-טורקיז / צהוב-זהב), במקום שבעה גווני
+    // ירוק שנראו זהים. הסדר קבוע ומאומת מול ה-validator: בעוגה כל פרוסה מושווית לכל פרוסה
+    // אחרת, ובטווח הצר ירוק↔צהוב אי אפשר להפריד יותר משלושה גוונים (רביעי מתנגש בצהוב גם
+    // לראייה תקינה) — לכן הזנב מתאחד ל"אחר" באפור כהה במקום לקבל גוון רביעי.
+    const SEGMENT_PALETTE = ['#008300', '#1baf7a', '#eda100'];
+    const SEGMENT_OTHER_COLOR = '#52514e'; // אפור כהה ניטרלי — "אחר" אינו קטגוריה, ונפרד מהגוונים
+    const MAX_SEGMENT_SLICES = 3;
     const allSegments = (customerTypeCounts as { type: string | null; _count: { _all: number } }[])
       .map((row) => {
         const code = (row.type || '').trim();

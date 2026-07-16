@@ -4099,9 +4099,9 @@ function ManagerDashboard({
   ];
 
   // פילוח לקוחות אמיתי — ספירת לקוחות לפי סיווג, מגיע מ-/dashboard/manager (charts.customerSegments).
-  // גיבוי בלבד — הצבעים מגיעים מהשרת (charts.customerSegments). ארבעה גוונים נפרדים + אפור
-  // ל"אחר", תואם ל-SEGMENT_PALETTE בשרת; לא גווני-ירוק שנראו זהים בעוגה.
-  const segmentFallbackPalette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#898781'];
+  // גיבוי בלבד — הצבעים מגיעים מהשרת (charts.customerSegments). משפחת ירוק→צהוב + אפור
+  // ל"אחר", תואם ל-SEGMENT_PALETTE בשרת.
+  const segmentFallbackPalette = ['#008300', '#1baf7a', '#eda100', '#52514e'];
   const customerSegmentationData = (data?.charts?.customerSegments ?? []).map((s, i) => ({
     name: s.name,
     value: s.value,
