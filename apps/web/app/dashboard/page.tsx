@@ -4099,7 +4099,9 @@ function ManagerDashboard({
   ];
 
   // פילוח לקוחות אמיתי — ספירת לקוחות לפי סיווג, מגיע מ-/dashboard/manager (charts.customerSegments).
-  const segmentFallbackPalette = ['#16a34a', '#22c55e', '#4ade80', '#86efac', '#65a30d', '#15803d', '#bbf7d0'];
+  // גיבוי בלבד — הצבעים מגיעים מהשרת (charts.customerSegments). ארבעה גוונים נפרדים + אפור
+  // ל"אחר", תואם ל-SEGMENT_PALETTE בשרת; לא גווני-ירוק שנראו זהים בעוגה.
+  const segmentFallbackPalette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#898781'];
   const customerSegmentationData = (data?.charts?.customerSegments ?? []).map((s, i) => ({
     name: s.name,
     value: s.value,
@@ -4185,12 +4187,29 @@ function ManagerDashboard({
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={customerSegmentationData} dataKey="value" nameKey="name" innerRadius={56} outerRadius={96} paddingAngle={2}>
+                    <Pie
+                      data={customerSegmentationData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={56}
+                      outerRadius={96}
+                      paddingAngle={2}
+                      // תווית אחוז על פרוסות מ-4% ומעלה: הגודל לא נסמך על צבע בלבד (חלק
+                      // מהגוונים בהירים מרקע לבן), ופרוסות זעירות לא מתקבצות לערימת תוויות.
+                      label={({ percent }: any) => (percent >= 0.04 ? `${Math.round(percent * 100)}%` : '')}
+                      labelLine={false}
+                      // דיו טקסט — לא צבע הסדרה
+                      style={{ fontSize: 12, fontWeight: 600, fill: '#52514e' }}
+                    >
                       {customerSegmentationData.map((entry) => (
-                        <Cell key={entry.name} fill={entry.color} />
+                        // טבעת רקע דקה בין פרוסות נוגעות — מפרידה גם כשהגוונים סמוכים
+                        <Cell key={entry.name} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(value: any, name: any) => [`${Number(value).toLocaleString('he-IL')} לקוחות`, name]}
+                      contentStyle={{ borderRadius: 12, border: '1px solid rgba(11,11,11,0.10)', fontSize: 13 }}
+                    />
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>

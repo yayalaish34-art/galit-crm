@@ -290,8 +290,13 @@ export class DashboardService {
     const classificationLabel = new Map<string, string>(
       (classifications as { code: string; labelHe: string }[]).map((c) => [c.code, c.labelHe]),
     );
-    const segmentPalette = ['#16a34a', '#22c55e', '#4ade80', '#86efac', '#65a30d', '#15803d', '#bbf7d0'];
-    const customerSegments = (customerTypeCounts as { type: string | null; _count: { _all: number } }[])
+    // צבעי הפילוח: ארבע גוונים נפרדים (כחול/ירוק/מג'נטה/צהוב) במקום שבעה גווני ירוק שנראו זהים.
+    // הסדר קבוע ומאומת: בעוגה כל פרוסה מושווית לכל פרוסה אחרת, ומעל ארבעה גוונים אי אפשר
+    // להבטיח הפרדה (גם לעיוורון-צבעים) — לכן הזנב מתאחד ל"אחר" אפור במקום לקבל גוון חמישי.
+    const SEGMENT_PALETTE = ['#2a78d6', '#008300', '#e87ba4', '#eda100'];
+    const SEGMENT_OTHER_COLOR = '#898781'; // אפור ניטרלי — "אחר" אינו קטגוריה אמיתית
+    const MAX_SEGMENT_SLICES = 4;
+    const allSegments = (customerTypeCounts as { type: string | null; _count: { _all: number } }[])
       .map((row) => {
         const code = (row.type || '').trim();
         const name = classificationLabel.get(code) || (code ? code : 'אחר');
@@ -305,8 +310,21 @@ export class DashboardService {
         return acc;
       }, [])
       .filter((s) => s.value > 0)
-      .sort((a, b) => b.value - a.value)
-      .map((s, i) => ({ ...s, color: segmentPalette[i % segmentPalette.length] }));
+      .sort((a, b) => b.value - a.value);
+    // ארבעת הגדולים מקבלים גוון; כל השאר (זנב ארוך של סיווגים זניחים) מתאחדים לפרוסת "אחר".
+    const headSegments = allSegments.slice(0, MAX_SEGMENT_SLICES);
+    const tailTotal = allSegments.slice(MAX_SEGMENT_SLICES).reduce((sum, s) => sum + s.value, 0);
+    const customerSegments = headSegments.map((s, i) => ({ ...s, color: SEGMENT_PALETTE[i] }));
+    if (tailTotal > 0) {
+      // אם כבר יש פרוסת "אחר" מהסיווגים עצמם — מוסיפים אליה את הזנב במקום ליצור פרוסה כפולה.
+      const existingOther = customerSegments.find((s) => s.name === 'אחר');
+      if (existingOther) {
+        existingOther.value += tailTotal;
+        existingOther.color = SEGMENT_OTHER_COLOR;
+      } else {
+        customerSegments.push({ name: 'אחר', value: tailTotal, color: SEGMENT_OTHER_COLOR });
+      }
+    }
 
     // Quota progress: approximate cumulative by week from won quotes updatedAt
     const days = [1, 8, 15, 22, 29];
