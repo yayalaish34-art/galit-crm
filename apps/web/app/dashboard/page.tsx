@@ -1947,7 +1947,7 @@ function canAccess(role: AppUserRole, key: string) {
   if (key === 'users' || key === 'feedback') return role === 'admin';
   // סקשן "לקוחות שסווגו כלא רלוונטי" — אדמין ומנהל.
   if (key === 'not-relevant') return role === 'admin' || role === 'manager';
-  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'];
+  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'quote-new', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'];
   return FULL.includes(key);
 }
 
@@ -3578,6 +3578,91 @@ function KpiCard({
   );
 }
 
+// בורר התקופות למודאל פילוח הלידים. last30 = ברירת המחדל.
+const LEADS_PERIODS = [
+  { key: 'last30' as const, label: '30 יום' },
+  { key: 'quarter' as const, label: 'רבעוני' },
+  { key: 'half' as const, label: 'חצי שנתי' },
+  { key: 'year' as const, label: 'שנתי' },
+];
+const LEADS_PERIOD_SUBTITLE: Record<'last30' | 'quarter' | 'half' | 'year', string> = {
+  last30: '30 הימים האחרונים',
+  quarter: 'הרבעון האחרון (90 יום)',
+  half: 'ששת החודשים האחרונים',
+  year: 'השנה האחרונה',
+};
+// פלטת צבעים לפילוח מקורות — משפחת ירוק גלית + גוונים משלימים; אחרון אפור ל"לא צוין".
+const LEADS_SOURCE_PALETTE = ['#16a34a', '#0ea5e9', '#eab308', '#f97316', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b', '#a3a3a3'];
+
+// המרת מפתח דלי (YYYY-MM / YYYY-MM-DD) לתווית עברית קצרה לציר ה-X.
+function fmtBucketLabel(bucket: string, mode: 'day' | 'week' | 'month'): string {
+  const parts = bucket.split('-');
+  if (mode === 'month' && parts.length >= 2) {
+    const months = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'יונ', 'יול', 'אוג', 'ספט', 'אוק', 'נוב', 'דצמ'];
+    const m = Number(parts[1]) - 1;
+    return months[m] ?? bucket;
+  }
+  if (parts.length >= 3) return `${parts[2]}/${parts[1]}`; // DD/MM
+  return bucket;
+}
+
+// פריט ביקורת מועשר — כולל את העובד המטפל וסיווג הלקוח (מעבר לנתוני הבסיס).
+type ReviewItem = {
+  customerId: string | null;
+  customerName: string;
+  rating: number;
+  reason: string | null;
+  ratedAt: string | null;
+  ownerName?: string | null;
+  customerType?: string | null;
+  customerTypeLabel?: string | null;
+};
+
+// אנליטיקת ביקורות לקוחות לפי סיווג + עובד + תקופה — מוחזר מ-GET /dashboard/reviews-analytics.
+type ReviewsAnalyticsPayload = {
+  updatedAt: string;
+  period: 'last30' | 'quarter' | 'half' | 'year';
+  range: { start: string; end: string; spanDays: number };
+  stats: { count: number; avg: number; csat: number | null; prevCsat: number | null; csatChangePct: number | null };
+  byType: Array<{ name: string; code: string | null; value: number; avg: number }>;
+  byOwner: Array<{ name: string; value: number; avg: number }>;
+  list: Array<ReviewItem>;
+  error?: string;
+};
+
+// אנליטיקת הכנסות לפי הזמנות + תקופה — מוחזר מ-GET /dashboard/revenue-analytics.
+type RevenueAnalyticsPayload = {
+  updatedAt: string;
+  period: 'last30' | 'month' | 'quarter' | 'half' | 'year';
+  range: { start: string; end: string; spanDays: number; bucketMode: 'day' | 'week' | 'month' };
+  stats: { total: number; prevTotal: number; changePct: number | null; ordersCount: number; avgPerOrder: number };
+  byEngineer: Array<{ name: string; revenue: number; count: number; pct: number }>;
+  timeSeries: Array<{ bucket: string; value: number }>;
+  orders: Array<{ id: string; quoteNumber: string; customerName: string; engineerName: string; amount: number; status: string; date: string }>;
+  error?: string;
+};
+
+// פילוח לידים לפי מקור הגעה + תקופה — מוחזר מ-GET /dashboard/leads-analytics.
+type LeadsAnalyticsPayload = {
+  updatedAt: string;
+  period: 'last30' | 'month' | 'quarter' | 'half' | 'year';
+  range: { start: string; end: string; spanDays: number; bucketMode: 'day' | 'week' | 'month' };
+  stats: {
+    total: number;
+    prevTotal: number;
+    changePct: number | null;
+    avgPerDay: number;
+    sourcesCount: number;
+    topSourceName: string | null;
+    topSourceValue: number;
+    specifiedPct: number;
+  };
+  bySource: Array<{ name: string; value: number; pct: number }>;
+  byBroker: Array<{ name: string; value: number }>;
+  timeSeries: Array<{ bucket: string; value: number }>;
+  error?: string;
+};
+
 type ManagerDashboardPayload = {
   updatedAt: string;
   config: { monthlyRevenueTarget: number };
@@ -3658,13 +3743,7 @@ type ManagerDashboardPayload = {
     count: number;
     avg: number;
     satisfiedPct: number | null;
-    list: Array<{
-      customerId: string | null;
-      customerName: string;
-      rating: number;
-      reason: string | null;
-      ratedAt: string | null;
-    }>;
+    list: Array<ReviewItem>;
   };
   workingNowEmployees: Array<{
     id: string;
@@ -3920,9 +3999,113 @@ function ManagerDashboard({
   const [targetInput, setTargetInput] = useState('');
   const [targetSaving, setTargetSaving] = useState(false);
   const [targetError, setTargetError] = useState('');
+  // פילוח לידים לפי מקור הגעה (לחיצה על כרטיס "לידים חדשים") — נפתח מודאל עם
+  // בורר תקופה, גרף מגמה, פילוח מקורות ונתונים קרים. ברירת מחדל = 30 יום אחרונים.
+  const [leadsOpen, setLeadsOpen] = useState(false);
+  const [leadsPeriod, setLeadsPeriod] = useState<'last30' | 'quarter' | 'half' | 'year'>('last30');
+  const [leadsData, setLeadsData] = useState<LeadsAnalyticsPayload | null>(null);
+  const [leadsLoading, setLeadsLoading] = useState(false);
+  const [leadsError, setLeadsError] = useState('');
   void customers;
   void navigateSafely;
   void onOpenProjectById;
+
+  // טעינת פילוח הלידים לתקופה הנבחרת. נקראת בפתיחת המודאל ובכל החלפת תקופה.
+  const loadLeadsAnalytics = async (period: string) => {
+    setLeadsLoading(true);
+    setLeadsError('');
+    try {
+      const res = await apiFetch(apiUrl(`/dashboard/leads-analytics?period=${encodeURIComponent(period)}`), { authUser: currentUser });
+      if (!res.ok) throw new Error(await res.text());
+      setLeadsData((await res.json()) as LeadsAnalyticsPayload);
+    } catch {
+      setLeadsError('טעינת פילוח הלידים נכשלה. נסה שוב.');
+      setLeadsData(null);
+    } finally {
+      setLeadsLoading(false);
+    }
+  };
+
+  const openLeadsModal = () => {
+    setLeadsOpen(true);
+    setLeadsPeriod('last30');
+    loadLeadsAnalytics('last30');
+  };
+  const changeLeadsPeriod = (p: 'last30' | 'quarter' | 'half' | 'year') => {
+    setLeadsPeriod(p);
+    loadLeadsAnalytics(p);
+  };
+
+  // ── ביקורות לקוחות (מודאל "שביעות רצון") — בורר תקופה, פילוח לפי סיווג/עובד, וסינון לפי סיווג ──
+  const [reviewsPeriod, setReviewsPeriod] = useState<'last30' | 'quarter' | 'half' | 'year'>('last30');
+  const [reviewsData, setReviewsData] = useState<ReviewsAnalyticsPayload | null>(null);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsError, setReviewsError] = useState('');
+  // סינון הרשימה לפי קוד סיווג לקוח ('all' = הכל). מתאפס בכל פתיחת מודאל/החלפת תקופה.
+  const [reviewsTypeFilter, setReviewsTypeFilter] = useState<string>('all');
+
+  // טעינת אנליטיקת הביקורות לתקופה הנבחרת. נקראת בפתיחת המודאל ובכל החלפת תקופה.
+  const loadReviewsAnalytics = async (period: string) => {
+    setReviewsLoading(true);
+    setReviewsError('');
+    try {
+      const res = await apiFetch(apiUrl(`/dashboard/reviews-analytics?period=${encodeURIComponent(period)}`), { authUser: currentUser });
+      if (!res.ok) throw new Error(await res.text());
+      setReviewsData((await res.json()) as ReviewsAnalyticsPayload);
+    } catch {
+      setReviewsError('טעינת הביקורות נכשלה. נסה שוב.');
+      setReviewsData(null);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
+
+  const openReviewsModal = () => {
+    setReviewsOpen(true);
+    setReviewsPeriod('last30');
+    setReviewsTypeFilter('all');
+    loadReviewsAnalytics('last30');
+  };
+  const changeReviewsPeriod = (p: 'last30' | 'quarter' | 'half' | 'year') => {
+    setReviewsPeriod(p);
+    setReviewsTypeFilter('all');
+    loadReviewsAnalytics(p);
+  };
+
+  // הכנסות לפי הזמנות (לחיצה על כרטיס "הכנסה") — מודאל עם שני מבטים: רשימת הזמנות
+  // (הצעות מאושרות) + אנליטיקות (לפי מהנדס + מגמת זמן). ברירת מחדל = 30 יום אחרונים.
+  const [revenueOpen, setRevenueOpen] = useState(false);
+  const [revenuePeriod, setRevenuePeriod] = useState<'last30' | 'quarter' | 'half' | 'year'>('last30');
+  const [revenueView, setRevenueView] = useState<'orders' | 'analytics'>('orders');
+  const [revenueData, setRevenueData] = useState<RevenueAnalyticsPayload | null>(null);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenueErr, setRevenueErr] = useState('');
+
+  const loadRevenueAnalytics = async (period: string) => {
+    setRevenueLoading(true);
+    setRevenueErr('');
+    try {
+      const res = await apiFetch(apiUrl(`/dashboard/revenue-analytics?period=${encodeURIComponent(period)}`), { authUser: currentUser });
+      if (!res.ok) throw new Error(await res.text());
+      setRevenueData((await res.json()) as RevenueAnalyticsPayload);
+    } catch {
+      setRevenueErr('טעינת פילוח ההכנסות נכשלה. נסה שוב.');
+      setRevenueData(null);
+    } finally {
+      setRevenueLoading(false);
+    }
+  };
+
+  const openRevenueModal = () => {
+    setRevenueOpen(true);
+    setRevenuePeriod('last30');
+    setRevenueView('orders');
+    loadRevenueAnalytics('last30');
+  };
+  const changeRevenuePeriod = (p: 'last30' | 'quarter' | 'half' | 'year') => {
+    setRevenuePeriod(p);
+    loadRevenueAnalytics(p);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -4047,13 +4230,15 @@ function ManagerDashboard({
     {
       title: 'סה"כ לידים חדשים (ברבעון)',
       value: leadsQuarter,
-      sub: leadsQuarterSub,
+      sub: `${leadsQuarterSub} · לחצו לפילוח מקורות`,
       subClass: leadsQuarterPct === null ? 'text-slate-400' : leadsQuarterPct >= 0 ? 'text-green-700' : 'text-red-600',
+      onClick: openLeadsModal,
     },
     {
       title: 'הכנסה רבעונית',
       value: formatCurrencyILS(Math.round((data.kpis.wonRevenueThisMonth || 0) * 3.1)),
-      sub: 'מגמת צמיחה יציבה',
+      sub: 'לחצו להכנסות לפי הזמנות',
+      onClick: openRevenueModal,
     },
     {
       title: 'עמידה ביעד מכירות שנתי',
@@ -4065,7 +4250,7 @@ function ManagerDashboard({
       title: 'שביעות רצון לקוחות (CSAT)',
       value: csatValue,
       sub: csatSub,
-      onClick: reviewsHasData ? () => setReviewsOpen(true) : undefined,
+      onClick: reviewsHasData ? openReviewsModal : undefined,
     },
   ];
 
@@ -4187,6 +4372,11 @@ function ManagerDashboard({
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
+                    {/*
+                      תווית אחוז על פרוסות מ-4% ומעלה: הגודל לא נסמך על צבע בלבד (חלק מהגוונים
+                      בהירים מרקע לבן), ופרוסות זעירות לא מתקבצות לערימת תוויות. style — דיו הטקסט,
+                      לא צבע הסדרה. הצבע של כל פרוסה נקבע ע"י ה-Cell (entry.color מהשרת).
+                    */}
                     <Pie
                       data={customerSegmentationData}
                       dataKey="value"
@@ -4194,12 +4384,25 @@ function ManagerDashboard({
                       innerRadius={56}
                       outerRadius={96}
                       paddingAngle={2}
-                      // תווית אחוז על פרוסות מ-4% ומעלה: הגודל לא נסמך על צבע בלבד (חלק
-                      // מהגוונים בהירים מרקע לבן), ופרוסות זעירות לא מתקבצות לערימת תוויות.
-                      label={({ percent }: any) => (percent >= 0.04 ? `${Math.round(percent * 100)}%` : '')}
+                      label={({ percent, x, y, textAnchor }: any) =>
+                        percent >= 0.04 ? (
+                          <text
+                            x={x}
+                            y={y}
+                            textAnchor={textAnchor}
+                            dominantBaseline="central"
+                            // דיו הטקסט של התווית — לא צבע הפרוסה. הצבע של הפרוסה נשאר מה-Cell.
+                            fill="#52514e"
+                            fontSize={12}
+                            fontWeight={600}
+                          >
+                            {`${Math.round(percent * 100)}%`}
+                          </text>
+                        ) : (
+                          <></>
+                        )
+                      }
                       labelLine={false}
-                      // דיו טקסט — לא צבע הסדרה
-                      style={{ fontSize: 12, fontWeight: 600, fill: '#52514e' }}
                     >
                       {customerSegmentationData.map((entry) => (
                         // טבעת רקע דקה בין פרוסות נוגעות — מפרידה גם כשהגוונים סמוכים
@@ -4337,38 +4540,118 @@ function ManagerDashboard({
       )}
 
       {/* ── מודל ביקורות: הלקוחות שדירגו + הדירוג והסיבה שכתבו ── */}
-      {reviewsOpen && (
+      {reviewsOpen && (() => {
+        // מקור הנתונים: אנליטיקת התקופה (reviewsData). בטעינה הראשונה, לפני שהתשובה חוזרת,
+        // נופלים חזרה לרשימת ה-30 יום מהדשבורד הראשי (data.reviews) כדי שלא יהבהב ריק.
+        const rd = reviewsData;
+        const fullList: ReviewItem[] = rd ? rd.list : (data.reviews?.list ?? []);
+        const count = rd ? rd.stats.count : (data.reviews?.count ?? 0);
+        const avg = rd ? rd.stats.avg : (data.reviews?.avg ?? 0);
+        const csat = rd ? rd.stats.csat : (data.reviews?.satisfiedPct ?? null);
+        const trend = rd?.stats.csatChangePct ?? null;
+
+        // תגי סינון לפי סיווג — נבנים מהפילוח שהשרת החזיר (byType), עם "הכל" בראש.
+        const typeChips = rd?.byType ?? [];
+        const list = reviewsTypeFilter === 'all'
+          ? fullList
+          : fullList.filter((r) => (r.customerType || 'ללא סיווג') === reviewsTypeFilter || r.customerTypeLabel === reviewsTypeFilter);
+
+        return (
         <div
           className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
           onClick={() => setReviewsOpen(false)}
         >
           <div
-            className="max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
+            className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
             onClick={(e) => e.stopPropagation()}
             dir="rtl"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
-              <div>
-                <div className="text-base font-bold text-slate-900">ביקורות לקוחות</div>
-                <div className="text-xs text-slate-500">
-                  {(data.reviews?.count ?? 0)} ביקורות · ממוצע {data.reviews?.avg ?? 0}★
-                  {data.reviews?.satisfiedPct != null ? ` · ${data.reviews.satisfiedPct}% מרוצים` : ''}
+            {/* כותרת + נתונים קרים + בורר תקופה */}
+            <div className="border-b border-slate-100 px-4 py-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-base font-bold text-slate-900">ביקורות לקוחות</div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {count} ביקורות · ממוצע {avg}★
+                    {csat != null ? ` · CSAT ${csat}%` : ''}
+                    {trend != null && trend !== 0 && (
+                      <span className={cn('mr-1 font-semibold', trend > 0 ? 'text-green-600' : 'text-red-600')}>
+                        {trend > 0 ? '▲' : '▼'} {Math.abs(trend)}% מהתקופה הקודמת
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <button
+                  className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  onClick={() => setReviewsOpen(false)}
+                  aria-label="סגור"
+                >
+                  ×
+                </button>
               </div>
-              <button
-                className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                onClick={() => setReviewsOpen(false)}
-                aria-label="סגור"
-              >
-                ×
-              </button>
+
+              {/* בורר תקופה — 30 יום (ברירת מחדל) / רבעוני / חצי שנתי / שנתי */}
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {LEADS_PERIODS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => changeReviewsPeriod(p.key)}
+                    className={cn(
+                      'rounded-full px-3 py-1 text-xs font-semibold transition',
+                      reviewsPeriod === p.key ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+                <span className="self-center pr-1 text-[11px] text-slate-400">{LEADS_PERIOD_SUBTITLE[reviewsPeriod]}</span>
+              </div>
+
+              {/* סינון לפי סיווג לקוח — נבנה מהפילוח (byType). מוצג רק כשיש יותר מסיווג אחד. */}
+              {typeChips.length > 1 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setReviewsTypeFilter('all')}
+                    className={cn(
+                      'rounded-full border px-3 py-1 text-xs font-medium transition',
+                      reviewsTypeFilter === 'all' ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+                    )}
+                  >
+                    הכל ({count})
+                  </button>
+                  {typeChips.map((t) => {
+                    const active = reviewsTypeFilter === t.name;
+                    return (
+                      <button
+                        key={t.name}
+                        type="button"
+                        onClick={() => setReviewsTypeFilter(t.name)}
+                        className={cn(
+                          'rounded-full border px-3 py-1 text-xs font-medium transition',
+                          active ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50',
+                        )}
+                        title={`ממוצע ${t.avg}★`}
+                      >
+                        {t.name} ({t.value})
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-            <div className="max-h-[calc(85vh-72px)] overflow-y-auto p-4">
-              {(data.reviews?.list ?? []).length === 0 ? (
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {reviewsLoading ? (
+                <div className="p-5 text-center text-sm text-slate-500">טוען…</div>
+              ) : reviewsError ? (
+                <div className="p-5 text-center text-sm text-red-600">{reviewsError}</div>
+              ) : list.length === 0 ? (
                 <div className="p-5 text-center text-sm text-slate-500">אין ביקורות להצגה.</div>
               ) : (
                 <ul className="space-y-2">
-                  {(data.reviews?.list ?? []).map((r, i) => {
+                  {list.map((r, i) => {
                     const face = r.rating >= 4 ? '😄' : r.rating === 3 ? '😐' : '😕';
                     const ratingColor = r.rating >= 4 ? 'text-green-600' : r.rating === 3 ? 'text-amber-600' : 'text-red-600';
                     const row = (
@@ -4379,6 +4662,19 @@ function ManagerDashboard({
                             <span className="text-base">{face}</span>
                             <span>{r.rating}/5</span>
                           </div>
+                        </div>
+                        {/* תגיות: סיווג לקוח + העובד המטפל */}
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {r.customerTypeLabel && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                              {r.customerTypeLabel}
+                            </span>
+                          )}
+                          {r.ownerName && (
+                            <span className="rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-medium text-green-700">
+                              טופל ע״י {r.ownerName}
+                            </span>
+                          )}
                         </div>
                         {r.reason ? (
                           <div className="mt-1 text-sm text-slate-600">{r.reason}</div>
@@ -4405,6 +4701,381 @@ function ManagerDashboard({
                     );
                   })}
                 </ul>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* ═══ מודאל פילוח לידים לפי מקור הגעה + תקופת זמן ═══ */}
+      {leadsOpen && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setLeadsOpen(false)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* כותרת + בורר תקופה */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div>
+                <div className="text-lg font-bold text-slate-900">פילוח לידים לפי מקור הגעה</div>
+                <div className="text-xs text-slate-500">
+                  {LEADS_PERIOD_SUBTITLE[leadsPeriod]} · מבוסס על "מקור הגעה" שהוזן בפתיחת הפנייה
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-xl bg-slate-100 p-0.5">
+                  {LEADS_PERIODS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => changeLeadsPeriod(p.key)}
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-xs font-bold transition',
+                        leadsPeriod === p.key ? 'bg-white text-green-700 shadow' : 'text-slate-500 hover:text-slate-700',
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  onClick={() => setLeadsOpen(false)}
+                  aria-label="סגור"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[calc(90vh-76px)] overflow-y-auto p-5">
+              {leadsLoading ? (
+                <div className="py-16 text-center text-sm text-slate-500">טוען נתונים…</div>
+              ) : leadsError ? (
+                <div className="py-16 text-center text-sm text-red-600">{leadsError}</div>
+              ) : !leadsData || leadsData.stats.total === 0 ? (
+                <div className="py-16 text-center text-sm text-slate-500">אין לידים בתקופה שנבחרה.</div>
+              ) : (
+                <div className="space-y-5">
+                  {/* נתונים קרים */}
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {(() => {
+                      const s = leadsData.stats;
+                      const changeTxt = s.changePct === null ? 'אין נתוני השוואה' : `${s.changePct >= 0 ? '▲' : '▼'} ${Math.abs(s.changePct)}% מהתקופה הקודמת`;
+                      const changeCls = s.changePct === null ? 'text-slate-400' : s.changePct >= 0 ? 'text-green-700' : 'text-red-600';
+                      const tiles = [
+                        { label: 'סה"כ לידים', value: String(s.total), sub: changeTxt, subCls: changeCls },
+                        { label: 'ממוצע ליום', value: String(s.avgPerDay), sub: `על פני ${leadsData.range.spanDays} ימים`, subCls: 'text-slate-400' },
+                        { label: 'מקור מוביל', value: s.topSourceName || '—', sub: `${s.topSourceValue} לידים`, subCls: 'text-slate-400' },
+                        { label: 'מקורות פעילים', value: String(s.sourcesCount), sub: `${s.specifiedPct}% עם מקור מזוהה`, subCls: 'text-slate-400' },
+                      ];
+                      return tiles.map((t) => (
+                        <div key={t.label} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                          <div className="text-xs font-semibold text-slate-500">{t.label}</div>
+                          <div className="mt-1 truncate text-xl font-black text-slate-900" title={t.value}>{t.value}</div>
+                          <div className={cn('mt-1 text-[11px] font-semibold', t.subCls)}>{t.sub}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {/* פילוח לפי מקור — עוגה */}
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-2 text-sm font-bold text-slate-800">פילוח לפי מקור הגעה</div>
+                      <div className="h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={leadsData.bySource}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={100}
+                              label={(e: any) => `${e.name} ${e.payload.pct}%`}
+                              labelLine={false}
+                            >
+                              {leadsData.bySource.map((_, i) => (
+                                <Cell key={i} fill={LEADS_SOURCE_PALETTE[i % LEADS_SOURCE_PALETTE.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(v: any, n: any) => [`${v} לידים`, n]} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* מגמת לידים לאורך זמן */}
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-2 text-sm font-bold text-slate-800">
+                        מגמת לידים ({leadsData.range.bucketMode === 'day' ? 'לפי יום' : leadsData.range.bucketMode === 'week' ? 'לפי שבוע' : 'לפי חודש'})
+                      </div>
+                      <div className="h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={leadsData.timeSeries.map((t) => ({ ...t, label: fmtBucketLabel(t.bucket, leadsData.range.bucketMode) }))}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="label" tick={{ fill: '#334155', fontSize: 11 }} />
+                            <YAxis allowDecimals={false} tick={{ fill: '#334155', fontSize: 11 }} />
+                            <Tooltip formatter={(v: any) => [`${v} לידים`, 'לידים']} />
+                            <Line type="monotone" dataKey="value" name="לידים" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* טבלת מקורות מפורטת */}
+                  <div className="rounded-xl border border-slate-100 p-4">
+                    <div className="mb-3 text-sm font-bold text-slate-800">פירוט מקורות</div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-right text-xs font-semibold text-slate-500">
+                            <th className="py-2">מקור הגעה</th>
+                            <th className="py-2">כמות לידים</th>
+                            <th className="py-2">אחוז</th>
+                            <th className="py-2 w-1/3">התפלגות</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {leadsData.bySource.map((row, i) => (
+                            <tr key={row.name} className="border-b border-slate-50">
+                              <td className="py-2 font-semibold text-slate-800">
+                                <span className="ml-2 inline-block h-3 w-3 rounded-sm align-middle" style={{ background: LEADS_SOURCE_PALETTE[i % LEADS_SOURCE_PALETTE.length] }} />
+                                {row.name}
+                              </td>
+                              <td className="py-2 font-bold text-slate-900">{row.value}</td>
+                              <td className="py-2 text-slate-600">{row.pct}%</td>
+                              <td className="py-2">
+                                <div className="h-2 w-full rounded-full bg-slate-100">
+                                  <div className="h-2 rounded-full" style={{ width: `${row.pct}%`, background: LEADS_SOURCE_PALETTE[i % LEADS_SOURCE_PALETTE.length] }} />
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* חברות מפנות (הדס/גינדי/אחר) — רק אם יש */}
+                  {leadsData.byBroker.length > 0 && (
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-3 text-sm font-bold text-slate-800">חברות מפנות</div>
+                      <div className="flex flex-wrap gap-2">
+                        {leadsData.byBroker.map((b) => (
+                          <span key={b.name} className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-bold text-indigo-700">
+                            {b.name}
+                            <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[10px] text-white">{b.value}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ מודאל הכנסות לפי הזמנות (הצעות מאושרות) ═══ */}
+      {revenueOpen && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setRevenueOpen(false)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* כותרת + בורר תקופה */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div>
+                <div className="text-lg font-bold text-slate-900">הכנסות לפי הזמנות</div>
+                <div className="text-xs text-slate-500">
+                  {LEADS_PERIOD_SUBTITLE[revenuePeriod]} · הצעות מחיר שאושרו/נחתמו
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-xl bg-slate-100 p-0.5">
+                  {LEADS_PERIODS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => changeRevenuePeriod(p.key)}
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-xs font-bold transition',
+                        revenuePeriod === p.key ? 'bg-white text-green-700 shadow' : 'text-slate-500 hover:text-slate-700',
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  onClick={() => setRevenueOpen(false)}
+                  aria-label="סגור"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* בורר תצוגה: הזמנות / אנליטיקות */}
+            <div className="flex gap-1 border-b border-slate-100 px-5 pt-3">
+              {[
+                { key: 'orders' as const, label: 'הזמנות' },
+                { key: 'analytics' as const, label: 'אנליטיקות' },
+              ].map((v) => (
+                <button
+                  key={v.key}
+                  onClick={() => setRevenueView(v.key)}
+                  className={cn(
+                    'rounded-t-lg px-4 py-2 text-sm font-bold transition',
+                    revenueView === v.key ? 'border-b-2 border-green-600 text-green-700' : 'text-slate-400 hover:text-slate-600',
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="max-h-[calc(90vh-136px)] overflow-y-auto p-5">
+              {revenueLoading ? (
+                <div className="py-16 text-center text-sm text-slate-500">טוען נתונים…</div>
+              ) : revenueErr ? (
+                <div className="py-16 text-center text-sm text-red-600">{revenueErr}</div>
+              ) : !revenueData || revenueData.stats.ordersCount === 0 ? (
+                <div className="py-16 text-center text-sm text-slate-500">אין הזמנות מאושרות בתקופה שנבחרה.</div>
+              ) : (
+                <div className="space-y-5">
+                  {/* נתונים קרים — משותפים לשני המבטים */}
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {(() => {
+                      const s = revenueData.stats;
+                      const changeTxt = s.changePct === null ? 'אין נתוני השוואה' : `${s.changePct >= 0 ? '▲' : '▼'} ${Math.abs(s.changePct)}% מהתקופה הקודמת`;
+                      const changeCls = s.changePct === null ? 'text-slate-400' : s.changePct >= 0 ? 'text-green-700' : 'text-red-600';
+                      const top = revenueData.byEngineer[0];
+                      const tiles = [
+                        { label: 'סה"כ הכנסה', value: formatCurrencyILS(s.total), sub: changeTxt, subCls: changeCls },
+                        { label: 'מס\' הזמנות', value: String(s.ordersCount), sub: `על פני ${revenueData.range.spanDays} ימים`, subCls: 'text-slate-400' },
+                        { label: 'ממוצע להזמנה', value: formatCurrencyILS(s.avgPerOrder), sub: 'ערך עסקה ממוצע', subCls: 'text-slate-400' },
+                        { label: 'מהנדס מוביל', value: top ? top.name : '—', sub: top ? formatCurrencyILS(top.revenue) : '', subCls: 'text-slate-400' },
+                      ];
+                      return tiles.map((t) => (
+                        <div key={t.label} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                          <div className="text-xs font-semibold text-slate-500">{t.label}</div>
+                          <div className="mt-1 truncate text-xl font-black text-slate-900" title={t.value}>{t.value}</div>
+                          <div className={cn('mt-1 text-[11px] font-semibold', t.subCls)}>{t.sub}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  {revenueView === 'orders' ? (
+                    /* ── מבט הזמנות: טבלת כל ההצעות המאושרות ── */
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-3 text-sm font-bold text-slate-800">כל ההזמנות בתקופה</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-right text-xs font-semibold text-slate-500">
+                              <th className="py-2">מס' הצעה</th>
+                              <th className="py-2">לקוח</th>
+                              <th className="py-2">מהנדס</th>
+                              <th className="py-2">סכום</th>
+                              <th className="py-2">תאריך</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {revenueData.orders.map((o) => (
+                              <tr key={o.id} className="border-b border-slate-50 hover:bg-slate-50">
+                                <td className="py-2 font-semibold text-slate-700" dir="ltr">{o.quoteNumber}</td>
+                                <td className="py-2 text-slate-800">{o.customerName}</td>
+                                <td className="py-2 text-slate-600">{o.engineerName}</td>
+                                <td className="py-2 font-bold text-green-700">{formatCurrencyILS(o.amount)}</td>
+                                <td className="py-2 text-slate-500">{fmtDayHe(o.date)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ── מבט אנליטיקות: לפי מהנדס + מגמת זמן ── */
+                    <div className="space-y-5">
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        {/* הכנסה לפי מהנדס */}
+                        <div className="rounded-xl border border-slate-100 p-4">
+                          <div className="mb-2 text-sm font-bold text-slate-800">הכנסה לפי מהנדס</div>
+                          <div className="h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={revenueData.byEngineer} layout="vertical" margin={{ left: 10, right: 20 }}>
+                                <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                                <XAxis type="number" tick={{ fill: '#334155', fontSize: 11 }} tickFormatter={(v: any) => formatCurrencyILS(v)} />
+                                <YAxis type="category" dataKey="name" width={90} tick={{ fill: '#334155', fontSize: 11 }} />
+                                <Tooltip formatter={(v: any) => [formatCurrencyILS(v), 'הכנסה']} />
+                                <Bar dataKey="revenue" name="הכנסה" fill="#16a34a" radius={[0, 8, 8, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        {/* מגמת הכנסה לאורך זמן */}
+                        <div className="rounded-xl border border-slate-100 p-4">
+                          <div className="mb-2 text-sm font-bold text-slate-800">
+                            מגמת הכנסה ({revenueData.range.bucketMode === 'day' ? 'לפי יום' : revenueData.range.bucketMode === 'week' ? 'לפי שבוע' : 'לפי חודש'})
+                          </div>
+                          <div className="h-[280px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={revenueData.timeSeries.map((t) => ({ ...t, label: fmtBucketLabel(t.bucket, revenueData.range.bucketMode) }))}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                <XAxis dataKey="label" tick={{ fill: '#334155', fontSize: 11 }} />
+                                <YAxis tick={{ fill: '#334155', fontSize: 11 }} tickFormatter={(v: any) => formatCurrencyILS(v)} width={70} />
+                                <Tooltip formatter={(v: any) => [formatCurrencyILS(v), 'הכנסה']} />
+                                <Line type="monotone" dataKey="value" name="הכנסה" stroke="#16a34a" strokeWidth={3} dot={{ r: 3 }} />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* טבלת מהנדסים */}
+                      <div className="rounded-xl border border-slate-100 p-4">
+                        <div className="mb-3 text-sm font-bold text-slate-800">פירוט לפי מהנדס</div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-slate-100 text-right text-xs font-semibold text-slate-500">
+                                <th className="py-2">מהנדס / נציג</th>
+                                <th className="py-2">הזמנות</th>
+                                <th className="py-2">הכנסה</th>
+                                <th className="py-2">אחוז</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {revenueData.byEngineer.map((r) => (
+                                <tr key={r.name} className="border-b border-slate-50">
+                                  <td className="py-2 font-semibold text-slate-800">{r.name}</td>
+                                  <td className="py-2 text-slate-600">{r.count}</td>
+                                  <td className="py-2 font-bold text-green-700">{formatCurrencyILS(r.revenue)}</td>
+                                  <td className="py-2 text-slate-600">{r.pct}%</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -11697,7 +12368,6 @@ function SettingsPage({
     { key: 'customerClassification', label: 'סיווגי לקוחות', enabled: canManageCustomerClassifications },
     { key: 'import', label: 'ייבוא נתונים', enabled: canDataImport },
     { key: 'followupImport', label: 'ייבוא Followup', enabled: canFollowupImport },
-    { key: 'services', label: 'שירותים', enabled: true },
     { key: 'statuses', label: 'סטטוסים', enabled: true },
     { key: 'targets', label: 'יעדים', enabled: true },
     { key: 'catalog', label: 'פריטים', enabled: true },
@@ -11708,7 +12378,7 @@ function SettingsPage({
 
   useEffect(() => {
     if (enabledTabs.some((t) => t.key === tab)) return;
-    setTab(enabledTabs[0]?.key ?? 'services');
+    setTab(enabledTabs[0]?.key ?? 'myProfile');
   }, [
     canManageUsersEffective,
     canEmployeeHandoff,
@@ -12495,6 +13165,7 @@ function SettingsPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
 
+  const catalogAutoSeeded = useRef(false);
   const loadCatalog = async () => {
     setCatalogLoading(true);
     setCatalogError('');
@@ -12502,7 +13173,19 @@ function SettingsPage({
       const res = await apiFetch(apiUrl('/quote-item-catalog'), { authUser: currentUser });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setCatalog(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setCatalog(list);
+      // מילוי אוטומטי: אם חסרים במחירון שירותים מרשימת השירותים (כל המחלקות) — לזרוע
+      // פעם אחת בכל טעינה את החסרים בלבד (זריעה מדלגת על קודים קיימים). כך המחירון
+      // מתמלא בכל השירותים גם אם כבר יש בו פריט בודד (למשל פריט דוגמה).
+      if (!catalogAutoSeeded.current) {
+        const existingCodes = new Set(list.map((c: any) => String(c.itemCode || '').trim()));
+        const missing = catalogSeedRows().some((r) => !existingCodes.has(r.itemCode));
+        if (missing) {
+          catalogAutoSeeded.current = true;
+          await seedCatalogFromServices({ silent: true });
+        }
+      }
     } catch {
       setCatalogError('טעינת מחירון נכשלה.');
     } finally {
@@ -12562,12 +13245,19 @@ function SettingsPage({
   const saveCatalogItem = async () => {
     setCatalogError('');
     try {
-      if (!catalogForm.itemCode.trim() || !catalogForm.name.trim()) {
-        setCatalogError('קוד פריט ושם פריט הם שדות חובה.');
+      if (!catalogForm.name.trim()) {
+        setCatalogError('שם הפריט הוא שדה חובה.');
         return;
       }
+      // בעריכה — שומרים על הקוד הקיים; בפריט חדש — קוד נוצר אוטומטית
+      const existingCodes = new Set(catalog.map((c) => String(c.itemCode || '').trim()));
+      let itemCode = (catalogEditing?.itemCode || catalogForm.itemCode || '').trim();
+      if (!itemCode) {
+        let n = catalog.length + 1;
+        do { itemCode = `ITM-${n}`; n++; } while (existingCodes.has(itemCode));
+      }
       const payload: any = {
-        itemCode: catalogForm.itemCode.trim(),
+        itemCode,
         name: catalogForm.name.trim(),
         description: catalogForm.description || null,
         serviceCategory: catalogForm.serviceCategory || null,
@@ -12599,36 +13289,43 @@ function SettingsPage({
     }
   };
 
-  const importPriceListFromServices = async () => {
-    if (!window.confirm('לייבא את כל השירותים מהמחירון? פריטים קיימים (לפי קוד) לא ישוכפלו.')) return;
+  // כל השירותים (עלים בלבד) מכל המחלקות → שורות מחירון. משותף לזריעה ולבדיקת-החוסר.
+  const catalogSeedRows = (): Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> => {
+    const rows: Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> = [];
+    for (const cat of SERVICE_CATEGORIES) {
+      for (const svc of cat.services) {
+        const leaves = svc.subServices && svc.subServices.length > 0 ? svc.subServices : [svc];
+        for (const leaf of leaves) {
+          if (leaf.subServices && leaf.subServices.length > 0) continue; // קבוצת אב — לא פריט
+          const code = String(leaf.sku || leaf.id || '').trim();
+          if (!code) continue;
+          rows.push({
+            itemCode: code,
+            name: leaf.name,
+            basePrice: Number(leaf.price) || 0, // מחיר ללקוח = העלות הסופית
+            serviceCategory: cat.name,
+            billingUnit: leaf.unit || 'יחידה',
+          });
+        }
+      }
+    }
+    return rows;
+  };
+
+  // זריעת המחירון מכל השירותים בכל המחלקות (עלים בלבד). silent=true — ללא אישור/הודעות (מילוי אוטומטי)
+  const seedCatalogFromServices = async ({ silent = false }: { silent?: boolean } = {}) => {
     setCatalogImporting(true);
     setCatalogError('');
     try {
-      // כל השירותים (עלים בלבד) מתוך רשימת השירותים, עם שם הקטגוריה
-      const rows: Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> = [];
-      for (const cat of SERVICE_CATEGORIES) {
-        for (const svc of cat.services) {
-          const leaves = svc.subServices && svc.subServices.length > 0 ? svc.subServices : [svc];
-          for (const leaf of leaves) {
-            if (leaf.subServices && leaf.subServices.length > 0) continue; // קבוצת אב — לא פריט
-            const code = String(leaf.sku || leaf.id || '').trim();
-            if (!code) continue;
-            rows.push({
-              itemCode: code,
-              name: leaf.name,
-              basePrice: Number(leaf.price) || 0, // מחיר ללקוח = העלות הסופית
-              serviceCategory: cat.name,
-              billingUnit: leaf.unit || 'יחידה',
-            });
-          }
-        }
-      }
+      const rows = catalogSeedRows();
 
       const existingCodes = new Set(catalog.map((c) => String(c.itemCode || '').trim()));
       const toCreate = rows.filter((r) => !existingCodes.has(r.itemCode));
       if (toCreate.length === 0) {
-        setSettingsMsg('כל השירותים כבר קיימים במחירון');
-        window.setTimeout(() => setSettingsMsg(''), 2500);
+        if (!silent) {
+          setSettingsMsg('כל השירותים כבר קיימים במחירון');
+          window.setTimeout(() => setSettingsMsg(''), 2500);
+        }
         return;
       }
 
@@ -12657,13 +13354,20 @@ function SettingsPage({
       }
 
       await loadCatalog();
-      setSettingsMsg(`יובאו ${created} שירותים למחירון`);
-      window.setTimeout(() => setSettingsMsg(''), 3000);
+      if (!silent) {
+        setSettingsMsg(`יובאו ${created} שירותים למחירון`);
+        window.setTimeout(() => setSettingsMsg(''), 3000);
+      }
     } catch {
-      setCatalogError('ייבוא המחירון נכשל.');
+      if (!silent) setCatalogError('ייבוא המחירון נכשל.');
     } finally {
       setCatalogImporting(false);
     }
+  };
+
+  const importPriceListFromServices = async () => {
+    if (!window.confirm('לייבא את כל השירותים מהמחירון? פריטים קיימים (לפי קוד) לא ישוכפלו.')) return;
+    await seedCatalogFromServices({ silent: false });
   };
 
   const toggleCatalogActive = async (it: any) => {
@@ -13293,7 +13997,8 @@ function SettingsPage({
         </Card>
       )}
 
-      {tab === 'services' && (
+      {/* טאב "שירותים" הוסר לבקשת המנהל (אין בו צורך יותר). הפאנל מנוטרל. */}
+      {false && (
         <Card>
           <CardHeader><CardTitle>שירותים</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -13466,8 +14171,9 @@ function SettingsPage({
         </Card>
       )}
 
-      {/* תבניות Word — מוסתרות כברירת מחדל; ניתן לפתוח לניהול קבצי המיזוג בלבד */}
-      {tab === 'catalog' && (
+      {/* ניהול תבניות Word הוסתר ממסך הפריטים (לבקשת המנהל — "בלי קבצי Word").
+          מנגנון התבניות והמיזוג עצמו נשאר פעיל במערכת; רק ה-UI כאן מוסתר. */}
+      {false && tab === 'catalog' && (
         <div className="mt-4" dir="rtl">
           <button
             type="button"
@@ -13479,7 +14185,7 @@ function SettingsPage({
         </div>
       )}
 
-      {tab === 'catalog' && showQuoteTemplates && (
+      {false && tab === 'catalog' && showQuoteTemplates && (
         <div className="space-y-4 mt-4" dir="rtl">
           <div>
             <h2 className="text-base font-semibold text-slate-900">תבניות Word להצעות מחיר</h2>
@@ -13694,11 +14400,11 @@ function SettingsPage({
             title="עריכת תבנית Word"
             maxWidth="max-w-lg"
           >
-            {qtEdit && (
+            {qtEdit && ((qt: NonNullable<typeof qtEdit>) => (
               <div className="space-y-3" dir="rtl">
                 <FormField label="שם התבנית">
                   <Input
-                    value={qtEdit.name}
+                    value={qt.name}
                     onChange={(e) => setQtEdit((p) => (p ? { ...p, name: e.target.value } : p))}
                     placeholder="שם"
                   />
@@ -13706,7 +14412,7 @@ function SettingsPage({
                 <FormField label="סוג שירות / קטגוריה">
                   <select
                     className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
-                    value={qtEdit.serviceType}
+                    value={qt.serviceType}
                     onChange={(e) => setQtEdit((p) => (p ? { ...p, serviceType: e.target.value } : p))}
                   >
                     {QUOTE_SERVICE_TYPE_OPTIONS.map((s) => (
@@ -13720,7 +14426,7 @@ function SettingsPage({
                   <input
                     id="qt-edit-active"
                     type="checkbox"
-                    checked={qtEdit.isActive}
+                    checked={qt.isActive}
                     onChange={(e) => setQtEdit((p) => (p ? { ...p, isActive: e.target.checked } : p))}
                   />
                   <label htmlFor="qt-edit-active" className="text-sm text-slate-700">
@@ -13731,8 +14437,8 @@ function SettingsPage({
                   <div className="text-sm font-medium">החלפת קובץ Word (DOCX)</div>
                   <p className="text-xs text-slate-600 break-all">
                     קובץ נוכחי:{' '}
-                    {qtEdit.docxTemplatePath ? (
-                      <code className="rounded bg-white px-1">{qtEdit.docxTemplatePath}</code>
+                    {qt.docxTemplatePath ? (
+                      <code className="rounded bg-white px-1">{qt.docxTemplatePath}</code>
                     ) : (
                       'לא הוגדר'
                     )}
@@ -13765,7 +14471,7 @@ function SettingsPage({
                   </Button>
                 </div>
               </div>
-            )}
+            ))(qtEdit!)}
           </Modal>
         </div>
       )}
@@ -14154,70 +14860,81 @@ function SettingsPage({
 
       <Modal open={catalogModalOpen} onClose={() => setCatalogModalOpen(false)} title={catalogEditing ? 'עריכת פריט' : 'פריט חדש'} maxWidth="max-w-2xl">
         <div className="grid gap-3 md:grid-cols-2">
-          <FormField label="קוד פריט">
-            <Input value={catalogForm.itemCode} onChange={(e) => setCatalogForm((p) => ({ ...p, itemCode: e.target.value }))} placeholder="קוד פריט" />
+          <FormField label="שם פריט / שירות">
+            <Input value={catalogForm.name} onChange={(e) => setCatalogForm((p) => ({ ...p, name: e.target.value }))} placeholder="שם השירות" />
           </FormField>
-          <FormField label="שם פריט">
-            <Input value={catalogForm.name} onChange={(e) => setCatalogForm((p) => ({ ...p, name: e.target.value }))} placeholder="שם פריט" />
+          <FormField label="קטגוריה / מחלקה">
+            <Input value={catalogForm.serviceCategory} onChange={(e) => setCatalogForm((p) => ({ ...p, serviceCategory: e.target.value }))} placeholder="למשל: איכות אוויר, קרינה" />
           </FormField>
-          <div className="md:col-span-2">
-            <FormField label="תיאור">
-              <Textarea value={catalogForm.description} onChange={(e) => setCatalogForm((p) => ({ ...p, description: e.target.value }))} placeholder="תיאור" />
-            </FormField>
+
+          {/* ── תמחור: מחיר עלות + אחוז רווח → מחיר ללקוח מתעדכן אוטומטית ── */}
+          <div className="md:col-span-2 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 text-sm font-semibold text-slate-700">תמחור</div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <FormField label="מחיר עלות (₪)">
+                <Input
+                  type="number"
+                  value={catalogForm.costPrice}
+                  onChange={(e) => {
+                    const cost = e.target.value;
+                    setCatalogForm((p) => {
+                      const c = Number(cost) || 0;
+                      const prof = Number(p.profitPercent);
+                      // אם יש אחוז רווח — המחיר ללקוח מחושב מהעלות והרווח
+                      if (p.profitPercent.trim() !== '' && c > 0 && !Number.isNaN(prof)) {
+                        const base = Math.round(c * (1 + prof / 100) * 100) / 100;
+                        return { ...p, costPrice: cost, basePrice: String(base) };
+                      }
+                      // אחרת — אם יש מחיר ללקוח, נעדכן את הרווח
+                      const cust = Number(p.basePrice) || 0;
+                      const profit = c > 0 && cust > 0 ? String(Math.round(((cust - c) / c) * 1000) / 10) : p.profitPercent;
+                      return { ...p, costPrice: cost, profitPercent: profit };
+                    });
+                  }}
+                  placeholder="כמה עולה לנו"
+                />
+              </FormField>
+              <FormField label="אחוז רווח (%)">
+                <Input
+                  type="number"
+                  value={catalogForm.profitPercent}
+                  onChange={(e) => {
+                    const prof = e.target.value;
+                    setCatalogForm((p) => {
+                      const c = Number(p.costPrice) || 0;
+                      const pr = Number(prof);
+                      // המחיר ללקוח מתעדכן אוטומטית: עלות × (1 + רווח%)
+                      if (prof.trim() !== '' && c > 0 && !Number.isNaN(pr)) {
+                        const base = Math.round(c * (1 + pr / 100) * 100) / 100;
+                        return { ...p, profitPercent: prof, basePrice: String(base) };
+                      }
+                      return { ...p, profitPercent: prof };
+                    });
+                  }}
+                  placeholder="למשל 30"
+                />
+              </FormField>
+              <FormField label="מחיר ללקוח (₪)">
+                <Input
+                  type="number"
+                  value={catalogForm.basePrice}
+                  onChange={(e) => {
+                    const cust = e.target.value;
+                    setCatalogForm((p) => {
+                      const c = Number(p.costPrice) || 0;
+                      const cu = Number(cust) || 0;
+                      // עריכה ידנית של המחיר ללקוח מעדכנת את אחוז הרווח בהתאם
+                      const profit = c > 0 && cu > 0 ? String(Math.round(((cu - c) / c) * 1000) / 10) : p.profitPercent;
+                      return { ...p, basePrice: cust, profitPercent: profit };
+                    });
+                  }}
+                  placeholder="מחושב אוטומטית"
+                />
+              </FormField>
+            </div>
+            <div className="mt-2 text-xs text-slate-500">הזן מחיר עלות ואחוז רווח — המחיר ללקוח יתעדכן אוטומטית.</div>
           </div>
-          <FormField label="קטגוריית שירות">
-            <Input value={catalogForm.serviceCategory} onChange={(e) => setCatalogForm((p) => ({ ...p, serviceCategory: e.target.value }))} placeholder="קטגוריית שירות" />
-          </FormField>
-          <FormField label="תת סוג שירות">
-            <Input value={catalogForm.serviceSubType} onChange={(e) => setCatalogForm((p) => ({ ...p, serviceSubType: e.target.value }))} placeholder="תת סוג שירות" />
-          </FormField>
-          <FormField label="מחיר עלות (₪)">
-            <Input
-              type="number"
-              value={catalogForm.costPrice}
-              onChange={(e) => {
-                const cost = e.target.value;
-                setCatalogForm((p) => {
-                  const c = Number(cost) || 0;
-                  const cust = Number(p.basePrice) || 0;
-                  const profit = c > 0 && cust > 0 ? String(Math.round(((cust - c) / c) * 1000) / 10) : p.profitPercent;
-                  return { ...p, costPrice: cost, profitPercent: profit };
-                });
-              }}
-              placeholder="כמה עולה לנו"
-            />
-          </FormField>
-          <FormField label="מחיר ללקוח (₪)">
-            <Input
-              type="number"
-              value={catalogForm.basePrice}
-              onChange={(e) => {
-                const cust = e.target.value;
-                setCatalogForm((p) => {
-                  const c = Number(p.costPrice) || 0;
-                  const cu = Number(cust) || 0;
-                  const profit = c > 0 && cu > 0 ? String(Math.round(((cu - c) / c) * 1000) / 10) : p.profitPercent;
-                  return { ...p, basePrice: cust, profitPercent: profit };
-                });
-              }}
-              placeholder="המחיר הסופי ללקוח"
-            />
-          </FormField>
-          <FormField label="אחוז רווח (%)">
-            <Input
-              type="number"
-              value={catalogForm.profitPercent}
-              onChange={(e) => setCatalogForm((p) => ({ ...p, profitPercent: e.target.value }))}
-              placeholder="מחושב אוטומטית מעלות ומחיר"
-            />
-          </FormField>
-          <FormField label="יחידת חיוב">
-            <Select
-              value={catalogForm.billingUnit}
-              onChange={(v) => setCatalogForm((p) => ({ ...p, billingUnit: v }))}
-              options={['יחידה', 'שעה', 'יום עבודה', 'ביקור', 'דגימה', 'מטר', 'מ"ר', 'גלאי', 'אתר', 'מסמך']}
-            />
-          </FormField>
+
           <FormField label={'אחוז מע"מ'}>
             <Input value={catalogForm.vatPercent} onChange={(e) => setCatalogForm((p) => ({ ...p, vatPercent: e.target.value }))} placeholder={'אחוז מע"מ'} />
           </FormField>
@@ -14225,23 +14942,7 @@ function SettingsPage({
             <input type="checkbox" checked={catalogForm.isActive} onChange={(e) => setCatalogForm((p) => ({ ...p, isActive: e.target.checked }))} />
             <span className="text-sm">פעיל</span>
           </div>
-          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
-            <input type="checkbox" checked={catalogForm.requiresQuantity} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresQuantity: e.target.checked }))} />
-            <span className="text-sm">דורש כמות</span>
-          </div>
-          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
-            <input type="checkbox" checked={catalogForm.requiresSiteVisit} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresSiteVisit: e.target.checked }))} />
-            <span className="text-sm">דורש ביקור שטח</span>
-          </div>
-          <div className="flex items-center gap-3 rounded-xl border px-4 py-2">
-            <input type="checkbox" checked={catalogForm.requiresReport} onChange={(e) => setCatalogForm((p) => ({ ...p, requiresReport: e.target.checked }))} />
-            <span className="text-sm">דורש דוח</span>
-          </div>
-          <div className="md:col-span-2">
-            <FormField label="הערות">
-              <Textarea value={catalogForm.notes} onChange={(e) => setCatalogForm((p) => ({ ...p, notes: e.target.value }))} placeholder="הערות" />
-            </FormField>
-          </div>
+
           <div className="md:col-span-2">
             <Button style={{ background: galit.primary }} onClick={saveCatalogItem}>שמור</Button>
           </div>
@@ -14657,6 +15358,30 @@ function TasksPage({
 
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח מודל "שלחתי כבר דוח" (בלי שליחת מייל) */
   const [alreadySentTaskId, setAlreadySentTaskId] = useState<string | null>(null);
+
+  /* שלב הביצוע: תזכורת לשליחת דוח חוזר — כעת inline בשלב 7 (לא בתוך המודלים).
+   * מפתח לפי מזהה משימה: הבחירה היא מספר ימים, 'manual' לתאריך ידני, או null (ללא). */
+  const [reportReminderChoice, setReportReminderChoice] = useState<Record<string, 7 | 30 | 60 | 90 | 'manual' | null>>({});
+  const [reportReminderManualDate, setReportReminderManualDate] = useState<Record<string, string>>({});
+  /* תרגום בחירת התזכורת של משימה למספר ימים קדימה. null = ללא תזכורת / תאריך לא תקין / תאריך בעבר. */
+  const computeReportReminderDays = (taskId: string): number | null => {
+    const choice = reportReminderChoice[taskId] ?? null;
+    if (choice === null) return null;
+    if (choice !== 'manual') return choice;
+    const manual = reportReminderManualDate[taskId] || '';
+    if (!manual) return null;
+    const target = new Date(`${manual}T09:00:00`);
+    if (isNaN(target.getTime())) return null;
+    const days = Math.ceil((target.getTime() - Date.now()) / 86_400_000);
+    return days >= 1 ? days : null;
+  };
+  /* יצירת משימת תזכורת עבור משימה + ניקוי הבחירה. משותף לשליחת דוח / "שלחתי כבר" / "תזכורת בלבד". */
+  const applyReportReminder = async (task: Task) => {
+    const days = computeReportReminderDays(task.id);
+    if (days && days >= 1) await createReportReminderTask(task, days);
+    setReportReminderChoice((p) => { const n = { ...p }; delete n[task.id]; return n; });
+    setReportReminderManualDate((p) => { const n = { ...p }; delete n[task.id]; return n; });
+  };
 
   /* סוף הזרימה: פופ-אפ "שליחת משוב" שנפתח אחרי שליחת הדוח */
   /* ══════ לידים נכנסים מהמייל — משימה ראשונה + טופס מיוחד ══════ */
@@ -20042,12 +20767,91 @@ function TasksPage({
                             <div className="text-center text-[12px] text-slate-400">
                               אם כבר שלחת את הדוח ללקוח בעבר — סמן זאת כאן במקום לשלוח שוב.
                             </div>
+
+                            {/* ── תזכורת לשליחת דוח חוזר (עבר מתוך המודלים לכאן — מתחת לכפתורי השליחה) ── */}
+                            {(() => {
+                              const rChoice = reportReminderChoice[t.id] ?? null;
+                              const rManual = reportReminderManualDate[t.id] || '';
+                              const rDays = computeReportReminderDays(t.id);
+                              return (
+                                <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-3">
+                                  <label className="mb-1 block text-sm font-semibold text-indigo-900">
+                                    🔁 לקבוע תזכורת לשליחת דוח חוזר?{' '}
+                                    <span className="font-normal text-indigo-500">(לא חובה)</span>
+                                  </label>
+                                  <div className="mb-2 text-[12px] leading-relaxed text-indigo-700/80">
+                                    המשימה תיסגר עם שליחת הדוח, ותקפוץ שוב אוטומטית במועד שתבחר — עד אז היא מוסתרת מהרשימה.
+                                    נוח כשלוקח זמן (למשל 60 יום) עד שיש תוצאות לדוח חוזר.
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    {([
+                                      { v: 7, label: 'שבוע' },
+                                      { v: 30, label: '30 יום' },
+                                      { v: 60, label: '60 יום' },
+                                      { v: 90, label: '90 יום' },
+                                      { v: 'manual', label: 'ידני' },
+                                    ] as { v: 7 | 30 | 60 | 90 | 'manual'; label: string }[]).map((o) => (
+                                      <button
+                                        key={String(o.v)}
+                                        type="button"
+                                        onClick={() => setReportReminderChoice((p) => ({ ...p, [t.id]: p[t.id] === o.v ? null : o.v }))}
+                                        className={`rounded-xl border px-4 py-2 text-sm font-bold transition-colors ${
+                                          rChoice === o.v
+                                            ? 'border-indigo-600 bg-indigo-600 text-white'
+                                            : 'border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100'
+                                        }`}
+                                      >
+                                        {o.label}
+                                      </button>
+                                    ))}
+                                  </div>
+                                  {rChoice === 'manual' && (
+                                    <div className="mt-2.5 flex items-center gap-2">
+                                      <label className="shrink-0 text-sm font-medium text-indigo-900">תאריך התזכורת:</label>
+                                      <input
+                                        type="date"
+                                        value={rManual}
+                                        onChange={(e) => setReportReminderManualDate((p) => ({ ...p, [t.id]: e.target.value }))}
+                                        className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                      />
+                                    </div>
+                                  )}
+                                  {rChoice !== null && rDays !== null && (
+                                    <div className="mt-2 text-[12px] font-medium text-indigo-700">
+                                      ✓ תיווצר משימת שליחת דוח חדשה בעוד {rDays} ימים.
+                                    </div>
+                                  )}
+                                  {rChoice === 'manual' && rManual && rDays === null && (
+                                    <div className="mt-2 text-[12px] font-medium text-red-600">
+                                      יש לבחור תאריך עתידי לתזכורת.
+                                    </div>
+                                  )}
+                                  {/* קבע תזכורת בלבד — סוגר את המשימה + קובע תזכורת לדוח חוזר, בלי לשלוח מייל */}
+                                  <button
+                                    type="button"
+                                    disabled={rDays === null}
+                                    title={rDays === null ? 'בחר תזכורת (שבוע / 30 / 60 / 90 / ידני) כדי לאפשר' : 'סוגר את המשימה וקובע תזכורת — בלי לשלוח מייל'}
+                                    onClick={async () => {
+                                      const existing = parseProcessNotes(t.processNotes);
+                                      const next = [{ text: '🔁 נקבעה תזכורת לדוח חוזר (לא נשלח מייל)', at: new Date().toISOString() }, ...existing];
+                                      await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
+                                      await applyReportReminder(t);
+                                      setExpandedTaskId(null);
+                                    }}
+                                    className="mt-3 w-full rounded-xl border border-indigo-300 bg-white px-4 py-2 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    🔁 קבע תזכורת בלבד
+                                  </button>
+                                </div>
+                              );
+                            })()}
+
                             {alreadySentTaskId === t.id && (
                               <MarkReportSentModal
                                 open
                                 customerName={t.customerName || t.leadName || ''}
                                 onClose={() => setAlreadySentTaskId(null)}
-                                onDone={async ({ paymentStatus, reportReminderDays }) => {
+                                onDone={async ({ paymentStatus }) => {
                                   setAlreadySentTaskId(null);
                                   // אותו רישום כמו בשליחת הדוח: הערת תהליך לפי סטטוס התשלום,
                                   // סימון המשימה DONE, ואז פתיחת פופ-אפ "שליחת משוב".
@@ -20057,10 +20861,8 @@ function TasksPage({
                                     : '⏳ דוח נשלח (סומן ידנית) — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
-                                  // נבחרה תזכורת לשליחת דוח חוזר → יצירת משימת שליחת דוח עתידית (מוסתרת עד המועד).
-                                  if (reportReminderDays && reportReminderDays >= 1) {
-                                    await createReportReminderTask(t, reportReminderDays);
-                                  }
+                                  // התזכורת נקבעת כעת inline בשלב 7 (מתחת לכפתורים), לא במודל.
+                                  await applyReportReminder(t);
                                   // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח — אין יותר פופ-אפ משוב ידני.
                                   setExpandedTaskId(null);
                                 }}
@@ -20082,26 +20884,19 @@ function TasksPage({
                                 isPrivateCustomer={((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
                                 employees={users.filter((u) => u.email).map((u) => ({ id: u.id, name: u.name, email: u.email }))}
                                 onClose={() => setReportModalTaskId(null)}
-                                onSent={async ({ paymentStatus, reportReminderDays, reminderOnly }) => {
+                                onSent={async ({ paymentStatus }) => {
                                   setReportModalTaskId(null);
                                   // רישום שליחת הדוח + סטטוס התשלום כהערת תהליך. תמיד נשמרת הערה כדי
                                   // שהדוח יופיע במעקב "דוחות שנשלחו — סטטוס תשלום" (אדמין/גלית). אם שאלת
                                   // התשלום דולגה (paymentStatus=null) — נרשם כ"טרם שולם" לצורך מעקב גבייה.
-                                  // reminderOnly = "קבע תזכורת בלבד": לא נשלח מייל — נרשם בהתאם כדי לא להטעות.
                                   const existing = parseProcessNotes(t.processNotes);
-                                  const noteText = reminderOnly
-                                    ? (paymentStatus === 'paid'
-                                        ? '🔁 נקבעה תזכורת לדוח חוזר (לא נשלח מייל) — שולם'
-                                        : '🔁 נקבעה תזכורת לדוח חוזר (לא נשלח מייל)')
-                                    : paymentStatus === 'paid'
+                                  const noteText = paymentStatus === 'paid'
                                     ? '💰 דוח נשלח — שולם'
                                     : '⏳ דוח נשלח — טרם שולם';
                                   const next = [{ text: noteText, at: new Date().toISOString() }, ...existing];
                                   await updateTaskField(t.id, { status: 'DONE', processNotes: JSON.stringify(next) });
-                                  // נבחרה תזכורת לשליחת דוח חוזר → יצירת משימת שליחת דוח עתידית (מוסתרת עד המועד).
-                                  if (reportReminderDays && reportReminderDays >= 1) {
-                                    await createReportReminderTask(t, reportReminderDays);
-                                  }
+                                  // התזכורת נקבעת כעת inline בשלב 7 (מתחת לכפתורים), לא במודל.
+                                  await applyReportReminder(t);
                                   // בקשת הדירוג (5 פרצופים) נשלחת אוטומטית ללקוח מיד אחרי הדוח —
                                   // אין יותר פופ-אפ "שליחת משוב" ידני בסוף הזרימה.
                                   setExpandedTaskId(null);
@@ -22025,7 +22820,7 @@ export default function GalitCRMPrototype() {
     // When the toolbar "חדש → הצעה" fires while a customer card is open,
     // open QuoteNewScreen as a workspace tab instead of navigating away.
     // selectedCustomer must NOT be cleared — QuoteNewScreen needs it for prefill.
-    if (target === 'quotes' && current === 'customer-profile' && selectedCustomer) {
+    if (target === 'quote-new' && current === 'customer-profile' && selectedCustomer) {
       setQuoteEditorInitialId(null);
       setNewQuoteContactId(customerCardContactId);
       setWorkspaceQuoteId(null);
@@ -22048,6 +22843,25 @@ export default function GalitCRMPrototype() {
     if (target === 'order-new' && current === 'customer-profile' && selectedCustomer) {
       // customerCardContactId / customerCardContactName already in state
       setCurrent('order-new');
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', window.location.pathname);
+      }
+      return;
+    }
+
+    // "חדש → הצעה" מהסרגל → פתיחת עורך ההצעה (QuoteNewScreen) ריק, לא רשימת ההצעות.
+    // כרטיס לקוח פתוח כבר טופל למעלה (workspace tab). כאן זה המקרה של דשבורד נקי.
+    // יעד נפרד ('quote-new') כדי לא לחטוף את 'quotes' שמשמש לפתיחת *רשימת* ההצעות.
+    if (target === 'quote-new') {
+      setSelectedCustomer(null);
+      setSelectedLead(null);
+      setIsNewCustomerMode(false);
+      setNewQuoteCustomerId(null);
+      setNewQuoteContactId(null);
+      setQuotePrefillFromLead(null);
+      setQuotePrefillServiceName(null);
+      setQuoteEditorInitialId(null);
+      setCurrent('quote-new');
       if (typeof window !== 'undefined') {
         window.history.pushState({}, '', window.location.pathname);
       }

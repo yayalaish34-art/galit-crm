@@ -37,35 +37,43 @@ function emptyCell(width: number): string {
 
 /**
  * טבלת החתימה בת 4 עמודות (RTL). סדר העמודות בכיוון קריאה (ימין→שמאל):
- * שם מלא של מאשר ההצעה · ת.ז · חתימה · חותמת. ב-OOXML הסדר הוא שמאל→ימין,
- * ולכן בגלל bidiVisual הסדר הפיזי מתהפך — כותבים חותמת·חתימה·ת.ז·שם כדי שיוצג נכון.
+ * שם מלא של מאשר ההצעה · ת.ז · חתימה · חותמת.
+ *
+ * חשוב (תיקון סדר-עמודות הפוך): כותבים את התאים בסדר הטבעי (שם·ת.ז·חתימה·חותמת)
+ * *בלי* <w:bidiVisual/>. bidiVisual מהפך את כיוון פריסת העמודות, ו-Word מכבד אותו
+ * אך מנוע ההמרה ל-PDF *לא* — ולכן קודם, כשהתאים נכתבו הפוך והסתמכנו על bidiVisual,
+ * ה-PDF יצא הפוך (חותמת·חתימה·ת.ז·שם). בלי bidiVisual שני המנועים מרנדרים את התאים
+ * בסדר ה-OOXML כמות-שהוא → תמיד שם·ת.ז·חתימה·חותמת. הטבלה נשארת RTL ברמת הטקסט
+ * (לכל run יש <w:rtl/> וה-jc ממורכז), רק כיוון פריסת העמודות מפסיק להתהפך.
  */
 function signatureTableXml(): string {
   // רוחב עמודות (dxa): שם רחב יותר, ת.ז צר, חתימה/חותמת בינוני. סה"כ ~10322.
   const wName = 3400, wId = 1400, wSign = 2760, wStamp = 2760;
+  // סדר טבעי בכיוון קריאה: שם · ת.ז · חתימה · חותמת.
   const grid =
-    `<w:tblGrid><w:gridCol w:w="${wStamp}"/><w:gridCol w:w="${wSign}"/><w:gridCol w:w="${wId}"/><w:gridCol w:w="${wName}"/></w:tblGrid>`;
+    `<w:tblGrid><w:gridCol w:w="${wName}"/><w:gridCol w:w="${wId}"/><w:gridCol w:w="${wSign}"/><w:gridCol w:w="${wStamp}"/></w:tblGrid>`;
   const borders =
     '<w:tblBorders>' +
     '<w:top w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:left w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
     '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:right w:val="single" w:sz="4" w:space="0" w:color="auto"/>' +
     '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="auto"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="auto"/></w:tblBorders>';
+  // ללא <w:bidiVisual/> — מונע היפוך עמודות שלא נתמך אחיד בין Word למנוע ה-PDF.
   const tblPr =
-    '<w:tblPr><w:bidiVisual/><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/>' +
+    '<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:jc w:val="center"/>' +
     borders +
     '<w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr>';
-  // שורת כותרות — סדר ה-OOXML הפוך (חותמת ראשון) בגלל bidiVisual. cantSplit כדי שלא תישבר.
+  // שורת כותרות — בסדר הטבעי (שם ראשון). cantSplit כדי שלא תישבר.
   const headerRow =
     '<w:tr><w:trPr><w:cantSplit/><w:tblHeader/></w:trPr>' +
-    headerCell('חותמת', wStamp) +
-    headerCell('חתימה', wSign) +
-    headerCell('ת.ז', wId) +
     headerCell('שם מלא של מאשר ההצעה', wName) +
+    headerCell('ת.ז', wId) +
+    headerCell('חתימה', wSign) +
+    headerCell('חותמת', wStamp) +
     '</w:tr>';
-  // שורת מילוי ריקה בגובה ~1.6 ס"מ.
+  // שורת מילוי ריקה בגובה ~1.6 ס"מ — באותו סדר עמודות.
   const fillRow =
     '<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="900"/></w:trPr>' +
-    emptyCell(wStamp) + emptyCell(wSign) + emptyCell(wId) + emptyCell(wName) +
+    emptyCell(wName) + emptyCell(wId) + emptyCell(wSign) + emptyCell(wStamp) +
     '</w:tr>';
   return `<w:tbl>${tblPr}${grid}${headerRow}${fillRow}</w:tbl>`;
 }

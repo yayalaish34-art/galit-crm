@@ -61,13 +61,8 @@ export function SendReportModal({
   /** האם הלקוח מסווג כ"לקוח פרטי" (customer.type === 'PRIVATE'). כשלקוח פרטי בוחר
    *  "טרם שולם" — חובה אישור מנהל לפני שליחת הדוח. */
   isPrivateCustomer?: boolean;
-  onSent: (info: {
-    paymentStatus: 'paid' | 'unpaid' | null;
-    /** תזכורת לשליחת דוח חוזר: מספר ימים קדימה, או null אם לא נבחרה תזכורת. */
-    reportReminderDays: number | null;
-    /** true כשנקרא מ"קבע תזכורת בלבד" — לא נשלח מייל (רק סגירת משימה + תזכורת). */
-    reminderOnly?: boolean;
-  }) => void;
+  // תזכורת לשליחת דוח חוזר עברה לשלב 7 (inline, מתחת לכפתורים) — כבר לא באחריות המודל.
+  onSent: (info: { paymentStatus: 'paid' | 'unpaid' | null }) => void;
 }) {
   const customerId = task.customerId || null;
   const inputRef = useRef<HTMLInputElement>(null);
@@ -102,12 +97,6 @@ export function SendReportModal({
   // שאלת תשלום לפני השליחה — לא חובה, רק תזכורת לוודא שהלקוח שילם.
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | null>(null);
 
-  // תזכורת לשליחת דוח חוזר. הבחירה היא מספר ימים קדימה, 'manual' לתאריך ידני, או null (ללא תזכורת).
-  //  - כשנבחרת תזכורת, בשליחה מוצלחת נוצרת משימת "שליחת דוח" חדשה עם תאריך יעד עתידי,
-  //    שמוסתרת מהרשימה עד אותו תאריך ואז קופצת שוב (הדוח הנוכחי כבר נשלח והמשימה נסגרה).
-  const [reminderChoice, setReminderChoice] = useState<7 | 30 | 60 | 90 | 'manual' | null>(null);
-  const [reminderManualDate, setReminderManualDate] = useState('');
-
   // אישור מנהל לשליחת דוח ללקוח פרטי שטרם שילם:
   //  managerApproval = null   → עדיין לא נשאל / לא רלוונטי
   //  managerApproval = 'yes'  → התקבל אישור מנהל, מותר לשלוח
@@ -130,8 +119,6 @@ export function SendReportModal({
     setErr('');
     setStatus('');
     setPaymentStatus(null);
-    setReminderChoice(null);
-    setReminderManualDate('');
     setManagerApproval(null);
     setShowApprovalPrompt(false);
     setToList(defaultEmail && defaultEmail.includes('@') ? [defaultEmail.trim()] : []);
@@ -303,28 +290,6 @@ export function SendReportModal({
   const blockedNoApproval = isPrivateCustomer && paymentStatus === 'unpaid' && managerApproval !== 'yes';
   const canSend = !!attached && allTo.length > 0 && !sending && !blockedNoApproval;
 
-  // תרגום בחירת התזכורת למספר ימים קדימה. 'manual' → מספר הימים עד התאריך שנבחר
-  // (עיגול כלפי מעלה, מינימום יום אחד). null / תאריך לא תקין / תאריך בעבר → null (ללא תזכורת).
-  const computeReminderDays = (): number | null => {
-    if (reminderChoice === null) return null;
-    if (reminderChoice !== 'manual') return reminderChoice;
-    if (!reminderManualDate) return null;
-    const target = new Date(`${reminderManualDate}T09:00:00`);
-    if (isNaN(target.getTime())) return null;
-    const days = Math.ceil((target.getTime() - Date.now()) / 86_400_000);
-    return days >= 1 ? days : null;
-  };
-
-  // "קבע תזכורת בלבד" — סוגר את המשימה וקובע תזכורת לדוח חוזר *בלי לשלוח מייל* ובלי לדרוש
-  // דוח מצורף/נמען. שקול ל"שלחתי כבר דוח": onSent מסמן DONE ויוצר את משימת התזכורת העתידית.
-  const reminderDays = computeReminderDays();
-  const reminderOnly = () => {
-    if (reminderDays === null) { setErr('יש לבחור תזכורת (שבוע / 30 / 60 / 90 / ידני) לפני "קבע תזכורת בלבד"'); return; }
-    setSending(true);
-    setErr('');
-    onSent({ paymentStatus, reportReminderDays: reminderDays, reminderOnly: true });
-  };
-
   const send = async () => {
     if (!attached) {
       setErr('יש לצרף דוח לפני השליחה');
@@ -368,7 +333,7 @@ export function SendReportModal({
       });
       if (r.ok) {
         setStatus('נשלח ✓');
-        onSent({ paymentStatus, reportReminderDays: computeReminderDays(), reminderOnly: false });
+        onSent({ paymentStatus });
       } else {
         let msg = 'שליחת הדוח נכשלה';
         try {
@@ -507,61 +472,6 @@ export function SendReportModal({
                     בדוק שוב
                   </button>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* ── תזכורת לשליחת דוח חוזר ── */}
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-3">
-            <label className="mb-1 block text-sm font-semibold text-indigo-900">
-              🔁 לקבוע תזכורת לשליחת דוח חוזר?{' '}
-              <span className="font-normal text-indigo-500">(לא חובה)</span>
-            </label>
-            <div className="mb-2 text-[12px] leading-relaxed text-indigo-700/80">
-              המשימה תיסגר עכשיו, ותקפוץ שוב אוטומטית במועד שתבחר — עד אז היא מוסתרת מהרשימה.
-              נוח כשלוקח זמן (למשל 60 יום) עד שיש תוצאות לדוח חוזר.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {([
-                { v: 7, label: 'שבוע' },
-                { v: 30, label: '30 יום' },
-                { v: 60, label: '60 יום' },
-                { v: 90, label: '90 יום' },
-                { v: 'manual', label: 'ידני' },
-              ] as { v: 7 | 30 | 60 | 90 | 'manual'; label: string }[]).map((o) => (
-                <button
-                  key={String(o.v)}
-                  type="button"
-                  onClick={() => setReminderChoice((p) => (p === o.v ? null : o.v))}
-                  className={`rounded-xl border px-4 py-2 text-sm font-bold transition-colors ${
-                    reminderChoice === o.v
-                      ? 'border-indigo-600 bg-indigo-600 text-white'
-                      : 'border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-100'
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            {reminderChoice === 'manual' && (
-              <div className="mt-2.5 flex items-center gap-2">
-                <label className="shrink-0 text-sm font-medium text-indigo-900">תאריך התזכורת:</label>
-                <input
-                  type="date"
-                  value={reminderManualDate}
-                  onChange={(e) => setReminderManualDate(e.target.value)}
-                  className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                />
-              </div>
-            )}
-            {reminderChoice !== null && computeReminderDays() !== null && (
-              <div className="mt-2 text-[12px] font-medium text-indigo-700">
-                ✓ תיווצר משימת שליחת דוח חדשה בעוד {computeReminderDays()} ימים.
-              </div>
-            )}
-            {reminderChoice === 'manual' && reminderManualDate && computeReminderDays() === null && (
-              <div className="mt-2 text-[12px] font-medium text-red-600">
-                יש לבחור תאריך עתידי לתזכורת.
               </div>
             )}
           </div>
@@ -817,16 +727,6 @@ export function SendReportModal({
             onClick={onClose}
           >
             ביטול
-          </button>
-          {/* קבע תזכורת בלבד — סוגר את המשימה + קובע תזכורת לדוח חוזר, בלי לשלוח מייל */}
-          <button
-            type="button"
-            disabled={sending || reminderDays === null}
-            title={reminderDays === null ? 'בחר תזכורת (שבוע / 30 / 60 / 90 / ידני) כדי לאפשר' : 'סוגר את המשימה וקובע תזכורת — בלי לשלוח מייל'}
-            className="rounded-xl border-2 border-indigo-300 bg-indigo-50 px-6 py-3 text-base font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
-            onClick={reminderOnly}
-          >
-            {sending ? 'שומר…' : '🔁 קבע תזכורת בלבד'}
           </button>
           <button
             type="button"

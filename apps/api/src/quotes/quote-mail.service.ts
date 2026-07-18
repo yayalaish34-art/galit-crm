@@ -63,6 +63,10 @@ export class QuoteMailService {
       cc?: string[];
       /** עותק מוסתר — נמענים שיקבלו את המייל בלי שייראו לשאר הנמענים. */
       bcc?: string[];
+      /** אישור קריאה — Graph isReadReceiptRequested (התראה כשהנמען פותח את המייל). */
+      requestReadReceipt?: boolean;
+      /** אישור מסירה — Graph isDeliveryReceiptRequested (התראה כשהמייל מגיע לתיבה). */
+      requestDeliveryReceipt?: boolean;
       includeSignature?: boolean;
       /** מזהה החתימה הנבחרת (UserSignature). אם לא צוין — חתימת ברירת המחדל הישנה. */
       signatureId?: string;
@@ -322,6 +326,8 @@ ${signatureHtml}
         subject,
         html,
         attachments: graphAttachments,
+        requestReadReceipt: opts?.requestReadReceipt,
+        requestDeliveryReceipt: opts?.requestDeliveryReceipt,
       });
       via = 'graph';
     } else {
@@ -334,6 +340,11 @@ ${signatureHtml}
           cid: signatureImage.contentId, // referenced via cid: in the HTML
         });
       }
+      // אישור קריאה/מסירה בנפילה-חזרה ל-SMTP — דרך כותרות תקן:
+      // Disposition-Notification-To = אישור קריאה, Return-Receipt-To = אישור מסירה.
+      const receiptHeaders: Record<string, string> = {};
+      if (opts?.requestReadReceipt) receiptHeaders['Disposition-Notification-To'] = fromAddress;
+      if (opts?.requestDeliveryReceipt) receiptHeaders['Return-Receipt-To'] = fromAddress;
       await this.transporter.sendMail({
         from: fromAddress,
         to: recipientEmail,
@@ -342,6 +353,7 @@ ${signatureHtml}
         subject,
         html,
         attachments: smtpAttachments,
+        headers: Object.keys(receiptHeaders).length ? receiptHeaders : undefined,
       });
       via = 'smtp';
     }

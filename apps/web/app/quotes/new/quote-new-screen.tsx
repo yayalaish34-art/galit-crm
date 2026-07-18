@@ -713,6 +713,11 @@ export function QuoteNewScreen({
   const [customer, setCustomer] = useState('');
   const [date, setDate] = useState('');
   const [follow, setFollow] = useState('');
+  // מצב כפתורי "מעקב" המהירים (כמו בשלב הצעת המחיר בתוך משימה): busy בזמן יצירת המשימה,
+  // הודעת הצלחה קצרה, ושדה תאריך ידני מוצג/מוסתר.
+  const [followQuickBusy, setFollowQuickBusy] = useState(false);
+  const [followQuickDone, setFollowQuickDone] = useState(false);
+  const [followManualOpen, setFollowManualOpen] = useState(false);
   // פופ-אפ אזהרה: נפתח כשלוחצים "סגור" בלי שמולא תאריך מעקב (follow ריק).
   const [followWarnOpen, setFollowWarnOpen] = useState(false);
   const [status, setStatus] = useState('');
@@ -1234,12 +1239,9 @@ export function QuoteNewScreen({
       if (r.ok) {
         const d = await r.json();
         const subject = d.subject || '';
-        const rawBody = d.body || '';
-        // תמיד מוסיפים בסוף הגוף (מתחת לניסוח ה-AI) שורות על הקבצים המצורפים — אידמפוטנטי (בלי כפילות).
-        const ATTACH_NOTE = 'מצורפות\nתעודות הסמכה ופרופיל החברה';
-        const body = rawBody.includes('תעודות הסמכה ופרופיל החברה')
-          ? rawBody
-          : `${rawBody.replace(/\s+$/, '')}\n\n${ATTACH_NOTE}`;
+        // גוף המייל = ניסוח ה-AI כמות-שהוא. ההערה על הקבצים המצורפים כבר מופיעה
+        // למעלה בתוכן, ולכן לא מוסיפים שוב "מצורפות תעודות הסמכה ופרופיל החברה".
+        const body = d.body || '';
         emailDraftEditedRef.current = false; // התוכן הטרי מה-AI הוא הבסיס
         setAiDraft({ quoteId: qid, subject, body });
         // עדכון חי של חלון השליחה אם הוא פתוח על אותה הצעה
@@ -1275,6 +1277,13 @@ export function QuoteNewScreen({
   // ומחזיר {subject, body} ישירות — כדי ש-"שלח במייל" ינסח על הגרסה העדכנית *ואז* ישלח.
   // מחזיר null בכישלון (השולח ייפול חזרה לנוסח שכבר בטופס). מעדכן גם את הטופס להצגה חיה.
   async function draftFreshForSend(quoteId: string): Promise<{ subject: string; body: string } | null> {
+    // אין לנסח מחדש בלחיצה על "שלח" אם כבר יש טיוטה להצעה הזו — הניסוח נעשה פעם אחת
+    // בפתיחת חלון המייל (generateEmailDraft). אם המשתמש ערך ידנית — מכבדים את העריכה ולא
+    // דורסים אותה. בשני המקרים מחזירים את הטיוטה הקיימת (או null → נפילה-חזרה לטופס בצד הקורא).
+    if (emailDraftEditedRef.current) return null;
+    if (aiDraft && aiDraft.quoteId === quoteId) {
+      return { subject: aiDraft.subject, body: aiDraft.body };
+    }
     setAiBusy(true);
     setStatusMsg('✨ מנסח מייל…');
     try {
@@ -1292,11 +1301,9 @@ export function QuoteNewScreen({
       if (!r.ok) return null;
       const d = await r.json();
       const subject = d.subject || '';
-      const rawBody = d.body || '';
-      const ATTACH_NOTE = 'מצורפות\nתעודות הסמכה ופרופיל החברה';
-      const body = rawBody
-        ? (rawBody.includes('תעודות הסמכה ופרופיל החברה') ? rawBody : `${rawBody.replace(/\s+$/, '')}\n\n${ATTACH_NOTE}`)
-        : '';
+      // גוף המייל = ניסוח ה-AI כמות-שהוא. ההערה על הקבצים המצורפים כבר מופיעה
+      // למעלה בתוכן, ולכן לא מוסיפים שוב "מצורפות תעודות הסמכה ופרופיל החברה".
+      const body = d.body || '';
       if (!subject && !body) return null;
       emailDraftEditedRef.current = false;
       setAiDraft({ quoteId, subject, body });
@@ -1353,6 +1360,9 @@ export function QuoteNewScreen({
           subject: f.subject,
           messageBody: f.body,
           includeSignature: f.includeSignature,
+          // אישור קריאה/מסירה (Microsoft Graph)
+          requestReadReceipt: f.requestReadReceipt,
+          requestDeliveryReceipt: f.requestDeliveryReceipt,
           signatureId: f.signatureId || undefined,
           // מצב חתימה: השרת יצרף את קובץ ה-PDF עם כפתור "לחץ כאן לחתימה" מוטמע בפנים.
           signToken: token,
@@ -1643,6 +1653,9 @@ export function QuoteNewScreen({
     ccInput: '',
     bccList: [] as string[],
     bccInput: '',
+    // אישור קריאה/מסירה — Microsoft Graph: isReadReceiptRequested / isDeliveryReceiptRequested
+    requestReadReceipt: false,
+    requestDeliveryReceipt: false,
     subject: '',
     body: '',
     includeSignature: true,
@@ -2187,6 +2200,40 @@ export function QuoteNewScreen({
       followupTaskCreatedForQuoteRef.current = savedQuoteId;
     }
   }
+
+  /**
+   * כפתורי "מעקב" מהירים במודל "הצעת מחיר חדשה" (חדש → הצעה), במקביל לשלב הצעת המחיר
+   * שבתוך משימה: לחיצה קובעת את תאריך המעקב ושומרת את ההצעה — כך שהמעקב נפתח מיד כמשימת
+   * פולואפ (דרך maybeCreateFollowupTask שרץ ב-doSave כשאין taskId מקושר).
+   * @param date תאריך היעד למעקב.
+   */
+  async function scheduleFollowupQuick(date: Date): Promise<void> {
+    if (followQuickBusy) return;
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    setFollow(`${yyyy}-${mm}-${dd}`);
+    setFollowManualOpen(false);
+    setFollowQuickBusy(true);
+    try {
+      // doSave מייצר את משימת הפולואפ (maybeCreateFollowupTask) כשאין taskId מקושר.
+      const savedId = await doSave({ advanceStage: false });
+      if (savedId) {
+        setFollowQuickDone(true);
+        window.setTimeout(() => setFollowQuickDone(false), 3000);
+      }
+    } catch {
+      /* שקט — doSave כבר מציג שגיאה במידת הצורך */
+    } finally {
+      setFollowQuickBusy(false);
+    }
+  }
+  const scheduleFollowupInDays = (days: number): Promise<void> => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(9, 0, 0, 0);
+    return scheduleFollowupQuick(d);
+  };
 
   async function doSave(opts?: { advanceStage?: boolean }): Promise<string | null> {
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
@@ -3127,8 +3174,8 @@ export function QuoteNewScreen({
   return (
     <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
       {/* ── Header ── */}
-      <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-2 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-2">
+      <header className="sticky top-0 z-50 bg-white border-b border-gray-100 px-3 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-y-2 shadow-sm">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <div className="h-9 w-9 rounded-full bg-green-500 flex items-center justify-center text-white font-bold text-sm shadow-md">G</div>
           <div>
             <h1 className="text-base font-bold text-gray-800 leading-tight">הצעת מחיר {initialQuoteId ? '' : 'חדשה'}</h1>
@@ -3147,7 +3194,7 @@ export function QuoteNewScreen({
             <a href={onedriveWebUrl} target="_blank" rel="noopener noreferrer" className="mr-1 whitespace-nowrap text-xs font-semibold text-blue-600 underline hover:text-blue-700">לא נפתח ב-Word? פתח בדפדפן</a>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-end gap-4 sm:gap-3 w-full sm:w-auto">
           <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40" disabled={isBusy} onClick={async () => { await doSave({ advanceStage: false }); }}>
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
             <span className="text-[10px] text-gray-500">שמור</span>
@@ -3223,6 +3270,8 @@ export function QuoteNewScreen({
               ccInput: '',
               bccList: [],
               bccInput: '',
+              requestReadReceipt: false,
+              requestDeliveryReceipt: false,
               subject: defSubject,
               body: defBody,
               includeSignature: hasSig,
@@ -3629,6 +3678,61 @@ export function QuoteNewScreen({
                     <input type="date" className={inp} value={follow} onChange={(e) => setFollow(e.target.value)} />
                   </div>
                 </div>
+                {/*
+                  כפתורי "מעקב" מהירים — מוצגים רק במודל "הצעת מחיר חדשה" (ללא taskId).
+                  בשלב הצעת המחיר שבתוך משימה, הסרגל המקביל מוצג ע"י הדשבורד מעל המסך, לכן
+                  כאן מוסתר כדי לא לשכפל. לחיצה קובעת תאריך מעקב + שומרת → נפתחת משימת פולואפ.
+                */}
+                {!taskId && (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50/60 border border-blue-100 px-3 py-2">
+                    <span className="text-[12px] font-bold text-slate-700">פתח מעקב כמשימה:</span>
+                    {[
+                      { label: 'מחר', days: 1 },
+                      { label: '3 ימים', days: 3 },
+                      { label: 'שבוע', days: 7 },
+                    ].map((opt) => (
+                      <button
+                        key={opt.days}
+                        type="button"
+                        disabled={followQuickBusy}
+                        onClick={() => { void scheduleFollowupInDays(opt.days); }}
+                        className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors bg-white text-slate-600 border border-blue-100 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40"
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setFollowManualOpen((v) => !v)}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${followManualOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-blue-100 hover:bg-blue-100'}`}
+                    >
+                      ידני
+                    </button>
+                    {followManualOpen && (
+                      <>
+                        <input
+                          type="date"
+                          value={follow}
+                          onChange={(e) => setFollow(e.target.value)}
+                          className="rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px] font-bold"
+                        />
+                        <button
+                          type="button"
+                          disabled={followQuickBusy || !follow.trim()}
+                          onClick={() => {
+                            const d = new Date(follow);
+                            if (!isNaN(d.getTime())) { d.setHours(9, 0, 0, 0); void scheduleFollowupQuick(d); }
+                          }}
+                          className="rounded-xl px-3 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40"
+                        >
+                          קבע
+                        </button>
+                      </>
+                    )}
+                    {followQuickBusy && <span className="text-[11px] font-bold text-blue-600">שומר…</span>}
+                    {followQuickDone && !followQuickBusy && <span className="text-[11px] font-bold text-green-600">✓ המעקב נפתח כמשימה</span>}
+                  </div>
+                )}
               </div>
             </section>
 
@@ -3909,6 +4013,40 @@ export function QuoteNewScreen({
                     onBlur={() => emailForm.bccInput.includes('@') && addRecipients(emailForm.bccInput, 'bccList')}
                     placeholder="הוסף עותק מוסתר…" />
                 </div>
+              </div>
+
+              {/* ── אישור קריאה / מסירה (Microsoft Graph read/delivery receipt) ── */}
+              <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-3.5 py-3">
+                <div className="mb-2 text-sm font-semibold text-gray-700">אישור קריאה / מסירה</div>
+                <div className="flex flex-col gap-2">
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                      checked={emailForm.requestReadReceipt}
+                      onChange={(e) => setEmailForm((p) => ({ ...p, requestReadReceipt: e.target.checked }))}
+                    />
+                    <span>
+                      <span className="font-medium">אישור קריאה</span>
+                      <span className="text-gray-400"> — קבלת התראה כשהנמען פותח את המייל</span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-2.5 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                      checked={emailForm.requestDeliveryReceipt}
+                      onChange={(e) => setEmailForm((p) => ({ ...p, requestDeliveryReceipt: e.target.checked }))}
+                    />
+                    <span>
+                      <span className="font-medium">אישור מסירה</span>
+                      <span className="text-gray-400"> — קבלת התראה כשהמייל מגיע לתיבת הנמען</span>
+                    </span>
+                  </label>
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+                  שים לב: אישור קריאה תלוי בתוכנת המייל של הנמען וייתכן שיסרב לשלוח אותו. אישור מסירה אמין יותר.
+                </p>
               </div>
 
               {/* ── PREVIEW מושקע של המייל — הניסוח נוצר אוטומטית בשמירה (שאלון ה-AI הוסר) ── */}

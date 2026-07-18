@@ -281,11 +281,64 @@ export class QuoteSignatureService {
       },
     });
 
+    // חתימה התקבלה → מקדמים את משימת המכירה מ"פולואפ" ל"תיאום". best-effort.
+    await this.advanceTaskToCoordination(quote);
+
     // שליחת ההצעה החתומה חזרה לאיש המכירות ששלח לחתימה (Outlook שלו).
     // best-effort — לעולם לא מפיל את החתימה (היא כבר נשמרה בכרטיס הלקוח).
     await this.notifySignedToRequester(quote, meta, signedPdf, cleanSigner, signedAt);
 
     return { success: true as const };
+  }
+
+  /**
+   * חתימה על הצעה = הלקוח אישר → מקדמים את משימת המכירה משלב "פולואפ" ל"תיאום".
+   *
+   * מציאת המשימה:
+   *   1) quote.linkedEntityId — מזהה המשימה שממנה נוצרה ההצעה (המקור הישיר).
+   *   2) נפילה-חזרה: משימת פולואפ פתוחה של אותו לקוח (כמו handleQuoteSent בפרונט).
+   *
+   * מקדמים *רק* משימה שנמצאת כרגע בפולואפ (type SALES_FOLLOWUP / step4) — כדי לא
+   * למשוך אחורה משימה שכבר התקדמה (ביצוע/דוח) ולא לגעת במשימה סגורה.
+   * best-effort: כל כשל נרשם בלוג בלבד ולעולם לא מפיל את החתימה (שכבר נשמרה).
+   */
+  private async advanceTaskToCoordination(quote: any): Promise<void> {
+    try {
+      const FOLLOWUP_TYPES = ['SALES_FOLLOWUP', 'STEP4'];
+      const isFollowup = (t: any) => FOLLOWUP_TYPES.includes(String(t?.type || '').toUpperCase());
+
+      // 1) המשימה המקושרת ישירות להצעה.
+      let task: { id: string; type: string | null } | null = quote.linkedEntityId
+        ? await this.prisma.task.findUnique({
+            where: { id: quote.linkedEntityId },
+            select: { id: true, type: true },
+          })
+        : null;
+
+      // 2) נפילה-חזרה לפי לקוח: משימת פולואפ הפתוחה העדכנית ביותר של אותו לקוח.
+      if ((!task || !isFollowup(task)) && quote.customerId) {
+        task = await this.prisma.task.findFirst({
+          where: {
+            customerId: quote.customerId,
+            status: { notIn: ['DONE', 'CANCELLED'] },
+            type: { in: FOLLOWUP_TYPES },
+          },
+          orderBy: { updatedAt: 'desc' },
+          select: { id: true, type: true },
+        });
+      }
+
+      if (!task || !isFollowup(task)) return; // אין משימה בפולואפ — לא נוגעים בכלום.
+
+      await this.prisma.task.update({
+        where: { id: task.id },
+        // תיאום = type step5 + currentStage 4 (מסונכרן עם detectStep/סנכרון השלבים בפרונט).
+        data: { type: 'step5', currentStage: 4, currentStageChangedAt: new Date() },
+      });
+      this.logger.log(`quote ${quote.id} signed → task ${task.id} advanced פולואפ→תיאום`);
+    } catch (e: any) {
+      this.logger.warn(`advanceTaskToCoordination failed for quote ${quote?.id}: ${e?.message || e}`);
+    }
   }
 
   /**
@@ -382,6 +435,8 @@ export class QuoteSignatureService {
         quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
       },
     });
+    // linkedEntityId (מזהה המשימה שממנה נוצרה ההצעה) ו-customerId נטענים דרך include/scalar
+    // ברירת-מחדל של findUnique — משמשים ב-advanceTaskToCoordination אחרי החתימה.
     const meta = (quote?.digitalCertificateMeta as SignatureMeta | null) || null;
     if (!quote || !meta?.secret || meta.secret !== secret) {
       throw new NotFoundException('קישור החתימה אינו תקף או שפג תוקפו');

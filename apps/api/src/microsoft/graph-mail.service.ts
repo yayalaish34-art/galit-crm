@@ -19,6 +19,10 @@ export interface GraphMailMessage {
   /** HTML body */
   html: string;
   attachments?: GraphMailAttachment[];
+  /** אישור קריאה — Graph isReadReceiptRequested (התראה כשהנמען פותח את המייל) */
+  requestReadReceipt?: boolean;
+  /** אישור מסירה — Graph isDeliveryReceiptRequested (התראה כשהמייל מגיע לתיבה) */
+  requestDeliveryReceipt?: boolean;
 }
 
 @Injectable()
@@ -203,6 +207,15 @@ export class GraphMailService {
 
     if (msg.bcc?.length) {
       message.bccRecipients = msg.bcc.map((address) => ({ emailAddress: { address } }));
+    }
+
+    // אישור קריאה/מסירה — התראה חוזרת לתיבת השולח (אאוטלוק של המשתמש).
+    // אישור קריאה תלוי בלקוח המייל של הנמען; אישור מסירה אמין יותר.
+    if (msg.requestReadReceipt) {
+      message.isReadReceiptRequested = true;
+    }
+    if (msg.requestDeliveryReceipt) {
+      message.isDeliveryReceiptRequested = true;
     }
 
     if (msg.attachments?.length) {

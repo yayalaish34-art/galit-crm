@@ -503,19 +503,13 @@ export function CrmLegacyTopNav({
             onPick={() => closeFileAndRun(() => go('settings'))}
           />
           <FileMenuRow
-            label="תוכניות שירות"
+            label="פריטים / מחירון"
             disabled={!settingsOk}
-            title={
-              !settingsOk
-                ? 'אין הרשאה'
-                : canAdminRibbon
-                  ? 'תבניות הצעות מחיר / תוכניות'
-                  : 'שירותים — הגדרות'
-            }
+            title={!settingsOk ? 'אין הרשאה' : 'פריטים / מחירון — כל השירותים והמחירים'}
             active={current === 'settings'}
             onPick={() =>
               closeFileAndRun(() => {
-                onJumpSettingsTab(canAdminRibbon ? 'templates' : 'services');
+                onJumpSettingsTab('catalog');
               })
             }
           />
@@ -590,10 +584,11 @@ export function CrmLegacyTopNav({
             <DropdownRow
               label="הצעה"
               disabled={!canAccess(role, 'quotes')}
-              title={!canAccess(role, 'quotes') ? 'אין הרשאה' : 'הצעות מחיר'}
+              title={!canAccess(role, 'quotes') ? 'אין הרשאה' : 'הצעת מחיר חדשה'}
               onPick={() => {
                 closeMenus();
-                go('quotes');
+                // 'quote-new' פותח את עורך ההצעה (מודל), לא את רשימת ההצעות ('quotes').
+                go('quote-new');
               }}
             />
             <DropdownRow

@@ -131,6 +131,10 @@ export class QuotesController {
       messageBody?: string;
       cc?: string[];
       bcc?: string[];
+      /** אישור קריאה — Graph isReadReceiptRequested */
+      requestReadReceipt?: boolean;
+      /** אישור מסירה — Graph isDeliveryReceiptRequested */
+      requestDeliveryReceipt?: boolean;
       includeSignature?: boolean;
       signatureId?: string;
       preferOnedrive?: boolean;
@@ -149,6 +153,8 @@ export class QuotesController {
       body: body.messageBody,
       cc: body.cc,
       bcc: body.bcc,
+      requestReadReceipt: body.requestReadReceipt,
+      requestDeliveryReceipt: body.requestDeliveryReceipt,
       includeSignature: body.includeSignature,
       signatureId: body.signatureId,
       preferOnedrive: body.preferOnedrive,
