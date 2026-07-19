@@ -53,6 +53,20 @@ export class OutlookCalendarController {
   }
 
   /**
+   * שליפת פרטים מלאים לאירוע יחיד לפי מזהה — כולל גוף, מוזמנים עם סטטוס תגובה,
+   * מארגן, joinUrl של Teams, קטגוריות ועוד. משמש את העוזרת "גלי" כשהמשתמש
+   * מבקש פרטים נוספים על פגישה שכבר זוהתה (למשל אחרי get_calendar_events).
+   */
+  @Get('events/:id')
+  async getEvent(
+    @Headers('x-user-id') userId: string | undefined,
+    @Param('id') id: string,
+  ) {
+    if (!userId) throw new BadRequestException('Missing x-user-id');
+    return this.calendar.getEventByIdAsUser(userId, id);
+  }
+
+  /**
    * עדכון אירוע קיים ביומן המשתמש (רק השדות שסופקו). משמש את העוזרת "גלי".
    */
   @Patch('events/:id')

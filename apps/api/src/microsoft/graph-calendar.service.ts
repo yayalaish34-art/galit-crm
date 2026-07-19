@@ -69,6 +69,48 @@ export interface CalendarEventSummary {
   webLink: string | null;
 }
 
+/** סטטוס תגובת מוזמן ל-Graph: none / organizer / tentativelyAccepted / accepted / declined / notResponded */
+export type CalendarAttendeeResponse =
+  | 'none'
+  | 'organizer'
+  | 'tentativelyAccepted'
+  | 'accepted'
+  | 'declined'
+  | 'notResponded';
+
+export interface CalendarEventAttendee {
+  email: string;
+  name: string | null;
+  type: 'required' | 'optional' | 'resource';
+  responseStatus: CalendarAttendeeResponse;
+}
+
+/**
+ * פרטים מלאים לאירוע יחיד (עשירים יותר מ-CalendarEventSummary):
+ * body/bodyPreview, attendees עם סטטוס תגובה, organizer, joinUrl של Teams, ועוד.
+ */
+export interface CalendarEventDetails {
+  id: string;
+  subject: string | null;
+  body: { content: string; contentType: 'html' | 'text' } | null;
+  bodyPreview: string | null;
+  start: { dateTime: string; timeZone: string } | null;
+  end: { dateTime: string; timeZone: string } | null;
+  location: string | null;
+  attendees: CalendarEventAttendee[];
+  organizer: { email: string; name: string | null } | null;
+  isOnlineMeeting: boolean;
+  isAllDay: boolean;
+  /** קישור הצטרפות ל-Teams (רק אם isOnlineMeeting=true); שטוח מ-onlineMeeting.joinUrl של Graph */
+  joinUrl: string | null;
+  webLink: string | null;
+  categories: string[];
+  /** low / normal / high */
+  importance: string | null;
+  /** free / tentative / busy / oof / workingElsewhere / unknown */
+  showAs: string | null;
+}
+
 /**
  * יצירת אירועי יומן ב-Outlook בשם המשתמש המחובר, דרך Microsoft Graph.
  * האירוע נוצר ביומן של המארגן (POST /me/events). כל עובד/לקוח שנכלל ב-attendees
@@ -251,6 +293,116 @@ export class GraphCalendarService {
         webLink: typeof r.webLink === 'string' ? r.webLink : null,
       };
     });
+  }
+
+  /**
+   * שליפת פרטים מלאים לאירוע ספציפי מיומן ה-Outlook של המשתמש (GET /me/events/{id}).
+   * מחזיר את הגוף/הערות, רשימת המוזמנים עם סטטוס תגובה, המארגן, קישור Teams להצטרפות,
+   * קטגוריות, חשיבות ו-showAs — מעבר לשדות הרזים של listEventsAsUser. משמש את העוזרת
+   * "גלי" כשהמשתמש מבקש פרטים נוספים על פגישה מסוימת שכבר זוהתה. דורש Calendars.ReadWrite.
+   */
+  async getEventByIdAsUser(userId: string, eventId: string): Promise<CalendarEventDetails> {
+    const accessToken = await this.auth.getAccessToken(userId);
+    const select =
+      'id,subject,body,bodyPreview,start,end,location,attendees,organizer,' +
+      'isOnlineMeeting,isAllDay,onlineMeeting,webLink,categories,importance,showAs';
+    const url =
+      `https://graph.microsoft.com/v1.0/me/events/${encodeURIComponent(eventId)}` +
+      `?$select=${encodeURIComponent(select)}`;
+
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    });
+
+    if (!res.ok) {
+      const detail = await res.text();
+      this.logger.error(
+        `Graph get event failed for user ${userId} event ${eventId}: ${res.status} ${detail}`,
+      );
+      if (res.status === 403) {
+        throw new BadRequestException(
+          'אין הרשאת יומן ל-Outlook — יש להתחבר מחדש כדי לאשר את הרשאת היומן (Calendars.ReadWrite)',
+        );
+      }
+      if (res.status === 404) throw new BadRequestException('האירוע לא נמצא ביומן');
+      throw new BadRequestException('קריאת פרטי הפגישה מ-Outlook נכשלה');
+    }
+
+    const r = (await res.json()) as Record<string, any>;
+
+    const start =
+      r.start && typeof r.start === 'object'
+        ? { dateTime: String(r.start.dateTime ?? ''), timeZone: String(r.start.timeZone ?? '') }
+        : null;
+    const end =
+      r.end && typeof r.end === 'object'
+        ? { dateTime: String(r.end.dateTime ?? ''), timeZone: String(r.end.timeZone ?? '') }
+        : null;
+    const location =
+      r.location && typeof r.location === 'object' && typeof r.location.displayName === 'string'
+        ? r.location.displayName || null
+        : null;
+    const body =
+      r.body && typeof r.body === 'object'
+        ? {
+            content: String(r.body.content ?? ''),
+            contentType: (r.body.contentType === 'html' ? 'html' : 'text') as 'html' | 'text',
+          }
+        : null;
+    const organizerEmail = r.organizer?.emailAddress;
+    const organizer =
+      organizerEmail && typeof organizerEmail === 'object' && typeof organizerEmail.address === 'string'
+        ? {
+            email: organizerEmail.address,
+            name:
+              typeof organizerEmail.name === 'string' && organizerEmail.name
+                ? organizerEmail.name
+                : null,
+          }
+        : null;
+    const attendees: CalendarEventAttendee[] = Array.isArray(r.attendees)
+      ? r.attendees
+          .map((a: any): CalendarEventAttendee => ({
+            email: String(a?.emailAddress?.address ?? ''),
+            name:
+              typeof a?.emailAddress?.name === 'string' && a.emailAddress.name
+                ? a.emailAddress.name
+                : null,
+            type:
+              a?.type === 'optional' || a?.type === 'resource'
+                ? a.type
+                : 'required',
+            responseStatus: (typeof a?.status?.response === 'string'
+              ? a.status.response
+              : 'none') as CalendarAttendeeResponse,
+          }))
+          .filter((a: CalendarEventAttendee) => a.email.includes('@'))
+      : [];
+    const categories: string[] = Array.isArray(r.categories)
+      ? r.categories.filter((c: unknown): c is string => typeof c === 'string')
+      : [];
+
+    return {
+      id: typeof r.id === 'string' ? r.id : '',
+      subject: typeof r.subject === 'string' ? r.subject : null,
+      body,
+      bodyPreview: typeof r.bodyPreview === 'string' ? r.bodyPreview : null,
+      start,
+      end,
+      location,
+      attendees,
+      organizer,
+      isOnlineMeeting: r.isOnlineMeeting === true,
+      isAllDay: r.isAllDay === true,
+      joinUrl:
+        r.onlineMeeting && typeof r.onlineMeeting === 'object' && typeof r.onlineMeeting.joinUrl === 'string'
+          ? r.onlineMeeting.joinUrl
+          : null,
+      webLink: typeof r.webLink === 'string' ? r.webLink : null,
+      categories,
+      importance: typeof r.importance === 'string' ? r.importance : null,
+      showAs: typeof r.showAs === 'string' ? r.showAs : null,
+    };
   }
 
   /**
