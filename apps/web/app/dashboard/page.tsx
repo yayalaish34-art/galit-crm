@@ -4071,10 +4071,12 @@ function ManagerDashboard({
     }
   };
 
+  // הכרטיס מציג "לידים חדשים ברבעון" — לכן המודאל נפתח על אותה תקופה,
+  // אחרת מוצגים שני מספרים סותרים זה ליד זה (רבעון בכרטיס, 30 יום במודאל).
   const openLeadsModal = () => {
     setLeadsOpen(true);
-    setLeadsPeriod('last30');
-    loadLeadsAnalytics('last30');
+    setLeadsPeriod('quarter');
+    loadLeadsAnalytics('quarter');
   };
   const changeLeadsPeriod = (p: 'last30' | 'quarter' | 'half' | 'year') => {
     setLeadsPeriod(p);
@@ -8851,9 +8853,29 @@ function QuotesPage({
       else if (form.discountType === 'PERCENT') totalAmount = Math.max(0, withVat * (1 - discVal / 100));
       const globalDiscPct = form.discountType === 'PERCENT' ? discVal : 0;
 
+      // ── מספר ההצעה למסמך ──
+      // form.quoteNumber מתמלא רק בטעינת הצעה שמורה; בהצעה חדשה שטרם נשמרה הוא ריק,
+      // ואז {contractSurveyNumber} היה מרונדר ריק בשקט (nullGetter) — המסמך יוצא בלי
+      // "מס' הצעת מחיר". לכן מושכים את המספר מהשרת לפי מזהה ההצעה כשחסר בטופס.
+      let quoteNumberForDoc = (form.quoteNumber || '').trim();
+      if (!quoteNumberForDoc && currentQuoteId) {
+        try {
+          const qr = await apiFetch(apiUrl(`/quotes/${encodeURIComponent(currentQuoteId)}`), { authUser: currentUser });
+          if (qr.ok) {
+            const qd = await qr.json();
+            quoteNumberForDoc = String(qd?.quoteNumber ?? '').trim();
+          }
+        } catch { /* נשאר ריק — נטפל בהודעה למטה */ }
+      }
+      if (!quoteNumberForDoc) {
+        setDocxMergeBusy(false);
+        setError('להצעה עדיין אין מספר — שמרו את ההצעה לפני הורדת קובץ ה-Word.');
+        return;
+      }
+
       const mergeData = buildQuoteDocxMergeBody({
-        quoteNumber: form.quoteNumber || '—',
-        contractSurveyNumber: form.quoteNumber || '',
+        quoteNumber: quoteNumberForDoc,
+        contractSurveyNumber: quoteNumberForDoc,
         quoteDateYmd: form.validityDate,
         validUntilYmd: form.validityDate,
         customerName: customer.name,

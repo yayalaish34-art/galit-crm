@@ -453,8 +453,10 @@ export class DashboardService {
     const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
     const thisQuarterStart = new Date(now.getFullYear(), qStartMonth, 1);
     const prevQuarterStart = new Date(now.getFullYear(), qStartMonth - 3, 1); // JS מנרמל חודש שלילי לשנה הקודמת
-    const leadsNewThisQuarter = leads.filter((l) => l.createdAt >= thisQuarterStart).length;
-    const leadsNewPrevQuarter = leads.filter((l) => l.createdAt >= prevQuarterStart && l.createdAt < thisQuarterStart).length;
+    // פנייה שנדחתה (DISMISSED) אינה נספרת כליד — זהה לסינון במודאל leadsAnalytics.
+    const countableLeads = leads.filter((l) => l.status !== 'DISMISSED');
+    const leadsNewThisQuarter = countableLeads.filter((l) => l.createdAt >= thisQuarterStart).length;
+    const leadsNewPrevQuarter = countableLeads.filter((l) => l.createdAt >= prevQuarterStart && l.createdAt < thisQuarterStart).length;
     // אחוז שינוי מול הרבעון הקודם. אם ברבעון הקודם היו 0 לידים — אין בסיס להשוואה (null).
     const leadsQuarterChangePct = leadsNewPrevQuarter > 0
       ? Math.round(((leadsNewThisQuarter - leadsNewPrevQuarter) / leadsNewPrevQuarter) * 100)
@@ -779,14 +781,51 @@ export class DashboardService {
   }
 
   /**
+   * מחלץ "מקור הגעה" מנושא/גוף מייל של IncomingLead — לטבלה אין עמודת source.
+   * זהה ללוגיקת leadSourcePage בפרונט (dashboard/page.tsx), לפי סדר עדיפות:
+   * 1) תווית מפורשת ("מקור: ...", "דף נחיתה: ...", "utm_source=...")
+   * 2) URL מלא של אחד מאתרי גלית — דומיין + הנתיב הראשון
+   * 3) שם דומיין galit-* כטקסט חופשי
+   * ריק → הפילוח יסווג כ"לא צוין".
+   */
+  private extractSourceFromEmail(subject?: string | null, body?: string | null): string {
+    const hay = `${subject || ''}\n${body || ''}`;
+    const labelRe =
+      /(?:^|\n)\s*(?:מקור(?:\s*הפנייה|\s*הליד)?|עמוד(?:\s*מקור)?|אתר|דף\s*נחיתה|landing\s*page|source|utm_source)\s*[:=：]\s*([^\n<>]+)/i;
+    const lbl = hay.match(labelRe);
+    if (lbl && lbl[1].trim()) {
+      return lbl[1].trim().replace(/^https?:\/\//i, '').replace(/[.,;]\s*$/, '').slice(0, 80);
+    }
+    const url = hay.match(/https?:\/\/([a-z0-9.-]*galit[a-z0-9.-]*)(\/[a-z0-9\-_/]*)?/i);
+    if (url) {
+      const host = url[1].replace(/^www\./i, '');
+      const firstSeg = (url[2] || '').split('/').filter(Boolean)[0] || '';
+      return (firstSeg ? `${host}/${firstSeg}` : host).slice(0, 80);
+    }
+    const dom = hay.match(/\bgalit[a-z0-9-]*(?:\.co\.il|\.com|\.net)?\b/i);
+    if (dom) return dom[0].replace(/^www\./i, '').slice(0, 80);
+    return '';
+  }
+
+  /**
    * גבולות חלון הזמן לפי התקופה שנבחרה. מחזיר { start, prevStart } —
    * prevStart מתחיל את התקופה הקודמת (באורך זהה) להשוואת מגמה.
-   * period: 'month' (30 יום), 'quarter' (רבעון = 90 יום), 'half' (חצי שנה = 180),
-   * 'year' (שנה). 'last30' זהה ל-month ומשמש כברירת המחדל של המסך.
+   *
+   * 'quarter' = רבעון קלנדרי (1/1, 1/4, 1/7, 1/10) — זהה להגדרה בכרטיס
+   * "לידים חדשים ברבעון" בדשבורד המנהל. בעבר זה היה 90 יום מתגלגלים, מה
+   * שגרם לכך ש"חודש" (30 יום) יצא גדול מ"רבעון" באמצע רבעון קלנדרי.
+   * שאר התקופות מתגלגלות: 'month'/'last30' (30 יום), 'half' (180), 'year' (365).
    */
   private leadPeriodWindow(period: string, now = new Date()) {
     const day = 24 * 60 * 60 * 1000;
-    const spanDays = period === 'year' ? 365 : period === 'half' ? 180 : period === 'quarter' ? 90 : 30;
+    if (period === 'quarter') {
+      const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+      const start = new Date(now.getFullYear(), qStartMonth, 1);
+      const prevStart = new Date(now.getFullYear(), qStartMonth - 3, 1); // JS מנרמל חודש שלילי לשנה הקודמת
+      const spanDays = Math.max(1, Math.round((now.getTime() - start.getTime()) / day));
+      return { start, prevStart, spanDays };
+    }
+    const spanDays = period === 'year' ? 365 : period === 'half' ? 180 : 30;
     const start = new Date(now.getTime() - spanDays * day);
     const prevStart = new Date(now.getTime() - 2 * spanDays * day);
     return { start, prevStart, spanDays };
@@ -869,8 +908,9 @@ export class DashboardService {
 
   /**
    * אנליטיקת לידים למסך שנפתח בלחיצה על כרטיס "לידים חדשים" בדשבורד מנהל.
-   * מקור האמת = מה שהעובד הזין ב"מקור הגעה" (Customer.leadSource / Lead.source),
-   * ולא ניחוש מדומיין המייל. מסונן לפי createdAt בתקופה הנבחרת.
+   * מקור האמת = IncomingLead בלבד (פניות שנכנסו מהמייל) — אותו מקור כמו כרטיס
+   * "לידים חדשים ברבעון", כדי ששני המספרים יהיו עקביים. מסונן לפי createdAt
+   * בתקופה הנבחרת, ללא פניות שנדחו (DISMISSED). "מקור הגעה" מחולץ מגוף המייל.
    *
    * מחזיר:
    *  - period, range: התקופה בפועל.
@@ -891,27 +931,24 @@ export class DashboardService {
     const { start, prevStart, spanDays } = this.leadPeriodWindow(period, now);
 
     try {
-      // כל הלידים = לקוחות (Customer.leadSource) + טבלת Lead (source), מהתקופה + מהתקופה הקודמת (למגמה).
-      // חשוב: מסננים לקוחות שיובאו מהמערכת הישנה (importLegacyId != null) — אלה 30k רשומות
-      // ללא "מקור הגעה" ועם createdAt=שעת-הייבוא, שהיו מציפות את הפילוח ב"לא צוין". סופרים רק
-      // לידים/פניות שנפתחו בפועל בטופס (שם העובד מזין את מקור ההגעה).
-      const [customers, leads] = await Promise.all([
-        this.prisma.customer.findMany({
-          where: { createdAt: { gte: prevStart }, importLegacyId: null },
-          select: { id: true, leadSource: true, createdAt: true },
-        }),
-        this.prisma.lead.findMany({
-          where: { createdAt: { gte: prevStart }, importLegacyId: null },
-          select: { id: true, source: true, createdAt: true, referralCompany: true },
-        }),
-      ]);
+      // מקור האמת היחיד = IncomingLead (פניות שנכנסו מהמייל) — זהה למקור של כרטיס
+      // "לידים חדשים ברבעון" בדשבורד המנהל, כדי שהכרטיס והמודאל שנפתח בלחיצה עליו
+      // יספרו בדיוק את אותו הדבר. בעבר נספרו כאן Customer+Lead, מה שהחזיר מספר גדול
+      // יותר מהרבעוני (85 מול 47) — שילוב בלתי-אפשרי שנבע משתי טבלאות שונות.
+      // DISMISSED (פנייה שנדחתה) לא נספרת כליד.
+      const incoming = await this.prisma.incomingLead.findMany({
+        where: { createdAt: { gte: prevStart }, status: { not: 'DISMISSED' } },
+        select: { id: true, subject: true, body: true, createdAt: true },
+      });
 
-      // איחוד לרשומה אחת: { source, createdAt, referralCompany }. שתי הטבלאות = "לידים שנפתחו".
+      // ל-IncomingLead אין עמודת "מקור הגעה" — הוא מחולץ מהנושא/גוף המייל
+      // (תווית "מקור:"/"utm_source="/דומיין גלית), בדיוק כמו בכרטיס הליד בפרונט.
       type Row = { source?: string | null; createdAt: Date; referralCompany?: string | null };
-      const allRows: Row[] = [
-        ...customers.map((c) => ({ source: c.leadSource, createdAt: c.createdAt, referralCompany: null as string | null })),
-        ...leads.map((l) => ({ source: l.source, createdAt: l.createdAt, referralCompany: l.referralCompany })),
-      ];
+      const allRows: Row[] = incoming.map((l) => ({
+        source: this.extractSourceFromEmail(l.subject, l.body),
+        createdAt: l.createdAt,
+        referralCompany: null as string | null,
+      }));
       const inWindow = allRows.filter((r) => r.createdAt >= start);
       const inPrevWindow = allRows.filter((r) => r.createdAt >= prevStart && r.createdAt < start);
 
