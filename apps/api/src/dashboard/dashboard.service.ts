@@ -1129,10 +1129,12 @@ export class DashboardService {
 
   /**
    * אנליטיקת הכנסות למסך שנפתח בלחיצה על כרטיס "הכנסה" בדשבורד המנהל.
-   * "הכנסה" = הצעות מחיר שאושרו/נחתמו (APPROVED/SIGNED) — כל הצעה שמהנדס הוציא
-   * וסומנה כמאושרת. הסכום נלקח מ-Quote.totalAmount (נפילה ל-amount) — אותו סכום
-   * שממוזג למסמך/מייל, אך מהשדה המובנה (אמין יותר מפירסור טקסט המייל).
-   * מסונן לפי updatedAt (תאריך הסגירה בפועל — אין שדה won-date ייעודי).
+   * "הכנסה" = הצעות מחיר שאושרו/נחתמו — status APPROVED/SIGNED, *או*
+   * digitalSignatureStatus=SIGNED (הצעה שהלקוח חתם דיגיטלית; הצעות שנחתמו לפני
+   * התיקון נשארו עם status=SENT ולכן נעדרו מכאן). הסכום נלקח מ-Quote.totalAmount
+   * (נפילה ל-amount) — אותו סכום שממוזג למסמך/מייל, אך מהשדה המובנה
+   * (אמין יותר מפירסור טקסט המייל).
+   * מסונן לפי signedAt כשקיים (תאריך החתימה בפועל), אחרת updatedAt.
    *
    * מחזיר:
    *  - stats: סה"כ הכנסה, מס' הזמנות, ממוצע להזמנה, שינוי מול תקופה קודמת.
@@ -1157,7 +1159,15 @@ export class DashboardService {
         this.prisma.user.findMany({ select: { id: true, name: true } }),
         this.prisma.quote.findMany({
           where: {
-            status: { in: [QuoteStatus.APPROVED, (QuoteStatus as any).SIGNED] },
+            OR: [
+              { status: { in: [QuoteStatus.APPROVED, (QuoteStatus as any).SIGNED] } },
+              // הצעות שנחתמו דיגיטלית — זרימת החתימה מסמנת digitalSignatureStatus,
+              // והצעות ישנות (לפני התיקון) נשארו עם status=SENT. גם הן הכנסה.
+              { digitalSignatureStatus: 'SIGNED' as any },
+            ],
+            // חלון התאריכים נסנן ב-JS לפי signedAt ?? updatedAt (ר' dateOf למטה);
+            // כאן מספיק חסם רחב — signedAt תמיד ≤ updatedAt, כך שרשומה רלוונטית
+            // לעולם לא תיחתך: כל מה שנחתם אחרי prevStart עודכן גם הוא אחרי prevStart.
             updatedAt: { gte: prevStart },
           },
           include: {
@@ -1170,8 +1180,10 @@ export class DashboardService {
       const userName = new Map<string, string>(users.map((u) => [u.id, u.name]));
 
       const amountOf = (q: any) => Number(q.totalAmount ?? q.amount ?? 0);
-      const inWindow = quotes.filter((q) => q.updatedAt >= start);
-      const inPrevWindow = quotes.filter((q) => q.updatedAt >= prevStart && q.updatedAt < start);
+      // תאריך ההכנסה: signedAt כשיש (מדויק — מתי הלקוח באמת חתם), אחרת updatedAt.
+      const dateOf = (q: any): Date => (q.signedAt as Date | null) ?? q.updatedAt;
+      const inWindow = quotes.filter((q) => dateOf(q) >= start);
+      const inPrevWindow = quotes.filter((q) => dateOf(q) >= prevStart && dateOf(q) < start);
 
       const total = inWindow.reduce((a, q) => a + amountOf(q), 0);
       const prevTotal = inPrevWindow.reduce((a, q) => a + amountOf(q), 0);
@@ -1205,7 +1217,7 @@ export class DashboardService {
       };
       const tsMap = new Map<string, number>();
       for (const q of inWindow) {
-        const k = labelFor(q.updatedAt);
+        const k = labelFor(dateOf(q));
         tsMap.set(k, (tsMap.get(k) || 0) + amountOf(q));
       }
       const timeSeries = Array.from(tsMap.entries())
@@ -1213,15 +1225,19 @@ export class DashboardService {
         .sort((a, b) => (a.bucket < b.bucket ? -1 : 1));
 
       // ── רשימת ההזמנות (הצעות מאושרות) — לתצוגת "הכנסות לפי הזמנות" ──
-      const orders = inWindow.map((q) => ({
-        id: q.id,
-        quoteNumber: q.quoteNumber || q.orderReferenceNumber || '—',
-        customerName: q.customer?.name || q.customerName || '—',
-        engineerName: (q.opportunity?.assignedUserId && userName.get(q.opportunity.assignedUserId)) || q.salesRepresentativeName || q.executorName || 'לא משויך',
-        amount: Math.round(amountOf(q)),
-        status: q.status,
-        date: q.updatedAt.toISOString(),
-      }));
+      // ממוין לפי תאריך התצוגה (signedAt ?? updatedAt) ולא לפי ה-orderBy של ה-DB,
+      // אחרת הצעה שנחתמה מזמן ועודכנה אתמול תקפוץ לראש הרשימה.
+      const orders = [...inWindow]
+        .sort((a, b) => dateOf(b).getTime() - dateOf(a).getTime())
+        .map((q) => ({
+          id: q.id,
+          quoteNumber: q.quoteNumber || q.orderReferenceNumber || '—',
+          customerName: q.customer?.name || q.customerName || '—',
+          engineerName: (q.opportunity?.assignedUserId && userName.get(q.opportunity.assignedUserId)) || q.salesRepresentativeName || q.executorName || 'לא משויך',
+          amount: Math.round(amountOf(q)),
+          status: q.status,
+          date: dateOf(q).toISOString(),
+        }));
 
       return {
         updatedAt: now.toISOString(),

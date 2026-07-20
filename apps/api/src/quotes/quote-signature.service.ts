@@ -274,6 +274,9 @@ export class QuoteSignatureService {
     await this.prisma.quote.update({
       where: { id: quote.id },
       data: {
+        // status (ולא רק digitalSignatureStatus) — הדשבורד סופר הכנסות לפי status,
+        // ובלעדיו הצעה שנחתמה דיגיטלית נשארת SENT ולא נספרת ב"הכנסות לפי הזמנות".
+        status: 'SIGNED',
         digitalSignatureStatus: 'SIGNED',
         signedAt,
         signedPdfPath: 'signature:digital',
