@@ -19801,16 +19801,72 @@ function TasksPage({
                             const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || linkedCustomerForGate?.phone || '').replace(/[^\d+]/g, '');
                             const fu3Email = t.leadEmail || linkedLeadForHeader?.email || linkedCustomerForGate?.email || '';
                             const waLink3 = fu3Phone ? whatsAppLink(fu3Phone) : null;
+                            /* ── לקוח עסקי: הבאנר חייב להציג גם חברה וגם איש קשר (שם + טלפון לכל אחד) ──
+                               isPrivateGate/fdGate/ccContactsGate מגיעים מה-scope החיצוני של השורה. */
+                            const fu3CompanyName = (
+                              fdGate.company
+                              || t.leadCompany
+                              || linkedLeadForHeader?.company
+                              || (linkedCustomerForGate?.type && linkedCustomerForGate.type !== 'PRIVATE'
+                                    ? ((linkedCustomerForGate as any).companyname || linkedCustomerForGate.name)
+                                    : '')
+                              || ''
+                            ).trim();
+                            const fu3IsCompany = !isPrivateGate && !!fu3CompanyName;
+                            // איש הקשר: קודם איש הקשר שנבחר בכרטיס, אחר כך זה ששמור על הלקוח
+                            const fu3PrimaryContact = ccContactsGate.find((c) => c.id && c.id === (fdGate as any).contactId)
+                              || ccContactsGate.find((c) => c.isPrimary && (c.fullName?.trim() || c.phone?.trim()))
+                              || ccContactsGate.find((c) => c.fullName?.trim() || c.phone?.trim())
+                              || null;
+                            const fu3ContactName = (
+                              fu3PrimaryContact?.fullName
+                              || fdGate.contactName
+                              || linkedCustomerForGate?.contactName
+                              || (fu3IsCompany ? followupCustomerName : '')
+                              || ''
+                            ).trim();
+                            const fu3ContactPhoneRaw = fu3PrimaryContact?.phone || '';
+                            const fu3ContactPhone = (fu3ContactPhoneRaw || fu3Phone || '').replace(/[^\d+]/g, '');
+                            // טלפון החברה: הטלפון הראשי של הלקוח/הליד. אם הוא זהה לטלפון איש הקשר — אין טעם לכפול.
+                            const fu3CompanyPhone = fu3Phone;
                             const coach = aiCoach[t.id];
                             const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
                               <div className="px-8 pb-4 space-y-3" style={{ direction: 'rtl' }}>
-                                {/* ── באנר שם + טלפון (הועבר לכאן משלב הצעת המחיר) ── */}
-                                {(followupCustomerName || fu3Phone) && (
+                                {/* ── באנר שם + טלפון (הועבר לכאן משלב הצעת המחיר) ──
+                                     לקוח עסקי: שם חברה + טלפון חברה, וגם שם איש קשר + טלפון איש קשר. */}
+                                {(fu3IsCompany ? (fu3CompanyName || fu3ContactName || fu3Phone) : (followupCustomerName || fu3Phone)) && (
                                   <div className="rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-2">
-                                    {followupCustomerName && <div className="text-xl font-extrabold text-blue-900 leading-tight">{followupCustomerName}</div>}
-                                    {fu3Phone && (
-                                      <a href={`tel:${fu3Phone}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3Phone}</a>
+                                    {fu3IsCompany ? (
+                                      <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
+                                        <div>
+                                          <div className="text-[11px] font-bold text-blue-500/80">שם חברה</div>
+                                          <div className="text-xl font-extrabold text-blue-900 leading-tight">{fu3CompanyName || '—'}</div>
+                                          <div className="mt-1 text-[11px] font-bold text-blue-500/80">טלפון חברה</div>
+                                          {fu3CompanyPhone ? (
+                                            <a href={`tel:${fu3CompanyPhone}`} className="inline-block text-lg font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3CompanyPhone}</a>
+                                          ) : (
+                                            <div className="text-lg font-bold text-slate-400">—</div>
+                                          )}
+                                        </div>
+                                        <div className="sm:border-r sm:border-blue-100 sm:pr-8">
+                                          <div className="text-[11px] font-bold text-blue-500/80">שם איש קשר</div>
+                                          <div className="text-xl font-extrabold text-blue-900 leading-tight">{fu3ContactName || '—'}</div>
+                                          <div className="mt-1 text-[11px] font-bold text-blue-500/80">טלפון איש קשר</div>
+                                          {fu3ContactPhone ? (
+                                            <a href={`tel:${fu3ContactPhone}`} className="inline-block text-lg font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3ContactPhone}</a>
+                                          ) : (
+                                            <div className="text-lg font-bold text-slate-400">—</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        {followupCustomerName && <div className="text-xl font-extrabold text-blue-900 leading-tight">{followupCustomerName}</div>}
+                                        {fu3Phone && (
+                                          <a href={`tel:${fu3Phone}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{fu3Phone}</a>
+                                        )}
+                                      </>
                                     )}
                                   </div>
                                 )}
