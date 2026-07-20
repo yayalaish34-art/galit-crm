@@ -15,6 +15,8 @@ model User {
   role     UserRole @default(SALES)
   status       UserStatus  @default(ACTIVE)
   phone        String?
+  /// מספרי וואטסאפ נוספים לאותו משתמש (מכשירים נוספים) — ראה model UserPhone.
+  extraPhones  UserPhone[]
   department   String?
   // Multi-select service ownership (used for lead routing)
   serviceDepartments String[] @default([])
@@ -89,6 +91,90 @@ model User {
   salesRepQuotes        Quote[] @relation("QuoteSalesRep")
   performerQuotes       Quote[] @relation("QuotePerformer")
   followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")
+  /// בקשות אישור מנהל שהעובד הזה שלח
+  approvalRequests      ApprovalRequest[] @relation("ApprovalRequester")
+  /// בקשות אישור מנהל שהמשתמש הזה אישר/דחה
+  approvalDecisions     ApprovalRequest[] @relation("ApprovalDecider")
+}
+
+/// בקשת אישור מנהל — נוצרת כשעובד מבקש להמשיך בשלב שחסום לו.
+///
+/// המקרה היחיד כרגע: לקוח פרטי שטרם שילם — העובד לא יכול לעבור לשלב הביצוע
+/// ולא יכול לשלוח את הדוח בלי אישור של יורם/גיא. הבקשה נוצרת מהפופ-אפ בצד
+/// העובד, מופיעה למנהלים במסך ההתראות, ורק אחרי APPROVED העובד משוחרר להמשיך.
+///
+/// ייחודיות: אין יותר מבקשה PENDING אחת לאותו (taskId, kind) — נאכף באינדקס
+/// חלקי במיגרציה, כדי שלחיצות חוזרות לא ייצרו ערימת בקשות כפולות.
+model ApprovalRequest {
+  id           String                @id @default(uuid())
+  kind         ApprovalKind
+  status       ApprovalStatus        @default(PENDING)
+  /// המשימה שעליה מבוקש האישור
+  taskId       String
+  task         Task                  @relation("TaskApprovalRequests", fields: [taskId], references: [id], onDelete: Cascade)
+  /// הלקוח (לתצוגה למנהל — שם/סוג); nullable כי משימה יכולה להיות בלי לקוח משויך
+  customerId   String?
+  /// snapshot לתצוגה, כדי שמסך המנהל לא יצטרך לטעון משימות/לקוחות
+  customerName String?
+  taskTitle    String?
+  /// סיבת הבקשה כפי שהוצגה לעובד (למשל "לקוח פרטי שטרם שילם")
+  reason       String?               @db.Text
+  requesterId  String
+  requester    User                  @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  /// מי הכריע (אישר/דחה)
+  deciderId    String?
+  decider      User?                 @relation("ApprovalDecider", fields: [deciderId], references: [id])
+  decidedAt    DateTime?
+  /// הערת המנהל בדחייה (מוצגת לעובד)
+  decisionNote String?               @db.Text
+  /// מתי הוקפצה התראה למנהל (כדי לא להקפיץ שוב)
+  notifiedAt   DateTime?
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  @@index([status])
+  @@index([taskId])
+  @@index([requesterId])
+}
+
+enum ApprovalKind {
+  /// מעבר לשלב הביצוע ללקוח פרטי שטרם שילם
+  EXEC_UNPAID_PRIVATE
+  /// שליחת הדוח ללקוח פרטי שטרם שילם
+  REPORT_UNPAID_PRIVATE
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// מספרי וואטסאפ נוספים למשתמש (מכשיר שני/שלישי וכו').
+///
+/// למה: זהות בבוט הוואטסאפ נקבעת לפי טלפון → שורת "User". פתיחת שורת משתמש
+/// נוספת עבור מכשיר שני הייתה מפצלת את הזהות — userId אחר פירושו משימות אחרות
+/// *וחיבור Outlook אחר* (ה-CRM שומר את חיבור היומן לפי userId). טבלה זו שומרת
+/// על userId אחד, ולכן כל המספרים מגיעים לאותן משימות ולאותו יומן.
+///
+/// אבטחה: מספר שמופיע כאן מקבל את מלוא ההרשאות של המשתמש (תפקיד, הרשאות,
+/// וקריאה/כתיבה/מחיקה ביומן ה-Outlook שלו). להוסיף רק מספרים של אותו אדם.
+///
+/// phoneDigits מאוחסן מנורמל (ספרות בלבד, פורמט 972XXXXXXXXX) כדי שהחיפוש
+/// יהיה ודאי ולא תלוי בפורמט הכתיבה (מקפים/רווחים/+/0 מוביל).
+model UserPhone {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// המספר כפי שהוזן, לתצוגה בלבד (למשל "+972 53-774-0988").
+  phone       String
+  /// ספרות בלבד, מנורמל ל-972XXXXXXXXX. זהו שדה החיפוש בפועל.
+  phoneDigits String   @unique
+  /// תיאור חופשי, למשל "טלפון חברה" / "מכשיר שני".
+  label       String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
 }
 
 /// חתימת מייל מרובה למשתמש — תמונה + כותרת. מאפשר לעובד להחזיק כמה חתימות
@@ -887,6 +973,8 @@ model Task {
 
   attachments TaskAttachment[]
   taskField   TaskField?
+  /// בקשות אישור מנהל שנפתחו על המשימה (לקוח פרטי שטרם שילם)
+  approvalRequests ApprovalRequest[] @relation("TaskApprovalRequests")
 
   @@index([incomingLeadId])
 }
@@ -932,12 +1020,23 @@ model TaskField {
   missingReportInfoNote String?  @db.Text
   managerNotifiedAt    DateTime?
 
+  /// אוטומציית "הנחיות לפני הבדיקה" — רלוונטית רק לבדיקות איכות אוויר (קודים 72 / 69).
+  /// preVisitEmailDueAt = 09:00 ביום שלפני מועד הבדיקה; ה-cron שולח כשהגיע המועד
+  /// וחותם preVisitEmailSentAt כדי שלא יישלח פעמיים.
+  preVisitEmailEnabled Boolean   @default(false)
+  preVisitEmailSku     String?
+  preVisitEmailDueAt   DateTime?
+  preVisitEmailSentAt  DateTime?
+  preVisitEmailError   String?   @db.Text
+
   updatedByUserId      String?
 
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
   @@index([taskId])
+  /// לסריקת ה-cron של "הנחיות לפני הבדיקה" — שליפת מיילים שהגיע מועדם וטרם נשלחו.
+  @@index([preVisitEmailEnabled, preVisitEmailSentAt, preVisitEmailDueAt])
 }
 
 /// קבצים מצורפים למשימה (למשל: מסמך הצעת מחיר ממוזג) — נשמרים ישירות ב-DB כך שיישארו זמינים תמיד

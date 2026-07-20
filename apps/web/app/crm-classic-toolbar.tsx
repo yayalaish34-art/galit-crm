@@ -29,6 +29,7 @@ import {
   TrendingUp,
   Bot,
   Mic,
+  Bell,
 } from 'lucide-react';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
@@ -75,9 +76,11 @@ type NavBtnProps = {
   disabled?: boolean;
   title?: string;
   active?: boolean;
+  /** מונה להצגה כבאדג' אדום על האייקון (0/undefined = לא מוצג) */
+  badge?: number;
 };
 
-function NavBtn({ label, Icon, onClick, disabled, title, active }: NavBtnProps) {
+function NavBtn({ label, Icon, onClick, disabled, title, active, badge }: NavBtnProps) {
   return (
     <button
       type="button"
@@ -92,7 +95,14 @@ function NavBtn({ label, Icon, onClick, disabled, title, active }: NavBtnProps) 
         disabled && 'cursor-not-allowed opacity-45 hover:border-transparent hover:bg-transparent',
       )}
     >
-      <Icon className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
+      <span className="relative inline-flex">
+        <Icon className="h-6 w-6 shrink-0 text-slate-600 sm:h-7 sm:w-7" />
+        {!!badge && badge > 0 && (
+          <span className="absolute -left-1.5 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+            {badge > 99 ? '99+' : badge}
+          </span>
+        )}
+      </span>
       <span className="line-clamp-2 max-w-[6rem] text-center text-slate-700">{label}</span>
     </button>
   );
@@ -287,6 +297,7 @@ export function CrmLegacyTopNav({
   onSearchQuote,
   onNewCustomer,
   isCustomerCard = false,
+  pendingApprovalCount = 0,
 }: {
   current: string;
   currentUserRole: string;
@@ -306,6 +317,8 @@ export function CrmLegacyTopNav({
   onNewCustomer?: () => void;
   /** When true, render the toolbar with a premium light style instead of the dark green */
   isCustomerCard?: boolean;
+  /** מספר בקשות אישור מנהל ממתינות — מוצג כבאדג' על "התראות". 0 למי שאינו מאשר. */
+  pendingApprovalCount?: number;
 }) {
   const role = currentUserRole;
   const [ribbonTab, setRibbonTab] = useState<RibbonTab>('main');
@@ -773,6 +786,16 @@ export function CrmLegacyTopNav({
                   title={!canAccess(role, 'dashboard') ? 'אין הרשאה' : 'דשבורד'}
                   active={current === 'dashboard'}
                   onClick={() => go('dashboard')}
+                />
+                <Sep />
+                <NavBtn
+                  label="התראות"
+                  Icon={Bell}
+                  disabled={!canAccess(role, 'alerts')}
+                  title={pendingApprovalCount > 0 ? `${pendingApprovalCount} בקשות אישור ממתינות` : 'התראות'}
+                  active={current === 'alerts'}
+                  badge={pendingApprovalCount}
+                  onClick={() => go('alerts')}
                 />
                 <Sep />
                 {/* "משוב" ו"לא רלוונטי" אוחדו לתוך דשבורד המנהל (סקשנים ייעודיים) — הוסרו כטאבים נפרדים. */}

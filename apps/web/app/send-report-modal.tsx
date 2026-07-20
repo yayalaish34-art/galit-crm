@@ -97,21 +97,84 @@ export function SendReportModal({
   // שאלת תשלום לפני השליחה — לא חובה, רק תזכורת לוודא שהלקוח שילם.
   const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | null>(null);
 
-  // אישור מנהל לשליחת דוח ללקוח פרטי שטרם שילם:
+  // אישור מנהל לשליחת דוח ללקוח פרטי שטרם שילם. האישור אינו הצהרה עצמית של
+  // העובד — נשלחת בקשה ליורם/גיא, והשליחה נפתחת רק אחרי APPROVED.
   //  managerApproval = null   → עדיין לא נשאל / לא רלוונטי
-  //  managerApproval = 'yes'  → התקבל אישור מנהל, מותר לשלוח
-  //  managerApproval = 'no'   → אין אישור מנהל, אסור לשלוח (בעיה)
+  //  managerApproval = 'yes'  → הבקשה אושרה, מותר לשלוח
+  //  managerApproval = 'no'   → הבקשה נדחתה, אסור לשלוח
   const [managerApproval, setManagerApproval] = useState<'yes' | 'no' | null>(null);
   const [showApprovalPrompt, setShowApprovalPrompt] = useState(false);
+  /** 'ask' = מסך הבקשה, 'waiting' = הבקשה נשלחה וממתינה להכרעה */
+  const [approvalStage, setApprovalStage] = useState<'ask' | 'waiting'>('ask');
+  const [approvalSending, setApprovalSending] = useState(false);
+  const [approvalErr, setApprovalErr] = useState('');
+  const [decisionNote, setDecisionNote] = useState<string | null>(null);
+  const [deciderName, setDeciderName] = useState<string | null>(null);
 
-  // בחירת סטטוס "טרם שולם". ללקוח פרטי — פותח פופ-אפ אישור מנהל.
+  // בחירת סטטוס "טרם שולם". ללקוח פרטי — פותח את פופ-אפ בקשת אישור המנהל.
   const chooseUnpaid = () => {
     setPaymentStatus((p) => (p === 'unpaid' ? null : 'unpaid'));
     if (isPrivateCustomer) {
       setManagerApproval(null);
+      setApprovalStage('ask');
+      setApprovalErr('');
       setShowApprovalPrompt(true);
     }
   };
+
+  // שליחת בקשת האישור למנהלים.
+  const sendApprovalRequest = async () => {
+    setApprovalSending(true);
+    setApprovalErr('');
+    try {
+      const r = await apiFetch(apiUrl('/approvals'), {
+        method: 'POST',
+        authUser: currentUser as never,
+        body: JSON.stringify({
+          taskId: task.id,
+          kind: 'REPORT_UNPAID_PRIVATE',
+          reason: 'שליחת דוח — לקוח פרטי שטרם שילם',
+        }),
+      });
+      if (!r.ok) throw new Error('failed');
+      setApprovalStage('waiting');
+    } catch {
+      setApprovalErr('שליחת הבקשה נכשלה. נסה שוב.');
+    } finally {
+      setApprovalSending(false);
+    }
+  };
+
+  // פולינג אחר הכרעת המנהל בזמן ההמתנה (20ש' — קצב הבית).
+  useEffect(() => {
+    if (!showApprovalPrompt || approvalStage !== 'waiting') return;
+    let alive = true;
+    const check = async () => {
+      try {
+        const r = await apiFetch(
+          apiUrl(`/approvals/status?taskId=${encodeURIComponent(task.id)}&kind=REPORT_UNPAID_PRIVATE`),
+          { authUser: currentUser as never },
+        );
+        if (!r.ok || !alive) return;
+        const d = await r.json();
+        if (d.status === 'APPROVED') {
+          setManagerApproval('yes');
+          setShowApprovalPrompt(false);
+          setErr('');
+        } else if (d.status === 'REJECTED') {
+          setManagerApproval('no');
+          setDecisionNote(d.decisionNote ?? null);
+          setDeciderName(d.deciderName ?? null);
+          setShowApprovalPrompt(false);
+        }
+      } catch {
+        /* שקט — פולינג */
+      }
+    };
+    void check();
+    const id = window.setInterval(check, 20_000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [showApprovalPrompt, approvalStage, task.id, currentUser]);
 
   // אתחול בעת פתיחה
   useEffect(() => {
@@ -121,6 +184,10 @@ export function SendReportModal({
     setPaymentStatus(null);
     setManagerApproval(null);
     setShowApprovalPrompt(false);
+    setApprovalStage('ask');
+    setApprovalErr('');
+    setDecisionNote(null);
+    setDeciderName(null);
     setToList(defaultEmail && defaultEmail.includes('@') ? [defaultEmail.trim()] : []);
     setCcList([]);
     setCcDropdownOpen(false);
@@ -301,8 +368,10 @@ export function SendReportModal({
       return;
     }
     if (blockedNoApproval) {
-      // לקוח פרטי שטרם שילם — חובה אישור מנהל.
+      // לקוח פרטי שטרם שילם — חובה אישור של יורם/גיא.
       setErr('לא ניתן לשלוח דוח ללקוח פרטי שטרם שילם ללא אישור מנהל.');
+      setApprovalStage('ask');
+      setApprovalErr('');
       setShowApprovalPrompt(true);
       return;
     }
@@ -459,17 +528,17 @@ export function SendReportModal({
             {paymentStatus === 'unpaid' && (
               <div className="mt-2 text-[12px] font-medium text-red-700">
                 {isPrivateCustomer && managerApproval === 'yes'
-                  ? '✅ התקבל אישור מנהל — אפשר לשלוח את הדוח.'
+                  ? '✅ הבקשה אושרה ע"י המנהל — אפשר לשלוח את הדוח.'
                   : isPrivateCustomer && managerApproval === 'no'
-                    ? '🚫 אין אישור מנהל — לא ניתן לשלוח דוח ללקוח פרטי שטרם שילם.'
+                    ? `🚫 הבקשה נדחתה${deciderName ? ` ע"י ${deciderName}` : ''}${decisionNote ? ` — ${decisionNote}` : ''}`
                     : 'שים לב: הלקוח עדיין לא שילם — אפשר לשלוח את הדוח בכל זאת.'}
                 {isPrivateCustomer && managerApproval === 'no' && (
                   <button
                     type="button"
-                    onClick={() => setShowApprovalPrompt(true)}
+                    onClick={() => { setApprovalStage('ask'); setApprovalErr(''); setShowApprovalPrompt(true); }}
                     className="ms-2 underline hover:text-red-900"
                   >
-                    בדוק שוב
+                    בקש שוב
                   </button>
                 )}
               </div>
@@ -750,29 +819,54 @@ export function SendReportModal({
             dir="rtl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-3xl">
-              🛡️
-            </div>
-            <div className="mb-2 text-xl font-bold text-gray-800">קיבלת אישור מנהל?</div>
-            <div className="mb-6 text-sm leading-relaxed text-gray-500">
-              הלקוח מסווג כלקוח פרטי וטרם שילם. לשליחת הדוח נדרש אישור מנהל.
-            </div>
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => { setManagerApproval('no'); setShowApprovalPrompt(false); }}
-                className="flex-1 rounded-xl border border-red-200 bg-white px-4 py-3 text-base font-bold text-red-700 hover:bg-red-50"
-              >
-                לא
-              </button>
-              <button
-                type="button"
-                onClick={() => { setManagerApproval('yes'); setShowApprovalPrompt(false); setErr(''); }}
-                className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white hover:bg-emerald-600"
-              >
-                כן, קיבלתי אישור
-              </button>
-            </div>
+            {approvalStage === 'ask' ? (
+              <>
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-3xl">
+                  🛡️
+                </div>
+                <div className="mb-2 text-xl font-bold text-gray-800">נדרש אישור מנהל</div>
+                <div className="mb-6 text-sm leading-relaxed text-gray-500">
+                  הלקוח מסווג כלקוח פרטי וטרם שילם. לשליחת הדוח נדרש אישור של יורם או גיא.
+                </div>
+                {approvalErr && (
+                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{approvalErr}</div>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowApprovalPrompt(false)}
+                    className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    ביטול
+                  </button>
+                  <button
+                    type="button"
+                    disabled={approvalSending}
+                    onClick={() => void sendApprovalRequest()}
+                    className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-base font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {approvalSending ? 'שולח…' : 'שלח לאישור מנהל'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-3xl">
+                  ⏳
+                </div>
+                <div className="mb-2 text-xl font-bold text-gray-800">הבקשה נשלחה — ממתין לאישור מנהל</div>
+                <div className="mb-6 text-sm leading-relaxed text-gray-500">
+                  הבקשה מופיעה כעת אצל יורם וגיא במסך ההתראות. ברגע שתאושר תוכל לשלוח את הדוח.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowApprovalPrompt(false)}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  סגור
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

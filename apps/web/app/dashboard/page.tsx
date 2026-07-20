@@ -165,6 +165,34 @@ const PRESET_CUSTOMER_TYPE_LABELS: Record<string, string> = {
   SUPPLIER: 'ספק',
 };
 
+/**
+ * בדיקות שעבורן קיים מסמך "הנחיות לפני הבדיקה" שנשלח ללקוח אוטומטית יום לפני מועד התיאום.
+ * המפתח הוא קוד השירות (productName) מתוך SERVICE_CATEGORIES; חייב להישאר מסונכרן עם
+ * apps/api/src/tasks/pre-visit-guidelines.ts (שם נמצא נוסח ההנחיות המלא שנשלח בפועל).
+ */
+const PRE_VISIT_GUIDELINE_TESTS: Record<string, { testName: string; summary: string[] }> = {
+  '72': {
+    testName: 'בדיקת איכות אוויר תוך-מבנית',
+    summary: [
+      'להשאיר את המבנה במצב שימוש רגיל — בלי אוורור חריג.',
+      '12 שעות לפני: להימנע מעישון, בישול ממושך, נרות/קטורת, תרסיסים וניקוי יסודי.',
+      'לא להפעיל מטהרי אוויר / מכשירי אוזון / מפיצי ריח.',
+      'מיזוג ואוורור יפעלו כרגיל; לא לצבוע/לשפץ/להדביר לפני הבדיקה.',
+      'לאפשר גישה לכל החדרים ולהכין מידע על התלונה.',
+    ],
+  },
+  '69': {
+    testName: 'בדיקת עובש באוויר',
+    summary: [
+      'לסגור חלונות ודלתות חיצוניות 24 שעות לפני הבדיקה.',
+      'לא לבצע ניקיון יסודי, שאיבה חזקה או שטיפה חריגה.',
+      'לא לרסס, לחטא, לצבוע או לטפל בעובש לפני הבדיקה.',
+      'לא להשתמש במטהרי אוויר, נרות ריחניים או קטורת.',
+      'מוקד עובש גלוי — לא לנקות אותו לפני הבדיקה.',
+    ],
+  },
+};
+
 const REMINDER_QUICK_OPTIONS: { key: string; label: string; minutes?: number; days?: number }[] = [
   { key: '1h', label: 'שעה', minutes: 60 },
   { key: '4h', label: '4 שעות', minutes: 240 },
@@ -645,6 +673,23 @@ type DashboardStats = {
 };
 
 type AppUserRole = 'admin' | 'technician' | 'sales' | 'manager' | 'expert' | 'billing';
+
+/** סוג בקשת אישור מנהל. מקביל ל-enum ApprovalKind ב-API. */
+type ApprovalKind = 'EXEC_UNPAID_PRIVATE' | 'REPORT_UNPAID_PRIVATE';
+
+/** בקשת אישור מנהל כפי שהיא מוחזרת מ-/approvals. */
+type ApprovalRequestRow = {
+  id: string;
+  kind: ApprovalKind;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  taskId: string;
+  customerName: string | null;
+  taskTitle: string | null;
+  reason: string | null;
+  requesterName: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+};
 
 type AppUser = {
   id: string;
@@ -13133,7 +13178,7 @@ function SettingsPage({
     basePrice: '0',
     profitPercent: '',
     billingUnit: 'יחידה',
-    vatPercent: '17',
+    vatPercent: '18',
     isActive: true,
     requiresQuantity: true,
     requiresSiteVisit: false,
@@ -13210,7 +13255,7 @@ function SettingsPage({
       basePrice: '0',
       profitPercent: '',
       billingUnit: 'יחידה',
-      vatPercent: '17',
+      vatPercent: '18',
       isActive: true,
       requiresQuantity: true,
       requiresSiteVisit: false,
@@ -13232,7 +13277,7 @@ function SettingsPage({
       basePrice: String(it.basePrice ?? 0),
       profitPercent: it.profitPercent === null || it.profitPercent === undefined ? '' : String(it.profitPercent),
       billingUnit: it.billingUnit || 'יחידה',
-      vatPercent: String(it.vatPercent ?? 17),
+      vatPercent: String(it.vatPercent ?? 18),
       isActive: it.isActive !== false,
       requiresQuantity: it.requiresQuantity !== false,
       requiresSiteVisit: !!it.requiresSiteVisit,
@@ -15559,6 +15604,9 @@ function TasksPage({
     inviteCustomer: boolean;
     employeeIds: string[]; // עובדים נוספים שיוזמנו כמשתתפים
     attachments: CoordAttachment[]; // קבצים לצירוף לפגישה (אופציונלי)
+    /** אוטומציית "הנחיות לפני הבדיקה" — נשלחות ללקוח יום לפני, ב-09:00.
+     *  רלוונטי רק לשתי בדיקות איכות האוויר (PRE_VISIT_SKUS); דלוק כברירת מחדל. */
+    sendPreVisitGuidelines: boolean;
   };
   const [coordForms, setCoordForms] = useState<Record<string, Partial<CoordMeetingForm>>>({});
   const [coordDurationManual, setCoordDurationManual] = useState<Record<string, boolean>>({});
@@ -15761,6 +15809,16 @@ function TasksPage({
   const [copiedPhrase, setCopiedPhrase] = useState<string | null>(null);
   /** מזהה המשימה שעבורה נפתחה אזהרת "לא ביצעת מעקב" בסגירת שלב הצעת המחיר (null = סגור). */
   const [quoteCloseWarnTaskId, setQuoteCloseWarnTaskId] = useState<string | null>(null);
+  /**
+   * שער תשלום לפני "מעבר לביצוע". אותה לוגיקה כמו בשלב הפקת הדוח:
+   *  stage='payment'  → "האם הלקוח שילם?"
+   *  stage='approval' → "קיבלת אישור מנהל?" (רק ללקוח פרטי שטרם שילם)
+   * לקוח פרטי שטרם שילם ואין לו אישור מנהל — חסום מלעבור לשלב הביצוע.
+   * לקוח שאינו פרטי (חברה) — אפשר להמשיך גם ללא תשלום.
+   */
+  const [execPaymentGate, setExecPaymentGate] = useState<
+    { taskId: string; stage: 'payment' | 'approval' | 'blocked' } | null
+  >(null);
   /**
    * משימות שנקבע להן מעקב בשלב "הצעת מחיר" וממתינות לקידום לשלב "פולואפ".
    * הקידום בפועל מתבצע רק כשעוזבים את המשימה (סגירה/מעבר) — כדי לא לקטוע עריכת ההצעה.
@@ -20321,6 +20379,11 @@ function TasksPage({
                             const inviteCustomer = form.inviteCustomer ?? false;
                             const employeeIds = form.employeeIds ?? [];
                             const attachments = form.attachments ?? [];
+                            // ── "צ'קליסט הנחיות ללקוח" ──
+                            // מוצג רק כשסוג הבדיקה הוא אחת משתי בדיקות איכות האוויר שיש להן הנחיות.
+                            // דלוק כברירת מחדל; נשלח אוטומטית יום לפני מועד הבדיקה ב-09:00.
+                            const preVisitTest = PRE_VISIT_GUIDELINE_TESTS[String(t.productName ?? '').trim()];
+                            const sendPreVisitGuidelines = form.sendPreVisitGuidelines ?? true;
 
                             const otherEmployees = users.filter((u) => u.email && u.status !== 'לא פעיל' && hasHebrewName(u.name));
                             const busy = !!coordBusy[t.id];
@@ -20424,6 +20487,9 @@ function TasksPage({
                                         : null,
                                       specialInstructions: notes || null,
                                       updatedByUserId: currentUser.id,
+                                      // אוטומציית הנחיות — השרת מתזמן ל-09:00 ביום שלפני הבדיקה
+                                      // ומתעלם אם סוג הבדיקה אינו אחד משני קודי איכות האוויר.
+                                      preVisitEmailEnabled: !!preVisitTest && sendPreVisitGuidelines,
                                     }),
                                   });
                                   const fd = fr.ok ? await fr.json().catch(() => null) : null;
@@ -20677,6 +20743,73 @@ function TasksPage({
                                     )}
                                   </div>
 
+                                  {/* ── צ'קליסט הנחיות ללקוח — רק לבדיקות איכות אוויר שיש להן נוסח הנחיות ── */}
+                                  {preVisitTest && (() => {
+                                    // התזמון מוצג רק אחרי שנבחר תאריך; המייל נשלח 09:00 ביום שלפני.
+                                    const dayBefore = date ? new Date(`${date}T09:00:00`) : null;
+                                    if (dayBefore) dayBefore.setDate(dayBefore.getDate() - 1);
+                                    const dayBeforeLabel = dayBefore
+                                      ? dayBefore.toLocaleDateString('he-IL', { weekday: 'long', day: '2-digit', month: '2-digit' })
+                                      : null;
+                                    const tooLate = !!dayBefore && dayBefore.getTime() <= Date.now();
+                                    return (
+                                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5">
+                                        <label className="flex items-start gap-2 cursor-pointer select-none">
+                                          <input
+                                            type="checkbox"
+                                            className="mt-0.5 h-4 w-4 accent-emerald-600"
+                                            checked={sendPreVisitGuidelines}
+                                            onChange={(e) => updateCoordForm(t.id, { sendPreVisitGuidelines: e.target.checked })}
+                                          />
+                                          <span className="min-w-0">
+                                            <span className="flex items-center gap-1.5 text-[13px] font-bold text-emerald-800">
+                                              <ClipboardList className="h-4 w-4" />
+                                              שלח ללקוח צ&apos;קליסט הנחיות לפני הבדיקה
+                                            </span>
+                                            <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">
+                                              {preVisitTest.testName}
+                                            </span>
+                                          </span>
+                                        </label>
+
+                                        {sendPreVisitGuidelines && (
+                                          <div className="mt-2.5 space-y-2 border-t border-emerald-200/70 pt-2.5">
+                                            <ul className="space-y-1 pr-1">
+                                              {preVisitTest.summary.map((s) => (
+                                                <li key={s} className="flex gap-1.5 text-[11.5px] leading-relaxed text-slate-600">
+                                                  <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-emerald-500" />
+                                                  <span>{s}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                            <div className="text-[11px] text-slate-500">
+                                              ההנחיות המלאות יישלחו בגוף המייל — זהו תקציר לתצוגה בלבד.
+                                            </div>
+                                            {/* מצב התזמון: אין תאריך / מאוחר מדי / מתוזמן; וכן חוסר כתובת מייל */}
+                                            {!date ? (
+                                              <div className="rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">
+                                                בחרו תאריך לפגישה כדי לתזמן את שליחת ההנחיות.
+                                              </div>
+                                            ) : tooLate ? (
+                                              <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-700">
+                                                מועד השליחה (יום לפני, 09:00) כבר חלף — ההנחיות לא יישלחו אוטומטית.
+                                              </div>
+                                            ) : (
+                                              <div className="rounded-lg bg-white px-2.5 py-1.5 text-[11px] font-bold text-emerald-700">
+                                                יישלח אוטומטית ב{dayBeforeLabel} בשעה 09:00
+                                              </div>
+                                            )}
+                                            {!customerEmail && (
+                                              <div className="rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-bold text-amber-700">
+                                                ללקוח אין כתובת מייל — לא ניתן לשלוח את ההנחיות.
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+
                                   <label className="flex items-center gap-2 cursor-pointer select-none">
                                     <input type="checkbox" className="h-4 w-4 accent-blue-600" checked={isOnline} onChange={(e) => updateCoordForm(t.id, { isOnline: e.target.checked })} />
                                     <Video className="h-4 w-4 text-blue-500" />
@@ -20793,7 +20926,8 @@ function TasksPage({
                                     label: 'מעבר לביצוע',
                                     circleBg: '#16a34a',
                                     icon: <ArrowUpRight className="h-7 w-7 text-white" />,
-                                    onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 5 })),
+                                    // לפני המעבר לביצוע — שאלת תשלום (ואם לקוח פרטי שטרם שילם: אישור מנהל).
+                                    onClick: () => setExecPaymentGate({ taskId: t.id, stage: 'payment' }),
                                   })}
                                 </div>
                               </div>
@@ -20997,6 +21131,30 @@ function TasksPage({
       </div>
       )}
 
+      {/* ═══ שער תשלום לפני "מעבר לביצוע" (אותה לוגיקה כמו בהפקת הדוח) ═══ */}
+      {execPaymentGate && (
+        <PaymentApprovalGate
+          currentUser={currentUser}
+          taskId={execPaymentGate.taskId}
+          kind="EXEC_UNPAID_PRIVATE"
+          isPrivateCustomer={
+            ((customers.find(
+              (c) => c.id === tasks.find((x) => x.id === execPaymentGate.taskId)?.customerId,
+            ) as any)?.type as string | undefined) === 'PRIVATE'
+          }
+          title="האם הלקוח שילם?"
+          subtitle="לפני המעבר לשלב הביצוע — ודא שהתקבל תשלום מהלקוח."
+          approvalSubtitle="הלקוח מסווג כלקוח פרטי וטרם שילם. למעבר לשלב הביצוע נדרש אישור של יורם או גיא."
+          blockedTitle="לא ניתן לעבור לשלב הביצוע"
+          reason="מעבר לשלב ביצוע — לקוח פרטי שטרם שילם"
+          onClose={() => setExecPaymentGate(null)}
+          onAllowed={() => {
+            setManualStepOverride((prev) => ({ ...prev, [execPaymentGate.taskId]: 5 }));
+            setExecPaymentGate(null);
+          }}
+        />
+      )}
+
       {/* ═══ אזהרת "לא ביצעת מעקב" — בסגירת שלב הצעת המחיר בלי שנקבע מעקב ═══ */}
       {quoteCloseWarnTaskId && (
         <div
@@ -21171,34 +21329,431 @@ function EnvironmentalTestsPage() {
   );
 }
 
-function AlertsPage() {
-  const alerts = [
-    { title: 'הצעת מחיר פגה בעוד יומיים', icon: Clock3 },
-    { title: 'פרויקט ממתין להשלמת דוח', icon: AlertTriangle },
-    { title: 'הצעת מחיר נחתמה ונפתח פרויקט חדש', icon: CheckCircle2 },
-  ];
+/**
+ * מונה בקשות אישור ממתינות — לבאדג' בפעמון. מחזיר 0 למי שאינו מאשר,
+ * כך שאפשר לקרוא לזה מכל משתמש בלי בדיקת הרשאה בצד הלקוח.
+ */
+function usePendingApprovalCount(currentUser: AppUser | null) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!currentUser) { setCount(0); return; }
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/approvals/pending-count'), { authUser: currentUser });
+        if (!r.ok || !alive) return;
+        const d = await r.json();
+        setCount(Number(d?.count) || 0);
+      } catch {
+        /* שקט — רענון רקע */
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 20_000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [currentUser]);
+  return count;
+}
+
+/**
+ * מעקב אחר בקשת אישור של משימה — הפופ-אפ בצד העובד עושה פולינג עד להכרעה.
+ * מופעל רק כשיש taskId (כלומר כשהפופ-אפ פתוח במצב "ממתין").
+ */
+function useApprovalStatus(
+  currentUser: AppUser,
+  taskId: string | null,
+  kind: ApprovalKind,
+  enabled: boolean,
+) {
+  const [state, setState] = useState<{
+    status: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+    deciderName?: string | null;
+    decisionNote?: string | null;
+  }>({ status: 'NONE' });
+
+  useEffect(() => {
+    if (!enabled || !taskId) { setState({ status: 'NONE' }); return; }
+    let alive = true;
+    const load = async () => {
+      try {
+        const r = await apiFetch(
+          apiUrl(`/approvals/status?taskId=${encodeURIComponent(taskId)}&kind=${kind}`),
+          { authUser: currentUser },
+        );
+        if (!r.ok || !alive) return;
+        setState(await r.json());
+      } catch {
+        /* שקט — פולינג */
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 20_000);
+    return () => { alive = false; window.clearInterval(id); };
+  }, [currentUser, taskId, kind, enabled]);
+
+  return state;
+}
+
+/** שליחת בקשת אישור מנהל. מוחזר true אם הבקשה נקלטה. */
+async function requestManagerApproval(
+  currentUser: AppUser,
+  taskId: string,
+  kind: ApprovalKind,
+  reason: string,
+): Promise<boolean> {
+  try {
+    const r = await apiFetch(apiUrl('/approvals'), {
+      method: 'POST',
+      authUser: currentUser,
+      body: JSON.stringify({ taskId, kind, reason }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * שער תשלום + אישור מנהל. משמש גם לפני "מעבר לביצוע" וגם לפני שליחת הדוח.
+ *
+ * הזרימה:
+ *   payment  → "האם הלקוח שילם?"  · שולם → onAllowed
+ *                                  · טרם שולם + חברה → onAllowed
+ *                                  · טרם שולם + לקוח פרטי → approval
+ *   approval → "שלח לאישור מנהל"  → נוצרת ApprovalRequest → waiting
+ *   waiting  → פולינג כל 20ש'      · APPROVED → onAllowed
+ *                                  · REJECTED → rejected (עם סיבת המנהל)
+ *
+ * העובד חסום עד שיורם/גיא מאשרים; אין יותר הצהרה עצמית.
+ */
+function PaymentApprovalGate({
+  currentUser,
+  taskId,
+  kind,
+  isPrivateCustomer,
+  title,
+  subtitle,
+  approvalSubtitle,
+  blockedTitle,
+  reason,
+  onClose,
+  onAllowed,
+}: {
+  currentUser: AppUser;
+  taskId: string;
+  kind: ApprovalKind;
+  isPrivateCustomer: boolean;
+  title: string;
+  subtitle: string;
+  approvalSubtitle: string;
+  blockedTitle: string;
+  reason: string;
+  onClose: () => void;
+  onAllowed: () => void;
+}) {
+  const [stage, setStage] = useState<'payment' | 'approval' | 'waiting' | 'rejected'>('payment');
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState('');
+
+  const approval = useApprovalStatus(currentUser, taskId, kind, stage === 'waiting');
+
+  // בכניסה לשלב האישור — אם כבר קיימת בקשה למשימה הזו, מדלגים ישר למצב הנכון,
+  // כדי שרענון דף לא יאבד בקשה שכבר נשלחה.
+  useEffect(() => {
+    if (stage !== 'approval') return;
+    let alive = true;
+    void (async () => {
+      try {
+        const r = await apiFetch(
+          apiUrl(`/approvals/status?taskId=${encodeURIComponent(taskId)}&kind=${kind}`),
+          { authUser: currentUser },
+        );
+        if (!r.ok || !alive) return;
+        const d = await r.json();
+        if (d.status === 'PENDING') setStage('waiting');
+        else if (d.status === 'APPROVED') onAllowed();
+      } catch {
+        /* שקט — נשארים במסך הבקשה */
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, taskId, kind]);
+
+  // תגובה להכרעת המנהל בזמן ההמתנה.
+  useEffect(() => {
+    if (stage !== 'waiting') return;
+    if (approval.status === 'APPROVED') onAllowed();
+    else if (approval.status === 'REJECTED') setStage('rejected');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [approval.status, stage]);
+
+  const send = async () => {
+    setSending(true);
+    setErr('');
+    const ok = await requestManagerApproval(currentUser, taskId, kind, reason);
+    setSending(false);
+    if (ok) setStage('waiting');
+    else setErr('שליחת הבקשה נכשלה. נסה שוב.');
+  };
+
+  return (
+    <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-3xl border border-gray-200 bg-white p-7 text-center shadow-2xl"
+        dir="rtl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {stage === 'payment' ? (
+          <>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-3xl">💰</div>
+            <div className="mb-2 text-xl font-bold text-gray-800">{title}</div>
+            <div className="mb-6 text-sm leading-relaxed text-gray-500">{subtitle}</div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                // לקוח פרטי שטרם שילם → נדרש אישור מנהל. חברה → אפשר להמשיך.
+                onClick={() => (isPrivateCustomer ? setStage('approval') : onAllowed())}
+                className="flex-1 rounded-xl border border-red-200 bg-white px-4 py-3 text-base font-bold text-red-700 hover:bg-red-50"
+              >
+                ⏳ טרם שולם
+              </button>
+              <button
+                type="button"
+                onClick={onAllowed}
+                className="flex-1 rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-white hover:bg-emerald-600"
+              >
+                ✅ שולם
+              </button>
+            </div>
+          </>
+        ) : stage === 'approval' ? (
+          <>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-3xl">🛡️</div>
+            <div className="mb-2 text-xl font-bold text-gray-800">נדרש אישור מנהל</div>
+            <div className="mb-6 text-sm leading-relaxed text-gray-500">{approvalSubtitle}</div>
+            {err && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{err}</div>}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-600 hover:bg-gray-50"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                disabled={sending}
+                onClick={() => void send()}
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-base font-bold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {sending ? 'שולח…' : 'שלח לאישור מנהל'}
+              </button>
+            </div>
+          </>
+        ) : stage === 'waiting' ? (
+          <>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-100 text-3xl">⏳</div>
+            <div className="mb-2 text-xl font-bold text-gray-800">הבקשה נשלחה — ממתין לאישור מנהל</div>
+            <div className="mb-6 text-sm leading-relaxed text-gray-500">
+              הבקשה מופיעה כעת אצל יורם וגיא במסך ההתראות. ברגע שתאושר תוכל להמשיך — אפשר לסגור
+              את החלון ולחזור מאוחר יותר.
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-600 hover:bg-gray-50"
+            >
+              סגור
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-3xl">🚫</div>
+            <div className="mb-2 text-xl font-bold text-gray-800">{blockedTitle}</div>
+            <div className="mb-2 text-sm leading-relaxed text-gray-500">
+              הבקשה נדחתה{approval.deciderName ? ` ע"י ${approval.deciderName}` : ''}.
+            </div>
+            {approval.decisionNote && (
+              <div className="mb-6 rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                {approval.decisionNote}
+              </div>
+            )}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="flex-1 rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-600 hover:bg-gray-50"
+              >
+                סגור
+              </button>
+              <button
+                type="button"
+                onClick={() => setStage('approval')}
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-base font-bold text-white hover:bg-blue-700"
+              >
+                בקש שוב
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AlertsPage({ currentUser }: { currentUser: AppUser }) {
+  const [requests, setRequests] = useState<ApprovalRequestRow[]>([]);
+  const [isApprover, setIsApprover] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  // דחייה מחייבת סיבה — היא מוצגת לעובד בפופ-אפ החסימה.
+  const [rejectFor, setRejectFor] = useState<string | null>(null);
+  const [rejectNote, setRejectNote] = useState('');
+
+  const load = useCallback(async (background = false) => {
+    if (!background) setLoading(true);
+    try {
+      const meRes = await apiFetch(apiUrl('/approvals/me'), { authUser: currentUser });
+      const me = meRes.ok ? await meRes.json() : { isApprover: false };
+      setIsApprover(!!me.isApprover);
+      if (!me.isApprover) { setRequests([]); return; }
+      const r = await apiFetch(apiUrl('/approvals/pending'), { authUser: currentUser });
+      if (r.ok) setRequests(await r.json());
+    } catch {
+      if (!background) setRequests([]);
+    } finally {
+      if (!background) setLoading(false);
+    }
+  }, [currentUser]);
+
+  // רענון רקע כל 20 שניות — קצב הבית לעדכונים בין עובדים.
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(() => void load(true), 20_000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  const decide = async (id: string, approve: boolean, note?: string) => {
+    setBusyId(id);
+    try {
+      await apiFetch(apiUrl(`/approvals/${id}/decide`), {
+        method: 'PATCH',
+        authUser: currentUser,
+        body: JSON.stringify({ approve, note: note || undefined }),
+      });
+      setRequests((prev) => prev.filter((x) => x.id !== id));
+      setRejectFor(null);
+      setRejectNote('');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   return (
     <div className="space-y-3">
       <div>
         <h1 className="text-2xl font-bold" style={{ color: galit.text }}>התראות</h1>
-        <p className="mt-1 text-slate-500">אירועים חכמים, חתימות ותזכורות</p>
+        <p className="mt-1 text-slate-500">
+          {isApprover ? 'בקשות אישור מנהל הממתינות להכרעתך' : 'אירועים חכמים, חתימות ותזכורות'}
+        </p>
       </div>
-      <div className="space-y-3">
-        {alerts.map((a, idx) => {
-          const Icon = a.icon;
-          return (
-            <Card key={idx}>
-              <CardContent className="flex items-center gap-3 p-4">
-                <div className="rounded-xl p-3" style={{ background: galit.soft }}>
-                  <Icon className="h-5 w-5" style={{ color: galit.primary }} />
+
+      {!isApprover ? (
+        <Card>
+          <CardContent className="p-6 text-center text-slate-500">
+            אין לך התראות ממתינות.
+          </CardContent>
+        </Card>
+      ) : loading ? (
+        <Card><CardContent className="p-6 text-center text-slate-400">טוען בקשות…</CardContent></Card>
+      ) : requests.length === 0 ? (
+        <Card>
+          <CardContent className="flex items-center justify-center gap-2 p-6 text-slate-500">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" /> אין בקשות אישור ממתינות
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {requests.map((r) => (
+            <Card key={r.id}>
+              <CardContent className="p-4">
+                <div className="flex items-start gap-3" dir="rtl">
+                  <div className="rounded-xl p-3" style={{ background: '#fef3c7' }}>
+                    <AlertTriangle className="h-5 w-5" style={{ color: '#d97706' }} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-slate-800">
+                      {r.kind === 'REPORT_UNPAID_PRIVATE'
+                        ? 'בקשת אישור לשליחת דוח ללקוח פרטי שטרם שילם'
+                        : 'בקשת אישור למעבר לשלב ביצוע ללקוח פרטי שטרם שילם'}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      <span className="font-semibold">לקוח:</span> {r.customerName || '—'}
+                      {r.taskTitle ? <> · <span className="font-semibold">משימה:</span> {r.taskTitle}</> : null}
+                    </div>
+                    <div className="mt-0.5 text-sm text-slate-500">
+                      <span className="font-semibold">מבקש:</span> {r.requesterName || '—'}
+                      {' · '}
+                      {new Date(r.createdAt).toLocaleString('he-IL')}
+                    </div>
+                    {r.reason && <div className="mt-1 text-[13px] text-slate-500">{r.reason}</div>}
+
+                    {rejectFor === r.id ? (
+                      <div className="mt-3 space-y-2">
+                        <textarea
+                          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+                          rows={2}
+                          autoFocus
+                          placeholder="סיבת הדחייה — תוצג לעובד"
+                          value={rejectNote}
+                          onChange={(e) => setRejectNote(e.target.value)}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={busyId === r.id || !rejectNote.trim()}
+                            onClick={() => void decide(r.id, false, rejectNote.trim())}
+                            className="rounded-xl bg-red-500 px-5 py-2 text-sm font-bold text-white hover:bg-red-600 disabled:opacity-50"
+                          >
+                            שלח דחייה
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setRejectFor(null); setRejectNote(''); }}
+                            className="rounded-xl border border-slate-300 bg-white px-5 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+                          >
+                            ביטול
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          type="button"
+                          disabled={busyId === r.id}
+                          onClick={() => void decide(r.id, true)}
+                          className="rounded-xl bg-emerald-500 px-5 py-2 text-sm font-bold text-white hover:bg-emerald-600 disabled:opacity-50"
+                        >
+                          ✅ אשר
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyId === r.id}
+                          onClick={() => setRejectFor(r.id)}
+                          className="rounded-xl border border-red-200 bg-white px-5 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          דחה
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="font-medium">{a.title}</div>
               </CardContent>
             </Card>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -21561,6 +22116,8 @@ export default function GalitCRMPrototype() {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [pendingSettingsTab, setPendingSettingsTab] = useState<SettingsToolbarJumpTab | null>(null);
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  /** בקשות אישור מנהל ממתינות — לבאדג' על "התראות" בסרגל. 0 למי שאינו מאשר. */
+  const pendingApprovalCount = usePendingApprovalCount(currentUser);
   const [authBootstrapped, setAuthBootstrapped] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -23225,6 +23782,7 @@ export default function GalitCRMPrototype() {
                 onSearchQuote={() => setQuoteSearchOpen(true)}
                 onNewCustomer={handleNewCustomer}
                 isCustomerCard={current === 'customer-profile'}
+                pendingApprovalCount={pendingApprovalCount}
               />
             </>
           )}
@@ -24013,7 +24571,7 @@ export default function GalitCRMPrototype() {
               onSearchCustomer={() => setCustomerSearchOpen(true)}
             />
           )}
-          {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage />}
+          {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage currentUser={currentUser} />}
           {current === 'users' && currentUser.role === 'admin' && (
             <UsersPage users={users} onReloadUsers={reloadUsers} currentUser={currentUser} />
           )}
