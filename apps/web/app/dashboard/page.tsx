@@ -15943,6 +15943,36 @@ function TasksPage({
   type TaskContact = { id: string; fullName: string; phone: string; email: string; roleTitle: string; isPrimary: boolean };
   const [taskContactsMap, setTaskContactsMap] = useState<Record<string, TaskContact[]>>({});
   const taskContactsCounter = useRef<Record<string, number>>({});
+  /**
+   * טוען פעם אחת מהמסד את אנשי הקשר של הלקוח לתוך taskContactsMap.
+   * דרוש כי taskContactsMap מתמלא רק כשעוברים בפועל דרך שלב "כרטיס לקוח" באותו session —
+   * מי שנכנס ישר לשלב "תיאום" (למשל לקוח קיים מסוג חברה) קיבל רשימה ריקה,
+   * ואז ההערות של הפגישה נפלו ל-contactName שהוא *שם החברה* ולא איש הקשר.
+   */
+  const hydratedContactsRef = useRef<Record<string, boolean>>({});
+  const hydrateTaskContacts = useCallback(async (taskId: string, customerId: string) => {
+    if (!currentUser || hydratedContactsRef.current[taskId]) return;
+    hydratedContactsRef.current[taskId] = true;
+    try {
+      const r = await apiFetch(apiUrl(`/customers/${customerId}/contacts`), { authUser: currentUser });
+      if (!r.ok) return;
+      const list = await r.json();
+      if (!Array.isArray(list) || list.length === 0) return;
+      const rows: TaskContact[] = list
+        .filter((c: any) => (c?.fullName || '').trim() || (c?.phone || c?.mobile || '').trim() || (c?.email || '').trim())
+        .map((c: any) => ({
+          id: c.id,
+          fullName: (c.fullName || '').trim(),
+          phone: (c.phone || c.mobile || '').trim(),
+          email: (c.email || '').trim(),
+          roleTitle: c.roleTitle || '',
+          isPrimary: !!c.isPrimary,
+        }));
+      if (rows.length === 0) return;
+      // לא דורסים מה שהמשתמש כבר הקליד בשלב כרטיס הלקוח.
+      setTaskContactsMap((p) => (p[taskId] && p[taskId].length > 0 ? p : { ...p, [taskId]: rows }));
+    } catch { /* נשארים עם ה-fallback הקיים */ }
+  }, [currentUser]);
   // הודעת שגיאה לכרטיס הלקוח (לדוגמה: חובת איש קשר עבור חברה/קבלן/מוסד)
   const [ccCardError, setCcCardError] = useState<Record<string, string>>({});
   // ── Stage persistence: sync manualStepOverride ↔ DB ──
@@ -20360,6 +20390,9 @@ function TasksPage({
                               void draftTitle();
                             }
                             const ccContactsCoord = taskContactsMap[t.id] || [];
+                            // אם לא עברנו דרך שלב "כרטיס לקוח" ב-session הזה, הרשימה ריקה —
+                            // מושכים את אנשי הקשר השמורים של הלקוח כדי שההערות יקבלו איש קשר אמיתי.
+                            if (t.customerId && ccContactsCoord.length === 0) void hydrateTaskContacts(t.id, t.customerId);
                             const customerEmail = (
                               t.leadEmail || lead?.email ||
                               ccContactsCoord.find((c) => c.isPrimary && c.email?.trim())?.email ||
@@ -20367,20 +20400,38 @@ function TasksPage({
                             ).trim();
 
                             // ── פרטי איש הקשר להערות הפגישה (שם מלא + טלפון) — אותה עדיפות כמו האימייל:
-                            //    איש קשר ראשי → כל איש קשר → פרטי הליד/המשימה. משמש כברירת מחדל להערות. ──
+                            //    איש קשר ראשי → כל איש קשר → contactName של הלקוח → פרטי הליד/המשימה. ──
+                            // הלקוח המקושר: כשהוא חברה/מוסד/ספק, t.customerName הוא *שם החברה* —
+                            // אסור להשתמש בו כ"שם איש קשר". במקרה כזה נופלים ל-contactName של כרטיס הלקוח.
+                            const coordCustomer = t.customerId ? customers.find((c) => c.id === t.customerId) : null;
+                            const coordIsCompany = !!coordCustomer && (coordCustomer.type || '').toUpperCase() !== 'PRIVATE';
+                            const coordCustomerContactName = (coordCustomer?.contactName || '').trim();
                             const coordContactName = (
                               ccContactsCoord.find((c) => c.isPrimary && c.fullName?.trim())?.fullName ||
                               ccContactsCoord.find((c) => c.fullName?.trim())?.fullName ||
-                              contactName || ''
+                              coordCustomerContactName ||
+                              // לחברה — לא נופלים ל-contactName (שם החברה); עדיף בלי שם מאשר שם שגוי.
+                              (coordIsCompany ? '' : contactName) || ''
                             ).trim();
                             const coordContactPhone = (
                               ccContactsCoord.find((c) => c.isPrimary && c.phone?.trim())?.phone ||
                               ccContactsCoord.find((c) => c.phone?.trim())?.phone ||
-                              t.leadPhone || lead?.phone || ''
+                              t.leadPhone || lead?.phone || coordCustomer?.phone || ''
                             ).trim();
-                            // הערות ברירת-מחדל: שם מלא + טלפון של איש הקשר (רק אם יש לפחות אחד מהם).
+                            const coordContactRole = (
+                              ccContactsCoord.find((c) => c.isPrimary && c.roleTitle?.trim())?.roleTitle ||
+                              ccContactsCoord.find((c) => c.roleTitle?.trim())?.roleTitle || ''
+                            ).trim();
+                            // שם החברה — מוצג בהערות כשורה נפרדת, כדי שלא יתחזה לאיש קשר.
+                            const coordCompanyName = coordIsCompany
+                              ? ((coordCustomer as any)?.companyname || coordCustomer?.name || '').trim()
+                              : '';
+                            // הערות ברירת-מחדל: חברה (אם יש) + שם מלא/תפקיד + טלפון של איש הקשר.
                             const defaultCoordNotes = [
-                              coordContactName ? `שם איש קשר: ${coordContactName}` : '',
+                              coordCompanyName ? `חברה: ${coordCompanyName}` : '',
+                              coordContactName
+                                ? `שם איש קשר: ${coordContactName}${coordContactRole ? ` (${coordContactRole})` : ''}`
+                                : '',
                               coordContactPhone ? `טלפון: ${coordContactPhone}` : '',
                             ].filter(Boolean).join('\n');
 
@@ -20502,8 +20553,9 @@ function TasksPage({
                                       durationMinutes: durationMin,
                                       siteAddress: location || null,
                                       siteCity: lead?.city || null,
-                                      fieldContactName: contactName || null,
-                                      fieldContactPhone: t.leadPhone || lead?.phone || null,
+                                      // איש הקשר האמיתי (ולא שם החברה) — אותה עדיפות כמו בהערות.
+                                      fieldContactName: coordContactName || null,
+                                      fieldContactPhone: coordContactPhone || null,
                                       navigationUrl: location
                                         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}`
                                         : null,

@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from '@nestjs/common';
 import { GraphCalendarService, GraphEventAttendee, GraphEventAttachment } from './graph-calendar.service';
+import { GraphMailService } from './graph-mail.service';
 
 interface CreateOutlookEventBody {
   subject: string;
@@ -12,6 +13,66 @@ interface CreateOutlookEventBody {
   employeeUserIds?: string[];
   isOnlineMeeting?: boolean;
   attachments?: GraphEventAttachment[];
+}
+
+/** גוף הבקשה לשליחת מייל מהתיבה של המשתמש (WhatsApp bot / CRM). */
+interface SendOutlookMailBody {
+  to: string;
+  subject: string;
+  /** גוף ההודעה. אם נשלח טקסט רגיל הוא יומר ל-HTML בסיסי. */
+  body?: string;
+  html?: string;
+  cc?: string[];
+  bcc?: string[];
+}
+
+/**
+ * שליחת מייל מתיבת ה-Outlook של המשתמש.
+ *
+ * נפרד מ-OutlookCalendarController במתכוון: אותה תבנית אימות (x-user-id של
+ * המשתמש שבשמו פועלים), אבל משאב אחר. עוטף את GraphMailService.sendMailAsUser
+ * הקיים — אין כאן לוגיקת שליחה חדשה.
+ *
+ * נצרך על ידי בוט הוואטסאפ (crmApi.sendCrmMail) כדי לאפשר "תשלח מייל ל..."
+ * בצ'אט, במקביל ליכולות היומן.
+ */
+@Controller('outlook/mail')
+export class OutlookMailController {
+  constructor(private readonly mail: GraphMailService) {}
+
+  /** POST /outlook/mail/send — שליחת מייל בשם המשתמש שב-x-user-id. */
+  @Post('send')
+  async send(
+    @Headers('x-user-id') userId: string | undefined,
+    @Body() body: SendOutlookMailBody,
+  ) {
+    if (!userId) throw new BadRequestException('Missing x-user-id');
+    if (!body?.to?.includes('@')) throw new BadRequestException('כתובת מייל לא תקינה');
+    if (!body?.subject?.trim()) throw new BadRequestException('חסר נושא למייל');
+
+    const raw = body.html ?? body.body ?? '';
+    if (!raw.trim()) throw new BadRequestException('חסר תוכן למייל');
+
+    // טקסט רגיל → HTML. שומר על שורות חדשות ומנטרל תגיות כדי שתוכן
+    // שהגיע מהודעת וואטסאפ לא יוכל להזריק HTML לגוף המייל.
+    const html = body.html
+      ? body.html
+      : raw
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/\n/g, '<br/>');
+
+    await this.mail.sendMailAsUser(userId, {
+      to: body.to.trim(),
+      subject: body.subject.trim(),
+      html: `<div dir="rtl" style="font-family:Arial,sans-serif">${html}</div>`,
+      ...(body.cc?.length ? { cc: body.cc } : {}),
+      ...(body.bcc?.length ? { bcc: body.bcc } : {}),
+    });
+
+    return { ok: true };
+  }
 }
 
 @Controller('outlook/calendar')
