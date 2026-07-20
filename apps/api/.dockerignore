@@ -7,3 +7,9 @@ dist
 .git
 .gitignore
 storage
+sig-table-backup
+apps
+data
+*.pdf
+_*.json
+_*.mjs

@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
+import { getPreVisitGuideline } from './pre-visit-guidelines';
 
 @Injectable()
 export class TasksService {
@@ -224,6 +225,8 @@ export class TasksService {
     navigationUrl?: string | null;
     specialInstructions?: string | null;
     updatedByUserId?: string | null;
+    /** הפעלת אוטומציית "הנחיות לפני הבדיקה" (רלוונטי רק לבדיקות עם הנחיות). */
+    preVisitEmailEnabled?: boolean | null;
   }) {
     const parsedStart = data.scheduledStartAt ? new Date(data.scheduledStartAt) : undefined;
     const parsedEnd = data.scheduledEndAt ? new Date(data.scheduledEndAt) : undefined;
@@ -269,6 +272,29 @@ export class TasksService {
       return { skipped: true as const, reason: 'missing_required_fields', missing };
     }
 
+    // ── אוטומציית "הנחיות לפני הבדיקה" ──
+    // מופעלת רק כשהשירות הוא אחת משתי בדיקות איכות האוויר שיש להן נוסח הנחיות.
+    // המועד: 09:00 ביום שלפני מועד הבדיקה. אם המועד כבר חלף (פגישה שתואמה
+    // להיום/מחר בבוקר) — לא מתזמנים, כדי לא לשלוח "יום לפני" באיחור.
+    const guideline = getPreVisitGuideline(data.productName);
+    const wantsPreVisit = !!data.preVisitEmailEnabled && !!guideline;
+    let preVisitDueAt: Date | null = null;
+    if (wantsPreVisit) {
+      const d = new Date(parsedStart);
+      d.setDate(d.getDate() - 1);
+      d.setHours(9, 0, 0, 0);
+      if (d.getTime() > Date.now()) preVisitDueAt = d;
+      else this.logger.warn(`pre-visit email not scheduled for task ${taskId}: due time already passed`);
+    }
+    const preVisit = {
+      preVisitEmailEnabled: wantsPreVisit && !!preVisitDueAt,
+      preVisitEmailSku: wantsPreVisit && preVisitDueAt ? guideline!.sku : null,
+      preVisitEmailDueAt: preVisitDueAt,
+      // תיאום מחדש → מאפסים את חותמת השליחה כדי שהמייל יישלח שוב למועד החדש.
+      preVisitEmailSentAt: null,
+      preVisitEmailError: null,
+    };
+
     const payload = {
       inspectionTypeId,
       family: family ?? 'other',
@@ -283,6 +309,7 @@ export class TasksService {
       navigationUrl: data.navigationUrl ?? null,
       specialInstructions: data.specialInstructions ?? null,
       updatedByUserId: data.updatedByUserId ?? null,
+      ...preVisit,
     };
     return this.prisma.taskField.upsert({
       where: { taskId },

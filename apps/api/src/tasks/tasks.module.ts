@@ -3,11 +3,13 @@ import { TasksService } from './tasks.service';
 import { TasksController } from './tasks.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { QuotesModule } from '../quotes/quotes.module';
+import { MicrosoftModule } from '../microsoft/microsoft.module';
+import { PreVisitEmailService } from './pre-visit-email.service';
 
 @Module({
-  imports: [PrismaModule, QuotesModule],
+  imports: [PrismaModule, QuotesModule, MicrosoftModule],
   controllers: [TasksController],
-  providers: [TasksService],
+  providers: [TasksService, PreVisitEmailService],
 })
 export class TasksModule {}
 
