@@ -2759,7 +2759,10 @@ export function QuoteNewScreen({
     const mergeData: Record<string, unknown> = {
       quoteId: quoteIdRef.current || undefined,
       quoteNumber: reference || quoteNo || '',
-      contractSurveyNumber: (orderNo || reference || quoteNo || '').trim(),
+      // "מס' הצעת מחיר" במסמך = מספר ההצעה. quoteNo קודם לסימוכין/מס' הזמנה:
+      // reference מאותחל תמיד בערך מקומי, ולכן קודם היה גובר וממלא סימוכין במקום מספר ההצעה.
+      // 'חדש' הוא ערך ההתחלה של quoteNo לפני שמירה — לא מספר אמיתי, ולכן נופלים ממנו הלאה.
+      contractSurveyNumber: ((quoteNo && quoteNo !== 'חדש' ? quoteNo : '') || orderNo || reference || '').trim(),
       quoteDate: date
         ? new Date(date).toLocaleDateString('he-IL')
         : new Date().toLocaleDateString('he-IL'),

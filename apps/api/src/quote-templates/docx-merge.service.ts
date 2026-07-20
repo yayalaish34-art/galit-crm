@@ -871,7 +871,13 @@ export function normalizeDocxMergePayload(raw: Record<string, unknown>): Record<
   if (!r.vatAmount && r.vat) r.vatAmount = r.vat;
   if (!r.totalAmount && r.total) r.totalAmount = r.total;
   if (!r.validUntil && r.validityDate) r.validUntil = r.validityDate;
-  if (!r.contractSurveyNumber) r.contractSurveyNumber = '';
+  // "מס' הצעת מחיר" במסמך מרונדר מ-{contractSurveyNumber} (כך ב-71 מהתבניות).
+  // כשהוא חסר — נופלים ל-quoteNumber במקום להשאיר ריק: nullGetter מרנדר מחרוזת ריקה
+  // בשקט, וזה הפיק מסמכים בלי מספר הצעה בכלל.
+  if (!r.contractSurveyNumber) {
+    const qn = String(r.quoteNumber ?? '').trim();
+    r.contractSurveyNumber = qn && qn !== '—' && qn !== 'חדש' ? qn : '';
+  }
 
   // דגל הנחה כללית (שורת "% הנחה" בטבלת הסיכום)
   r.hasGeneralDiscount = toNumber(pickStr(r, ['discountPercent'])) > 0;
