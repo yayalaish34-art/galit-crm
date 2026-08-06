@@ -4,13 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 export type ApprovalKind = 'EXEC_UNPAID_PRIVATE' | 'REPORT_UNPAID_PRIVATE';
 
 /**
- * מי רשאי לאשר בקשות: יורם וגיא גבאי בלבד.
+ * מי רשאי לאשר בקשות: יורם, גיא גבאי וגלית.
+ * גלית רשומה כ-TECHNICIAN ולכן הייתה חסומה בעצמה ונדרשה לבקש אישור — הוספתה
+ * לרשימה גם פוטרת אותה מהשער וגם מאפשרת לה לאשר לאחרים.
  *
  * למה לפי מייל ולא לפי role: RolesGuard נותן ל-ADMIN מעבר חופשי לכל @Roles,
  * ויש במערכת אדמין שלישי (guyf@galit.co.il) שלא אמור לאשר. הרשימה נשלטת
  * דרך APPROVAL_MANAGER_EMAILS (CSV) כדי שאפשר יהיה לשנות בלי דיפלוי.
  */
-const DEFAULT_APPROVER_EMAILS = ['yoram@galit.co.il', 'guy@galit.co.il'];
+const DEFAULT_APPROVER_EMAILS = ['yoram@galit.co.il', 'guy@galit.co.il', 'galit@galit.co.il'];
 
 export function approverEmails(): string[] {
   const raw = process.env.APPROVAL_MANAGER_EMAILS;

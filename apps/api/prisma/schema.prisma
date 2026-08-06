@@ -51,6 +51,8 @@ model User {
   currentProject   Project?    @relation("UserCurrentProject", fields: [currentProjectId], references: [id])
 
   leadActivitiesCreated LeadActivity[]
+  /// "לקוחות אחרונים" — לקוחות שהעובד נכנס אליהם לאחרונה (ראה model CustomerView)
+  customerViews         CustomerView[]
   /// מספר עובד (20260327000000_add_employee_number)
   employeeNumber        String?
 
@@ -200,8 +202,10 @@ model IncomingLead {
   id              String             @id @default(uuid())
   /// מזהה ההודעה ב-Graph (פר-תיבה) — ייחודי, מונע יצירה כפולה לאותו משתמש
   messageId       String             @unique
-  /// Message-ID מ-RFC 5322 — זהה בכל תיבות הנמענים; משמש לקיבוץ אותו מייל בין עובדים
-  internetMessageId String?
+  /// Message-ID מ-RFC 5322 — זהה בכל תיבות הנמענים; משמש לקיבוץ אותו מייל בין עובדים.
+  /// @unique = "ליד אחד משותף": אותו מייל שהגיע ל-5 תיבות ייכנס כשורה אחת. duplicateOfExistingLead
+  /// לבדו הוא check-then-act ולכן לא עמד בסריקות מקבילות (נוצרו עד 6 עותקים לאותו מייל).
+  internetMessageId String?            @unique
   subject         String
   /// גוף המייל = פרטי הליד שהוזנו
   body            String?
@@ -305,6 +309,9 @@ model Customer {
   id          String         @id @default(uuid())
   /// מזהה מהמערכת המיובאת (לקישור בין לידים/דוחות/פרויקטים)
   importLegacyId String?
+  /// ה-ContactId של הלקוח בכספית. נפתר פעם אחת (התאמה ללקוח קיים או יצירה) ונשמר,
+  /// כדי שהנפקות הבאות לא ייצרו כרטיס כפול ולא יסרקו שוב את כל אנשי הקשר.
+  caspitContactId String?
   name        String
   /// שם חברה / מוסד — חובה כשסיווג לקוח אינו PRIVATE
   companyname String?
@@ -442,10 +449,27 @@ model Customer {
   additionalDataRows     CustomerAdditionalDataRow[]
   externalDataRows       CustomerExternalDataRow[]
   blocks                 CustomerBlock[]
+  views                  CustomerView[]
+  emailRequests          CustomerEmailRequest[]
 
   @@index([importLegacyId])
   @@index([name])
   @@index([phone])
+}
+
+/// "לקוחות אחרונים" per-user — נרשם/מתעדכן ברגע שעובד נכנס לכרטיס לקוח (או למשימה
+/// המשויכת ללקוח). upsert על (userId, customerId): viewedAt = now. משמש להצגת
+/// 10 הלקוחות האחרונים שהעובד נגע בהם, ולא לפי createdAt.
+model CustomerView {
+  id         String   @id @default(uuid())
+  userId     String
+  customerId String
+  viewedAt   DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, customerId])
+  @@index([userId, viewedAt])
 }
 
 /// ערוצי תקשורת שניתן לחסום ("חסום ל:") — נפרד מהעדפות הדיוור (allow*).
@@ -863,7 +887,12 @@ model Quote {
   followupDate            DateTime?
   salesRepresentativeName String?
   executorName            String?
+  /// המשימה שמטפלת בהצעה. היה String חופשי ללא FK וללא אינדקס, ולכן הצטברו מצביעים
+  /// למשימות שנמחקו (10 בייצור) — והמנעול "ההצעה כבר מקושרת למשימה" ראה ערך לא-ריק
+  /// ודילג, או נדרס למשימה החדשה ונטש את הקודמת. שתיהן דרכים לשתי משימות על הצעה אחת.
+  /// onDelete: SetNull — מחיקת משימה מנקה את הקישור במקום להשאיר מצביע מת.
   linkedEntityId          String?
+  linkedTask              Task?     @relation("QuoteLinkedTask", fields: [linkedEntityId], references: [id], onDelete: SetNull)
   orderReferenceNumber    String?
   copiedFromOrder         String?
   priceList               String?
@@ -926,6 +955,9 @@ model Quote {
   onedriveOwnerId           String?
   /// ה-TaskAttachment שנפתח לעריכה ב-Word (עריכה פר-קובץ) — הסנכרון-חזרה מעדכן אותו, לא את החדש ביותר.
   onedriveAttachmentId      String?
+  /// המשתמש ערך ידנית את שם הקובץ → השם הידני מנצח. הסנכרון האוטומטי (renameOnedriveToMatch)
+  /// לא ידרוס שם ידני ב-OneDrive כל עוד הדגל דלוק.
+  onedriveNameLocked        Boolean  @default(false)
 
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]
@@ -935,6 +967,7 @@ model Quote {
   @@index([salesRepresentativeId])
   @@index([performerUserId])
   @@index([followUpResponsibleUserId])
+  @@index([linkedEntityId])
 }
 
 model Task {
@@ -965,8 +998,14 @@ model Task {
   currentStage         Int?
   currentStageChangedAt DateTime?
 
-  /// אם מקורו של ה-task בליד נכנס מהמייל — מזהה ה-IncomingLead (לסידור-ראשון ולטופס המיוחד)
-  incomingLeadId       String?
+  /// אם מקורו של ה-task בליד נכנס מהמייל — מזהה ה-IncomingLead (לסידור-ראשון ולטופס המיוחד).
+  /// @unique = בלם DB נגד כפילות: לליד נכנס יש משימת-תהליך אחת בדיוק. ב-Postgres ערכי NULL
+  /// אינם מתנגשים זה בזה, כך שכל המשימות שאינן מליד נכנס אינן מושפעות.
+  incomingLeadId       String?  @unique
+
+  /// מתי המשימה הועברה לבעלים הנוכחי ("העבר לעובד"/העברת ליד). נדרש כדי שמשימת
+  /// "ליד חדש נכנס" שהועברה תופיע בראש הרשימה של מי שקיבל אותה, גם אחרי שנפתח כרטיס לקוח.
+  transferredAt        DateTime?
 
   /// הערות כלליות על התהליך/הלקוח לאורך הזרימה — מערך JSON של { text, at } (הכי חדש בראש)
   processNotes         String?
@@ -975,6 +1014,9 @@ model Task {
   taskField   TaskField?
   /// בקשות אישור מנהל שנפתחו על המשימה (לקוח פרטי שטרם שילם)
   approvalRequests ApprovalRequest[] @relation("TaskApprovalRequests")
+  /// הצעות המחיר שמקושרות למשימה (Quote.linkedEntityId). לא unique בכוונה — למשימה
+  /// אחת יכולות להיות כמה הצעות (גרסאות/סבבים); מה שאסור הוא ההפך, שתי משימות להצעה.
+  linkedQuotes Quote[] @relation("QuoteLinkedTask")
 
   @@index([incomingLeadId])
 }
@@ -1410,4 +1452,348 @@ model ReviewRequest {
 
   @@index([customerId])
   @@index([taskId])
+}
+
+// ══════════════════════════════════════════════════════════════
+// שירות ראדון — מודול עצמאי
+//
+// כל הטבלאות כאן חדשות ואינן משנות דבר בצינור הקיים. הקישור ל-CRM נעשה
+// דרך taskId/customerId רופפים (ללא FK), בדיוק כמו ב-ReviewRequest — כך
+// שהמשימה הרגילה ממשיכה לזרום ב-pipeline הקיים בלי לדעת על ראדון.
+//
+// המודל מנהל שני מחזורי חיים במקביל (סעיף 11 במסמך האפיון):
+//   RadonJob      — העבודה מול הלקוח
+//   RadonDetector — חיי הגלאי הפיזי
+// ══════════════════════════════════════════════════════════════
+
+/// עבודת ראדון — נפתחת כשנבחר אחד מקודי בדיקות הראדון (RADON_TEST_SKUS).
+/// מחזיקה את תשובות השאלון, את המסלול שנקבע, ואת שלבי הביצוע הייחודיים לראדון.
+model RadonJob {
+  id            String   @id @default(uuid())
+
+  /// הקשר ל-CRM — רופף בכוונה (ללא FK), כדי שהמודול יישאר עצמאי.
+  taskId        String?
+  customerId    String?
+  leadId        String?
+
+  /// קוד השירות שפתח את הזרימה (10044 / 10017 / 61 / 10000)
+  sku           String
+
+  /// תשובות שאלון הפתיחה (8 השאלות). מבנה: RadonAnswers ב-radon-tracks.ts
+  answers       Json     @default("{}")
+
+  /// המסלול שנקבע מהתשובות: track1..track4. null = השאלון טרם הושלם.
+  track         String?
+  /// אזהרות התאמה שהוצגו למשתמש בזמן הקביעה (מערך מחרוזות)
+  trackWarnings Json     @default("[]")
+
+  /// השלב הנוכחי בתוך המסלול — אינדקס במערך stages של המסלול.
+  stageIndex    Int      @default(0)
+  status        RadonJobStatus @default(OPEN)
+
+  /// תאריכי תקופת הבדיקה — קריטי במיוחד למסלולים 3 ו-4 (בדיקה ארוכה).
+  placedAt      DateTime?
+  expectedEndAt DateTime?
+  collectedAt   DateTime?
+
+  /// בדיקה עצמית במשלוח (מסלול 4)
+  shippingAddress   String?
+  outboundTracking  String?
+  returnTracking    String?
+  /// תאריך ההצבה כפי שדווח ע״י הלקוח (להבדיל מ-placedAt שנרשם על ידינו)
+  clientReportedAt  DateTime?
+
+  detectorCount Int?
+  siteAddress   String?
+  contactName   String?
+  contactPhone  String?
+  notes         String?  @db.Text
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  detectors     RadonDetectorAssignment[]
+  alerts        RadonAlert[]
+
+  @@index([taskId])
+  @@index([customerId])
+  @@index([status, track])
+}
+
+enum RadonJobStatus {
+  OPEN
+  IN_FIELD
+  IN_ANALYSIS
+  REPORTED
+  CLOSED
+  CANCELLED
+}
+
+/// גלאי ראדון פיזי. מנוהל כמלאי — לכל גלאי מספר סידורי ייחודי וסטטוס משלו.
+model RadonDetector {
+  id             String              @id @default(uuid())
+  /// המספר הסידורי המוטבע על הגלאי — המזהה שהבודק מתעד בשטח.
+  serialNumber   String              @unique
+  model          String?
+  status         RadonDetectorStatus @default(IN_STOCK)
+
+  /// אצל מי הגלאי כרגע (רלוונטי לסטטוסים WITH_EMPLOYEE / WITH_CLIENT)
+  heldByUserId   String?
+  heldByNote     String?
+
+  /// כיול — ראה SKU 70 / 10069 בקטלוג השירותים.
+  calibratedAt   DateTime?
+  calibrationDue DateTime?
+
+  notes          String?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  assignments    RadonDetectorAssignment[]
+  events         RadonDetectorEvent[]
+
+  @@index([status])
+  @@index([calibrationDue])
+}
+
+/// 13 הסטטוסים מסעיף 7 במסמך האפיון.
+enum RadonDetectorStatus {
+  IN_STOCK          // במלאי
+  RESERVED          // שמור לעבודה
+  WITH_EMPLOYEE     // אצל עובד
+  SHIPPED_TO_CLIENT // נשלח ללקוח
+  WITH_CLIENT       // אצל לקוח
+  DEPLOYED          // הוצב בשטח
+  COLLECTED         // נאסף
+  RETURNED          // חזר למשרד
+  SENT_TO_LAB       // נשלח לאנליזה
+  RESULT_RECEIVED   // תוצאה התקבלה
+  CLOSED            // סגור
+  LOST              // אבד
+  DISQUALIFIED      // נפסל
+}
+
+/// שיוך גלאי לעבודה. האילוץ המרכזי מסעיף 7: אותו גלאי לא יכול להיות משויך
+/// לשתי עבודות במקביל — נאכף ע״י אינדקס ייחודי חלקי על שיוך פעיל (ראה המיגרציה).
+model RadonDetectorAssignment {
+  id           String        @id @default(uuid())
+
+  detectorId   String
+  detector     RadonDetector @relation(fields: [detectorId], references: [id], onDelete: Cascade)
+
+  jobId        String
+  job          RadonJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// שיוך פעיל = releasedAt הוא null. האינדקס הייחודי מונע כפילות.
+  assignedAt   DateTime      @default(now())
+  releasedAt   DateTime?
+
+  /// מיקום ההצבה בפועל — נדרש לתיעוד לפי חוקי טופס 4.
+  placementNote String?
+  placedAt      DateTime?
+  /// תמונת הגלאי במקום ההצבה (base64, בהתאם לדפוס Document במערכת)
+  photoBase64   String?       @db.Text
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([jobId])
+  @@index([detectorId])
+}
+
+/// יומן תנועות הגלאי — כל שינוי סטטוס נרשם, כדי שתמיד יהיה ידוע איפה הגלאי היה.
+model RadonDetectorEvent {
+  id          String              @id @default(uuid())
+
+  detectorId  String
+  detector    RadonDetector       @relation(fields: [detectorId], references: [id], onDelete: Cascade)
+
+  jobId       String?
+  fromStatus  RadonDetectorStatus?
+  toStatus    RadonDetectorStatus
+  note        String?
+  byUserId    String?
+  createdAt   DateTime            @default(now())
+
+  @@index([detectorId, createdAt])
+}
+
+/// התראה על עבודת ראדון (11 ההתראות מסעיף 9). נפתחת ע״י ה-cron ונסגרת
+/// כשהתנאי חדל להתקיים או כשמשתמש סוגר אותה ידנית.
+model RadonAlert {
+  id           String   @id @default(uuid())
+
+  jobId        String
+  job          RadonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  /// מזהה סוג ההתראה — ראה RADON_ALERT_RULES ב-radon-alerts.ts
+  kind         String
+  message      String
+  severity     String   @default("warning")
+
+  /// null = פתוחה
+  resolvedAt   DateTime?
+  dismissedAt  DateTime?
+  dismissedBy  String?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  /// התראה אחת פתוחה מכל סוג לכל עבודה — מונע הצפה בכל סבב cron.
+  @@unique([jobId, kind])
+  @@index([resolvedAt])
+}
+// ═══════════════════════════════════════════════════════════════════════════
+// AFFILIATE PORTAL — חברות צד-שלישי ששולחות לנו לקוחות ומקבלות עמלה.
+// מודול עצמאי: זהות נפרדת מ-User (טבלת Affiliate משלה), auth נפרד (AffiliateGuard).
+// קישור רופף ל-Lead/Task הקיימים דרך id בלבד (בלי FK) כדי לא לגעת בזרימה הקיימת.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// חברת שותפה (צד שלישי). נכנסת לפורטל ב-/affiliate עם username+password.
+model Affiliate {
+  id             String   @id @default(uuid())
+  /// שם החברה לתצוגה.
+  name           String
+  /// שם משתמש לכניסה (ייחודי, case-insensitive נאכף באפליקציה).
+  username       String   @unique
+  /// bcrypt hash של הסיסמה — הסיסמה הגולמית לעולם לא נשמרת.
+  passwordHash   String
+  /// אחוז העמלה שאנחנו חייבים לשותף מכל תשלום של לקוח שהוא הפנה (למשל 10 = 10%).
+  commissionPct  Float    @default(10)
+  /// פרטי קשר (אופציונליים) — לתשלום/תיאום.
+  contactName    String?
+  email          String?
+  phone          String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  referrals      AffiliateReferral[]
+
+  @@index([isActive])
+}
+
+/// סטטוס ההפניה לאורך המשפך.
+enum AffiliateReferralStatus {
+  NEW          // התקבל מהשותף, טרם טופל
+  IN_PROGRESS  // בטיפול (הופך למשימה אצלנו)
+  WON          // נסגר (הפך ללקוח משלם)
+  LOST         // לא רלוונטי / לא נסגר
+}
+
+/// ליד/לקוח שהופנה אלינו ע"י שותף. נוצר כשהשותף שולח לנו לקוח דרך הפורטל.
+model AffiliateReferral {
+  id             String   @id @default(uuid())
+  affiliateId    String
+  affiliate      Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  /// פרטי הלקoח שהופנה (כפי שהשותף הזין).
+  customerName   String
+  customerPhone  String?
+  customerEmail  String?
+  serviceType    String?
+  note           String?  @db.Text
+
+  status         AffiliateReferralStatus @default(NEW)
+
+  /// קישור רופף (בלי FK) לישויות הפנימיות שנוצרו מההפניה — לצורך מעקב וחישוב עמלה.
+  leadId         String?
+  taskId         String?
+
+  /// חישוב עמלה — מתעדכן אוטומטית כשההצעה/דוח של הלקוח מסומנים "שולם".
+  /// paidAmount = הסכום ששולם בפועל; commissionAmount = paidAmount * (commissionPct/100)
+  /// (commissionPct נלקח מהשותף במועד החישוב ונצרב כאן לשקיפות היסטורית).
+  paidAmount        Float?
+  commissionPct     Float?
+  commissionAmount  Float?
+  paidAt            DateTime?
+  /// האם העמלה שולמה לשותף על ידינו (מעקב תשלומי-עמלה יוצא).
+  commissionSettledAt DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([affiliateId])
+  @@index([status])
+  @@index([leadId])
+  @@index([taskId])
+}
+
+/// "בקשה" שתויקה לכרטיס הלקוח מתוך מייל ב-Outlook של העובד. משמש כשמגיע מייל
+/// (למשל פנייה) שלא נכנס כליד — העובד שולף את המיילים האחרונים מהתיבה שלו ומצרף
+/// את הרלוונטי לכרטיס. נשמר נושא/שולח/תאריך/גוף הטקסט (לא הקובץ המלא).
+model CustomerEmailRequest {
+  id             String   @id @default(uuid())
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// מספר בקשה סדרתי לתצוגה (REQ-<requestNumber>). autoincrement כדי שלא יתנגש.
+  requestNumber  Int      @default(autoincrement())
+
+  /// מקור הבקשה: MANUAL (צירוף ידני מהכרטיס) או OUTLOOK_ADDIN (תוסף Outlook).
+  source         String   @default("MANUAL")
+  /// סטטוס הבקשה. NEW כברירת מחדל.
+  status         String   @default("NEW")
+
+  /// מזהה ההודעה ב-Graph (id) — למניעת צירוף כפול של אותו מייל לאותו לקוח.
+  graphMessageId    String?
+  /// internetMessageId — מזהה יציב יותר בין תיבות; לגיבוי לדדופ.
+  internetMessageId String?
+  /// מזהה הפריט ב-Outlook (item id מה-Add-in) + מזהה השיחה.
+  outlookItemId     String?
+  conversationId    String?
+  /// תיבת הדואר שממנה נשלף המייל (לדדופ ולאודיט).
+  mailboxEmail      String?
+
+  subject        String?
+  fromName       String?
+  fromEmail      String?
+  /// נמענים (to/cc) כמחרוזת JSON של [{name,email}]. טקסט כדי לא לחייב jsonb.
+  toJson         String?  @db.Text
+  ccJson         String?  @db.Text
+  /// תאריך קבלת המייל המקורי (receivedDateTime).
+  receivedAt     DateTime?
+  /// גוף המייל כטקסט נקי (HTML הומר לטקסט בזמן הצירוף).
+  bodyText       String?  @db.Text
+  /// גוף המייל כ-HTML (מנוקה לפני הצגה ב-CRM).
+  bodyHtml       String?  @db.Text
+
+  /// האם קובץ ה-EML אורכב בהצלחה כמסמך. false אם יצירת ה-EML נכשלה/לא נתמכה.
+  emlArchived    Boolean  @default(false)
+  /// מזהה מסמך ה-EML שנשמר (Document), אם קיים. קישור רופף בלי FK.
+  emlDocumentId  String?
+
+  /// סוג שירות משוער מהסיווג האוטומטי (טקסט חופשי, best-effort).
+  serviceTypeGuess String?
+
+  /// העובד שצירף/יצר את הבקשה (User.id רופף, בלי FK).
+  attachedByUserId String?
+  attachedByName   String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([graphMessageId])
+  /// דדופ: מייל ייחודי לפי תיבה + internetMessageId (חלקי — רק כששניהם קיימים).
+  @@index([mailboxEmail, internetMessageId])
+}
+
+/// יומן ביקורת (Audit) לפעולות התוסף — מי הוסיף איזה מייל, ומה התוצאה.
+/// לא נרשם תוכן המייל המלא ולא טוקנים.
+model OutlookImportAudit {
+  id                String   @id @default(uuid())
+  userId            String?
+  requestId         String?
+  customerId        String?
+  outlookItemId     String?
+  internetMessageId String?
+  mailboxEmail      String?
+  /// CREATED | DUPLICATE | FAILED
+  result            String
+  errorCode         String?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
 }

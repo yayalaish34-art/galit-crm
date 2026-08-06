@@ -2,6 +2,7 @@
  * מיזוג משתנים דינמיים בתבניות HTML להצעות מחיר.
  * פורמט: {{variableName}}
  */
+import { formatIsraeliPhoneDisplay } from './phone-format';
 
 export type QuoteTemplateLineItem = {
   name: string;
@@ -131,7 +132,7 @@ export function buildQuoteTemplateContext(
     customerAddress: c?.address ?? '',
     customerCity: c?.city ?? '',
     customerEmail: c?.email ?? '',
-    customerPhone: c?.phone ?? '',
+    customerPhone: formatIsraeliPhoneDisplay(c?.phone),
     quoteDate: input.quoteDate.toLocaleDateString('he-IL'),
     quoteNumber: input.quoteNumber || '—',
     serviceName: input.serviceName,

@@ -212,6 +212,17 @@ export class QuotesController {
     return this.quotesService.syncFromOneDrive(id);
   }
 
+  /**
+   * POST /quotes/:id/onedrive-rename  { fileName }
+   * עריכה ידנית של שם קובץ → משנה את שם הקובץ ב-OneDrive ונועל אותו (השם הידני מנצח).
+   * best-effort — מחזיר { renamed } (false אם אין קובץ פעיל ב-OneDrive).
+   */
+  @Post(':id/onedrive-rename')
+  async onedriveRename(@Param('id') id: string, @Body() body: { fileName?: string }) {
+    const renamed = await this.quotesService.renameOnedriveForQuote(id, body?.fileName || '');
+    return { renamed };
+  }
+
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any, @Req() req: any) {
     return this.quotesService.update(id, body, req.user);

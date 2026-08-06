@@ -94,11 +94,17 @@ export class PublicController {
       return;
     }
     const text = String(feedback || '').trim().slice(0, 4000);
-    if (text) {
-      await this.prisma.reviewRequest
-        .update({ where: { token }, data: { feedback: text, feedbackAt: new Date() } })
-        .catch(() => null);
+    // ההערה חובה — אם ריקה/קצרה מדי, חוזרים לדף המשוב עם שגיאה במקום להציג "תודה".
+    if (text.length < 5) {
+      res
+        .status(400)
+        .type('html')
+        .send(this.feedbackPage(token, rr.customerName, 'יש לכתוב הערה (לפחות 5 תווים) לפני השליחה.', text));
+      return;
     }
+    await this.prisma.reviewRequest
+      .update({ where: { token }, data: { feedback: text, feedbackAt: new Date() } })
+      .catch(() => null);
     res.type('html').send(this.thanksAfterFeedbackPage());
   }
 
@@ -137,19 +143,34 @@ export class PublicController {
 </html>`;
   }
 
-  /** דף דירוג נמוך — התנצלות + טופס משוב חופשי. */
-  private feedbackPage(token: string, customerName?: string | null): string {
+  /** דף דירוג נמוך — התנצלות + טופס משוב חופשי. ההערה חובה (מינימום 5 תווים).
+   *  errorMsg / prevText מוצגים כשחוזרים מהשרת לאחר ניסיון שליחה ריק. */
+  private feedbackPage(token: string, customerName?: string | null, errorMsg?: string, prevText?: string): string {
     const firstName = String(customerName || '').trim().split(/\s+/)[0] || '';
     const hello = firstName ? `${this.esc(firstName)}, ` : '';
+    const errBlock = errorMsg
+      ? `<p style="color:#c0392b;font-weight:600;margin:0 0 10px;">${this.esc(errorMsg)}</p>`
+      : '';
     const inner = `
     <div style="font-size:44px;line-height:1;margin-bottom:10px;">🙏</div>
     <h1>${hello}תודה על המשוב הכן</h1>
     <p>אנחנו מצטערים לשמוע שהשירות לא עמד בציפיות שלך.</p>
-    <p>המשוב שלך חשוב לנו מאוד ויעזור לנו להשתפר. נשמח אם תשתף/י אותנו במה שאפשר לעשות טוב יותר:</p>
-    <form method="post" action="/public/rate/${encodeURIComponent(token)}/feedback">
-      <textarea name="feedback" placeholder="ספר/י לנו מה קרה, ומה נוכל לשפר…"></textarea>
+    <p>המשוב שלך חשוב לנו מאוד ויעזור לנו להשתפר. <strong>נשמח שתפרט/י מה קרה ומה נוכל לשפר — זו הערת חובה:</strong></p>
+    ${errBlock}
+    <form method="post" action="/public/rate/${encodeURIComponent(token)}/feedback" onsubmit="return validateFb(this)">
+      <textarea name="feedback" required minlength="5" aria-required="true"
+        placeholder="ספר/י לנו מה קרה, ומה נוכל לשפר… (חובה)">${this.esc(prevText || '')}</textarea>
+      <div id="fbErr" style="display:none;color:#c0392b;font-size:13px;font-weight:600;text-align:right;margin:-8px 0 12px;">יש לכתוב הערה (לפחות 5 תווים) לפני השליחה.</div>
       <button type="submit">שליחת המשוב</button>
-    </form>`;
+    </form>
+    <script>
+      function validateFb(f){
+        var t=(f.feedback.value||'').trim();
+        var e=document.getElementById('fbErr');
+        if(t.length<5){ e.style.display='block'; f.feedback.focus(); return false; }
+        e.style.display='none'; return true;
+      }
+    </script>`;
     return this.pageShell('תודה על המשוב', inner);
   }
 

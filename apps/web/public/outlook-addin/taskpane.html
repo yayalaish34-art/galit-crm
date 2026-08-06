@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My CRM</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b; background: #f8fafc; direction: rtl; }
+    .wrap { padding: 16px; }
+    .brand { font-size: 18px; font-weight: 800; color: #0d5c63; margin-bottom: 4px; }
+    .status { font-size: 12px; margin-bottom: 14px; }
+    .status.ok { color: #15803d; }
+    .status.no { color: #b45309; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    .label { font-size: 11px; color: #94a3b8; }
+    .value { font-size: 14px; font-weight: 600; word-break: break-word; margin-bottom: 8px; }
+    button { width: 100%; border: 0; border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer; }
+    .primary { background: #0d5c63; color: #fff; }
+    .primary:disabled { background: #cbd5e1; cursor: default; }
+    .link { display: inline-block; margin-top: 10px; color: #2563eb; font-weight: 700; text-decoration: none; font-size: 14px; }
+    .msg { font-size: 13px; margin-top: 10px; }
+    .msg.ok { color: #15803d; } .msg.err { color: #dc2626; }
+    .empty { color: #64748b; font-size: 14px; text-align: center; padding: 30px 10px; }
+    .hidden { display: none; }
+    .field { margin-bottom: 10px; }
+    .field label { display: block; font-size: 11px; color: #64748b; margin-bottom: 4px; }
+    .field input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; font-size: 14px; direction: ltr; text-align: left; }
+    .err { color: #dc2626; font-size: 12px; margin-top: 6px; }
+    .logout { background: none; border: 0; color: #94a3b8; font-size: 11px; text-decoration: underline; cursor: pointer; padding: 0; width: auto; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">My CRM</div>
+    <div id="conn" class="status">בודק חיבור…</div>
+
+    <!-- מסך התחברות (מוצג כשאין חיבור ל-CRM) -->
+    <div id="loginCard" class="card hidden">
+      <div class="value" style="margin-bottom:12px;">התחברות ל-CRM</div>
+      <div class="field">
+        <label>אימייל</label>
+        <input id="loginEmail" type="email" autocomplete="username" placeholder="you@galit.co.il" />
+      </div>
+      <div class="field">
+        <label>סיסמה</label>
+        <input id="loginPassword" type="password" autocomplete="current-password" placeholder="••••••••" />
+      </div>
+      <button id="loginBtn" class="primary">התחברות</button>
+      <div id="loginErr" class="err"></div>
+    </div>
+
+    <div id="noMail" class="empty hidden">יש לפתוח הודעת דואר כדי להוסיף אותה ל-CRM</div>
+
+    <div id="mailCard" class="card hidden">
+      <div class="label">שם השולח</div><div id="senderName" class="value">—</div>
+      <div class="label">כתובת המייל</div><div id="senderEmail" class="value">—</div>
+      <div class="label">נושא</div><div id="subject" class="value">—</div>
+    </div>
+
+    <button id="addBtn" class="primary hidden">הוספה ל-CRM</button>
+    <div id="result" class="msg"></div>
+    <button id="logoutBtn" class="logout hidden">התנתקות</button>
+  </div>
+
+  <script src="./config.js"></script>
+  <script src="./outlook-message.js"></script>
+  <script src="./crm-api.js"></script>
+  <script src="./taskpane.js"></script>
+</body>
+</html>

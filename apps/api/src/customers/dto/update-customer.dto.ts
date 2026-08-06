@@ -218,4 +218,65 @@ export class UpdateCustomerDocumentDto {
   @IsOptional() @IsString() documentDate?: string | null;
   @IsOptional() @IsString() mimeType?: string | null;
   @IsOptional() @IsNumber() sizeBytes?: number | null;
+  /**
+   * תוכן הקובץ החדש כ-base64 — מחליף את הקובץ הקיים *באותה שורה*.
+   *
+   * למה החלפה ולא מחיקה+העלאה: לדוח שהופק כבר יש היסטוריה (הוא נשלח במייל,
+   * הוא מוצג בכרטיס עם תאריך). כשמתקנים טעות בדוח רוצים שהגרסה המתוקנת תחליף
+   * את הישנה בלי לאבד את המזהה, את מיקומו ברשימה או את תאריך ההפקה.
+   */
+  @IsOptional() @IsString() dataBase64?: string | null;
+}
+
+/**
+ * שליחת דוח קיים מכרטיס הלקוח במייל (documentId מגיע מה-URL). ללא משימה משויכת.
+ */
+export class SendCustomerDocumentEmailDto {
+  @IsOptional() @IsString() to?: string;
+  @IsOptional() @IsArray() @IsString({ each: true }) toList?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) cc?: string[];
+  @IsOptional() @IsArray() @IsString({ each: true }) bcc?: string[];
+  @IsOptional() @IsString() subject?: string;
+  @IsOptional() @IsString() body?: string;
+  @IsOptional() @IsBoolean() includeSignature?: boolean;
+  @IsOptional() @IsString() signatureId?: string;
+  @IsOptional() @IsString() customerName?: string;
+  @IsOptional() @IsBoolean() requestReadReceipt?: boolean;
+  @IsOptional() @IsBoolean() requestDeliveryReceipt?: boolean;
+}
+
+/** חילוץ בלבד — שולחים base64 של PDF ומקבלים סכום מוצע (או null). */
+export class ParseSignedQuoteDto {
+  /** תוכן הקובץ כ-base64 (ללא תחילית data:). */
+  @IsString() dataBase64!: string;
+  @IsOptional() @IsString() mimeType?: string | null;
+}
+
+/**
+ * צירוף הצעת מחיר חתומה (ידני) — יוצר מסמך SIGNED_QUOTE + Quote בסטטוס SIGNED
+ * (כדי שההכנסה תיספר בדשבורד) ומקדם משימת פולואפ→תיאום.
+ */
+export class CreateSignedQuoteDto {
+  @IsString() name!: string;
+  @IsString() dataBase64!: string;
+  @IsOptional() @IsString() mimeType?: string | null;
+  @IsOptional() @IsNumber() sizeBytes?: number | null;
+  /** הסכום הסופי (סך הכל) שהמשתמש אישר/תיקן — נכנס ל-totalAmount של ה-Quote. */
+  @IsNumber() finalAmount!: number;
+  /** מס' הצעה/הזמנה אופציונלי לתצוגה בדשבורד. */
+  @IsOptional() @IsString() quoteNumber?: string | null;
+}
+
+/**
+ * הוספת הכנסה ידנית מכרטיס הלקוח — יוצר Quote "זכייה" (status SIGNED) עם הסכום,
+ * כך שההכנסה נספרת בכל חישובי הדשבורד (manager + revenue-analytics + me), בדיוק
+ * כמו הצעה חתומה. אין קובץ/מסמך מצורף. ההערה (note) מסבירה מדוע נרשמה ידנית.
+ */
+export class CreateManualIncomeDto {
+  /** סכום ההכנסה (לפני מע"מ) — נכנס כ-amountBeforeVat/totalAmount של ה-Quote. */
+  @IsNumber() amount!: number;
+  /** הערה חובה: מדוע ההכנסה נרשמה ידנית. */
+  @IsString() note!: string;
+  /** תאריך ההכנסה (ISO). ברירת מחדל: עכשיו. משמש ל-signedAt (תאריך הזכייה בדשבורד). */
+  @IsOptional() @IsString() date?: string | null;
 }

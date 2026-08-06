@@ -25,7 +25,8 @@ export function formatIsraeliPhone(value: string) {
     const rest = digits.slice(3);
     return `${area}-${rest}`;
   }
-  const landlinePrefixes = ['02', '03', '04', '08'];
+  // 09 (השרון — נתניה/הרצליה/רעננה/כפר סבא) חסר כאן וגרם ל"טלפון לא תקין" בייבוא.
+  const landlinePrefixes = ['02', '03', '04', '08', '09'];
   if (landlinePrefixes.some((p) => digits.startsWith(p)) && digits.length === 9) {
     return `${digits.slice(0, 2)}-${digits.slice(2)}`;
   }

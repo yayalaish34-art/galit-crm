@@ -2,6 +2,7 @@
  * בניית גוף JSON ל־POST /quote-templates/:id/merge-docx
  * (שמות שדות תואמים ל־normalizeDocxMergePayload בצד ה-API).
  */
+import { formatIsraeliPhoneDisplay } from './phone-format';
 
 export type DocxLineInput = {
   code?: string;
@@ -100,11 +101,11 @@ export function buildQuoteDocxMergeBody(o: BuildQuoteDocxMergeBodyOpts): Record<
       })(),
       customerName: o.customerName,
       contactName: o.contactName,
-      customerPhone: o.customerPhone,
+      customerPhone: formatIsraeliPhoneDisplay(o.customerPhone),
       customerEmail: o.customerEmail,
       customerAddress: o.customerAddress,
       customerCity: o.customerCity,
-      contactPhone: o.contactPhone ?? '',
+      contactPhone: formatIsraeliPhoneDisplay(o.contactPhone),
       contactEmail: o.contactEmail ?? '',
       salesRepName: o.salesRepName,
       paymentTerms: o.paymentTerms,
@@ -133,11 +134,11 @@ export function buildQuoteDocxMergeBody(o: BuildQuoteDocxMergeBodyOpts): Record<
     validUntil: Number.isNaN(vd.getTime()) ? '' : vd.toLocaleDateString('he-IL'),
     customerName: o.customerName,
     contactName: o.contactName,
-    customerPhone: o.customerPhone,
+    customerPhone: formatIsraeliPhoneDisplay(o.customerPhone),
     customerEmail: o.customerEmail,
     customerAddress: o.customerAddress,
     customerCity: o.customerCity,
-    contactPhone: o.contactPhone ?? '',
+    contactPhone: formatIsraeliPhoneDisplay(o.contactPhone),
     contactEmail: o.contactEmail ?? '',
     salesRepName: o.salesRepName,
     paymentTerms: o.paymentTerms,

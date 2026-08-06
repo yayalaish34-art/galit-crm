@@ -90,6 +90,10 @@ export function SendReportModal({
   const [includeSignature, setIncludeSignature] = useState(false);
   const [signatureId, setSignatureId] = useState('');
 
+  // אישור קריאה/מסירה — Microsoft Graph (isReadReceiptRequested / isDeliveryReceiptRequested)
+  const [requestReadReceipt, setRequestReadReceipt] = useState(false);
+  const [requestDeliveryReceipt, setRequestDeliveryReceipt] = useState(false);
+
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
@@ -194,6 +198,8 @@ export function SendReportModal({
     setBccList([]);
     setBccInput('');
     setBccDropdownOpen(false);
+    setRequestReadReceipt(false);
+    setRequestDeliveryReceipt(false);
     // טעינת חתימות המשתמש
     const uid = currentUser?.id;
     if (uid) {
@@ -398,6 +404,8 @@ export function SendReportModal({
           includeSignature,
           signatureId: includeSignature ? signatureId : undefined,
           customerName: task.customerName || '',
+          requestReadReceipt,
+          requestDeliveryReceipt,
         }),
       });
       if (r.ok) {
@@ -779,6 +787,40 @@ export function SendReportModal({
               )}
             </div>
           )}
+
+          {/* ── אישור קריאה / מסירה (Microsoft Graph read/delivery receipt) ── */}
+          <div className="rounded-xl border border-gray-200 bg-gray-50/60 px-3.5 py-3">
+            <div className="mb-2 text-sm font-semibold text-gray-700">אישור קריאה / מסירה</div>
+            <div className="flex flex-col gap-2">
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                  checked={requestReadReceipt}
+                  onChange={(e) => setRequestReadReceipt(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">אישור קריאה</span>
+                  <span className="text-gray-400"> — קבלת התראה כשהנמען פותח את המייל</span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                  checked={requestDeliveryReceipt}
+                  onChange={(e) => setRequestDeliveryReceipt(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium">אישור מסירה</span>
+                  <span className="text-gray-400"> — קבלת התראה כשהמייל מגיע לתיבת הנמען</span>
+                </span>
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+              שים לב: אישור קריאה תלוי בתוכנת המייל של הנמען וייתכן שיסרב לשלוח אותו. אישור מסירה אמין יותר.
+            </p>
+          </div>
         </div>
 
         {err && <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{err}</div>}

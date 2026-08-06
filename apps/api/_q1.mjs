@@ -1,0 +1,10 @@
+import pg from 'pg';
+import fs from 'fs';
+const url = fs.readFileSync('.env','utf8').split(/\r?\n/).find(l=>l.startsWith('DATABASE_URL')).split('=')[1].replace(/^"|"$/g,'').trim();
+const c = new pg.Client({connectionString:url, ssl:{rejectUnauthorized:false}});
+await c.connect();
+const u = await c.query(`SELECT id,name,email,role FROM "User" WHERE email ILIKE '%yoram%' OR email ILIKE '%yorm%' OR name ILIKE '%יורם%'`);
+console.log('USERS:'); console.table(u.rows);
+const cu = await c.query(`SELECT id,name,companyname,type,"contactName",city FROM "Customer" WHERE name ILIKE '%רעננה%' OR companyname ILIKE '%רעננה%' OR city ILIKE '%רעננה%' LIMIT 40`);
+console.log('CUSTOMERS raanana:', cu.rows.length); console.table(cu.rows);
+await c.end();

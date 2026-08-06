@@ -125,7 +125,19 @@ export class QuoteMailService {
     // מצב חתימה: מצרפים את קובץ ה-PDF של ההצעה כשבתוכו כבר מוטמע כפתור "לחץ כאן לחתימה"
     // (נשלף משירות החתימה לפי הטוקן) — במקום כפתור-קישור בגוף המייל.
     const signMode = !!opts?.signToken;
-    const baseDocName = buildQuoteDocName(quote);
+    // שם ברירת המחדל = השם הקנוני. אך אם המשתמש נעל שם ידני (onedriveNameLocked), עדיף
+    // את השם *בפועל* של הקובץ ב-OneDrive — כדי שה-PDF הנשלח יישא את השם הידני, לא הישן.
+    let baseDocName = buildQuoteDocName(quote);
+    if (!signMode && quote.onedriveNameLocked) {
+      const ref = await this.getOnedriveRefSafe(quoteId);
+      if (ref) {
+        try {
+          const item = await this.graphFiles.getItem(ref.ownerId, ref.itemId);
+          const nm = (item?.name || '').replace(/\.docx$/i, '').trim();
+          if (nm) baseDocName = nm;
+        } catch { /* נשאר עם השם הקנוני */ }
+      }
+    }
 
     // מצב חתימה: מצרפים את ה-PDF (עם כפתור החתימה מוטמע בפנים) — נשלף ישירות משירות החתימה.
     if (signMode) {
@@ -144,6 +156,7 @@ export class QuoteMailService {
       if (ref) {
         try {
           const fresh = await this.graphFiles.downloadContent(ref.ownerId, ref.itemId);
+          // baseDocName כבר משקף את השם הידני שנעל ב-OneDrive (ראה למעלה) — משתמשים בו.
           docs.push({ content: fresh, fileName: `${baseDocName}.docx`, mime: DOCX_MIME });
         } catch (e: any) {
           this.logger.warn(`OneDrive pull failed for quote ${quoteId} — falling back to stored copy: ${e?.message || e}`);
@@ -166,7 +179,10 @@ export class QuoteMailService {
     // משתמשים ב-mimeType השמור — כך PDF שהועלה (Word→PDF) נשלח כמות-שהוא בלי המרה.
     if (!signMode && docs.length === 0 && quote.quoteDocuments?.length > 0 && quote.quoteDocuments[0].data) {
       const qd = quote.quoteDocuments[0];
-      docs.push({ content: Buffer.from(qd.data), fileName: qd.fileName, mime: qd.mimeType || DOCX_MIME });
+      // אם נעל שם ידני — נשתמש בשם הידני (baseDocName) עם סיומת הקובץ המקורית של ה-QuoteDocument.
+      const ext = /\.pdf$/i.test(qd.fileName || '') || qd.mimeType === 'application/pdf' ? '.pdf' : '.docx';
+      const fileName = quote.onedriveNameLocked ? `${baseDocName}${ext}` : qd.fileName;
+      docs.push({ content: Buffer.from(qd.data), fileName, mime: qd.mimeType || DOCX_MIME });
     }
     if (!signMode && docs.length === 0) {
       let relPath: string | null = null;

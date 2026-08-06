@@ -1,9 +1,15 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DocumentType, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { formatIsraeliPhone, formatPhoneFields } from '../common/phone.util';
+import { GraphMailService } from '../microsoft/graph-mail.service';
+import { extractTotalFromPdf } from './signed-quote-total.util';
 import type {
   CreateCustomerDocumentDto,
+  CreateManualIncomeDto,
+  CreateSignedQuoteDto,
+  ParseSignedQuoteDto,
   ReplaceAdditionalDataDto,
   ReplaceBlocksDto,
   ReplaceExternalDataDto,
@@ -37,11 +43,145 @@ function parseDocumentType(v: unknown): DocumentType {
   return DocumentType.OTHER;
 }
 
+/** מבין כמה רשומות של אותו לקוח — המלאה ביותר, ובתיקו הוותיקה (הרשימה ממוינת asc). */
+function pickFullest<T extends { phone?: string | null; email?: string | null }>(candidates: T[]): T {
+  const score = (c: T) => (c.phone ? 2 : 0) + (c.email ? 1 : 0);
+  return candidates.reduce((a, b) => (score(b) > score(a) ? b : a), candidates[0]);
+}
+
+/** מרחק עריכה (Levenshtein). עוצר מוקדם ברגע שברור שחרגנו מהסף. */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > max) return max + 1; // כל השורה כבר מעבר לסף — אין טעם להמשיך
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * האם שני השמות נבדלים בשגיאת כתיב בלבד ("תומר גולפדר" מול "תומר גולדפדר")?
+ *
+ * מכוון בכוונה **צר**: איחוד שני לקוחות אמיתיים אינו הפיך, ולכן עדיף להחמיץ
+ * כפילות מאשר למזג בטעות. שני תנאים במצטבר:
+ *   • לכל היותר 2 עריכות, וגם
+ *   • לכל היותר 20% מאורך השם — כך ששמות קצרים מוגנים ("משה" מול "מזה" נדחה,
+ *     יחס 0.33), ושם שהוא הרחבה של אחר ("אורי" מול "אורי יעקב") נדחה גם הוא.
+ *
+ * ובנוסף — ספרות חייבות להיות זהות. "פיצה פיאצה" מול "פיצה פיאצה 2" הן שני
+ * **סניפים** נפרדים, לא שגיאת כתיב; בלי התנאי הזה מרחק העריכה (2) היה ממזג אותן.
+ */
+function isTypoOf(a: unknown, b: unknown): boolean {
+  const norm = (s: unknown) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  // מספר בשם מבדיל סניף/אתר — לעולם לא "שגיאת כתיב".
+  const digitsOf = (s: string) => (s.match(/[0-9]+/g) || []).join(',');
+  if (digitsOf(x) !== digitsOf(y)) return false;
+  const maxLen = Math.max(x.length, y.length);
+  const d = editDistance(x, y, 2);
+  return d <= 2 && d / maxLen <= 0.2;
+}
+
 @Injectable()
 export class CustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CustomersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly graphMail: GraphMailService,
+  ) {}
 
   private static readonly PRESET_CLASSIFICATION_CODES = new Set(['POTENTIAL', 'COMPANY', 'PUBLIC', 'PRIVATE']);
+
+  // ── בקשות מ-Outlook: שליפת מיילים אחרונים + צירוף מייל לכרטיס הלקוח ──
+
+  /** 20 המיילים האחרונים מתיבת ה-Outlook של העובד המחובר — לבחירה ידנית לצירוף. */
+  async listRecentInboxForUser(userId: string, top = 20) {
+    if (!userId) throw new BadRequestException('משתמש לא מזוהה');
+    return this.graphMail.listRecentInbox(userId, top);
+  }
+
+  /** רשימת הבקשות (מיילים שתויקו) של לקוח, מהחדש לישן. */
+  async listEmailRequests(customerId: string) {
+    return (this.prisma as any).customerEmailRequest.findMany({
+      where: { customerId },
+      orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  /**
+   * מצרף מייל מ-Outlook כ"בקשה" לכרטיס הלקוח. שולף מחדש את 20 האחרונים מהתיבה של
+   * העובד ומאתר את המייל שנבחר לפי graphMessageId — כדי לא לסמוך על גוף שנשלח מהלקוח.
+   * דדופ: אם אותו מייל כבר צורף לאותו לקוח — מחזיר את הרשומה הקיימת.
+   */
+  async attachEmailRequest(
+    customerId: string,
+    messageId: string,
+    user?: { id?: string; name?: string },
+  ) {
+    if (!customerId) throw new BadRequestException('מזהה לקוח חסר');
+    if (!messageId) throw new BadRequestException('יש לבחור מייל לצירוף');
+    const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+    if (!customer) throw new NotFoundException('הלקוח לא נמצא');
+
+    const inbox = await this.graphMail.listRecentInbox(user?.id || '', 20);
+    const msg = inbox.find((m) => m.id === messageId);
+    if (!msg) throw new BadRequestException('המייל לא נמצא ברשימת המיילים האחרונים — רענן ונסה שוב');
+
+    // שם המצרף — נשלף מה-DB (req.user מחזיק id/role בלבד).
+    const attacherName =
+      user?.name ||
+      (user?.id
+        ? (await this.prisma.user.findUnique({ where: { id: user.id }, select: { name: true } }))?.name
+        : null) ||
+      null;
+
+    // דדופ לפי graphMessageId (או internetMessageId) לאותו לקוח.
+    const existing = await (this.prisma as any).customerEmailRequest.findFirst({
+      where: {
+        customerId,
+        OR: [
+          { graphMessageId: msg.id },
+          ...(msg.internetMessageId ? [{ internetMessageId: msg.internetMessageId }] : []),
+        ],
+      },
+    });
+    if (existing) return existing;
+
+    return (this.prisma as any).customerEmailRequest.create({
+      data: {
+        customerId,
+        graphMessageId: msg.id || null,
+        internetMessageId: msg.internetMessageId || null,
+        subject: msg.subject || null,
+        fromName: msg.fromName || null,
+        fromEmail: msg.fromEmail || null,
+        receivedAt: msg.receivedDateTime ? new Date(msg.receivedDateTime) : null,
+        bodyText: msg.bodyText || null,
+        attachedByUserId: user?.id || null,
+        attachedByName: attacherName,
+      },
+    });
+  }
+
+  /** מחיקת בקשה שתויקה. */
+  async deleteEmailRequest(customerId: string, requestId: string) {
+    const row = await (this.prisma as any).customerEmailRequest.findUnique({ where: { id: requestId } });
+    if (!row || row.customerId !== customerId) throw new NotFoundException('הבקשה לא נמצאה');
+    await (this.prisma as any).customerEmailRequest.delete({ where: { id: requestId } });
+    return { ok: true };
+  }
 
   private async assertClassificationCode(code: string | undefined) {
     if (code == null || code === '') {
@@ -74,7 +214,7 @@ export class CustomersService {
     if (dto.companyname !== undefined) out.companyname = dto.companyname;
     if (dto.type !== undefined) out.type = dto.type ?? '';
     if (dto.contactName !== undefined) out.contactName = dto.contactName ?? '';
-    if (dto.phone !== undefined) out.phone = dto.phone ?? '';
+    if (dto.phone !== undefined) out.phone = formatIsraeliPhone(dto.phone);
     if (dto.email !== undefined) out.email = dto.email ?? '';
     if (dto.city !== undefined) out.city = dto.city ?? '';
     if (dto.address !== undefined) out.address = dto.address;
@@ -82,9 +222,9 @@ export class CustomersService {
     if (dto.services !== undefined) out.services = dto.services;
     if (dto.notes !== undefined) out.notes = dto.notes;
     if (dto.leadSource !== undefined) out.leadSource = dto.leadSource;
-    if (dto.phone2 !== undefined) out.phone2 = dto.phone2;
-    if (dto.phone3 !== undefined) out.phone3 = dto.phone3;
-    if (dto.fax !== undefined) out.fax = dto.fax;
+    if (dto.phone2 !== undefined) out.phone2 = dto.phone2 == null ? dto.phone2 : formatIsraeliPhone(dto.phone2);
+    if (dto.phone3 !== undefined) out.phone3 = dto.phone3 == null ? dto.phone3 : formatIsraeliPhone(dto.phone3);
+    if (dto.fax !== undefined) out.fax = dto.fax == null ? dto.fax : formatIsraeliPhone(dto.fax);
     if (dto.website !== undefined) out.website = dto.website;
     if (dto.companyRegNumber !== undefined) out.companyRegNumber = dto.companyRegNumber;
     if (dto.internalNotes !== undefined) out.internalNotes = dto.internalNotes;
@@ -208,12 +348,39 @@ export class CustomersService {
       where.type = typeTrim;
     }
     if (term) {
+      // התאמת טלפון עמידה למפרידים: מפשיטים הכל חוץ מספרות מהחיפוש *ומהעמודה* ומשווים.
+      // טלפונים מאוחסנים בפורמטים לא עקביים ("052-9243249" / "0529243249" / "052 924 3249"),
+      // כך שחיפוש "0529243249" חייב למצוא "052-9243249" ולהיפך. `contains` לא יכול לשנות
+      // את העמודה, לכן ההתאמה לפי ספרות רצה כ-SQL גולמי שמחזיר את מזהי הלקוחות התואמים.
+      const digits = term.replace(/\D/g, '');
+      const phoneDigits = digits.length >= 4 ? digits : ''; // שמירה מפני ריצת ספרות קצרה מדי
+      const customerIdsByPhone = new Set<string>();
+      if (phoneDigits) {
+        try {
+          const rows = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+            `SELECT id FROM "Customer"
+               WHERE regexp_replace(COALESCE(phone,''),  '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+                  OR regexp_replace(COALESCE(phone2,''), '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+                  OR regexp_replace(COALESCE(phone3,''), '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+               LIMIT 500`,
+            phoneDigits,
+          );
+          for (const r of rows) customerIdsByPhone.add(r.id);
+        } catch {
+          /* best-effort — נפילה חזרה להתאמת contains הרגילה למטה */
+        }
+      }
+
       where.OR = [
         { name: { contains: term, mode: 'insensitive' } },
         { contactName: { contains: term, mode: 'insensitive' } },
         { phone: { contains: term, mode: 'insensitive' } },
+        { phone2: { contains: term, mode: 'insensitive' } },
+        { phone3: { contains: term, mode: 'insensitive' } },
         { email: { contains: term, mode: 'insensitive' } },
         { city: { contains: term, mode: 'insensitive' } },
+        { companyRegNumber: { contains: term, mode: 'insensitive' } },
+        ...(customerIdsByPhone.size ? [{ id: { in: [...customerIdsByPhone] } }] : []),
       ];
     }
 
@@ -238,6 +405,132 @@ export class CustomersService {
       }
       throw e;
     }
+  }
+
+  /**
+   * חיפוש לקוח + אנשי קשר. מחזיר לכל לקוח תואם את רשימת אנשי הקשר שתאמו לחיפוש.
+   * לקוח נכלל אם השדות שלו תאמו, או אם לאחד מאנשי הקשר שלו תאם שם/טלפון/נייד/מייל/תפקיד.
+   * כך חברה כמו "אינטל" תימצא גם כשמחפשים לפי שם/טלפון של איש קשר ספציפי שלה.
+   */
+  async searchWithContacts(qIn?: string, limitIn?: number) {
+    const term = (qIn ?? '').trim();
+    const take = Math.min(100, Math.max(1, limitIn ?? 50));
+    if (!term) return { customers: [] as any[] };
+
+    // Phone matching is separator-agnostic: strip everything but digits from BOTH
+    // the search term and the stored column, then compare. Stored phones are
+    // wildly inconsistent (e.g. "050-6545356", "0506545356", "050 654 5356"), so
+    // searching "050-6666666" must match "0506666666" and vice-versa. `contains`
+    // can't transform the column, so the phone match runs as raw SQL that finds
+    // the matching row IDs, which we OR into the Prisma queries below.
+    const digits = term.replace(/\D/g, '');
+    // Guard against a too-short digit run matching half the table (e.g. "05").
+    const phoneDigits = digits.length >= 4 ? digits : '';
+
+    const customerIdsByPhone = new Set<string>();
+    const contactIdsByPhone = new Set<string>();
+    if (phoneDigits) {
+      // NOTE: Postgres POSIX regex does NOT support the `\D` shorthand — use the
+      // explicit `[^0-9]` class to strip non-digits (verified against prod data).
+      const [custRows, contactRows] = await Promise.all([
+        this.prisma.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT id FROM "Customer"
+             WHERE regexp_replace(COALESCE(phone,''),   '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+                OR regexp_replace(COALESCE(phone2,''),  '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+                OR regexp_replace(COALESCE(phone3,''),  '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+             LIMIT 200`,
+          phoneDigits,
+        ),
+        this.prisma.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT id FROM "CustomerContact"
+             WHERE regexp_replace(COALESCE(phone,''),  '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+                OR regexp_replace(COALESCE(mobile,''), '[^0-9]', '', 'g') LIKE '%' || $1 || '%'
+             LIMIT 500`,
+          phoneDigits,
+        ),
+      ]);
+      for (const r of custRows) customerIdsByPhone.add(r.id);
+      for (const r of contactRows) contactIdsByPhone.add(r.id);
+    }
+
+    // 1. אנשי קשר תואמים — כדי לצרף את הלקוחות שלהם ולהדגיש את איש הקשר התואם.
+    const matchedContacts = await this.prisma.customerContact.findMany({
+      where: {
+        OR: [
+          { fullName: { contains: term, mode: 'insensitive' } },
+          { phone: { contains: term, mode: 'insensitive' } },
+          { mobile: { contains: term, mode: 'insensitive' } },
+          { email: { contains: term, mode: 'insensitive' } },
+          { roleTitle: { contains: term, mode: 'insensitive' } },
+          ...(contactIdsByPhone.size ? [{ id: { in: [...contactIdsByPhone] } }] : []),
+        ],
+      },
+      orderBy: [{ isPrimary: 'desc' }, { fullName: 'asc' }],
+      take: 500,
+    });
+
+    // 2. לקוחות שתאמו ישירות (שם/איש קשר ראשי/טלפונים/מייל/עיר/כתובת/ח.פ/סימוכין).
+    const directCustomers = await this.prisma.customer.findMany({
+      where: {
+        OR: [
+          { name: { contains: term, mode: 'insensitive' } },
+          { companyname: { contains: term, mode: 'insensitive' } },
+          { contactName: { contains: term, mode: 'insensitive' } },
+          { phone: { contains: term, mode: 'insensitive' } },
+          { phone2: { contains: term, mode: 'insensitive' } },
+          { phone3: { contains: term, mode: 'insensitive' } },
+          { email: { contains: term, mode: 'insensitive' } },
+          { city: { contains: term, mode: 'insensitive' } },
+          { address: { contains: term, mode: 'insensitive' } },
+          { companyRegNumber: { contains: term, mode: 'insensitive' } },
+          { importLegacyId: { contains: term, mode: 'insensitive' } },
+          ...(customerIdsByPhone.size ? [{ id: { in: [...customerIdsByPhone] } }] : []),
+        ],
+      },
+      orderBy: { name: 'asc' },
+      take: 200,
+    });
+
+    // 3. איחוד: מזהי הלקוחות מכל שני המקורות.
+    const contactsByCustomer = new Map<string, typeof matchedContacts>();
+    for (const ct of matchedContacts) {
+      const arr = contactsByCustomer.get(ct.customerId) ?? [];
+      arr.push(ct);
+      contactsByCustomer.set(ct.customerId, arr);
+    }
+
+    const customerIds = new Set<string>(directCustomers.map((c) => c.id));
+    for (const id of contactsByCustomer.keys()) customerIds.add(id);
+
+    // מביא לקוחות שהגיעו רק דרך התאמת איש קשר (ולא היו ב-directCustomers).
+    const missingIds = [...contactsByCustomer.keys()].filter(
+      (id) => !directCustomers.some((c) => c.id === id),
+    );
+    const extraCustomers = missingIds.length
+      ? await this.prisma.customer.findMany({ where: { id: { in: missingIds } } })
+      : [];
+
+    const byId = new Map<string, any>();
+    for (const c of [...directCustomers, ...extraCustomers]) byId.set(c.id, c);
+
+    // 4. בונה תוצאה: לקוח + אנשי הקשר התואמים שלו (אם יש). ממוין לפי שם, מוגבל ל-take.
+    const result = [...byId.values()]
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'he'))
+      .slice(0, take)
+      .map((c) => ({
+        ...c,
+        matchedContacts: (contactsByCustomer.get(c.id) ?? []).map((ct) => ({
+          id: ct.id,
+          fullName: ct.fullName,
+          phone: ct.phone,
+          mobile: ct.mobile,
+          email: ct.email,
+          roleTitle: ct.roleTitle,
+          isPrimary: ct.isPrimary,
+        })),
+      }));
+
+    return { customers: result };
   }
 
   async findOne(id: string) {
@@ -382,9 +675,9 @@ export class CustomersService {
         customerId,
         importLegacyId,
         fullName: (data?.fullName || '').toString().trim() || 'איש קשר',
-        phone: (data?.phone || '').toString().trim(),
-        mobile: (data?.mobile || '').toString().trim(),
-        fax: (data?.fax || '').toString().trim(),
+        phone: formatIsraeliPhone(data?.phone),
+        mobile: formatIsraeliPhone(data?.mobile),
+        fax: formatIsraeliPhone(data?.fax),
         email: (data?.email || '').toString().trim().toLowerCase(),
         address: (data?.address || '').toString().trim(),
         city: (data?.city || '').toString().trim(),
@@ -408,9 +701,9 @@ export class CustomersService {
       where: { id: contactId },
       data: {
         fullName: data?.fullName !== undefined ? (data.fullName || '').toString().trim() || 'איש קשר' : undefined,
-        phone: data?.phone !== undefined ? (data.phone || '').toString().trim() : undefined,
-        mobile: data?.mobile !== undefined ? (data.mobile || '').toString().trim() : undefined,
-        fax: data?.fax !== undefined ? (data.fax || '').toString().trim() : undefined,
+        phone: data?.phone !== undefined ? formatIsraeliPhone(data.phone) : undefined,
+        mobile: data?.mobile !== undefined ? formatIsraeliPhone(data.mobile) : undefined,
+        fax: data?.fax !== undefined ? formatIsraeliPhone(data.fax) : undefined,
         email: data?.email !== undefined ? (data.email || '').toString().trim().toLowerCase() : undefined,
         address: data?.address !== undefined ? (data.address || '').toString().trim() : undefined,
         city: data?.city !== undefined ? (data.city || '').toString().trim() : undefined,
@@ -436,7 +729,81 @@ export class CustomersService {
 
   async create(data: any) {
     await this.assertClassificationCode(data?.type);
-    return this.prisma.customer.create({ data });
+    // כל מסלולי היצירה האוטומטית (שלבי הצינור, בוט הוואטסאפ, המרת ליד, resolve)
+    // מגיעים לכאן — לכן זו הנקודה שמבטיחה שטלפון נשמר עם מקף.
+    return this.prisma.customer.create({ data: formatPhoneFields({ ...(data || {}) }) });
+  }
+
+  /**
+   * מאתר לקוח קיים לפי הפרטים הנתונים, ורק אם אין — יוצר חדש.
+   *
+   * **הבאג שזה מתקן:** שלבי הצינור יצרו לקוח בכל פעם שלמשימה עדיין לא היה
+   * `customerId`, בלי לחפש קודם. לקוח קיים נפתח שוב ושוב כלקוח חדש. מקרה אמיתי:
+   * "אורים הנדסת חשמל בע״מ" נוצר 9 פעמים ב-2026-08-02 בין 14:08 ל-14:28,
+   * ו"משה" 4 פעמים ב-2026-08-04 בתוך 4 שניות.
+   *
+   * **למה טלפון לבדו אינו מספיק:** בנתונים האמיתיים טלפון אחד משותף לכמה
+   * לקוחות שונים לגמרי — למשל ...522357357 מופיע אצל 7 חברות נפרדות (מספר של
+   * יועץ/מפקח שמשותף לכולן). התאמה לפי טלפון בלבד הייתה **מאחדת לקוחות אמיתיים
+   * שונים** — נזק חמור בהרבה מכפילות. לכן טלפון מתאים רק **בצירוף שם כמעט זהה**.
+   *
+   * לכן ההתאמה, מהחזק לחלש:
+   *   1. `companyRegNumber` (ח.פ) — מזהה רשמי וחד-ערכי.
+   *   2. שם מנורמל זהה — זה בדיוק האופן שבו הכפילות מתבטאת.
+   *   3. טלפון זהה **וגם** שם שנבדל בשגיאת כתיב בלבד — המקרה של "תומר גולפדר"
+   *      מול "תומר גולדפדר" (אות אחת חסרה, אותו טלפון, שתי רשומות נפרדות).
+   * שם ריק או גנרי ("לקוח חדש") לעולם אינו מתאים — אחרת כל הפניות בלי שם היו
+   * מתמזגות לרשומה אחת.
+   */
+  async resolve(data: any): Promise<{ customer: any; created: boolean; matchedBy: string | null }> {
+    const rawName = String(data?.name ?? '').trim().replace(/\s+/g, ' ');
+    const regNumber = String(data?.companyRegNumber ?? '').trim();
+
+    // 1. ח.פ — המזהה החזק. מספיק בפני עצמו.
+    if (regNumber) {
+      const byReg = await this.prisma.customer.findFirst({
+        where: { companyRegNumber: regNumber },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (byReg) return { customer: byReg, created: false, matchedBy: 'companyRegNumber' };
+    }
+
+    // 2. שם זהה (אחרי נרמול רווחים, בלי תלות ברישיות).
+    const GENERIC = new Set(['לקוח חדש', 'לקוח', 'ללא שם', 'טסט', 'test']);
+    if (rawName && !GENERIC.has(rawName)) {
+      const candidates = await this.prisma.customer.findMany({
+        where: { name: { equals: rawName, mode: 'insensitive' } },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (candidates.length > 0) {
+        return { customer: pickFullest(candidates), created: false, matchedBy: 'name' };
+      }
+    }
+
+    // 3. טלפון זהה + שם שנבדל בשגיאת כתיב בלבד.
+    //    הטלפון לבדו לעולם אינו מספיק (ראו הערת התיעוד) — הוא רק מצמצם את
+    //    המועמדים, וההכרעה היא של בדיקת הדמיון בשם.
+    const phoneDigits = String(data?.phone ?? '').replace(/[^0-9]/g, '');
+    // פחות מ-9 ספרות אינו מספר טלפון שלם — קידומת בלבד תתאים לחצי מהטבלה.
+    if (rawName && !GENERIC.has(rawName) && phoneDigits.length >= 9) {
+      // NOTE: Postgres POSIX regex אינו תומך ב-`\D` — חובה `[^0-9]` (ראו search).
+      const byPhone = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM "Customer"
+           WHERE regexp_replace(COALESCE(phone,''),  '[^0-9]', '', 'g') = $1
+              OR regexp_replace(COALESCE(phone2,''), '[^0-9]', '', 'g') = $1
+              OR regexp_replace(COALESCE(phone3,''), '[^0-9]', '', 'g') = $1
+           ORDER BY "createdAt" ASC
+           LIMIT 50`,
+        phoneDigits,
+      );
+      const nearIdentical = byPhone.filter((c) => isTypoOf(rawName, c?.name));
+      if (nearIdentical.length > 0) {
+        return { customer: pickFullest(nearIdentical), created: false, matchedBy: 'phone+name' };
+      }
+    }
+
+    const customer = await this.create(data);
+    return { customer, created: true, matchedBy: null };
   }
 
   async update(id: string, dto: UpdateCustomerDto) {
@@ -668,10 +1035,62 @@ export class CustomersService {
         mimeType: true,
         sizeBytes: true,
         dataBase64: true,
+        // description/documentDate are editable from the customer card ("דוחות
+        // שהופקו" → עריכה), so the list has to return their current values —
+        // otherwise the edit form opens blank and saving would wipe them.
+        description: true,
+        documentDate: true,
         createdAt: true,
+        updatedAt: true,
         uploadedBy: { select: { id: true, name: true } },
       },
     });
+  }
+
+  /**
+   * רושם "כניסה" של עובד ללקוח — עבור "10 הלקוחות האחרונים" per-user.
+   * upsert על (userId, customerId): viewedAt = now. best-effort; מזהה לקוח לא קיים
+   * או משתמש חסר לא זורקים (כדי לא להפיל את פתיחת הכרטיס). לא מחזיר כלום משמעותי.
+   */
+  async recordCustomerView(customerId: string, userId?: string): Promise<{ ok: boolean }> {
+    if (!userId || !customerId || customerId === '__new__') return { ok: false };
+    try {
+      // מוודאים שהלקוח קיים לפני יצירת רשומת view (מונע FK error על מזהה זבל).
+      const exists = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+      if (!exists) return { ok: false };
+      await this.prisma.customerView.upsert({
+        where: { userId_customerId: { userId, customerId } },
+        create: { userId, customerId },
+        update: { viewedAt: new Date() },
+      });
+      return { ok: true };
+    } catch (e: any) {
+      this.logger.warn(`recordCustomerView failed (user=${userId}, customer=${customerId}): ${e?.message || e}`);
+      return { ok: false };
+    }
+  }
+
+  /**
+   * 10 הלקוחות האחרונים שהעובד נכנס אליהם (לפי viewedAt יורד). מחזיר שדות בסיס
+   * לתצוגת הצ'יפים בטאב הלקוחות. אם אין היסטוריית כניסות — רשימה ריקה (הפרונט
+   * נופל חזרה ל-createdAt).
+   */
+  async listRecentlyViewedCustomers(userId?: string, take = 10) {
+    if (!userId) return [];
+    const views = await this.prisma.customerView.findMany({
+      where: { userId },
+      orderBy: { viewedAt: 'desc' },
+      take,
+      select: {
+        viewedAt: true,
+        customer: {
+          select: { id: true, name: true, city: true, type: true, phone: true },
+        },
+      },
+    });
+    return views
+      .filter((v) => v.customer)
+      .map((v) => ({ ...v.customer, viewedAt: v.viewedAt }));
   }
 
   async updateCustomerDocument(customerId: string, documentId: string, dto: UpdateCustomerDocumentDto) {
@@ -681,6 +1100,19 @@ export class CustomersService {
     });
     if (!doc) throw new NotFoundException('מסמך לא נמצא');
     const nextName = dto.name !== undefined ? dto.name?.trim() : undefined;
+
+    // החלפת הקובץ עצמו: מקבלים base64 נטו (בלי קידומת "data:...;base64,")
+    // ובלי רווחים/שורות. מחרוזת ריקה נחשבת "לא נשלח קובץ" ואינה מוחקת את
+    // הקיים — ריקון תוכן של דוח אינו פעולת עריכה סבירה, ולמחיקה יש כפתור נפרד.
+    let nextData: string | undefined;
+    if (typeof dto.dataBase64 === 'string') {
+      const raw = dto.dataBase64.includes(',')
+        ? dto.dataBase64.slice(dto.dataBase64.indexOf(',') + 1)
+        : dto.dataBase64;
+      const clean = raw.replace(/\s/g, '');
+      if (clean) nextData = clean;
+    }
+
     return this.prisma.document.update({
       where: { id: documentId },
       data: {
@@ -691,6 +1123,7 @@ export class CustomersService {
           dto.documentDate !== undefined ? parseOptionalDate(dto.documentDate ?? undefined) ?? null : undefined,
         mimeType: dto.mimeType !== undefined ? dto.mimeType?.trim() || null : undefined,
         sizeBytes: dto.sizeBytes !== undefined ? dto.sizeBytes : undefined,
+        dataBase64: nextData,
       },
       include: {
         uploadedBy: { select: { id: true, name: true, email: true } },
@@ -706,6 +1139,226 @@ export class CustomersService {
     if (!doc) throw new NotFoundException('מסמך לא נמצא');
     await this.prisma.document.delete({ where: { id: documentId } });
     return { ok: true };
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // הצעת מחיר חתומה (העלאה ידנית) — מסמך + Quote SIGNED + קידום משימה
+  // ─────────────────────────────────────────────────────────────
+
+  /** חילוץ הסכום הסופי המשוער מ-PDF (או null אם לא זוהה / זה תמונה). */
+  async parseSignedQuoteTotal(dto: ParseSignedQuoteDto): Promise<{ total: number | null }> {
+    const mime = (dto.mimeType || '').toLowerCase();
+    // רק PDF טקסטואלי ניתן לחילוץ; תמונה/סריקה → קלט ידני.
+    if (mime && !mime.includes('pdf')) return { total: null };
+    const b64 = dto.dataBase64.includes(',') ? dto.dataBase64.split(',')[1] : dto.dataBase64;
+    let buf: Buffer;
+    try {
+      buf = Buffer.from(b64, 'base64');
+    } catch {
+      return { total: null };
+    }
+    const total = await extractTotalFromPdf(buf);
+    return { total };
+  }
+
+  /**
+   * צירוף הצעה חתומה ידנית → מריץ את אותם הטריגרים כמו חתימה דיגיטלית:
+   *   1) שומר את הקובץ כמסמך SIGNED_QUOTE של הלקוח (יופיע בסקשן הקיים).
+   *   2) יוצר Quote בסטטוס SIGNED עם totalAmount = הסכום הסופי → נספר אוטומטית
+   *      בכל חישובי ההכנסות של הדשבורד (manager + revenue-analytics).
+   *   3) מקדם משימת פולואפ פתוחה של הלקוח → תיאום (best-effort).
+   * המסמך + ה-Quote נוצרים אטומית; קידום המשימה best-effort ולא מפיל את הצירוף.
+   */
+  async createSignedQuote(customerId: string, dto: CreateSignedQuoteDto, actorId?: string | null) {
+    await this.ensureCustomer(customerId);
+    const amount = Number(dto.finalAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('סכום סופי לא תקין');
+    }
+    const b64 = dto.dataBase64.includes(',') ? dto.dataBase64.split(',')[1] : dto.dataBase64;
+    const now = new Date();
+
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true },
+    });
+
+    const { document, quote } = await this.prisma.$transaction(async (tx) => {
+      const document = await tx.document.create({
+        data: {
+          id: randomUUID(),
+          customerId,
+          name: dto.name.trim(),
+          filePath: 'signed-quote:manual',
+          documentType: DocumentType.SIGNED_QUOTE,
+          documentDate: now,
+          mimeType: dto.mimeType?.trim() || null,
+          sizeBytes: dto.sizeBytes ?? null,
+          dataBase64: b64 || null,
+          uploadedById: actorId || null,
+        },
+      });
+
+      const quote = await tx.quote.create({
+        data: {
+          id: randomUUID(),
+          customerId,
+          customerName: customer?.name || null,
+          service: 'הצעת מחיר חתומה',
+          // amount = legacy; totalAmount = השדה שהדשבורד סוכם לפיו.
+          amount,
+          totalAmount: amount,
+          amountBeforeVat: amount,
+          vatPercent: 0,
+          quoteNumber: dto.quoteNumber?.trim() || null,
+          status: 'SIGNED',
+          digitalSignatureStatus: 'SIGNED',
+          signedAt: now,
+          quoteDate: now,
+          validTo: now,
+          signedPdfPath: 'signed-quote:manual',
+          // שיוך ההכנסה למהנדס/נציג בדשבורד (opportunity.assignedUserId) —
+          // המשתמש שביצע את הצירוף.
+          salesRepresentativeId: actorId || null,
+        },
+      });
+
+      return { document, quote };
+    }, {
+      // כתיבת ה-base64 של ההצעה החתומה יכולה לקחת עשרות שניות בקובץ גדול (הצעה
+      // סרוקה של ~70 עמודים ≈ 30MB). ברירת המחדל של Prisma לטרנזקציה אינטראקטיבית
+      // היא 5 שניות בלבד — ה-document.create הצליח, ואז ה-quote.create נפל על
+      // P2028 "expired transaction" והכל התגלגל אחורה. מכאן "צירוף ההצעה נכשל"
+      // שקרה רק בקבצים גדולים. maxWait — כמה להמתין לחיבור פנוי מה-pool.
+      timeout: 180_000,
+      maxWait: 30_000,
+    });
+
+    // קידום משימת פולואפ→תיאום — best-effort, לא מפיל את הצירוף.
+    let taskAdvanced = false;
+    try {
+      taskAdvanced = await this.advanceFollowupToCoordination(customerId);
+    } catch (e: any) {
+      this.logger.warn(`advanceFollowupToCoordination failed for customer ${customerId}: ${e?.message || e}`);
+    }
+
+    return { document, quoteId: quote.id, totalAmount: amount, taskAdvanced };
+  }
+
+  /** מסמן Quote סינתטי כ"הכנסה ידנית" — מפתח שאילתה יציב (לא נוגע בהצעות רגילות). */
+  private static readonly MANUAL_INCOME_MARKER = 'MANUAL_INCOME';
+
+  /**
+   * הוספת הכנסה ידנית מכרטיס הלקוח — יוצר Quote בסטטוס SIGNED עם הסכום, כך שההכנסה
+   * נספרת אוטומטית בכל חישובי ההכנסה של הדשבורד (revenueAmountOf קורא amountBeforeVat).
+   * אין מסמך/קובץ. ההערה נשמרת ב-Quote.notes ומסבירה מדוע נרשמה ידנית. מסומן ב-orderSource
+   * כדי שאפשר יהיה לשלוף/למחוק בדיוק את ההכנסות הידניות בלי לפגוע בהצעות מחיר רגילות.
+   */
+  async createManualIncome(customerId: string, dto: CreateManualIncomeDto, actorId?: string | null) {
+    await this.ensureCustomer(customerId);
+    const amount = Number(dto.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new BadRequestException('סכום הכנסה לא תקין');
+    }
+    const note = String(dto.note || '').trim();
+    if (!note) {
+      throw new BadRequestException('חובה לרשום הערה המסבירה מדוע ההכנסה נרשמה ידנית');
+    }
+    const when = dto.date ? new Date(dto.date) : new Date();
+    if (Number.isNaN(when.getTime())) {
+      throw new BadRequestException('תאריך ההכנסה לא תקין');
+    }
+
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true },
+    });
+
+    const quote = await this.prisma.quote.create({
+      data: {
+        id: randomUUID(),
+        customerId,
+        customerName: customer?.name || null,
+        service: 'הכנסה ידנית',
+        // amount = legacy; totalAmount/amountBeforeVat = השדות שהדשבורד סוכם לפיהם (ללא מע"מ).
+        amount,
+        totalAmount: amount,
+        amountBeforeVat: amount,
+        vatPercent: 0,
+        status: 'SIGNED',
+        signedAt: when, // תאריך הזכייה שהדשבורד מקבץ לפיו (revenueAnalytics/quarter)
+        quoteDate: when,
+        validTo: when,
+        notes: note,
+        orderSource: CustomersService.MANUAL_INCOME_MARKER,
+        salesRepresentativeId: actorId || null,
+      },
+    });
+
+    return { id: quote.id, amount, note, at: when.toISOString() };
+  }
+
+  /** רשימת ההכנסות הידניות של הלקוח (הכי חדשה בראש) — לתצוגה בכרטיס הלקוח. */
+  async listManualIncome(customerId: string) {
+    await this.ensureCustomer(customerId);
+    const rows = await this.prisma.quote.findMany({
+      where: { customerId, orderSource: CustomersService.MANUAL_INCOME_MARKER },
+      orderBy: [{ signedAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        amountBeforeVat: true,
+        totalAmount: true,
+        amount: true,
+        notes: true,
+        signedAt: true,
+        createdAt: true,
+        salesRepresentativeId: true,
+      },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      amount: Number(r.amountBeforeVat ?? r.totalAmount ?? r.amount ?? 0),
+      note: r.notes || '',
+      at: (r.signedAt ?? r.createdAt)?.toISOString() ?? null,
+      createdById: r.salesRepresentativeId || null,
+    }));
+  }
+
+  /** מחיקת הכנסה ידנית (רק Quote שסומן כ-MANUAL_INCOME של אותו לקוח). */
+  async deleteManualIncome(customerId: string, quoteId: string) {
+    const row = await this.prisma.quote.findFirst({
+      where: { id: quoteId, customerId, orderSource: CustomersService.MANUAL_INCOME_MARKER },
+      select: { id: true },
+    });
+    if (!row) throw new NotFoundException('הכנסה ידנית לא נמצאה');
+    await this.prisma.quote.delete({ where: { id: quoteId } });
+    return { ok: true };
+  }
+
+  /**
+   * מקדם משימת מכירה של הלקוח משלב "פולואפ" ל"תיאום" — זהה ל-quote-signature.
+   * מקדם רק משימה שנמצאת כרגע בפולואפ (type SALES_FOLLOWUP/STEP4/step4), כדי לא
+   * למשוך אחורה משימה שכבר התקדמה. מחזיר true אם קודמה משימה.
+   */
+  private async advanceFollowupToCoordination(customerId: string): Promise<boolean> {
+    const FOLLOWUP_TYPES = ['SALES_FOLLOWUP', 'STEP4', 'step4'];
+    const task = await this.prisma.task.findFirst({
+      where: {
+        customerId,
+        status: { notIn: ['DONE', 'CANCELLED'] },
+        type: { in: FOLLOWUP_TYPES },
+      },
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!task) return false;
+    await this.prisma.task.update({
+      where: { id: task.id },
+      // תיאום = type step5 + currentStage 4 (מסונכרן עם detectStep בפרונט).
+      data: { type: 'step5', currentStage: 4, currentStageChangedAt: new Date() },
+    });
+    this.logger.log(`signed-quote (manual) for customer ${customerId} → task ${task.id} advanced פולואפ→תיאום`);
+    return true;
   }
 
   async remove(id: string, actor?: { id?: string; role?: string }) {

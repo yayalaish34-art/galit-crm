@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import PizZip from 'pizzip';
 import { PrismaService } from '../prisma/prisma.service';
+import { formatIsraeliPhone } from '../common/phone.util';
 
 export interface DraftContext {
   /** ההצעה שעבורה מנסחים — לשליפת סכום/תנאי תשלום/מספר אוטומטית */
@@ -19,6 +20,9 @@ export interface DraftContext {
   reportBase64?: string;
   /** סוג ה-MIME של הדוח המצורף — קובע האם לחלץ כ-PDF או DOCX. */
   reportMimeType?: string;
+  /** מזהה מסמך הדוח (Document) — כשהדוח כבר שמור בכרטיס הלקוח. השרת שולף ממנו את
+   *  ה-base64+mimeType לחילוץ הטקסט, במקום שהפרונט ישלח את כל הקובץ. גובר אם אין reportBase64. */
+  reportDocumentId?: string;
 
   // ── פרטי המקרה שהמשתמש ממלא (שאלון) ──
   location?: string;        // מיקום מדויק
@@ -242,22 +246,24 @@ export class AiMailService {
   // ── ניסוח מייל ללוויית "דוח" שהופק (לא הצעת מחיר) ──
   private readonly REPORT_SYSTEM = `אתה מנסח מיילים בעברית עבור "גלית – החברה לאיכות הסביבה", המספקת בדיקות ושירותים סביבתיים (קרינה, רעש, אוויר, אסבסט, ראדון ועוד).
 המשימה: לנסח מייל רשמי, מקצועי ומכובד, המלווה את הדוח המפורט שהופק עבור הלקוח לאחר שהעבודה הסתיימה, ומצורף למייל.
-ההקשר החשוב: בעבר נשלחה ללקוח הצעת מחיר עבור שירות מסוים (מצורף לך מייל הצעת המחיר המקורי). מאז — העבודה שסוכמה בהצעה **בוצעה בפועל**, וכעת אנו שולחים ללקוח את הדוח המסכם עם התוצאות. המייל צריך "לסגור מעגל": להזכיר את העבודה שהוזמנה בהצעה, ולהבהיר בבירור שהיא הושלמה ושמצורף הדוח עם התוצאות.
+
+חשוב מכל: הרפרנס העיקרי לניסוח הוא **תוכן הדוח המצורף עצמו** (הטקסט שחולץ מהדוח ונמסר לך). עליך לקרוא אותו ולנסח נושא וגוף ש**משקפים את מה שנבדק ואת עיקרי הממצאים בפועל** — לא מייל תבניתי כללי. כל דוח שונה, ולכן כל מייל צריך להיות שונה ולשקף את הדוח הספציפי הזה.
 
 מבנה הגוף (לפי הסדר):
 1. פנייה: "שלום [שם פרטי]," בשם הפרטי בלבד (אם אין שם — "שלום רב,").
-2. משפט פתיחה רשמי שמבהיר במפורש שהעבודה שהוזמנה — [השירות/הפרויקט, כפי שתואר בהצעת המחיר] — **בוצעה והושלמה**, ושבהמשך להצעת המחיר שנשלחה, מצורף כעת הדוח המסכם עם התוצאות.
-3. 1-2 משפטים המתארים בקצרה את מהות הדוח: הוא מרכז את ממצאי ותוצאות הבדיקה/העבודה שבוצעה, בהתאם למה שהוזמן בהצעה. בסס את תיאור השירות/העבודה על מייל הצעת המחיר המקורי כדי לשמור עקביות.
-4. משפט שמדגיש שצוות החברה זמין לכל שאלה, הבהרה או הסבר לגבי הדוח, ממצאיו ותוצאותיו.
+2. משפט פתיחה שמבהיר שהעבודה שהוזמנה **בוצעה והושלמה**, ושמצורף כעת הדוח המסכם — עם ציון סוג הבדיקה/העבודה הספציפי כפי שהוא עולה מהדוח (למשל "מדידת קרינה אלקטרומגנטית", "בדיקת ראדון", "דיגום אסבסט").
+3. 2-3 משפטים המתארים בקצרה את **מה שנבדק ואת עיקרי מה שעולה מהדוח** — המיקומים/הנקודות שנבדקו, סוג המדידות, והמסקנה הכללית אם היא מופיעה במפורש בדוח (למשל "הערכים נמצאו בתחום התקן" / "נמצאה חריגה בנקודה X"). השתמש אך ורק במידע שמופיע בטקסט הדוח.
+4. משפט שמדגיש שצוות החברה זמין לכל שאלה, הבהרה או הסבר לגבי הדוח וממצאיו.
 5. משפט סיום מכובד: "נשמח לעמוד לרשותכם לכל שאלה." או נוסח דומה.
 
 כללים מחייבים:
-- ברור לחלוטין שהמייל הזה נשלח **אחרי שהעבודה בוצעה** — הטון "העבודה הושלמה, מצורף הדוח עם התוצאות", ולא "הנה הצעה" או "נשמח לבצע". אל תבקש אישור/חתימה על ההצעה — זה כבר מאחורינו.
-- הישען על "מייל הצעת המחיר המקורי" כדי לתאר את השירות/העבודה שבוצעה ולשמור עקביות מלאה עם מה שהובטח בהצעה — אך אל תעתיק את מייל ההצעה; נסח מחדש כמייל שמלווה דוח שהושלם.
-- אל תמציא פרטים שלא נמסרו (ממצאים ספציפיים, מספרים, סכומים, תאריכים).
+- **בסס את הנושא והגוף על תוכן הדוח שחולץ.** הנושא חייב לשקף את סוג הבדיקה האמיתי מהדוח. הגוף חייב להזכיר את מה שנבדק בפועל לפי הדוח.
+- אם מסקנה/תוצאה כללית מופיעה **במפורש** בדוח (עמידה בתקן, חריגה, המלצה) — שקף אותה במשפט אחד. **אל תמציא** מספרים, ערכים או מסקנות שלא כתובים בדוח. אם הדוח לא כולל מסקנה חד-משמעית — הסתפק בתיאור מה נבדק, בלי להמציא תוצאה.
+- הטון: "העבודה הושלמה, מצורף הדוח עם התוצאות" — לא "הנה הצעה" ולא "נשמח לבצע". אל תבקש אישור/חתימה.
+- אם נמסר גם מייל הצעת המחיר המקורי — השתמש בו רק כהקשר משלים לשם השירות; בכל סתירה, **תוכן הדוח גובר**.
 - אל תכלול סכומים, תנאי תשלום או תוקף — אלה שייכים להצעה, לא לדוח.
 - אל תוסיף חתימה ("בברכה" / שם) — היא מתווספת בנפרד.
-- נושא בפורמט: "דוח [השירות/הפרויקט] – [שם הלקוח]".
+- נושא בפורמט: "דוח [סוג הבדיקה/השירות מהדוח] – [שם הלקוח]".
 - החזר JSON תקין בלבד עם "subject" ו-"body" (טקסט רגיל עם שורות חדשות).`;
 
   private readonly REPORT_EXAMPLE_USER = `פרטי הדוח:
@@ -265,18 +271,16 @@ export class AiMailService {
 שם פרטי לפנייה: דיאנה
 שירות/פרויקט: מדידת קרינה אלקטרומגנטית במתחם הכניסה
 שם הדוח: דוח מדידות קרינה.pdf
-מייל הצעת המחיר המקורי שנשלח ללקוח (בסס עליו את תיאור השירות, אך נסח מחדש כמייל המלווה דוח שהושלם):
-נושא: הצעת מחיר למדידת קרינה אלקטרומגנטית – מתחם הכניסה אקספו תל אביב – מס' 13762
-תוכן:
-שלום דיאנה,
-מצורפת הצעת מחיר מס' 13762 עבור ביצוע מדידת קרינה אלקטרומגנטית במתחם הכניסה אקספו תל אביב.`;
+תוכן הדוח המצורף (זהו הרפרנס העיקרי — בסס את תיאור העבודה והתוצאות על הטקסט הזה בלבד, אל תמציא נתונים):
+דוח מדידת קרינה אלקטרומגנטית בתדר נמוך (ELF). המדידות בוצעו ב-6 נקודות במתחם הכניסה של אקספו תל אביב: דלפק הקבלה, אזור השערים, חדר החשמל הראשי, מעברי הקהל, ומעלית המבקרים. נמדדה צפיפות שטף מגנטי בכל נקודה. הערכים שנמדדו נעו בין 0.2 ל-1.4 מיליגאוס. כלל הערכים נמצאו נמוכים בהרבה מסף החשיפה המומלץ (ברמת אוכלוסייה) ועומדים בדרישות התקן. לא נדרשת פעולה מתקנת.`;
 
   private readonly REPORT_EXAMPLE_ASSISTANT = JSON.stringify({
-    subject: 'דוח מדידת קרינה אלקטרומגנטית – אקספו תל אביב',
+    subject: 'דוח מדידת קרינה אלקטרומגנטית (ELF) – אקספו תל אביב',
     body: `שלום דיאנה,
 
-בהמשך להצעת המחיר שנשלחה עבור מדידת קרינה אלקטרומגנטית במתחם הכניסה — אנו שמחים לעדכן כי העבודה בוצעה והושלמה, ומצורף כעת הדוח המסכם עם התוצאות.
-הדוח מרכז את ממצאי המדידה והתוצאות שהתקבלו בהתאם לשירות שהוזמן.
+בהמשך לשירות שהוזמן, אנו שמחים לעדכן כי מדידת הקרינה האלקטרומגנטית בתדר נמוך (ELF) במתחם הכניסה בוצעה והושלמה, ומצורף כעת הדוח המסכם.
+במסגרת הבדיקה נמדדה צפיפות השטף המגנטי ב-6 נקודות מרכזיות במתחם, בהן דלפק הקבלה, אזור השערים, חדר החשמל ומעברי הקהל.
+על פי ממצאי הדוח, כלל הערכים שנמדדו נמצאו נמוכים מסף החשיפה המומלץ ועומדים בדרישות התקן, ולא נדרשת פעולה מתקנת.
 צוות החברה זמין עבורכם לכל שאלה, הבהרה או הסבר לגבי הדוח וממצאיו.
 נשמח לעמוד לרשותכם לכל שאלה.`,
   });
@@ -318,7 +322,8 @@ export class AiMailService {
 
     const detailLines = [
       ctx.customerName?.trim() ? `שם לקוח: ${ctx.customerName.trim()}` : '',
-      ctx.serviceName?.trim() ? `שירות: ${ctx.serviceName.trim()}` : '',
+      // "שירות" מגיע מפריטי הצעת המחיר בפועל (כשקיימת) — בסס את הכותרת על הבדיקות/השירותים האלה.
+      ctx.serviceName?.trim() ? `השירותים/הבדיקות שהוצעו בהצעת המחיר: ${ctx.serviceName.trim()}` : '',
       ctx.location?.trim() ? `מיקום הפגישה (חובה לכלול בכותרת): ${ctx.location.trim()}` : '',
       ctx.address?.trim() ? `כתובת: ${ctx.address.trim()}` : '',
       ctx.city?.trim() ? `עיר: ${ctx.city.trim()}` : '',
@@ -421,7 +426,8 @@ export class AiMailService {
       const parsed = JSON.parse(content);
       return {
         fullName: String(parsed.fullName || '').trim(),
-        phone: String(parsed.phone || '').replace(/[^\d+]/g, ''),
+        // המספר שחולץ נכתב לגוף הליד ומשם ממלא אוטומטית את שדה הטלפון — לכן עם מקף.
+        phone: formatIsraeliPhone(String(parsed.phone || '').replace(/[^\d+]/g, '')),
         email: String(parsed.email || '').trim(),
         serviceType: String(parsed.serviceType || '').trim(),
         essence: String(parsed.essence || '').trim(),
@@ -439,7 +445,37 @@ export class AiMailService {
       throw new BadRequestException('ניסוח AI אינו מוגדר בשרת — חסר OPENAI_API_KEY');
     }
 
-    const firstName = this.firstNameOf(ctx.contactName);
+    // ── פתרון איש הקשר ללקוח עסקי ──
+    // כשהלקוח הוא חברה (type !== PRIVATE), הפנייה במייל חייבת להיות אל *איש הקשר* ולא אל שם
+    // החברה. אם contactName שנשלח זהה לשם הלקוח/חברה (או ריק), שולפים את איש הקשר הראשי מה-DB.
+    let contactNameResolved = (ctx.contactName || '').trim();
+    let companyForPrompt = '';
+    if (ctx.customerId) {
+      try {
+        const cust: any = await this.prisma.customer.findUnique({
+          where: { id: ctx.customerId },
+          select: {
+            name: true, companyname: true, type: true, contactName: true,
+            contacts: { where: { isPrimary: true }, select: { fullName: true }, take: 1 },
+          },
+        });
+        if (cust) {
+          const isCompany = String(cust.type || '').toUpperCase() !== 'PRIVATE';
+          const companyName = (cust.companyname || cust.name || '').trim();
+          if (isCompany) {
+            companyForPrompt = companyName;
+            const looksLikeCompany = !contactNameResolved || contactNameResolved === companyName || contactNameResolved === (cust.name || '').trim();
+            if (looksLikeCompany) {
+              const primary = cust.contacts?.[0]?.fullName?.trim();
+              contactNameResolved = primary || (cust.contactName || '').trim() || '';
+            }
+          }
+        }
+      } catch (e: any) {
+        this.logger.warn(`report-draft: contact resolution failed for ${ctx.customerId}: ${e?.message || e}`);
+      }
+    }
+    const firstName = this.firstNameOf(contactNameResolved);
 
     // ── הקשר: מייל הצעת המחיר המקורי שנשלח ללקוח — ממנו גוזרים את תיאור השירות
     //    כדי לשמור עקביות בין ההצעה לדוח. best-effort: בכישלון מתעלמים. ──
@@ -448,13 +484,43 @@ export class AiMailService {
       ctx.projectName?.trim() || ctx.serviceName?.trim() || quoteEmail?.service?.trim() || '';
 
     // ── תוכן הדוח המצורף עצמו — הרפרנס העיקרי לניסוח. מחלצים טקסט מ-PDF/DOCX. ──
-    const reportText = await this.extractReportText(ctx.reportBase64, ctx.reportMimeType, ctx.reportName);
+    // כשהדוח כבר שמור בכרטיס (reportDocumentId) ולא נשלח base64 — שולפים אותו מה-DB כאן,
+    // כדי שגם ניסוח מכרטיס הלקוח יתבסס על תוכן הדוח (ולא יֵצא גנרי).
+    let reportBase64 = ctx.reportBase64;
+    let reportMimeType = ctx.reportMimeType;
+    let reportName = ctx.reportName;
+    if (!reportBase64 && ctx.reportDocumentId) {
+      try {
+        const doc: any = await this.prisma.document.findUnique({
+          where: { id: ctx.reportDocumentId },
+          select: { dataBase64: true, mimeType: true, name: true },
+        });
+        if (doc?.dataBase64) {
+          reportBase64 = doc.dataBase64;
+          reportMimeType = reportMimeType || doc.mimeType || undefined;
+          reportName = reportName || doc.name || undefined;
+        }
+      } catch (e: any) {
+        this.logger.warn(`report-draft: loading document ${ctx.reportDocumentId} failed: ${e?.message || e}`);
+      }
+    }
+    const reportText = await this.extractReportText(reportBase64, reportMimeType, reportName);
+    // דיאגנוסטיקה: אם צורף דוח אך לא חולץ ממנו טקסט — הניסוח ייצא גנרי. מתעדים כדי לזהות
+    // דוחות שסרוקים כתמונה / פורמט שלא נתמך (במקום כשל שקט).
+    if (reportBase64 && !reportText) {
+      this.logger.warn(
+        `report-draft: attached report yielded NO extractable text (name="${reportName || ''}", mime="${reportMimeType || ''}") — draft will be generic`,
+      );
+    } else if (reportText) {
+      this.logger.log(`report-draft: extracted ${reportText.length} chars from report for AI drafting`);
+    }
 
     const contextLines = [
-      ctx.customerName ? `לקוח: ${ctx.customerName}` : '',
+      companyForPrompt ? `שם החברה (הלקוח הוא חברה — אל תפנה במייל אל שם החברה): ${companyForPrompt}` : (ctx.customerName ? `לקוח: ${ctx.customerName}` : ''),
+      contactNameResolved ? `איש הקשר (הפנייה במייל היא אליו): ${contactNameResolved}` : '',
       firstName ? `שם פרטי לפנייה (השתמש בזה בלבד בפנייה "שלום [שם]"): ${firstName}` : '',
       serviceOrProject ? `שירות/פרויקט: ${serviceOrProject}` : '',
-      ctx.reportName ? `שם הדוח: ${ctx.reportName}` : '',
+      reportName ? `שם הדוח: ${reportName}` : '',
       ctx.extraDetails ? `פרטים נוספים: ${ctx.extraDetails}` : '',
       reportText
         ? `תוכן הדוח המצורף (זהו הרפרנס העיקרי — בסס את תיאור העבודה והתוצאות על הטקסט הזה בלבד, אל תמציא נתונים):\n${reportText}`

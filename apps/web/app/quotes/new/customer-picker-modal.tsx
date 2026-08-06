@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Search as SearchIcon, X, Plus } from 'lucide-react';
 import { apiUrl, apiFetch } from '../../lib/api-base';
+import { formatIsraeliPhoneDisplay } from '../../lib/phone-format';
 
 /* ── types ─────────────────────────────────────────────────────────────── */
 type CustomerRow = {
@@ -240,7 +241,7 @@ export function CustomerPickerModal({ open, onClose, onSelect }: Props) {
                         onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = i % 2 === 0 ? '#fff' : '#f4f7fb'; }}
                       >
                         <td style={{ padding: '4px 8px', borderBottom: '1px solid #e8e8e8', fontWeight: 500 }}>{c.name}</td>
-                        <td style={{ padding: '4px 8px', borderBottom: '1px solid #e8e8e8', direction: 'ltr', textAlign: 'right' }}>{c.phone ?? ''}</td>
+                        <td style={{ padding: '4px 8px', borderBottom: '1px solid #e8e8e8', direction: 'ltr', textAlign: 'right' }}>{formatIsraeliPhoneDisplay(c.phone)}</td>
                         <td style={{ padding: '4px 8px', borderBottom: '1px solid #e8e8e8', direction: 'ltr', textAlign: 'right' }}>{c.email ?? ''}</td>
                         <td style={{ padding: '4px 8px', borderBottom: '1px solid #e8e8e8' }}>{c.city ?? ''}</td>
                       </tr>

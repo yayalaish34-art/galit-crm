@@ -5,6 +5,7 @@ import { parseApiErrorResponse } from '../lib/api-error';
 import { whatsAppLink } from '../lib/whatsapp';
 import { CustomerLegacyCard } from '../customer-legacy-card';
 import { SignedQuotesSection } from '../signed-quotes-section';
+import { AffiliatesAdminPage } from '../affiliates-admin-section';
 import { SendReportModal } from '../send-report-modal';
 import { MarkReportSentModal } from '../mark-report-sent-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
@@ -19,7 +20,12 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
-import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku, getCategoryForSku } from '../lib/service-categories';
+import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku, getCategoryForSku, getCategoryName, getSubgroupNameForSku, mergeCatalogIntoCategories, type CatalogRow } from '../lib/service-categories';
+import { isRadonTestSku, isRadonKitSku } from '../lib/radon-tracks';
+import { CustomerReminderCard } from '../radon/customer-reminder-card';
+import { formatIsraeliPhoneDisplay } from '../lib/phone-format';
+import { RadonFlowPanel } from '../radon/radon-flow-panel';
+import { CollectionPaymentTermsModal } from '../collection-payment-terms-modal';
 import {
   Users,
   FileText,
@@ -60,6 +66,7 @@ import {
   Trash2,
   Eye,
   TrendingUp,
+  DollarSign,
   Target,
   Zap,
   PhoneCall,
@@ -109,6 +116,7 @@ import { DataImportWizard } from '../data-import-wizard';
 import { FollowupImportPanel } from '../followup-import-panel';
 import { ChangePasswordSection } from '../change-password-section';
 import { isAdminRole } from '../lib/roles';
+import { playNotifyChime, primeNotifySound } from '../lib/notify-sound';
 import {
   CrmLegacyTopNav,
   GLOBAL_SEARCH_INPUT_ID,
@@ -131,6 +139,7 @@ import {
   Tooltip,
   BarChart,
   Bar,
+  LabelList,
   Legend,
 } from 'recharts';
 
@@ -606,6 +615,8 @@ type Task = {
   projectName?: string;
   customerId?: string | null;
   customerName?: string;
+  /** טלפון הלקוח (או איש הקשר הראשי כגיבוי) — לתצוגה בעמודת "טלפון" ברשימת המשימות */
+  customerPhone?: string;
   leadId?: string | null;
   leadName?: string;
   leadPhone?: string;
@@ -622,6 +633,8 @@ type Task = {
   createdAt?: string;
   /** מזהה IncomingLead אם ה-task מקורו בליד נכנס מהמייל (לסידור-ראשון ולטופס המיוחד) */
   incomingLeadId?: string | null;
+  /** מתי המשימה הועברה לבעלים הנוכחי — משימת ליד שהועברה נשארת בראש הרשימה של המקבל */
+  transferredAt?: string | null;
   /** הערות כלליות על התהליך/הלקוח לאורך הזרימה — מחרוזת JSON של { text, at } (הכי חדש בראש) */
   processNotes?: string | null;
 };
@@ -983,7 +996,9 @@ function validateIsraeliPhone(value: string) {
 
 function phoneToDisplay(phone?: string | null) {
   if (!phone) return '-';
-  return formatIsraeliPhone(phone) || phone;
+  // formatIsraeliPhoneDisplay מטפל גם ב-+972, ב-1-700 ובקלט חלקי (מחזיר כמו שהוא),
+  // בניגוד ל-formatIsraeliPhone המחמיר שמחזיר null לכל מה שלא זוהה.
+  return formatIsraeliPhoneDisplay(phone) || phone;
 }
 
 function hasHebrewName(name?: string | null) {
@@ -1034,8 +1049,11 @@ function PhoneInput({
       onChange('');
       return;
     }
-    const f = formatIsraeliPhone(value);
-    if (f) onChange(f);
+    // formatIsraeliPhone מחזיר null לכל מה שלא תואם לתבנית מוכרת, ואז המספר היה נשאר
+    // בלי מקף. formatIsraeliPhoneDisplay מטפל גם ב-+972 וב-1-700, ומחזיר את הקלט
+    // כמות שהוא אם לא זוהה — כך שאף פעם לא מאבדים מה שהמשתמש הקליד.
+    const f = formatIsraeliPhone(value) || formatIsraeliPhoneDisplay(value);
+    if (f && f !== value) onChange(f);
   };
 
   return (
@@ -1368,50 +1386,141 @@ function Modal({
 }
 
 /* ─── Customer Search Modal (חפש → לקוח) ───────────────────────────── */
+/** איש קשר שתאם לחיפוש, כפי שמוחזר מ-/customers/search. */
+type MatchedContact = {
+  id: string;
+  fullName: string;
+  phone?: string | null;
+  mobile?: string | null;
+  email?: string | null;
+  roleTitle?: string | null;
+  isPrimary?: boolean;
+};
+
 function CustomerSearchModal({
   open,
   customers,
+  currentUser,
   onClose,
   onSelect,
   onNewCustomer,
+  onDeleted,
 }: {
   open: boolean;
   customers: Customer[];
+  currentUser?: AppUser | null;
   onClose: () => void;
   onSelect: (customer: Customer) => void;
   onNewCustomer?: (prefillName: string) => void;
+  /** נקרא אחרי מחיקת לקוח, כדי שהמסך שמאחור ירענן את רשימתו. */
+  onDeleted?: (customerId: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [serverCustomers, setServerCustomers] = useState<Array<Customer & { matchedContacts?: MatchedContact[] }> | null>(null);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // מחיקת לקוח ישירות מתוצאות החיפוש — נועד בעיקר לניקוי כפילויות שמתגלות כאן.
+  const canDelete = !!currentUser && (
+    (currentUser.role || '').toLowerCase() === 'admin' ||
+    (currentUser.role || '').toLowerCase() === 'manager' ||
+    !!currentUser.canDeleteCustomers
+  );
+  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteErr, setDeleteErr] = useState('');
+
+  const deleteFromSearch = async (c: Customer) => {
+    // אישור מפורש עם שם הלקוח — השורות כאן נראות זהות כשיש כפילויות,
+    // וקל למחוק את הרשומה הלא נכונה.
+    if (!window.confirm(`למחוק לצמיתות את הלקוח "${c.name}"?\n\nהפעולה אינה הפיכה. הצעות מחיר של הלקוח יימחקו, ומשימות/לידים ינותקו ממנו.`)) return;
+    setDeletingId(c.id);
+    setDeleteErr('');
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${c.id}`), { method: 'DELETE', authUser: currentUser ?? undefined });
+      if (!res.ok) {
+        let msg = res.status === 403 ? 'אין לך הרשאה למחוק לקוחות' : 'המחיקה נכשלה';
+        try { const e = await res.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message.join(', ') : e.message; } catch { /* ignore */ }
+        setDeleteErr(msg);
+        return;
+      }
+      setDeletedIds((p) => new Set(p).add(c.id));
+      onDeleted?.(c.id);
+    } catch {
+      setDeleteErr('שגיאת רשת — נסו שוב');
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     if (open) {
       setQuery('');
+      setServerCustomers(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open]);
 
+  // חיפוש בשרת (עם debounce) — מביא גם אנשי קשר תואמים (טבלת CustomerContact),
+  // מה שהחיפוש המקומי לא יכול, כי רשימת הלקוחות שנטענה לא כוללת אנשי קשר.
+  const q = query.trim().toLowerCase();
+  // Digits-only variant for separator-agnostic phone matching ("050-6666666"
+  // must match a stored "0506666666" and vice-versa). Only used when the query
+  // has ≥4 digits, so a name like "052 מוקד" doesn't spuriously phone-match.
+  const qDigits = query.replace(/\D/g, '');
+  const phoneMatch = (v?: string | null) =>
+    qDigits.length >= 4 && (v || '').replace(/\D/g, '').includes(qDigits);
+  useEffect(() => {
+    if (!open) return;
+    const term = query.trim();
+    if (!term) { setServerCustomers(null); setSearching(false); return; }
+    let cancelled = false;
+    setSearching(true);
+    const t = setTimeout(async () => {
+      try {
+        const res = await apiFetch(apiUrl(`/customers/search?q=${encodeURIComponent(term)}&limit=50`), { authUser: currentUser ?? undefined });
+        if (!res.ok) throw new Error('search failed');
+        const data = await res.json();
+        if (!cancelled) setServerCustomers(Array.isArray(data?.customers) ? data.customers : []);
+      } catch {
+        if (!cancelled) setServerCustomers(null); // נופל בחזרה לחיפוש המקומי
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [query, open, currentUser]);
+
   if (!open) return null;
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
+  // מקור התוצאות: העדפה לתוצאות השרת (כוללות אנשי קשר); נפילה חזרה לחיפוש מקומי.
+  const localFiltered = q
     ? customers.filter((c) =>
         (c.name || '').toLowerCase().includes(q) ||
         (c.contactName || '').toLowerCase().includes(q) ||
-        (c.phone || '').includes(q) ||
-        (c.phone2 || '').includes(q) ||
-        (c.phone3 || '').includes(q) ||
+        phoneMatch(c.phone) ||
+        phoneMatch(c.phone2) ||
+        phoneMatch(c.phone3) ||
         (c.email || '').toLowerCase().includes(q) ||
         (c.city || '').toLowerCase().includes(q) ||
         (c.address || '').toLowerCase().includes(q) ||
         (c.companyRegNumber || '').toLowerCase().includes(q) ||
         (c.importLegacyId || '').toLowerCase().includes(q) ||
-        (c.fax || '').includes(q) ||
+        phoneMatch(c.fax) ||
         (c.website || '').toLowerCase().includes(q) ||
         (c.status || '').toLowerCase().includes(q)
       )
     : customers;
-  const results = filtered.slice(0, 50);
+
+  /* שורה אחת לכל חברה — ולא שורה נפרדת לכל איש קשר תואם.
+     matchedContacts מהשרת ממשיך להרחיב את *ההתאמה* (חיפוש לפי שם/טלפון של איש
+     קשר מחזיר את החברה שלו), אבל התוצאות מציגות רק את שם החברה: רשימת אנשי הקשר
+     הציפה את החיפוש בשמות ובתגיות ("ראשי"/"איש קשר") והקשתה על מציאת החברה. */
+  const sourceCustomers: Array<Customer & { matchedContacts?: MatchedContact[] }> =
+    (q && serverCustomers ? serverCustomers : localFiltered.slice(0, 50))
+      // לקוח שנמחק נעלם מיד מהתוצאות, בלי להמתין לחיפוש מחדש.
+      .filter((c) => !deletedIds.has(c.id));
+  const results = sourceCustomers.slice(0, 120);
+  const customerCount = sourceCustomers.length;
 
   return (
     <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
@@ -1449,7 +1558,11 @@ function CustomerSearchModal({
             )}
           </div>
           <div className="mt-2 text-xs text-slate-400">
-            {q ? `${results.length} תוצאות${filtered.length > 50 ? ` מתוך ${filtered.length}` : ''}` : `${customers.length} לקוחות`}
+            {searching
+              ? 'מחפש…'
+              : q
+                ? `${customerCount} לקוחות`
+                : `${customers.length} לקוחות`}
           </div>
         </div>
 
@@ -1482,12 +1595,13 @@ function CustomerSearchModal({
                   <th className="px-3 py-2 text-right">מייל</th>
                   <th className="px-3 py-2 text-right">ח.פ</th>
                   <th className="px-3 py-2 text-right">סטטוס</th>
+                  {canDelete && <th className="px-3 py-2 text-right" />}
                 </tr>
               </thead>
               <tbody>
                 {results.map((c) => (
                   <tr
-                    key={c.id}
+                    key={`c-${c.id}`}
                     className="cursor-pointer border-b border-slate-100 transition-colors hover:bg-green-50"
                     onClick={() => onSelect(c)}
                     onDoubleClick={() => onSelect(c)}
@@ -1495,7 +1609,7 @@ function CustomerSearchModal({
                     <td className="px-3 py-2 font-medium text-slate-800">{c.name}</td>
                     <td className="px-3 py-2 text-slate-600">{c.contactName || '—'}</td>
                     <td className="px-3 py-2 text-slate-600">{c.city || '—'}</td>
-                    <td className="px-3 py-2 text-slate-600" dir="ltr">{c.phone || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600" dir="ltr">{c.phone ? phoneToDisplay(c.phone) : '—'}</td>
                     <td className="px-3 py-2 text-slate-500 text-xs" dir="ltr">{c.email || '—'}</td>
                     <td className="px-3 py-2 text-slate-500 text-xs" dir="ltr">{c.companyRegNumber || '—'}</td>
                     <td className="px-3 py-2">
@@ -1506,6 +1620,21 @@ function CustomerSearchModal({
                         'bg-slate-100 text-slate-600'
                       )}>{c.status || '—'}</span>
                     </td>
+                    {canDelete && (
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          // stopPropagation — לחיצה על השורה בוחרת לקוח; בלי זה
+                          // המחיקה הייתה גם פותחת את הכרטיס שנמחק.
+                          onClick={(e) => { e.stopPropagation(); void deleteFromSearch(c); }}
+                          disabled={deletingId === c.id}
+                          className="rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                          title="מחק לקוח"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -1514,7 +1643,8 @@ function CustomerSearchModal({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-200 px-4 py-2 text-left">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-2">
+          {deleteErr ? <span className="text-xs font-semibold text-red-600">{deleteErr}</span> : <span />}
           <button
             type="button"
             onClick={onClose}
@@ -1562,6 +1692,10 @@ function QuoteSearchModal({
 
   const today = new Date().toISOString().slice(0, 10);
   const q = query.trim().toLowerCase();
+  // Separator-agnostic phone matching (see CustomerSearchModal).
+  const qDigits = query.replace(/\D/g, '');
+  const phoneMatch = (v?: string | null) =>
+    qDigits.length >= 4 && (v || '').replace(/\D/g, '').includes(qDigits);
 
   const filtered = q
     ? quotes.filter((qt) => {
@@ -1578,8 +1712,8 @@ function QuoteSearchModal({
           /* contact-level fields via customer lookup */
           (cust ? (cust.contactName || '').toLowerCase().includes(q) : false) ||
           (cust ? (cust.city || '').toLowerCase().includes(q) : false) ||
-          (cust ? (cust.phone || '').includes(q) : false) ||
-          (cust ? (cust.phone2 || '').includes(q) : false) ||
+          (cust ? phoneMatch(cust.phone) : false) ||
+          (cust ? phoneMatch(cust.phone2) : false) ||
           (cust ? (cust.email || '').toLowerCase().includes(q) : false) ||
           (cust ? (cust.address || '').toLowerCase().includes(q) : false) ||
           (cust ? (cust.companyRegNumber || '').toLowerCase().includes(q) : false)
@@ -1885,6 +2019,32 @@ function taskStatusLabelForTasks(status: string) {
   return map[(status || '').toUpperCase()] || status || '-';
 }
 
+/**
+ * שם השירות של משימה לתצוגה (לא שלב הזרימה!). נגזר מ-productName (קוד ה-SKU
+ * שנבחר ב"התאמת הפתרון") דרך SERVICE_CATEGORIES, ובנפילה — משם השירות החופשי
+ * של הליד המקושר. מחזיר undefined כשאין שום מקור שם.
+ */
+function serviceNameForTask(task: {
+  productName?: string | null;
+  lead?: { service?: string | null; serviceType?: string | null } | null;
+  serviceType?: string | null;
+}): string | undefined {
+  const productName = task.productName;
+  if (productName) {
+    for (const cat of SERVICE_CATEGORIES) {
+      for (const svc of cat.services) {
+        if (svc.id === productName) return svc.name;
+        const sub = svc.subServices?.find((s) => s.id === productName);
+        if (sub) return sub.name;
+      }
+    }
+    // productName קיים אך אינו קוד SKU מוכר — כנראה שם חופשי; נציג כמו שהוא.
+    if (typeof productName === 'string' && productName.trim()) return productName.trim();
+  }
+  const raw = task.lead?.service || task.lead?.serviceType || task.serviceType;
+  return raw ? String(raw) : undefined;
+}
+
 function taskTypeLabelForTasks(type: string) {
   // type מייצג כעת את שלב הזרימה: step1..step7
   const map: Record<string, string> = {
@@ -1966,7 +2126,8 @@ function normalizeLeadRowFromApi(lead: any, index: number): Lead {
     assignee: lead.assignee || lead.assignedUser?.name || '',
     assignedUserId: lead.assignedUserId ?? null,
     assignedUserName: lead.assignedUser?.name,
-    phone: lead.phone || '',
+    // נקודת הכניסה של כל ליד למסך — מעצבים כאן פעם אחת, וכל תצוגה/מילוי-טופס יורש את המקף.
+    phone: formatIsraeliPhoneDisplay(lead.phone),
     email: lead.email ?? undefined,
     city: lead.city ?? undefined,
     address: lead.address ?? undefined,
@@ -1987,12 +2148,18 @@ function normalizeLeadRowFromApi(lead: any, index: number): Lead {
   };
 }
 
+/**
+ * כיבוי זמני של תצוגת "לקוחות שסווגו כלא רלוונטי" — בדשבורד המנהל ובעמוד הייעודי.
+ * הנתונים ב-DB והסקשנים בקוד נשארים כמו שהם; רק לא מוצגים. להחזרה: true.
+ */
+const SHOW_NOT_RELEVANT_CUSTOMERS: boolean = false;
+
 function canAccess(role: AppUserRole, key: string) {
   // כל העובדים מקבלים גישה מלאה לכל הפיצ'רים. "ניהול עובדים" ('users') ו"משוב" ('feedback') = אדמין בלבד.
   if (key === 'users' || key === 'feedback') return role === 'admin';
-  // סקשן "לקוחות שסווגו כלא רלוונטי" — אדמין ומנהל.
-  if (key === 'not-relevant') return role === 'admin' || role === 'manager';
-  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'quote-new', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new'];
+  // סקשן "לקוחות שסווגו כלא רלוונטי" — אדמין ומנהל (כרגע מוסתר לגמרי).
+  if (key === 'not-relevant') return SHOW_NOT_RELEVANT_CUSTOMERS && (role === 'admin' || role === 'manager');
+  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'quote-new', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new', 'affiliates'];
   return FULL.includes(key);
 }
 
@@ -2034,7 +2201,7 @@ function PipelinePage({
           fullName: lead.fullName ?? (lead.name || `${lead.firstName || ''} ${lead.lastName || ''}`.trim() || undefined),
           name: lead.fullName || lead.name || `${lead.firstName || ''} ${lead.lastName || ''}`.trim() || 'ליד ללא שם',
           company: lead.company || lead.companyName || '',
-          phone: lead.phone || '',
+          phone: formatIsraeliPhoneDisplay(lead.phone),
           email: lead.email ?? undefined,
           city: lead.city ?? undefined,
           address: lead.address ?? undefined,
@@ -2623,7 +2790,7 @@ function LeadDetailPage({
   const [form, setForm] = useState({
     firstName: lead.firstName ?? lead.fullName ?? lead.name ?? '',
     lastName: lead.lastName ?? '',
-    phone: lead.phone ?? '',
+    phone: formatIsraeliPhoneDisplay(lead.phone),
     email: lead.email ?? '',
     serviceType: lead.serviceType ?? lead.service ?? '',
     assignedUserId: (lead.assignedUserId ?? '') as string,
@@ -2698,7 +2865,7 @@ function LeadDetailPage({
       setForm({
         firstName: fresh.firstName ?? fresh.fullName ?? fresh.name ?? '',
         lastName: fresh.lastName ?? '',
-        phone: fresh.phone ?? '',
+        phone: formatIsraeliPhoneDisplay(fresh.phone),
         email: fresh.email ?? '',
         serviceType: fresh.serviceType ?? fresh.service ?? '',
         assignedUserId: (fresh.assignedUserId ?? '') as string,
@@ -3708,12 +3875,24 @@ type LeadsAnalyticsPayload = {
   error?: string;
 };
 
+// מקור הגעה של לקוחות + תקופה + פילטר שם — מ-GET /dashboard/customer-source-analytics.
+type CustomerSourceAnalyticsPayload = {
+  updatedAt: string;
+  period: 'last30' | 'month' | 'quarter' | 'half' | 'year';
+  range: { start: string; end: string; spanDays: number };
+  stats: { totalCustomers: number };
+  bySource: Array<{ name: string; count: number; pct: number }>;
+  customers: Array<{ id: string; customerName: string; source: string; date: string }>;
+  error?: string;
+};
+
 type ManagerDashboardPayload = {
   updatedAt: string;
   config: { monthlyRevenueTarget: number };
   kpis: {
     monthlyRevenueTarget: number;
     wonRevenueThisMonth: number;
+    wonRevenueThisQuarter: number;
     attainmentPct: number;
     openPipelineValue: number;
     pipelinePctOfTarget: number;
@@ -3784,6 +3963,23 @@ type ManagerDashboardPayload = {
     projectsInField?: number;
     reportsWaiting?: number;
   };
+  /** לידים יומי — מה שנכנס היום (שעון ישראל), מול אתמול ומול ממוצע 7 ימים. */
+  dailyLeads?: {
+    today: number;
+    yesterday: number;
+    changePct: number | null;
+    avg7: number;
+    series: Array<{ date: string; label: string; value: number }>;
+    list: Array<{
+      id: string;
+      name: string;
+      subject: string;
+      from: string;
+      createdAt: string;
+      status: string;
+      ownerName: string | null;
+    }>;
+  };
   reviews?: {
     count: number;
     avg: number;
@@ -3812,12 +4008,242 @@ type ReportPayRow = {
   paidAt: string | null;
 };
 
+type RealIncomePayload = {
+  period: string;
+  from: string;
+  vatRate: number;
+  totalReceived: number;
+  vatDerived: number;
+  netIncome: number;
+  byType: Array<{ trxTypeId: number; label: string; count: number; amount: number }>;
+  byMonth: Array<{ month: string; amount: number }>;
+  documents: Array<{ number: string; date: string; customer: string; amount: number; trxTypeId: number; label: string }>;
+};
+
+/**
+ * ── הכנסות בפועל (אדמין בלבד) ──
+ * כסף שהתקבל *בפועל*, ישירות מכספית — לא מהצעות המחיר אצלנו. נספרים מסמכי קבלה
+ * וחשבונית מס קבלה. שונה במהותו מ"הכנסה חודשית" בקוביות למעלה, שנגזרת מהצעות
+ * שאושרו ולא מכסף שנכנס.
+ */
+function RealIncomeSection({ currentUser }: { currentUser: AppUser }) {
+  const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
+  const [data, setData] = useState<RealIncomePayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = async (p: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const r = await apiFetch(apiUrl(`/caspit/income?period=${encodeURIComponent(p)}`), { authUser: currentUser });
+      if (!r.ok) {
+        // 400 = כספית לא מוגדרת עדיין; מציגים הסבר ולא שגיאה גנרית.
+        let msg = 'טעינת ההכנסות מכספית נכשלה';
+        try { const e = await r.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message.join(', ') : e.message; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+      setData((await r.json()) as RealIncomePayload);
+    } catch (e: any) {
+      setError(e?.message || 'טעינת ההכנסות מכספית נכשלה');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(period); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [period, currentUser.id]);
+
+  const periods: { v: 'month' | 'quarter' | 'year'; label: string }[] = [
+    { v: 'month', label: 'החודש' },
+    { v: 'quarter', label: 'הרבעון' },
+    { v: 'year', label: 'השנה' },
+  ];
+
+  return (
+    <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-xl font-bold text-slate-900">
+          <span className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-emerald-600" /> הכנסות בפועל (כספית)
+          </span>
+          <div className="inline-flex rounded-xl bg-slate-100 p-1">
+            {periods.map((p) => (
+              <button
+                key={p.v}
+                type="button"
+                onClick={() => setPeriod(p.v)}
+                className={cn(
+                  'rounded-xl px-3 py-1 text-sm font-semibold transition',
+                  period === p.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700',
+                )}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-400">טוען מכספית…</div>
+        ) : error ? (
+          <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-700">{error}</div>
+        ) : !data ? null : (
+          <>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl bg-emerald-50 p-4">
+                <div className="text-sm font-semibold text-emerald-800">סה״כ שהתקבל</div>
+                <div className="mt-2 text-2xl font-black text-emerald-900">{formatCurrencyILS(Math.round(data.totalReceived))}</div>
+                <div className="mt-1 text-xs text-emerald-700">קבלות + חשבוניות מס קבלה</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 p-4">
+                <div className="text-sm font-semibold text-slate-600">מזה מע״מ ({data.vatRate}%)</div>
+                <div className="mt-2 text-2xl font-black text-slate-900">{formatCurrencyILS(Math.round(data.vatDerived))}</div>
+                <div className="mt-1 text-xs text-slate-500">מחושב מהתקבול — לא תחליף לדוח מע״מ</div>
+              </div>
+              <div className="rounded-xl bg-blue-50 p-4">
+                <div className="text-sm font-semibold text-blue-800">הכנסה נטו</div>
+                <div className="mt-2 text-2xl font-black text-blue-900">{formatCurrencyILS(Math.round(data.netIncome))}</div>
+                <div className="mt-1 text-xs text-blue-700">לפני מע״מ</div>
+              </div>
+            </div>
+
+            {data.byType.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {data.byType.map((t) => (
+                  <span key={t.trxTypeId} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                    {t.label}: {t.count} · {formatCurrencyILS(Math.round(t.amount))}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {data.documents.length === 0 ? (
+              <div className="py-8 text-center text-sm text-slate-400">לא התקבלו תשלומים בתקופה שנבחרה</div>
+            ) : (
+              <div className="mt-4 max-h-[320px] overflow-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50">
+                      <TableHead>תאריך</TableHead>
+                      <TableHead>מסמך</TableHead>
+                      <TableHead>סוג</TableHead>
+                      <TableHead>לקוח</TableHead>
+                      <TableHead>סכום</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.documents.map((d) => (
+                      <TableRow key={`${d.trxTypeId}-${d.number}`}>
+                        <TableCell className="whitespace-nowrap text-slate-600">{String(d.date).slice(0, 10)}</TableCell>
+                        <TableCell className="font-medium">{d.number}</TableCell>
+                        <TableCell className="text-slate-600">{d.label}</TableCell>
+                        <TableCell className="text-slate-600">{d.customer || '—'}</TableCell>
+                        <TableCell className="font-bold">{formatCurrencyILS(Math.round(d.amount))}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * הגדרות אינטגרציית כספית (Caspit) — במסך ההגדרות → מערכת. שם משתמש + סיסמה + עוסק מורשה.
+ * הסיסמה נשמרת מוצפנת בשרת; כאן לא מוצגת. כפתור "בדוק חיבור" מאמת מול כספית.
+ */
+function CaspitSettingsCard({ currentUser }: { currentUser: AppUser }) {
+  const [userName, setUserName] = useState('');
+  const [osekMorshe, setOsekMorshe] = useState('');
+  const [password, setPassword] = useState('');
+  const [configured, setConfigured] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await apiFetch(apiUrl('/caspit/settings'), { authUser: currentUser });
+        if (r.ok) {
+          const d = await r.json();
+          setConfigured(!!d.configured);
+          setUserName(d.userName || '');
+          setOsekMorshe(d.osekMorshe || '');
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [currentUser]);
+
+  const save = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await apiFetch(apiUrl('/caspit/settings'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ userName, osekMorshe, password: password || undefined }),
+      });
+      if (r.ok) { setMsg({ ok: true, text: 'פרטי כספית נשמרו' }); setPassword(''); setConfigured(true); }
+      else { let m = 'השמירה נכשלה'; try { const e = await r.json(); if (e?.message) m = Array.isArray(e.message) ? e.message.join(', ') : e.message; } catch { /* */ } setMsg({ ok: false, text: m }); }
+    } catch { setMsg({ ok: false, text: 'שגיאת רשת' }); } finally { setBusy(false); }
+  };
+
+  const test = async () => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await apiFetch(apiUrl('/caspit/test'), { method: 'POST', authUser: currentUser, body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
+      setMsg({ ok: !!d.ok, text: d.message || (d.ok ? 'החיבור תקין' : 'החיבור נכשל') });
+    } catch { setMsg({ ok: false, text: 'שגיאת רשת' }); } finally { setBusy(false); }
+  };
+
+  return (
+    <Card className="mt-4">
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardTitle>חשבוניות — כספית (Caspit)</CardTitle>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${configured ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+          {configured ? 'מחובר' : 'לא מוגדר'}
+        </span>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-sm text-slate-500">
+          חיבור לכספית מאפשר להנפיק חשבוniות ישירות משלב הגבייה (״דוחות ותשלומים״) עם כפתור ״הפק חשבונית״.
+        </p>
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormField label="שם משתמש בכספית">
+            <Input value={userName} onChange={(e) => setUserName(e.target.value)} placeholder="UserName" autoCapitalize="none" />
+          </FormField>
+          <FormField label="מספר עוסק מורשה">
+            <Input value={osekMorshe} onChange={(e) => setOsekMorshe(e.target.value)} placeholder="OsekMorshe" dir="ltr" />
+          </FormField>
+          <FormField label={configured ? 'סיסמה (השאר ריק כדי לא לשנות)' : 'סיסמה'}>
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={configured ? '••••••••' : 'Password'} />
+          </FormField>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button style={{ background: galit.primary }} onClick={save} disabled={busy}>{busy ? 'שומר…' : 'שמור פרטי כספית'}</Button>
+          <Button variant="outline" onClick={test} disabled={busy || !configured}>בדוק חיבור</Button>
+          {msg && <span className={`text-sm font-semibold ${msg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{msg.text}</span>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /**
  * ── דוחות שנשלחו + סטטוס תשלום (אדמין + גלית בלבד) ──
  * מקור הנתונים: הערות התהליך (processNotes) של המשימות. כל שליחת דוח כותבת הערת-תשלום
  * ('דוח נשלח — שולם' / 'טרם שולם'), כך שאפשר לגזור מכאן איזה דוחות שולמו ואיזה לא — בלי
  * שינוי סכימה במסד הנתונים. "סמן כשולם" מוסיף הערה חדשה ('סומן כשולם'), וההערה האחרונה
  * (לפי זמן) קובעת את הסטטוס הנוכחי. הרשימה נטענת עם scope=all כדי לכלול דוחות של כל העובדים.
+ *
+ * שים לב: זהו סטטוס תשלום *לפי דיווח אצלנו*, ולא כסף שהתקבל בפועל. להכנסות אמיתיות
+ * ראה RealIncomeSection, שמושך מכספית.
  */
 function ReportsPaymentsSection({
   currentUser,
@@ -3867,7 +4293,9 @@ function ReportsPaymentsSection({
           taskId: t.id,
           customerId: t.customerId ?? null,
           name: t.customer?.name || t.lead?.fullName || t.title || '—',
-          service: taskTypeLabelForTasks(t.type || ''),
+          // שם השירות בפועל (למשל "בדיקת קרינה"), לא שלב הזרימה ("ביצוע"/"פולואפ").
+          // נופל חזרה לתווית השלב רק אם אין שום מקור לשם שירות.
+          service: serviceNameForTask(t) || taskTypeLabelForTasks(t.type || ''),
           sentAt: asc[0].at || t.updatedAt || '',
           paid,
           paidAt: paid ? latest.at : null,
@@ -3910,6 +4338,8 @@ function ReportsPaymentsSection({
       setBusyId(null);
     }
   };
+
+  // (הנפקת חשבונית עברה לשלב הגבייה בזרימת המשימה — ראה issueCollectionInvoice בטאב המשימות.)
 
   const fmtDay = (iso: string | null | undefined) => {
     if (!iso) return '—';
@@ -4083,6 +4513,11 @@ function ManagerDashboard({
     loadLeadsAnalytics(p);
   };
 
+  // ── לידים יומי (קוביה + מודאל) ──
+  // הנתונים כבר מגיעים ב-payload של /dashboard/manager (data.dailyLeads), ולכן
+  // הלחיצה על הקוביה לא מבצעת קריאת רשת נוספת — רק פותחת את הרשימה.
+  const [dailyLeadsOpen, setDailyLeadsOpen] = useState(false);
+
   // ── ביקורות לקוחות (מודאל "שביעות רצון") — בורר תקופה, פילוח לפי סיווג/עובד, וסינון לפי סיווג ──
   const [reviewsPeriod, setReviewsPeriod] = useState<'last30' | 'quarter' | 'half' | 'year'>('last30');
   const [reviewsData, setReviewsData] = useState<ReviewsAnalyticsPayload | null>(null);
@@ -4154,6 +4589,44 @@ function ManagerDashboard({
     loadRevenueAnalytics(p);
   };
 
+  // מקור הגעה של לקוחות (לחיצה על כרטיס "מקור הגעה") — פילוח לפי מקור + טבלה,
+  // עם פילטר תקופה ופילטר שם לקוח. ברירת מחדל = 30 יום אחרונים.
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [sourcePeriod, setSourcePeriod] = useState<'last30' | 'quarter' | 'half' | 'year'>('last30');
+  const [sourceNameQuery, setSourceNameQuery] = useState('');
+  const [sourceData, setSourceData] = useState<CustomerSourceAnalyticsPayload | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceErr, setSourceErr] = useState('');
+
+  const loadCustomerSource = async (period: string, name: string) => {
+    setSourceLoading(true);
+    setSourceErr('');
+    try {
+      const res = await apiFetch(
+        apiUrl(`/dashboard/customer-source-analytics?period=${encodeURIComponent(period)}&name=${encodeURIComponent(name)}`),
+        { authUser: currentUser },
+      );
+      if (!res.ok) throw new Error(await res.text());
+      setSourceData((await res.json()) as CustomerSourceAnalyticsPayload);
+    } catch {
+      setSourceErr('טעינת פילוח מקורות ההגעה נכשלה. נסה שוב.');
+      setSourceData(null);
+    } finally {
+      setSourceLoading(false);
+    }
+  };
+
+  const openSourceModal = () => {
+    setSourceOpen(true);
+    setSourcePeriod('last30');
+    setSourceNameQuery('');
+    loadCustomerSource('last30', '');
+  };
+  const changeSourcePeriod = (p: 'last30' | 'quarter' | 'half' | 'year') => {
+    setSourcePeriod(p);
+    loadCustomerSource(p, sourceNameQuery);
+  };
+
   const load = async () => {
     setLoading(true);
     setError('');
@@ -4174,19 +4647,19 @@ function ManagerDashboard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
 
-  // פותח את מודל עריכת היעד השנתי, מאותחל ליעד הנוכחי.
+  // פותח את מודל עריכת היעד החודשי, מאותחל ליעד הנוכחי.
   const openTargetModal = () => {
-    const currentAnnual = Math.round((data?.kpis?.monthlyRevenueTarget || 0) * 12);
-    setTargetInput(currentAnnual ? String(currentAnnual) : '');
+    const currentMonthly = Math.round(data?.kpis?.monthlyRevenueTarget || 0);
+    setTargetInput(currentMonthly ? String(currentMonthly) : '');
     setTargetError('');
     setTargetOpen(true);
   };
 
-  // שומר יעד שנתי חדש ומרענן את הדשבורד.
+  // שומר יעד חודשי חדש ומרענן את הדשבורד.
   const saveTarget = async () => {
-    const annual = Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')));
-    if (!Number.isFinite(annual) || annual <= 0) {
-      setTargetError('נא להזין יעד שנתי חיובי');
+    const monthly = Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')));
+    if (!Number.isFinite(monthly) || monthly <= 0) {
+      setTargetError('נא להזין יעד חודשי חיובי');
       return;
     }
     setTargetSaving(true);
@@ -4195,7 +4668,7 @@ function ManagerDashboard({
       const res = await apiFetch(apiUrl('/dashboard/target'), {
         method: 'POST',
         authUser: currentUser,
-        body: JSON.stringify({ annualRevenueTarget: annual }),
+        body: JSON.stringify({ monthlyRevenueTarget: monthly }),
       });
       if (!res.ok) throw new Error(await res.text());
       setTargetOpen(false);
@@ -4213,6 +4686,8 @@ function ManagerDashboard({
   const [nrRows, setNrRows] = useState<NotRelevantCustomer[]>([]);
 
   useEffect(() => {
+    // הסקשן מוסתר כרגע — אין טעם למשוך את הנתונים.
+    if (!SHOW_NOT_RELEVANT_CUSTOMERS) return;
     let alive = true;
     (async () => {
       try {
@@ -4273,7 +4748,27 @@ function ManagerDashboard({
     ? `ממוצע ${rev?.avg ?? 0}★ · ${reviewsCount} ביקורות · לחצו לפירוט`
     : 'טרם נאספו ביקורות';
 
+  // ── לידים יומי — מה שנכנס היום מול אתמול (נתוני אמת מהשרת, שעון ישראל) ──
+  const daily = data.dailyLeads;
+  const leadsTodayCount = daily?.today ?? 0;
+  const leadsDayPct = daily?.changePct ?? null;
+  const leadsDaySub =
+    leadsDayPct === null
+      ? `אתמול: ${daily?.yesterday ?? 0} · ממוצע 7 ימים: ${daily?.avg7 ?? 0}`
+      : `${leadsDayPct >= 0 ? '+' : ''}${leadsDayPct}% מול אתמול (${daily?.yesterday ?? 0}) · ממוצע 7 ימים: ${daily?.avg7 ?? 0}`;
+
+  // סקשן "לידים יומי" (גרף 7 הימים + רשימת הפניות של היום) הוסר מהדשבורד
+  // לבקשת המשתמש. `daily` עצמו נשאר בשימוש — קוביית ה-KPI "לידים היום"
+  // והמודאל שנפתח בלחיצה עליה עדיין מציגים את אותם נתונים.
+
   const kpiCards = [
+    {
+      title: 'לידים היום',
+      value: leadsTodayCount,
+      sub: `${leadsDaySub}${leadsTodayCount > 0 ? ' · לחצו לרשימה' : ''}`,
+      subClass: leadsDayPct === null ? 'text-slate-400' : leadsDayPct >= 0 ? 'text-green-700' : 'text-red-600',
+      onClick: daily ? () => setDailyLeadsOpen(true) : undefined,
+    },
     {
       title: 'סה"כ לידים חדשים (ברבעון)',
       value: leadsQuarter,
@@ -4282,15 +4777,15 @@ function ManagerDashboard({
       onClick: openLeadsModal,
     },
     {
-      title: 'הכנסה רבעונית',
-      value: formatCurrencyILS(Math.round((data.kpis.wonRevenueThisMonth || 0) * 3.1)),
-      sub: 'לחצו להכנסות לפי הזמנות',
+      title: 'הכנסה חודשית',
+      value: formatCurrencyILS(Math.round(data.kpis.wonRevenueThisMonth || 0)),
+      sub: 'הכנסה מה-1 לחודש · לחצו להכנסות לפי הזמנות',
       onClick: openRevenueModal,
     },
     {
-      title: 'עמידה ביעד מכירות שנתי',
+      title: 'עמידה ביעד מכירות חודשי',
       value: `${Math.min(100, Math.round((data.kpis.attainmentPct || 0) * 100))}%`,
-      sub: `יעד שנתי: ${formatCurrencyILS(Math.round(data.kpis.monthlyRevenueTarget * 12))} · לחצו לעריכה`,
+      sub: `יעד חודשי: ${formatCurrencyILS(Math.round(data.kpis.monthlyRevenueTarget))} · לחצו לעריכה`,
       onClick: openTargetModal,
     },
     {
@@ -4298,6 +4793,12 @@ function ManagerDashboard({
       value: csatValue,
       sub: csatSub,
       onClick: reviewsHasData ? openReviewsModal : undefined,
+    },
+    {
+      title: 'מקור הגעה של לקוחות',
+      value: 'פילוח',
+      sub: 'לחצו למקור הגעה לפי לקוח',
+      onClick: openSourceModal,
     },
   ];
 
@@ -4343,7 +4844,8 @@ function ManagerDashboard({
   return (
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-4" dir="rtl">
       <div className="space-y-4">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {/* 6 קוביות → שתי שורות של 3 ב-xl (במקום 4+2 עקום) */}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {kpiCards.map((kpi) => {
             const onClick = (kpi as any).onClick as (() => void) | undefined;
             return (
@@ -4468,6 +4970,7 @@ function ManagerDashboard({
           </Card>
         </div>
 
+
         {/* ── מתג טווח תאריכים (שבוע/חודש אחרון) — משפיע על שני הסקשנים שמתחת ── */}
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-base font-bold text-slate-800">פעילות אחרונה</h2>
@@ -4477,11 +4980,17 @@ function ManagerDashboard({
           </div>
         </div>
 
+        {/* ── הכנסות בפועל מכספית — אדמין בלבד (יורם, מנהל המערכת) ── */}
+        {(currentUser.role || '').toUpperCase() === 'ADMIN' && (
+          <RealIncomeSection currentUser={currentUser} />
+        )}
+
         {/* ── דוחות שנשלחו + סטטוס תשלום (מחליף את סקשן "המשוב") ── */}
         <ReportsPaymentsSection currentUser={currentUser} onOpenCustomerById={onOpenCustomerById} />
 
+        {/* ── לקוחות שסומנו כלא רלוונטי — לא מוצג כרגע (SHOW_NOT_RELEVANT_CUSTOMERS) ── */}
+        {SHOW_NOT_RELEVANT_CUSTOMERS && (
         <div className="grid gap-3">
-          {/* ── לקוחות שסומנו כלא רלוונטי ── */}
           <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between gap-2 text-xl font-bold text-slate-900">
@@ -4515,6 +5024,7 @@ function ManagerDashboard({
             </CardContent>
           </Card>
         </div>
+        )}
 
         <div className="flex justify-end">
           <Button style={{ background: galit.primary }} className="rounded-xl px-4" onClick={refresh}>
@@ -4522,6 +5032,96 @@ function ManagerDashboard({
           </Button>
         </div>
       </div>
+
+      {/* ── מודל "לידים היום" — מגמת 7 ימים + רשימת הפניות שנכנסו היום ── */}
+      {dailyLeadsOpen && daily && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setDailyLeadsOpen(false)}
+        >
+          <div
+            className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
+              <div>
+                <div className="text-base font-bold text-slate-900">לידים שנכנסו היום</div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  {daily.today} היום · אתמול {daily.yesterday} · ממוצע 7 ימים {daily.avg7}
+                </div>
+              </div>
+              <button
+                className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                onClick={() => setDailyLeadsOpen(false)}
+                aria-label="סגור"
+              >
+                ×
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              {daily.series.length > 0 && (
+                <div className="mb-4 h-[180px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={daily.series}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" tick={{ fill: '#334155', fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fill: '#334155', fontSize: 12 }} />
+                      <Tooltip formatter={(v: any) => [`${Number(v).toLocaleString('he-IL')} לידים`, 'לידים']} />
+                      <Bar dataKey="value" fill="#16a34a" radius={[10, 10, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {daily.list.length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-400">לא נכנסו לידים היום</div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50">
+                      <TableHead>שעה</TableHead>
+                      <TableHead>ליד</TableHead>
+                      <TableHead>נושא</TableHead>
+                      <TableHead>מטפל</TableHead>
+                      <TableHead>סטטוס</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {daily.list.map((l) => {
+                      const statusLabel =
+                        l.status === 'NEW' ? 'חדש' : l.status === 'ACTIVE' ? 'בטיפול' : l.status || '—';
+                      return (
+                        <TableRow key={l.id}>
+                          <TableCell className="whitespace-nowrap text-slate-600">
+                            {(() => {
+                              try {
+                                return new Date(l.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+                              } catch { return '—'; }
+                            })()}
+                          </TableCell>
+                          <TableCell className="font-medium">{l.name}</TableCell>
+                          <TableCell className="max-w-[260px] truncate text-slate-600" title={l.subject}>{l.subject}</TableCell>
+                          <TableCell className="text-slate-600">{l.ownerName || 'טרם נלקח'}</TableCell>
+                          <TableCell>
+                            <span
+                              className={cn(
+                                'rounded-full px-2.5 py-1 text-xs font-bold',
+                                l.status === 'NEW' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700',
+                              )}
+                            >
+                              {statusLabel}
+                            </span>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── מודל עריכת יעד המכירות השנתי ── */}
       {targetOpen && (
@@ -4535,7 +5135,7 @@ function ManagerDashboard({
             dir="rtl"
           >
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4">
-              <div className="text-base font-bold text-slate-900">עדכון יעד מכירות שנתי</div>
+              <div className="text-base font-bold text-slate-900">עדכון יעד מכירות חודשי</div>
               <button
                 className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                 onClick={() => !targetSaving && setTargetOpen(false)}
@@ -4546,21 +5146,21 @@ function ManagerDashboard({
             </div>
             <div className="space-y-3 p-4">
               <div>
-                <label className="mb-1 block text-sm font-semibold text-slate-600">יעד שנתי (₪)</label>
+                <label className="mb-1 block text-sm font-semibold text-slate-600">יעד חודשי (₪)</label>
                 <Input
                   type="text"
                   inputMode="numeric"
                   value={targetInput}
                   onChange={(e) => setTargetInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter' && !targetSaving) saveTarget(); }}
-                  placeholder="לדוגמה: 5400000"
+                  placeholder="לדוגמה: 450000"
                   autoFocus
                 />
                 {Number(String(targetInput).replace(/[^\d.]/g, '')) > 0 && (
                   <div className="mt-2 text-xs text-slate-500">
-                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, ''))))} לשנה
+                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, ''))))} לחודש
                     {' · '}
-                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')) / 12))} לחודש
+                    {formatCurrencyILS(Math.round(Number(String(targetInput).replace(/[^\d.]/g, '')) * 12))} לשנה
                   </div>
                 )}
               </div>
@@ -5128,6 +5728,200 @@ function ManagerDashboard({
           </div>
         </div>
       )}
+
+      {/* ── מקור הגעה של לקוחות ── */}
+      {sourceOpen && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setSourceOpen(false)}
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            dir="rtl"
+          >
+            {/* כותרת + בורר תקופה */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div>
+                <div className="text-lg font-bold text-slate-900">מקור הגעה של לקוחות</div>
+                <div className="text-xs text-slate-500">
+                  {LEADS_PERIOD_SUBTITLE[sourcePeriod]} · לפי כרטיס הלקוח
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded-xl bg-slate-100 p-0.5">
+                  {LEADS_PERIODS.map((p) => (
+                    <button
+                      key={p.key}
+                      onClick={() => changeSourcePeriod(p.key)}
+                      className={cn(
+                        'rounded-lg px-3 py-1.5 text-xs font-bold transition',
+                        sourcePeriod === p.key ? 'bg-white text-indigo-700 shadow' : 'text-slate-500 hover:text-slate-700',
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  onClick={() => setSourceOpen(false)}
+                  aria-label="סגור"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+
+            {/* פילטר שם לקוח */}
+            <div className="border-b border-slate-100 px-5 py-3">
+              <form
+                onSubmit={(e) => { e.preventDefault(); loadCustomerSource(sourcePeriod, sourceNameQuery); }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={sourceNameQuery}
+                  onChange={(e) => setSourceNameQuery(e.target.value)}
+                  placeholder="סינון לפי שם לקוח…"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-indigo-400 focus:outline-none"
+                />
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-indigo-700"
+                >
+                  סנן
+                </button>
+                {sourceNameQuery && (
+                  <button
+                    type="button"
+                    onClick={() => { setSourceNameQuery(''); loadCustomerSource(sourcePeriod, ''); }}
+                    className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+                  >
+                    נקה
+                  </button>
+                )}
+              </form>
+            </div>
+
+            <div className="max-h-[calc(90vh-170px)] overflow-y-auto p-5">
+              {sourceLoading ? (
+                <div className="py-16 text-center text-sm text-slate-500">טוען נתונים…</div>
+              ) : sourceErr ? (
+                <div className="py-16 text-center text-sm text-red-600">{sourceErr}</div>
+              ) : !sourceData || sourceData.stats.totalCustomers === 0 ? (
+                <div className="py-16 text-center text-sm text-slate-500">אין לקוחות בתקופה שנבחרה{sourceNameQuery ? ' עבור הסינון הזה' : ''}.</div>
+              ) : (
+                <div className="space-y-5">
+                  {/* נתונים קרים */}
+                  <div className="grid grid-cols-3 gap-3">
+                    {(() => {
+                      const s = sourceData.stats;
+                      const top = sourceData.bySource[0];
+                      const tiles = [
+                        { label: 'לקוחות עם מקור', value: String(s.totalCustomers), sub: `על פני ${sourceData.range.spanDays} ימים` },
+                        { label: 'מספר מקורות', value: String(sourceData.bySource.length), sub: 'ערוצי הגעה שונים' },
+                        { label: 'מקור מוביל', value: top ? top.name : '—', sub: top ? `${top.pct}%` : '' },
+                      ];
+                      return tiles.map((t) => (
+                        <div key={t.label} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                          <div className="text-xs font-semibold text-slate-500">{t.label}</div>
+                          <div className="mt-1 truncate text-xl font-black text-slate-900" title={t.value}>{t.value}</div>
+                          <div className="mt-1 text-[11px] font-semibold text-slate-400">{t.sub}</div>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    {/* פילוח לפי מקור — עוגה */}
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-2 text-sm font-bold text-slate-800">פילוח לפי מקור</div>
+                      <div className="h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={sourceData.bySource}
+                              dataKey="count"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={90}
+                              label={(e: any) => `${e.name} (${e.pct}%)`}
+                            >
+                              {sourceData.bySource.map((entry, i) => (
+                                <Cell
+                                  key={entry.name}
+                                  fill={LEADS_SOURCE_PALETTE[i % LEADS_SOURCE_PALETTE.length]}
+                                  stroke="#ffffff"
+                                  strokeWidth={2}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(v: any, n: any, p: any) => [`${p?.payload?.pct ?? 0}%`, n]} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* טבלת מקורות */}
+                    <div className="rounded-xl border border-slate-100 p-4">
+                      <div className="mb-3 text-sm font-bold text-slate-800">פירוט לפי מקור</div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-slate-100 text-right text-xs font-semibold text-slate-500">
+                              <th className="py-2">מקור</th>
+                              <th className="py-2">לקוחות</th>
+                              <th className="py-2">אחוז</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sourceData.bySource.map((r) => (
+                              <tr key={r.name} className="border-b border-slate-50">
+                                <td className="py-2 font-semibold text-slate-800">{r.name}</td>
+                                <td className="py-2 text-slate-600">{r.count}</td>
+                                <td className="py-2 text-slate-600">{r.pct}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* טבלת לקוחות מפורטת */}
+                  <div className="rounded-xl border border-slate-100 p-4">
+                    <div className="mb-3 text-sm font-bold text-slate-800">
+                      לקוחות בתקופה{sourceData.customers.length >= 500 ? ' (500 ראשונים)' : ''}
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-right text-xs font-semibold text-slate-500">
+                            <th className="py-2">לקוח</th>
+                            <th className="py-2">מקור הגעה</th>
+                            <th className="py-2">תאריך</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sourceData.customers.map((c) => (
+                            <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50">
+                              <td className="py-2 text-slate-800">{c.customerName}</td>
+                              <td className="py-2 text-slate-600">{c.source}</td>
+                              <td className="py-2 text-slate-500">{fmtDayHe(c.date)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -5156,6 +5950,12 @@ type MeDashboardPayload = {
   leadsBySource: Array<{ name: string; value: number }>;
   leadsByServiceType: Array<{ name: string; value: number }>;
   recentLeads: Array<{ id: string; name: string; phone: string; serviceType: string; source: string; status: string; createdAt: string | null }>;
+  /** פילוח לקוחות לפי מקור הגעה — מאוכלס רק לגלית (אחראית הכספים), אחרת null. */
+  customerSources: {
+    totalCustomers: number;
+    bySource: Array<{ name: string; count: number; pct: number }>;
+    customers: Array<{ id: string; customerName: string; source: string; date: string }>;
+  } | null;
 };
 
 /** כרטיס מדד אישי — אייקון צבעוני, מספר גדול, תווית והערה. */
@@ -5235,6 +6035,133 @@ function LeadBreakdownBars({ title, icon: Icon, rows, barClass }: { title: strin
   );
 }
 
+/**
+ * פילוח לקוחות לפי מקור הגעה — כרטיס ייעודי לגלית (אחראית הכספים).
+ * עוגת טבעת של כמות לקוחות לכל מקור (שנה אחרונה), + רשימה גלילה של הלקוחות
+ * עם המקור של כל אחד ותאריך ההצטרפות, וסינון חופשי לפי שם/מקור.
+ */
+function CustomerSourceSegmentation({
+  data,
+}: {
+  data: {
+    totalCustomers: number;
+    bySource: Array<{ name: string; count: number; pct: number }>;
+    customers: Array<{ id: string; customerName: string; source: string; date: string }>;
+  };
+}) {
+  const [q, setQ] = useState('');
+  const pieData = data.bySource.map((s, i) => ({
+    name: s.name,
+    value: s.count,
+    pct: s.pct,
+    color: LEADS_SOURCE_PALETTE[i % LEADS_SOURCE_PALETTE.length],
+  }));
+  const query = q.trim().toLowerCase();
+  const filtered = query
+    ? data.customers.filter(
+        (c) =>
+          (c.customerName || '').toLowerCase().includes(query) ||
+          (c.source || '').toLowerCase().includes(query),
+      )
+    : data.customers;
+
+  return (
+    <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="flex items-center gap-2 text-base font-bold text-slate-800">
+          <Building2 className="h-4 w-4 text-slate-400" /> פילוח לקוחות לפי מקור הגעה
+        </CardTitle>
+        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+          {data.totalCustomers.toLocaleString('he-IL')} לקוחות · שנה אחרונה
+        </span>
+      </CardHeader>
+      <CardContent>
+        {data.totalCustomers === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-400">אין לקוחות עם מקור הגעה ידוע בשנה האחרונה</div>
+        ) : (
+          <div className="grid gap-5 lg:grid-cols-2">
+            {/* עוגת פילוח לפי מקור */}
+            <div>
+              <div className="mb-2 text-sm font-bold text-slate-800">התפלגות לפי מקור</div>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={52}
+                      outerRadius={90}
+                      paddingAngle={2}
+                      label={({ percent, x, y, textAnchor }: any) =>
+                        percent >= 0.05 ? (
+                          <text x={x} y={y} textAnchor={textAnchor} dominantBaseline="central" fill="#52514e" fontSize={12} fontWeight={600}>
+                            {`${Math.round(percent * 100)}%`}
+                          </text>
+                        ) : (
+                          <></>
+                        )
+                      }
+                      labelLine={false}
+                    >
+                      {pieData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value: any, name: any) => [`${Number(value).toLocaleString('he-IL')} לקוחות`, name]}
+                      contentStyle={{ borderRadius: 12, border: '1px solid rgba(11,11,11,0.10)', fontSize: 13 }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* רשימת הלקוחות עם המקור של כל אחד */}
+            <div className="flex flex-col">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div className="text-sm font-bold text-slate-800">מאיפה הגיע כל לקוח</div>
+                <span className="text-[11px] text-slate-400">{filtered.length.toLocaleString('he-IL')}</span>
+              </div>
+              <div className="relative mb-2">
+                <Search className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="חיפוש לפי שם לקוח או מקור…"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pr-8 pl-3 text-sm text-slate-700 outline-none focus:border-emerald-400 focus:bg-white"
+                />
+              </div>
+              <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-100">
+                {filtered.length === 0 ? (
+                  <div className="py-6 text-center text-sm text-slate-400">לא נמצאו לקוחות</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {filtered.map((c) => (
+                      <div key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 hover:bg-slate-50">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-slate-800">{c.customerName || '—'}</div>
+                          <div className="mt-0.5 text-[11px] text-slate-400">
+                            {c.date ? new Date(c.date).toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                          </div>
+                        </div>
+                        <span className="flex-shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+                          {c.source || '—'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const LEAD_STATUS_STYLE: Record<string, { label: string; cls: string }> = {
   NEW: { label: 'חדש', cls: 'bg-blue-100 text-blue-700' },
   CONTACTED: { label: 'נוצר קשר', cls: 'bg-indigo-100 text-indigo-700' },
@@ -5246,6 +6173,60 @@ const LEAD_STATUS_STYLE: Record<string, { label: string; cls: string }> = {
   LOST: { label: 'אבוד', cls: 'bg-rose-100 text-rose-700' },
   NOT_RELEVANT: { label: 'לא רלוונטי', cls: 'bg-slate-100 text-slate-600' },
 };
+
+/**
+ * סקשן "שביעות רצון הלקוחות שלי" בדשבורד העובד — CSAT + מספר ביקורות + הביקורות
+ * האחרונות. השרת מסנן אוטומטית לביקורות של הלקוחות/המשימות שהעובד טיפל בהם
+ * (מנהל/אדמין יראו את הכל, אבל להם יש כבר את דשבורד המנהל). מוצג רק כשיש ביקורות.
+ */
+function MySatisfactionCard({ currentUser }: { currentUser: AppUser }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await apiFetch(apiUrl('/dashboard/reviews-analytics?period=year'), { authUser: currentUser });
+        if (alive && res.ok) setData(await res.json());
+      } catch { /* ignore */ } finally { if (alive) setLoading(false); }
+    })();
+    return () => { alive = false; };
+  }, [currentUser]);
+
+  if (loading || !data) return null;
+  const count = data?.stats?.count ?? (Array.isArray(data?.list) ? data.list.length : 0);
+  if (!count) return null; // אין ביקורות — לא מציגים סקשן ריק
+  const csat = data?.stats?.csat;
+  const avg = data?.stats?.avg;
+  const list: Array<{ customerName: string; rating: number; reason: string | null; ratedAt: string | null }> =
+    Array.isArray(data?.list) ? data.list.slice(0, 6) : [];
+
+  return (
+    <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base font-bold text-slate-800">
+          <span className="flex items-center gap-2"><Star className="h-4 w-4 text-amber-500" /> שביעות רצון הלקוחות שלי</span>
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            {csat != null && <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">CSAT {csat}%</span>}
+            {avg != null && <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">{avg}★</span>}
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">{count} ביקורות</span>
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-1">
+        <div className="space-y-1.5">
+          {list.map((r, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg bg-slate-50/70 px-3 py-2">
+              <span className="text-amber-500 text-sm shrink-0" dir="ltr">{'★'.repeat(Math.max(0, Math.min(5, r.rating)))}<span className="text-slate-300">{'★'.repeat(Math.max(0, 5 - r.rating))}</span></span>
+              <span className="text-sm font-semibold text-slate-700 truncate">{r.customerName}</span>
+              {r.reason && <span className="text-xs text-slate-500 truncate flex-1">— {r.reason}</span>}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 function DashboardPage({
   currentUser,
@@ -5295,7 +6276,10 @@ function DashboardPage({
   );
 
   // גלית (אחראית הכספים) רואה בדשבורד שלה את מעקב הדוחות והתשלומים — כמו האדמין.
-  const isGalit = (currentUser.name || '').includes('גלית');
+  // זיהוי לפי המייל שלה (מדויק) או לפי השם, לגיבוי.
+  const isGalit =
+    (currentUser.email || '').trim().toLowerCase() === 'galit@galit.co.il' ||
+    (currentUser.name || '').includes('גלית');
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -5341,7 +6325,16 @@ function DashboardPage({
             <EmployeeStatCard title="משימות באיחור" value={k?.overdueTasks ?? 0} sub="דורשות טיפול מיידי" icon={AlertTriangle} accent={{ from: 'from-rose-500', to: 'to-red-600', ring: 'bg-rose-500', text: 'text-rose-600' }} />
           </div>
 
-          {/* ── Sales metrics + lead funnel ── */}
+          {/* ── מכירות אישיות (₪) — הסכומים של העובד המחובר: החודש, סה"כ, וצבר פתוח ── */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            <EmployeeStatCard title="המכירות שלי החודש" value={formatCurrencyILS(k?.wonRevenueThisMonth ?? 0)} sub="הצעות שאושרו החודש" icon={TrendingUp} accent={{ from: 'from-emerald-500', to: 'to-green-600', ring: 'bg-emerald-500', text: 'text-emerald-600' }} />
+            <EmployeeStatCard title="סה״כ מכירות שלי" value={formatCurrencyILS(k?.wonRevenueTotal ?? 0)} sub="כל ההצעות שאושרו" icon={DollarSign} accent={{ from: 'from-teal-500', to: 'to-emerald-600', ring: 'bg-teal-500', text: 'text-teal-600' }} />
+            <EmployeeStatCard title="צבר פתוח (Pipeline)" value={formatCurrencyILS(k?.pipelineValue ?? 0)} sub="הזדמנויות בטיפול" icon={BarChart3} accent={{ from: 'from-indigo-500', to: 'to-blue-600', ring: 'bg-indigo-500', text: 'text-indigo-600' }} />
+          </div>
+
+          {/* ── Sales metrics + lead funnel — מוסתר לגלית (אחראית כספים, לא נציגת מכירות) ── */}
+          {!isGalit && (
+          <>
           <div className="grid gap-3 xl:grid-cols-3">
             <Card className="rounded-xl border-0 bg-white shadow-[0_6px_18px_rgba(15,23,42,0.06)] xl:col-span-2">
               <CardHeader className="pb-2">
@@ -5393,6 +6386,16 @@ function DashboardPage({
             <LeadBreakdownBars title="לידים לפי מקור" icon={Radio} rows={me?.leadsBySource ?? []} barClass="bg-gradient-to-l from-teal-400 to-emerald-500" />
             <LeadBreakdownBars title="לידים לפי סוג שירות" icon={FlaskConical} rows={me?.leadsByServiceType ?? []} barClass="bg-gradient-to-l from-sky-400 to-blue-500" />
           </div>
+          </>
+          )}
+
+          {/* ── שביעות רצון הלקוחות שלי — כל העובדים, מסונן לביקורות שלהם ── */}
+          <MySatisfactionCard currentUser={currentUser} />
+
+          {/* ── פילוח לקוחות לפי מקור הגעה — מוצג רק לגלית (אחראית הכספים) ── */}
+          {isGalit && me?.customerSources ? (
+            <CustomerSourceSegmentation data={me.customerSources} />
+          ) : null}
 
           {/* ── Recent leads + my tasks ── */}
           <div className="grid gap-3 xl:grid-cols-3">
@@ -5421,7 +6424,7 @@ function DashboardPage({
                             <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
                               {l.serviceType ? <span className="truncate">{l.serviceType}</span> : null}
                               {l.phone ? <span className="text-slate-300">·</span> : null}
-                              {l.phone ? <span dir="ltr">{l.phone}</span> : null}
+                              {l.phone ? <span dir="ltr">{phoneToDisplay(l.phone)}</span> : null}
                             </div>
                           </div>
                           <span className={cn('flex-shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold', st.cls)}>{st.label}</span>
@@ -5477,7 +6480,9 @@ type FeedbackCustomer = {
 };
 
 /** סיבות הסיווג "לא רלוונטי" — משותף לפופאפ המשימה ולסקשן "לקוחות שסווגו כלא רלוונטי". */
-const NOT_RELEVANT_REASONS = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'אחר'] as const;
+// 'אחר' חייב להישאר אחרון — הוא גם ברירת המחדל שאליה נופלת כל סיבה שאינה
+// ברשימה (ראה קיבוץ הסיבות בסקשן "לא רלוונטי"), ולכן סיבה חדשה נוספת לפניו.
+const NOT_RELEVANT_REASONS = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'טעות', 'אחר'] as const;
 
 /** קישור הדירוג של גלית בגוגל (כפי שנמסר). */
 const GOOGLE_REVIEW_URL =
@@ -5848,14 +6853,14 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setPhoneModal({ row, channel: 'whatsapp', phone: row.phone || '' })}
+                            onClick={() => setPhoneModal({ row, channel: 'whatsapp', phone: formatIsraeliPhoneDisplay(row.phone) })}
                             className="flex items-center gap-1.5 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 transition hover:bg-green-100"
                           >
                             <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
                           </button>
                           <button
                             type="button"
-                            onClick={() => setPhoneModal({ row, channel: 'sms', phone: row.phone || '' })}
+                            onClick={() => setPhoneModal({ row, channel: 'sms', phone: formatIsraeliPhoneDisplay(row.phone) })}
                             className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
                           >
                             <Phone className="h-3.5 w-3.5" /> SMS
@@ -6140,6 +7145,7 @@ function FeedbackPage({ currentUser }: { currentUser: AppUser }) {
               dir="ltr"
               value={phoneModal.phone}
               onChange={(e) => setPhoneModal((p) => (p ? { ...p, phone: e.target.value } : p))}
+              onBlur={() => setPhoneModal((p) => (p ? { ...p, phone: formatIsraeliPhoneDisplay(p.phone) } : p))}
               onKeyDown={(e) => { if (e.key === 'Enter') sendViaPhone(); }}
               placeholder="050-0000000"
               className="mb-4 h-11 w-full rounded-xl border border-gray-200 px-4 text-right text-base outline-none focus:border-green-400"
@@ -6277,7 +7283,7 @@ function NotRelevantPage({ currentUser, onOpenCustomerById }: { currentUser: App
                             <div className="truncate text-sm font-bold text-slate-800">{c.name}</div>
                             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
                               {c.contactName && c.contactName !== c.name ? <span className="truncate">{c.contactName}</span> : null}
-                              {c.phone ? <><span className="text-slate-300">·</span><span dir="ltr">{c.phone}</span></> : null}
+                              {c.phone ? <><span className="text-slate-300">·</span><span dir="ltr">{phoneToDisplay(c.phone)}</span></> : null}
                               {c.city ? <><span className="text-slate-300">·</span><span>{c.city}</span></> : null}
                               {c.notRelevantAt ? <><span className="text-slate-300">·</span><span>סווג {fmtDate(c.notRelevantAt)}</span></> : null}
                             </div>
@@ -6715,7 +7721,7 @@ function LeadsPage({
       firstName: lead.firstName || '',
       lastName: lead.lastName || '',
       fullName: lead.fullName || lead.name || '',
-      phone: lead.phone || '',
+      phone: formatIsraeliPhoneDisplay(lead.phone),
       email: lead.email || '',
       company: lead.company || '',
       city: lead.city || '',
@@ -7705,7 +8711,17 @@ function computeCustomersPageAnalytics(
     ['SENT', 'APPROVED', 'SIGNED', 'REJECTED'].includes((q.status || '').toString().toUpperCase());
   const quoteCountsTowardSales = (q: Quote) =>
     ['SENT', 'APPROVED', 'SIGNED'].includes((q.status || '').toString().toUpperCase());
-  const quoteMoney = (q: Quote) => Number(q.totalAmount ?? q.amountBeforeVat ?? q.amount ?? 0);
+  // הכנסה = מחיר לפני מע"מ (לבקשת המנהל). עדיף amountBeforeVat; אם חסר — גוזרים מהסכום
+  // הכולל לפי vatPercent; ואם אין נתוני מע"מ — נופלים לסכום הכולל כדי לא לאבד הכנסה.
+  const quoteMoney = (q: Quote) => {
+    const beforeVat = Number(q.amountBeforeVat ?? 0);
+    if (beforeVat > 0) return beforeVat;
+    const total = Number(q.totalAmount ?? q.amount ?? 0);
+    if (total <= 0) return 0;
+    const vat = Number(q.vatPercent);
+    if (Number.isFinite(vat) && vat > 0) return Math.round((total / (1 + vat / 100)) * 100) / 100;
+    return total;
+  };
   const lostLeadStatuses = new Set(['WON', 'LOST', 'NOT_RELEVANT']);
 
   const typeCounts = new Map<string, number>();
@@ -7864,6 +8880,7 @@ function CustomersPage({
   typeLabelMap,
   classifications,
   onReloadClassifications,
+  recentViewIds,
 }: {
   customers: Customer[];
   leads: Lead[];
@@ -7882,6 +8899,8 @@ function CustomersPage({
   typeLabelMap: Record<string, string>;
   classifications: CustomerClassificationDto[];
   onReloadClassifications: () => Promise<void>;
+  /** מזהי הלקוחות שהמשתמש נכנס אליהם לאחרונה (מהחדש לישן) — ל"10 לקוחות אחרונים". */
+  recentViewIds?: string[];
 }) {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('הכל');
@@ -8185,7 +9204,7 @@ function CustomersPage({
       name: customer.name,
       type: normalizeCustomerTypeEnum(customer.type),
       contactName: customer.contactName,
-      phone: customer.phone,
+      phone: formatIsraeliPhoneDisplay(customer.phone),
       email: customer.email,
       city: customer.city,
       address: (customer as any).address || '',
@@ -8261,12 +9280,19 @@ function CustomersPage({
   const rangeStart = pagedTotal === 0 ? 0 : (listPage - 1) * CUSTOMER_PAGE_SIZE + 1;
   const rangeEnd = pagedTotal === 0 ? 0 : Math.min(listPage * CUSTOMER_PAGE_SIZE, pagedTotal);
 
-  /* ── 10 הלקוחות האחרונים שנוספו — תמיד מוצג בראש הטאב ── */
+  /* ── 10 הלקוחות האחרונים שהעובד *נכנס* אליהם — מוצג בראש הטאב ──
+   * מקור-אמת: recentViewIds (CustomerView per-user). אם עדיין אין היסטוריית כניסות
+   * (משתמש חדש / טרם נכנס לאף לקוח) — נפילה חזרה ל-10 הלקוחות האחרונים שנוצרו. */
   const recentCustomers = useMemo(() => {
+    if (recentViewIds && recentViewIds.length > 0) {
+      const byId = new Map(customers.map((c) => [c.id, c]));
+      const viewed = recentViewIds.map((id) => byId.get(id)).filter((c): c is Customer => !!c);
+      if (viewed.length > 0) return viewed.slice(0, 10);
+    }
     return [...customers]
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
       .slice(0, 10);
-  }, [customers]);
+  }, [customers, recentViewIds]);
 
   const customerFormControlClass =
     '!text-base h-14 rounded-xl border border-slate-300 bg-white px-4 leading-7 text-slate-900 placeholder:!text-base placeholder:text-slate-400 shadow-sm outline-none transition focus:border-green-500 focus:ring-2 focus:ring-green-100';
@@ -8300,25 +9326,45 @@ function CustomersPage({
         </Button>
       </div>
 
-      {/* 10 הלקוחות האחרונים שנוספו */}
+      {/* 10 הלקוחות האחרונים שהעובד נכנס אליהם */}
       {recentCustomers.length > 0 && (
-        <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
-            <History className="h-4 w-4 text-slate-400" />
+        <div className="rounded-xl border border-emerald-100 bg-gradient-to-br from-emerald-50/80 to-teal-50/40 p-3">
+          <div className="mb-2 flex items-center gap-2 text-sm font-bold text-emerald-800">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-emerald-100">
+              <History className="h-3.5 w-3.5 text-emerald-600" />
+            </span>
             10 הלקוחות האחרונים
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {recentCustomers.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => onOpenCustomer(c)}
-                className="min-w-[160px] flex-shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-right transition-colors hover:bg-slate-100"
-              >
-                <div className="truncate text-sm font-semibold text-slate-800">{c.name}</div>
-                <div className="text-xs text-slate-500">{c.city || '-'}</div>
-              </button>
-            ))}
+            {recentCustomers.map((c, i) => {
+              // פלטת צבעים מתחלפת — עדין אך חי, כדי שהשורה לא תיראה אפורה ומשעממת.
+              const palette = [
+                'border-emerald-200 bg-white hover:bg-emerald-50 hover:border-emerald-300',
+                'border-sky-200 bg-white hover:bg-sky-50 hover:border-sky-300',
+                'border-violet-200 bg-white hover:bg-violet-50 hover:border-violet-300',
+                'border-amber-200 bg-white hover:bg-amber-50 hover:border-amber-300',
+                'border-rose-200 bg-white hover:bg-rose-50 hover:border-rose-300',
+              ];
+              const dot = ['bg-emerald-400', 'bg-sky-400', 'bg-violet-400', 'bg-amber-400', 'bg-rose-400'];
+              const tone = palette[i % palette.length];
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onOpenCustomer(c)}
+                  className={cn(
+                    'group min-w-[168px] flex-shrink-0 rounded-xl border px-3 py-2.5 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md',
+                    tone,
+                  )}
+                >
+                  <div className="mb-0.5 flex items-center gap-1.5">
+                    <span className={cn('h-2 w-2 shrink-0 rounded-full', dot[i % dot.length])} />
+                    <span className="truncate text-sm font-bold text-slate-800">{c.name}</span>
+                  </div>
+                  <div className="truncate text-xs text-slate-500">{c.city || '—'}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -8880,11 +9926,11 @@ function QuotesPage({
         validUntilYmd: form.validityDate,
         customerName: customer.name,
         contactName: customer.contactName || '',
-        customerPhone: customer.phone || '',
+        customerPhone: formatIsraeliPhoneDisplay(customer.phone),
         customerEmail: customer.email || '',
         customerAddress: customer.address || '',
         customerCity: customer.city || '',
-        contactPhone: (customer.phone || '').trim(),
+        contactPhone: formatIsraeliPhoneDisplay(customer.phone),
         contactEmail: (customer.email || '').trim(),
         salesRepName: '',
         paymentTerms: form.paymentTerms || '',
@@ -8980,7 +10026,7 @@ function QuotesPage({
           address: customer.address,
           city: customer.city,
           email: customer.email,
-          phone: customer.phone,
+          phone: formatIsraeliPhoneDisplay(customer.phone),
         },
         serviceName: form.service,
         quoteNumber: form.quoteNumber || '—',
@@ -10052,8 +11098,8 @@ function ProjectDetailsPage({
     serviceSubType: project.serviceSubType ?? '',
     address: project.address ?? '',
     city: project.city ?? '',
-    contactPhone: project.contactPhone ?? '',
-    fieldContactPhone: project.fieldContactPhone ?? '',
+    contactPhone: formatIsraeliPhoneDisplay(project.contactPhone),
+    fieldContactPhone: formatIsraeliPhoneDisplay(project.fieldContactPhone),
     urgency: project.urgency ?? '',
     notes: project.notes ?? '',
     customerId: project.customerId ?? '',
@@ -10086,8 +11132,8 @@ function ProjectDetailsPage({
       serviceSubType: project.serviceSubType ?? '',
       address: project.address ?? '',
       city: project.city ?? '',
-      contactPhone: project.contactPhone ?? '',
-      fieldContactPhone: project.fieldContactPhone ?? '',
+      contactPhone: formatIsraeliPhoneDisplay(project.contactPhone),
+      fieldContactPhone: formatIsraeliPhoneDisplay(project.fieldContactPhone),
       urgency: project.urgency ?? '',
       notes: project.notes ?? '',
       customerId: project.customerId ?? '',
@@ -12940,7 +13986,7 @@ function SettingsPage({
       password: '',
       role: (u.role || 'SALES').toString(),
       status: (u.status || 'ACTIVE').toString(),
-      phone: u.phone || '',
+      phone: formatIsraeliPhoneDisplay(u.phone),
       serviceDepartments: Array.isArray(u.serviceDepartments) ? u.serviceDepartments : u.department ? [u.department] : [],
       canViewFinance: !!u.canViewFinance,
       canEditFinance: !!u.canEditFinance,
@@ -13186,6 +14232,8 @@ function SettingsPage({
   const [catalog, setCatalog] = useState<any[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState('');
+  // חיפוש בפריטים — מסנן לפי קוד/שם/תיאור/קטגוריה/תת-קטגוריה.
+  const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogModalOpen, setCatalogModalOpen] = useState(false);
   const [catalogEditing, setCatalogEditing] = useState<any | null>(null);
   const [showQuoteTemplates, setShowQuoteTemplates] = useState(false);
@@ -13207,6 +14255,30 @@ function SettingsPage({
     requiresReport: false,
     notes: '',
   });
+  // קטגוריה/תת-קטגוריה בטופס הפריט נבחרות מרשימת השירותים (SERVICE_CATEGORIES).
+  // "אחר…" מחליף את ה-dropdown בשדה טקסט חופשי, כדי לאפשר מחלקה שאינה ברשימה.
+  const CATALOG_CUSTOM = '__custom__';
+  const [catalogCategoryFreeText, setCatalogCategoryFreeText] = useState(false);
+  const [catalogSubTypeFreeText, setCatalogSubTypeFreeText] = useState(false);
+  const catalogCategoryOptions = useMemo(() => SERVICE_CATEGORIES.map((c) => c.name), []);
+  // תתי-הקטגוריות של המחלקה שנבחרה — קבוצות-האב בלבד (אלו שיש תחתיהן subServices)
+  const catalogSubTypeOptions = useMemo(() => {
+    const cat = SERVICE_CATEGORIES.find((c) => c.name === catalogForm.serviceCategory);
+    if (!cat) return [] as string[];
+    return cat.services.filter((s) => s.subServices && s.subServices.length > 0).map((s) => s.name);
+  }, [catalogForm.serviceCategory]);
+
+  // בבחירת מחלקה — מאפסים תת-קטגוריה שאינה שייכת למחלקה החדשה
+  const changeCatalogCategory = (name: string) => {
+    const cat = SERVICE_CATEGORIES.find((c) => c.name === name);
+    const subs = cat ? cat.services.filter((s) => s.subServices && s.subServices.length > 0).map((s) => s.name) : [];
+    setCatalogSubTypeFreeText(false);
+    setCatalogForm((p) => ({
+      ...p,
+      serviceCategory: name,
+      serviceSubType: subs.includes(p.serviceSubType) ? p.serviceSubType : '',
+    }));
+  };
 
   const loadSetting = async (key: string) => {
     const res = await apiFetch(apiUrl(`/settings/${key}`), { authUser: currentUser });
@@ -13233,6 +14305,7 @@ function SettingsPage({
   }, [currentUser.id, currentUser.role]);
 
   const catalogAutoSeeded = useRef(false);
+  const catalogSubTypeBackfilled = useRef(false);
   const loadCatalog = async () => {
     setCatalogLoading(true);
     setCatalogError('');
@@ -13240,8 +14313,47 @@ function SettingsPage({
       const res = await apiFetch(apiUrl('/quote-item-catalog'), { authUser: currentUser });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      const list = Array.isArray(data) ? data : [];
+      const rawList: any[] = Array.isArray(data) ? data : [];
+      // תת-קטגוריה לפי ה-SKU: שירותים שיושבים תחת תת-קבוצה ב-SERVICE_CATEGORIES
+      // (מיגון קרינה, מיגון רנטגן, ELF/RF היתר, אקוסטיקה, חיזוי רעש, דיגומי קרקע…)
+      // מקבלים את שם התת-קבוצה — גם אם נזרעו בעבר בלי הערך. מציגים מיד, ומשלימים
+      // ב-DB ברקע (backfill חד-פעמי) כדי שגם צרכנים אחרים יקבלו את הערך.
+      const list = rawList.map((it) => {
+        const code = String(it?.itemCode || '').trim();
+        return {
+          ...it,
+          serviceCategory: it?.serviceCategory || (code ? getCategoryName(getCategoryForSku(code) || '') : '') || null,
+          serviceSubType: it?.serviceSubType || (code ? getSubgroupNameForSku(code) : null) || null,
+        };
+      });
       setCatalog(list);
+      if (!catalogSubTypeBackfilled.current) {
+        const toFix = list
+          .map((it, i) => {
+            const raw = rawList[i];
+            const patch: any = {};
+            if (it.serviceSubType && !raw?.serviceSubType) patch.serviceSubType = it.serviceSubType;
+            if (it.serviceCategory && !raw?.serviceCategory) patch.serviceCategory = it.serviceCategory;
+            return Object.keys(patch).length > 0 ? { id: it.id, patch } : null;
+          })
+          .filter(Boolean) as Array<{ id: string; patch: any }>;
+        if (toFix.length > 0) {
+          catalogSubTypeBackfilled.current = true;
+          void (async () => {
+            for (const row of toFix) {
+              try {
+                await apiFetch(`${getApiBaseUrl()}/quote-item-catalog/${row.id}`, {
+                  method: 'PATCH',
+                  authUser: currentUser,
+                  body: JSON.stringify(row.patch),
+                });
+              } catch {
+                /* השלמה ברקע — התצוגה כבר נכונה גם בלעדיה */
+              }
+            }
+          })();
+        }
+      }
       // מילוי אוטומטי: אם חסרים במחירון שירותים מרשימת השירותים (כל המחלקות) — לזרוע
       // פעם אחת בכל טעינה את החסרים בלבד (זריעה מדלגת על קודים קיימים). כך המחירון
       // מתמלא בכל השירותים גם אם כבר יש בו פריט בודד (למשל פריט דוגמה).
@@ -13267,6 +14379,8 @@ function SettingsPage({
 
   const openNewCatalog = () => {
     setCatalogEditing(null);
+    setCatalogCategoryFreeText(false);
+    setCatalogSubTypeFreeText(false);
     setCatalogForm({
       itemCode: '',
       name: '',
@@ -13289,12 +14403,20 @@ function SettingsPage({
 
   const openEditCatalog = (it: any) => {
     setCatalogEditing(it);
+    setCatalogCategoryFreeText(false);
+    setCatalogSubTypeFreeText(false);
+    // מילוי אוטומטי של תת-קטגוריה (ובנפילה גם קטגוריה) לפי ה-SKU של הפריט, מתוך
+    // SERVICE_CATEGORIES — כך שירותי קרינה וכו' שכבר משויכים לתת-קבוצה מקבלים אותה
+    // אוטומטית. ממלאים רק כשהשדה ריק, כדי לא לדרוס ערך שהמשתמש הזין ידנית.
+    const sku = (it.itemCode || '').trim();
+    const autoSubType = sku ? (getSubgroupNameForSku(sku) || '') : '';
+    const autoCategory = sku ? (getCategoryName(getCategoryForSku(sku) || '') || '') : '';
     setCatalogForm({
       itemCode: it.itemCode || '',
       name: it.name || '',
       description: it.description || '',
-      serviceCategory: it.serviceCategory || '',
-      serviceSubType: it.serviceSubType || '',
+      serviceCategory: it.serviceCategory || autoCategory || '',
+      serviceSubType: it.serviceSubType || autoSubType || '',
       costPrice: String(it.costPrice ?? 0),
       basePrice: String(it.basePrice ?? 0),
       profitPercent: it.profitPercent === null || it.profitPercent === undefined ? '' : String(it.profitPercent),
@@ -13316,12 +14438,24 @@ function SettingsPage({
         setCatalogError('שם הפריט הוא שדה חובה.');
         return;
       }
-      // בעריכה — שומרים על הקוד הקיים; בפריט חדש — קוד נוצר אוטומטית
+      // בעריכה — שומרים על הקוד הקיים; בפריט חדש — קוד נוצר אוטומטית.
+      //
+      // המק"ט חייב להיות **מספר**: כל המחירון בנוי כך (9, 61, 002, 10044…),
+      // וגם כספית וקבצי הייצוא מתייחסים אליו כמספר פריט. הגרסה הקודמת ייצרה
+      // "ITM-142" (רץ לפי אורך הרשימה), שגם אינו מספר וגם מתנגש ברגע שפריט
+      // נמחק. עכשיו: המספרי הגבוה ביותר שקיים + 1.
       const existingCodes = new Set(catalog.map((c) => String(c.itemCode || '').trim()));
       let itemCode = (catalogEditing?.itemCode || catalogForm.itemCode || '').trim();
       if (!itemCode) {
-        let n = catalog.length + 1;
-        do { itemCode = `ITM-${n}`; n++; } while (existingCodes.has(itemCode));
+        const maxNumeric = catalog.reduce((max, c) => {
+          const code = String(c.itemCode || '').trim();
+          // רק מק"טים מספריים טהורים; "002" נחשב 2 ולכן אינו מקדם את הרץ.
+          if (!/^\d+$/.test(code)) return max;
+          const n = parseInt(code, 10);
+          return Number.isFinite(n) && n > max ? n : max;
+        }, 0);
+        let n = maxNumeric + 1;
+        do { itemCode = String(n); n++; } while (existingCodes.has(itemCode));
       }
       const payload: any = {
         itemCode,
@@ -13357,11 +14491,12 @@ function SettingsPage({
   };
 
   // כל השירותים (עלים בלבד) מכל המחלקות → שורות מחירון. משותף לזריעה ולבדיקת-החוסר.
-  const catalogSeedRows = (): Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> => {
-    const rows: Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; billingUnit: string }> = [];
+  const catalogSeedRows = (): Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; serviceSubType: string | null; billingUnit: string }> => {
+    const rows: Array<{ itemCode: string; name: string; basePrice: number; serviceCategory: string; serviceSubType: string | null; billingUnit: string }> = [];
     for (const cat of SERVICE_CATEGORIES) {
       for (const svc of cat.services) {
-        const leaves = svc.subServices && svc.subServices.length > 0 ? svc.subServices : [svc];
+        const isGroup = !!(svc.subServices && svc.subServices.length > 0);
+        const leaves = isGroup ? svc.subServices! : [svc];
         for (const leaf of leaves) {
           if (leaf.subServices && leaf.subServices.length > 0) continue; // קבוצת אב — לא פריט
           const code = String(leaf.sku || leaf.id || '').trim();
@@ -13371,6 +14506,8 @@ function SettingsPage({
             name: leaf.name,
             basePrice: Number(leaf.price) || 0, // מחיר ללקוח = העלות הסופית
             serviceCategory: cat.name,
+            // שירות שיושב תחת קבוצת-אב — שם הקבוצה הוא התת-קטגוריה שלו
+            serviceSubType: isGroup ? svc.name : null,
             billingUnit: leaf.unit || 'יחידה',
           });
         }
@@ -13406,6 +14543,7 @@ function SettingsPage({
               itemCode: r.itemCode,
               name: r.name,
               serviceCategory: r.serviceCategory,
+              serviceSubType: r.serviceSubType, // null לשירות שאינו תחת תת-קבוצה
               costPrice: 0, // מחיר עלות — למילוי ידני
               basePrice: r.basePrice, // מחיר ללקוח (העלות הסופית)
               profitPercent: null,
@@ -14158,16 +15296,25 @@ function SettingsPage({
             >
               שמור יעדים
             </Button>
-            <div className="text-xs text-slate-500">היעד נשמר אוטומטית ומוצג בכרטיס "עמידה ביעד מכירות שנתי" בדשבורד המנהל (יעד שנתי = יעד חודשי × 12).</div>
+            <div className="text-xs text-slate-500">היעד נשמר אוטומטית ומוצג בכרטיס "עמידה ביעד מכירות חודשי" בדשבורד המנהל.</div>
           </CardContent>
         </Card>
       )}
 
       {tab === 'catalog' && (
         <Card>
-          <CardHeader className="flex items-center justify-between">
+          <CardHeader className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>פריטים / מחירון</CardTitle>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="w-56 rounded-xl border border-slate-200 bg-slate-50 py-2 pr-9 pl-3 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                  placeholder="חיפוש פריט: שם, קוד, קטגוריה, תת-קטגוריה…"
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                />
+              </div>
               <button
                 type="button"
                 onClick={importPriceListFromServices}
@@ -14189,6 +15336,7 @@ function SettingsPage({
                     <TableHead>קוד פריט</TableHead>
                     <TableHead>שם שירות</TableHead>
                     <TableHead>קטגוריה</TableHead>
+                    <TableHead>תת-קטגוריה</TableHead>
                     <TableHead>מחיר עלות</TableHead>
                     <TableHead>מחיר ללקוח</TableHead>
                     <TableHead>אחוז רווח</TableHead>
@@ -14198,11 +15346,30 @@ function SettingsPage({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {catalog.map((it) => (
+                  {(() => {
+                    const q = catalogSearch.trim().toLowerCase();
+                    const rows = q
+                      ? catalog.filter((it) => `${it.itemCode || ''} ${it.name || ''} ${it.description || ''} ${it.serviceCategory || ''} ${it.serviceSubType || ''}`.toLowerCase().includes(q))
+                      : catalog;
+                    if (rows.length === 0) {
+                      return (
+                        <TableRow>
+                          <TableCell colSpan={10} className="py-8 text-center text-sm text-slate-400">
+                            {q ? `לא נמצאו פריטים התואמים ל"${catalogSearch}"` : 'אין פריטים'}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+                    return rows.map((it) => (
                     <TableRow key={it.id} className={cn('hover:bg-slate-50', it.isActive ? '' : 'opacity-60')}>
                       <TableCell className="font-medium">{it.itemCode}</TableCell>
                       <TableCell>{it.name}</TableCell>
                       <TableCell>{it.serviceCategory || '-'}</TableCell>
+                      <TableCell>
+                        {it.serviceSubType
+                          ? <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">{it.serviceSubType}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </TableCell>
                       <TableCell>{Number(it.costPrice ?? 0) > 0 ? formatCurrencyILS(Number(it.costPrice)) : '—'}</TableCell>
                       <TableCell>{formatCurrencyILS(Number(it.basePrice ?? 0))}</TableCell>
                       <TableCell>{(() => {
@@ -14230,7 +15397,8 @@ function SettingsPage({
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    ));
+                  })()}
                 </TableBody>
               </Table>
             )}
@@ -14590,6 +15758,8 @@ function SettingsPage({
         </Card>
       )}
 
+      {tab === 'system' && <CaspitSettingsCard currentUser={currentUser} />}
+
       <Modal open={empModalOpen} onClose={() => setEmpModalOpen(false)} title={empEditing ? (canManageUsersEffective ? 'עריכת עובד' : 'הפרופיל שלי') : 'עובד חדש'} maxWidth="max-w-xl">
         <div className="space-y-3">
           <FormField label="שם עובד">
@@ -14931,7 +16101,91 @@ function SettingsPage({
             <Input value={catalogForm.name} onChange={(e) => setCatalogForm((p) => ({ ...p, name: e.target.value }))} placeholder="שם השירות" />
           </FormField>
           <FormField label="קטגוריה / מחלקה">
-            <Input value={catalogForm.serviceCategory} onChange={(e) => setCatalogForm((p) => ({ ...p, serviceCategory: e.target.value }))} placeholder="למשל: איכות אוויר, קרינה" />
+            {catalogCategoryFreeText ? (
+              <div className="flex gap-2">
+                <Input
+                  value={catalogForm.serviceCategory}
+                  onChange={(e) => setCatalogForm((p) => ({ ...p, serviceCategory: e.target.value }))}
+                  placeholder="שם מחלקה חדשה"
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-xl border px-3 text-xs text-slate-600 hover:bg-slate-50"
+                  onClick={() => { setCatalogCategoryFreeText(false); changeCatalogCategory(''); }}
+                >
+                  מהרשימה
+                </button>
+              </div>
+            ) : (
+              <select
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400"
+                value={catalogForm.serviceCategory}
+                onChange={(e) => {
+                  if (e.target.value === CATALOG_CUSTOM) {
+                    setCatalogCategoryFreeText(true);
+                    changeCatalogCategory('');
+                    return;
+                  }
+                  changeCatalogCategory(e.target.value);
+                }}
+              >
+                <option value="">— בחר מחלקה —</option>
+                {catalogCategoryOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+                {/* ערך קיים שאינו ברשימה — נשמר כדי לא לאבד אותו בעריכה */}
+                {catalogForm.serviceCategory && !catalogCategoryOptions.includes(catalogForm.serviceCategory) && (
+                  <option value={catalogForm.serviceCategory}>{catalogForm.serviceCategory}</option>
+                )}
+                <option value={CATALOG_CUSTOM}>אחר…</option>
+              </select>
+            )}
+          </FormField>
+          <FormField label="תת-קטגוריה">
+            {catalogSubTypeFreeText ? (
+              <div className="flex gap-2">
+                <Input
+                  value={catalogForm.serviceSubType}
+                  onChange={(e) => setCatalogForm((p) => ({ ...p, serviceSubType: e.target.value }))}
+                  placeholder="שם תת-קטגוריה חדשה"
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-xl border px-3 text-xs text-slate-600 hover:bg-slate-50"
+                  onClick={() => { setCatalogSubTypeFreeText(false); setCatalogForm((p) => ({ ...p, serviceSubType: '' })); }}
+                >
+                  מהרשימה
+                </button>
+              </div>
+            ) : (
+              <select
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm outline-none transition focus:border-slate-400 disabled:bg-slate-50 disabled:text-slate-400"
+                value={catalogForm.serviceSubType}
+                onChange={(e) => {
+                  if (e.target.value === CATALOG_CUSTOM) {
+                    setCatalogSubTypeFreeText(true);
+                    setCatalogForm((p) => ({ ...p, serviceSubType: '' }));
+                    return;
+                  }
+                  setCatalogForm((p) => ({ ...p, serviceSubType: e.target.value }));
+                }}
+              >
+                <option value="">
+                  {!catalogForm.serviceCategory
+                    ? '— בחר מחלקה תחילה —'
+                    : catalogSubTypeOptions.length === 0
+                      ? '— אין תת-קטגוריות במחלקה זו —'
+                      : '— ללא תת-קטגוריה —'}
+                </option>
+                {catalogSubTypeOptions.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+                {catalogForm.serviceSubType && !catalogSubTypeOptions.includes(catalogForm.serviceSubType) && (
+                  <option value={catalogForm.serviceSubType}>{catalogForm.serviceSubType}</option>
+                )}
+                <option value={CATALOG_CUSTOM}>אחר…</option>
+              </select>
+            )}
           </FormField>
 
           {/* ── תמחור: מחיר עלות + אחוז רווח → מחיר ללקוח מתעדכן אוטומטית ── */}
@@ -15327,6 +16581,8 @@ function TasksPage({
   onNewCustomer,
   onSearchCustomer,
   onCustomerCreated,
+  onOpenCustomerView,
+  recentViewIds,
 }: {
   tasks: Task[];
   setTasks: React.Dispatch<React.SetStateAction<Task[]>>;
@@ -15355,6 +16611,10 @@ function TasksPage({
   onSearchCustomer?: () => void;
   /** Called after `saveCustomerCard` creates a new Customer record (כרטיס לקוח → לקוח אמיתי) */
   onCustomerCreated?: (customer: Customer) => void;
+  /** נכנס למשימה המשויכת ללקוח → מקדם את הלקוח ל"10 לקוחות אחרונים". */
+  onOpenCustomerView?: (customerId: string) => void;
+  /** מזהי הלקוחות שהמשתמש נכנס אליהם לאחרונה (מהחדש לישן) — לפילטר "10 לקוחות אחרונים". */
+  recentViewIds?: string[];
 }) {
   /* ── state ── */
   const [open, setOpen] = useState(false);
@@ -15363,9 +16623,43 @@ function TasksPage({
   const [searchQ, setSearchQ] = useState('');
   const [quickFilter, setQuickFilter] = useState<string>('all');
   const [onlyMine, setOnlyMine] = useState(true);
+  // סינון לפי עובד ספציפי — כשמוגדר, גובר על "רק שלי"/"של כולם" ומציג רק את משימות העובד הנבחר.
+  const [filterWorkerId, setFilterWorkerId] = useState<string>('');
+
+  /**
+   * שמירת בורר הבעלות בין טעינות. בלי זה כל רענון (או פריסה חדשה) מחזיר את המסך
+   * ל"רק שלי", והמשימות של שאר העובדים "נעלמות" בלי שנגעו בנתונים — בדיוק התסמין
+   * שדווח על המשימות של יורם.
+   */
+  const TASK_OWNER_FILTER_KEY = 'galit-crm-tasks-owner-filter';
+  const ownerFilterRestored = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(TASK_OWNER_FILTER_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (typeof saved?.onlyMine === 'boolean') setOnlyMine(saved.onlyMine);
+        if (typeof saved?.filterWorkerId === 'string') setFilterWorkerId(saved.filterWorkerId);
+      }
+    } catch {
+      /* localStorage חסום/פגום — נשארים על ברירת המחדל */
+    } finally {
+      ownerFilterRestored.current = true;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    // לא כותבים לפני השחזור, אחרת ברירת המחדל תדרוס את מה שנשמר.
+    if (!ownerFilterRestored.current) return;
+    try {
+      window.localStorage.setItem(TASK_OWNER_FILTER_KEY, JSON.stringify({ onlyMine, filterWorkerId }));
+    } catch {
+      /* ignore */
+    }
+  }, [onlyMine, filterWorkerId]);
 
   // ── מקורות הגעה ("מקור הגעה") — נטענים מה-DB; ניתן להוסיף חדש דרך "אחר" וזה נשמר לכל הלקוחות לתמיד ──
-  const LEAD_SOURCE_DEFAULTS = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי'];
+  const LEAD_SOURCE_DEFAULTS = ['פייסבוק', 'טיק טוק', 'גוגל אדס', 'אינסטגרם', 'אתר אינטרנט', 'המלצה', 'לקוח חוזר', 'הדס', 'גינדי'];
   const [leadSources, setLeadSources] = useState<string[]>([]);
   const [newLeadSourceText, setNewLeadSourceText] = useState('');
   const reloadLeadSources = useCallback(async () => {
@@ -15401,12 +16695,17 @@ function TasksPage({
   const expandedTaskId = extSetExpandedTaskId ? (extExpandedTaskId ?? null) : _localExpandedTaskId;
   const setExpandedTaskId = useCallback((v: string | null) => {
     setTaskSidebarOpen(false); // פתיחת/סגירת משימה תמיד מתחילה עם סרגל הפרטים סגור (רלוונטי לטלפון)
+    // נכנס למשימה המשויכת ללקוח → מקדם את הלקוח ל"10 לקוחות אחרונים" (רק בפתיחה, לא בסגירה).
+    if (v && onOpenCustomerView) {
+      const custId = tasks.find((t) => t.id === v)?.customerId;
+      if (custId) onOpenCustomerView(custId);
+    }
     if (extSetExpandedTaskId) {
       extSetExpandedTaskId(v);
     } else {
       _setLocalExpandedTaskId(v);
     }
-  }, [extSetExpandedTaskId]);
+  }, [extSetExpandedTaskId, onOpenCustomerView, tasks]);
 
   // expandedTab removed — workspace is now single-page
   const [_localManualStep, _setLocalManualStep] = useState<Record<string, number>>({});
@@ -15420,8 +16719,176 @@ function TasksPage({
     }
   }, [extSetManualStepOverride]);
 
+  /* ── בורר השירותים: עץ הקטגוריות הקבוע + המחירון מה-DB ──
+   * SERVICE_CATEGORIES הוא קובץ קבוע שנצרב ל-bundle, ואילו "הוספת פריט" בהגדרות
+   * כותבת ל-QuoteItemCatalog. בלי המיזוג הזה פריט שנוסף דרך הממשק נשמר כראוי —
+   * ופשוט לא הופיע כאן. מסך ההצעה כבר מיזג; מסך המשימות לא, וזה היה ההבדל. */
+  const [serviceCatalogRows, setServiceCatalogRows] = useState<CatalogRow[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiFetch(apiUrl('/quote-item-catalog'), { authUser: currentUser })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => { if (alive) setServiceCatalogRows(Array.isArray(data) ? data : []); })
+      .catch(() => { if (alive) setServiceCatalogRows([]); });
+    return () => { alive = false; };
+  }, [currentUser.id, currentUser.role]);
+  const serviceCategories = useMemo(
+    () => mergeCatalogIntoCategories(serviceCatalogRows),
+    [serviceCatalogRows],
+  );
+
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח טופס "צרף דוח ושלח במייל" */
   const [reportModalTaskId, setReportModalTaskId] = useState<string | null>(null);
+
+  /* שלב הגבייה: הנפקת חשבונית בכספית מתוך זרימת המשימה. */
+  const [collectionInvoiceBusy, setCollectionInvoiceBusy] = useState<string | null>(null);
+  const [collectionInvoiceMsg, setCollectionInvoiceMsg] = useState<{ taskId: string; text: string; ok: boolean } | null>(null);
+  // אמצעי התשלום עבר לדיאלוג ההנפקה (PAYMENT_METHODS ב-collection-payment-terms-modal),
+  // כדי שכל מה שנדרש להנפקה ייבחר במקום אחד ובזמן ההנפקה.
+  // המסמך שממתין לאישור בדיאלוג ההנפקה. כל ארבעת הסוגים עוברים דרכו: שם נבחרים
+  // איש הקשר, ותנאי התשלום (למסמך באשראי) או אמצעי התשלום (למסמך ששולם).
+  const [pendingCollectionDoc, setPendingCollectionDoc] = useState<
+    { taskId: string; kind: string; label: string; paid: boolean } | null
+  >(null);
+  /* אישור שליחת המסמך ללקוח. נפתח *אחרי* ההנפקה; בלי אישור כאן לא נשלח שום מייל.
+   * closeTaskAfter — בזרימת הקבלה סוגרים את המשימה רק אחרי שהמשתמש סיים עם הדיאלוג. */
+  const [emailPrompt, setEmailPrompt] = useState<{
+    taskId: string;
+    /** סוג המסמך — קובע איזה DocumentId יישלח בשרת (לכל סוג קידומת משלו). */
+    kind: string;
+    /** שם המסמך בעברית לתצוגה ("חשבונית עסקה" / "קבלה" …). */
+    docLabel: string;
+    number: string;
+    to: string;
+    closeTaskAfter: boolean;
+  } | null>(null);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailPromptMsg, setEmailPromptMsg] = useState('');
+
+  /** סוגר את דיאלוג האישור, ומשלים את סגירת המשימה אם זו הייתה זרימת קבלה. */
+  const closeEmailPrompt = () => {
+    if (emailPrompt?.closeTaskAfter) {
+      void updateTaskField(emailPrompt.taskId, { status: 'DONE' });
+      setExpandedTaskId(null);
+    }
+    setEmailPrompt(null);
+    setEmailPromptMsg('');
+  };
+
+  /** שולח בפועל — רק מכאן, ורק בלחיצה מפורשת של המשתמש. */
+  const confirmSendDocumentEmail = async () => {
+    if (!emailPrompt) return;
+    const to = emailPrompt.to.trim();
+    if (!to.includes('@')) { setEmailPromptMsg('כתובת מייל לא תקינה'); return; }
+    setEmailSending(true);
+    setEmailPromptMsg('');
+    try {
+      const res = await apiFetch(apiUrl(`/caspit/email/task/${emailPrompt.taskId}`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ kind: emailPrompt.kind, to }),
+      });
+      if (!res.ok) {
+        let msg = 'השליחה נכשלה';
+        try { const e = await res.json(); msg = Array.isArray(e?.message) ? e.message.join(', ') : (e?.message || msg); } catch { /* ignore */ }
+        setEmailPromptMsg(msg);
+        return;
+      }
+      setCollectionInvoiceMsg({
+        taskId: emailPrompt.taskId,
+        ok: true,
+        text: `${emailPrompt.docLabel} ${emailPrompt.number} נשלחה ל-${to}`,
+      });
+      closeEmailPrompt();
+    } catch {
+      setEmailPromptMsg('שגיאת רשת — נסו שוב');
+    } finally {
+      setEmailSending(false);
+    }
+  };
+  /**
+   * ארבעת סוגי המסמכים שאפשר להנפיק משלב הגבייה. ה-kind נשלח לשרת, שממפה אותו
+   * ל-TrxTypeId של כספית. שני האחרונים מייצגים כסף שהתקבל בפועל.
+   */
+  const COLLECTION_DOC_KINDS: { kind: string; label: string; paid: boolean }[] = [
+    { kind: 'proforma', label: 'חשבונית עסקה', paid: false },
+    { kind: 'invoice', label: 'חשבונית מס', paid: false },
+    { kind: 'invoiceReceipt', label: 'חשבונית מס קבלה', paid: true },
+    { kind: 'receipt', label: 'קבלה', paid: true },
+  ];
+
+  const issueCollectionInvoice = async (
+    taskId: string,
+    kind = 'invoice',
+    choice?: { paymentTerms: string | null; contactId: string | null; paymentTypeId?: number },
+  ) => {
+    const spec = COLLECTION_DOC_KINDS.find((k) => k.kind === kind);
+    setCollectionInvoiceBusy(taskId);
+    setCollectionInvoiceMsg(null);
+    try {
+      const res = await apiFetch(apiUrl(`/caspit/document/task/${taskId}`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          kind,
+          // הכל מגיע מדיאלוג ההנפקה: איש הקשר שאליו המסמך מופנה, ותנאי התשלום
+          // (למסמך באשראי) או אמצעי התשלום (למסמך ששולם במעמד).
+          ...(choice?.contactId ? { contactId: choice.contactId } : {}),
+          ...(spec?.paid ? { paymentTypeId: choice?.paymentTypeId ?? 1 } : {}),
+          ...(choice?.paymentTerms !== undefined ? { paymentTerms: choice.paymentTerms } : {}),
+        }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        // customerLinked=false → המסמך נוצר בכספית עם שם הלקוח בלבד, בלי כרטיס לקוח
+        // ובלי עדכון יתרה. לא כישלון, אבל חייב להיראות — אי אפשר לתקן חשבונית בדיעבד.
+        // finalized=false → המסמך נשאר טיוטה בכספית: לא נכנס לספרים ולא מעדכן יתרה,
+        // וצריך לסגור אותו ידנית שם. חמור יותר מחוסר קישור, ולכן מוצג ראשון.
+        const warn = d.finalized === false
+          ? ' — אך נשארה טיוטה בכספית, יש לסגור אותה שם'
+          : d.customerLinked === false
+            ? ' — אך ללא קישור לכרטיס הלקוח בכספית'
+            : '';
+        // alreadyIssued — לחצו שוב על הצעה שכבר חויבה. לא נוצרה חשבונית שנייה
+        // (כספית חוסמת), ולכן זו הודעה מיידעת ולא שגיאה.
+        const label = spec?.label || 'חשבונית';
+        setCollectionInvoiceMsg({
+          taskId,
+          ok: !warn,
+          text: d.alreadyIssued
+            ? `${label} ${d.number || ''} כבר הונפקה להצעה זו — לא נוצר מסמך נוסף`
+            : `${label} ${d.number || ''} הונפקה${warn || ' בהצלחה'}`,
+        });
+        if (d.linkToPdf) window.open(d.linkToPdf, '_blank', 'noopener,noreferrer');
+        // שואלים אם לשלוח ללקוח. רק מסמך שנסגר בפועל ראוי לשליחה.
+        if (d.finalized !== false) {
+          setEmailPrompt({
+            taskId,
+            kind: kind === 'receipt' ? 'receipt' : 'invoice',
+            docLabel: label,
+            number: d.number || '',
+            to: d.suggestedEmail || '',
+            closeTaskAfter: false,
+          });
+          setEmailPromptMsg('');
+        }
+      } else {
+        let msg = `הנפקת ${spec?.label || 'החשבונית'} נכשלה`;
+        try { const e = await res.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message.join(', ') : e.message; } catch { /* ignore */ }
+        setCollectionInvoiceMsg({ taskId, ok: false, text: msg });
+      }
+    } catch {
+      setCollectionInvoiceMsg({ taskId, ok: false, text: 'שגיאת רשת — נסה שוב' });
+    } finally {
+      setCollectionInvoiceBusy(null);
+    }
+  };
+
+  /* זרימת ראדון: המשימה שעבורה פתוח פאנל הראדון (רק לקודי בדיקות ראדון) */
+  const [radonPanelTask, setRadonPanelTask] = useState<{ taskId: string; sku: string; customerId: string | null } | null>(null);
+  /* ערכת ראדון: אין זרימה ואין שאלון — הערכה נשלחת ללקוח והדבר היחיד שצריך
+   * לעשות בביצוע הוא לתזמן לו תזכורת להחזיר אותה. זה המסמך היחיד שנפתח כאן. */
+  const [radonReminderTask, setRadonReminderTask] = useState<{ taskId: string; sku: string } | null>(null);
 
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח מודל "שלחתי כבר דוח" (בלי שליחת מייל) */
   const [alreadySentTaskId, setAlreadySentTaskId] = useState<string | null>(null);
@@ -15699,7 +17166,8 @@ function TasksPage({
   //  coordTitleBusy: מזהה שהניסוח בעבודה; coordTitleDraftedRef: כדי לנסח פעם אחת אוטומטית לכל משימה
   //  (ref ולא state — כדי לא לקרוא ל-setState בזמן רינדור).
   const [coordTitleBusy, setCoordTitleBusy] = useState<Record<string, boolean>>({});
-  const coordTitleDraftedRef = useRef<Record<string, boolean>>({});
+  // ערך = מפתח השירות שעליו כבר נוסחה כותרת אוטומטית (כדי לנסח שוב אם השירות מתגלה מאוחר יותר).
+  const coordTitleDraftedRef = useRef<Record<string, string>>({});
   const draftMeetingTitle = useCallback(
     async (taskId: string, details: { customerName?: string; serviceName?: string; city?: string; address?: string; location?: string }) => {
       setCoordTitleBusy((p) => ({ ...p, [taskId]: true }));
@@ -15773,6 +17241,8 @@ function TasksPage({
   /* ── הערות על התהליך/הלקוח (פר-משימה) — טיוטה + מצב שמירה ── */
   const [processNoteDraft, setProcessNoteDraft] = useState<Record<string, string>>({});
   const [processNoteBusy, setProcessNoteBusy] = useState<Record<string, boolean>>({});
+  // עריכת הערה קיימת: מפתח = `${taskId}:${index}` (index במערך הממוין newest-first), ערך = טקסט בעריכה.
+  const [editingNote, setEditingNote] = useState<{ key: string; text: string } | null>(null);
   /* ── מסמכים מצורפים למשימה (למשל קובץ הצעת מחיר ממוזג) ── */
   const [taskAttachments, setTaskAttachments] = useState<Record<string, { id: string; fileName: string; mimeType: string; createdAt: string }[]>>({});
   const [attachmentDownloading, setAttachmentDownloading] = useState<Record<string, boolean>>({});
@@ -15914,6 +17384,7 @@ function TasksPage({
     setFollowupBusy((p) => ({ ...p, [taskId]: false }));
   };
   const shareTaskWithEmployee = async (task: Task, newOwnerId: string) => {
+    if (followupBusy[task.id]) return; // לחיצה כפולה = שני עותקים של המשימה אצל העובד
     setFollowupBusy((p) => ({ ...p, [task.id]: true }));
     try {
       // ודא שהלקוח נשמר/נוצר לפני יצירת עותק המשימה — אחרת המשימה המשותפת תיווצר בלי לקוח.
@@ -15944,12 +17415,21 @@ function TasksPage({
   const [taskContactsMap, setTaskContactsMap] = useState<Record<string, TaskContact[]>>({});
   const taskContactsCounter = useRef<Record<string, number>>({});
   /**
+   * יצירת לקוח למשימה היא פעולה חד-פעמית — כאן נשמרת ההבטחה (Promise) של היצירה לכל משימה.
+   * בלי זה כל קריאה חוזרת ל-saveCustomerForTask רואה customerId ריק (ה-PATCH מהקריאה
+   * הקודמת עדיין לא השתקף ב-state) ויוצרת לקוח *נוסף*: כך נולדו 6 לקוחות יתומים
+   * ב-3 שניות מלחיצה אחת, כשרק האחרון נשאר מקושר למשימה.
+   */
+  const customerCreationForTask = useRef<Map<string, Promise<string | null>>>(new Map());
+  /**
    * טוען פעם אחת מהמסד את אנשי הקשר של הלקוח לתוך taskContactsMap.
    * דרוש כי taskContactsMap מתמלא רק כשעוברים בפועל דרך שלב "כרטיס לקוח" באותו session —
    * מי שנכנס ישר לשלב "תיאום" (למשל לקוח קיים מסוג חברה) קיבל רשימה ריקה,
    * ואז ההערות של הפגישה נפלו ל-contactName שהוא *שם החברה* ולא איש הקשר.
    */
   const hydratedContactsRef = useRef<Record<string, boolean>>({});
+  /** מנעול "יצירת תזכורת דוח חוזר" פר-משימה — מונע שתי תזכורות מלחיצה כפולה. */
+  const reportReminderBusyRef = useRef<Record<string, boolean>>({});
   const hydrateTaskContacts = useCallback(async (taskId: string, customerId: string) => {
     if (!currentUser || hydratedContactsRef.current[taskId]) return;
     hydratedContactsRef.current[taskId] = true;
@@ -15963,7 +17443,7 @@ function TasksPage({
         .map((c: any) => ({
           id: c.id,
           fullName: (c.fullName || '').trim(),
-          phone: (c.phone || c.mobile || '').trim(),
+          phone: formatIsraeliPhoneDisplay(c.phone || c.mobile),
           email: (c.email || '').trim(),
           roleTitle: c.roleTitle || '',
           isPrimary: !!c.isPrimary,
@@ -16009,7 +17489,7 @@ function TasksPage({
   useEffect(() => {
     for (const t of tasks) {
       if (!t.productName || coachInitializedRef.current.has(t.id)) continue;
-      const catId = SERVICE_CATEGORIES.find((c) =>
+      const catId = serviceCategories.find((c) =>
         c.services.some((s) => s.id === t.productName || s.sku === t.productName || s.subServices?.some((sub) => sub.id === t.productName || sub.sku === t.productName))
       )?.id ?? null;
       if (!catId) continue;
@@ -16068,7 +17548,8 @@ function TasksPage({
     }
     if (!out.email) { const m = body.match(/[\w.+-]+@[\w-]+\.[\w.-]+/); if (m) out.email = m[0]; }
     if (!out.phone) { const m = body.match(/0\d[-\s]?\d{1,2}[-\s]?\d{6,7}/); if (m) out.phone = m[0].replace(/[-\s]/g, ''); }
-    out.phone = out.phone.replace(/[^\d+]/g, '');
+    // הטלפון שנשלף מגוף הליד ממלא אוטומטית את טופס השיחה — לכן מעוצב עם מקף כבר כאן.
+    out.phone = formatIsraeliPhoneDisplay(out.phone.replace(/[^\d+]/g, ''));
     if (out.email && !out.email.includes('@')) out.email = '';
     return out;
   };
@@ -16107,7 +17588,7 @@ function TasksPage({
       firstName: linkedLead?.firstName || nameParts[0] || '',
       lastName: linkedLead?.lastName || nameParts.slice(1).join(' ') || '',
       company: task.leadCompany || linkedLead?.company || (linkedCustomer?.type !== 'PRIVATE' ? linkedCustomer?.name : '') || '',
-      phone: leadPrefill?.phone || task.leadPhone || linkedLead?.phone || linkedCustomer?.phone || '',
+      phone: formatIsraeliPhoneDisplay(leadPrefill?.phone || task.leadPhone || linkedLead?.phone || linkedCustomer?.phone || ''),
       email: leadPrefill?.email || task.leadEmail || linkedLead?.email || linkedCustomer?.email || '',
       city: linkedLead?.city || linkedCustomer?.city || '',
       address: linkedLead?.address || linkedCustomer?.address || '',
@@ -16223,7 +17704,7 @@ function TasksPage({
             fullName: c.fullName || '',
             firstName: nameParts[0] || '',
             lastName: nameParts.slice(1).join(' ') || '',
-            phone: c.phone || cust?.phone || '',
+            phone: formatIsraeliPhoneDisplay(c.phone || cust?.phone),
             email: c.email || cust?.email || '',
             role: c.roleTitle || '',
             contactName: c.fullName || '',
@@ -16361,10 +17842,18 @@ function TasksPage({
     const map: Record<string, string> = { LOW: 'bg-slate-200 text-slate-700', MEDIUM: 'bg-blue-100 text-blue-700', HIGH: 'bg-orange-100 text-orange-700', URGENT: 'bg-red-100 text-red-700' };
     return map[(p || '').toUpperCase()] || 'bg-slate-100 text-slate-600';
   };
-  const priorityDot = (p: string) => {
-    const map: Record<string, string> = { LOW: 'bg-slate-400', MEDIUM: 'bg-blue-500', HIGH: 'bg-orange-500', URGENT: 'bg-red-500' };
-    return map[(p || '').toUpperCase()] || 'bg-slate-400';
-  };
+  /**
+   * צבע הנקודה בעמודת "עדיפות" בטבלת המשימות — לפי **קטגוריית השורה**, לא לפי
+   * שדה `priority`: ליד חדש ירוק, משימה באיחור כתומה, וכל השאר כחול.
+   * סדר הבדיקה זהה לזה של צבע רקע השורה (איחור גובר על ליד), אחרת ליד באיחור
+   * היה מקבל שורה אדומה עם נקודה ירוקה — שני אותות סותרים.
+   */
+  const taskDot = (opts: { isOverdue: boolean; isNewLead: boolean }) =>
+    opts.isOverdue
+      ? { cls: 'bg-orange-500', label: 'באיחור' }
+      : opts.isNewLead
+        ? { cls: 'bg-green-500', label: 'ליד חדש' }
+        : { cls: 'bg-blue-500', label: 'רגיל' };
   const taskStatusLabel = (status: string) => {
     const map: Record<string, string> = { OPEN: 'פתוחה', IN_PROGRESS: 'בביצוע', DONE: 'הושלמה', CANCELLED: 'בוטלה' };
     return map[(status || '').toUpperCase()] || status || '-';
@@ -16381,23 +17870,71 @@ function TasksPage({
   const weekEnd = new Date(today); weekEnd.setDate(weekEnd.getDate() + 7);
   const weekEndStr = weekEnd.toLocaleDateString('en-CA');
 
-  /* ה-KPI מחושבים על אותו בסיס כמו הטבלה — מכבדים את הפילטר "רק שלי". */
-  const kpiBaseTasks = onlyMine ? effectiveTasks.filter((t) => t.ownerId === currentUser.id) : effectiveTasks;
-  const kpiToday = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
-  const kpiOverdue = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
+  /**
+   * שייכת ל"להיום"? — מקור אמת יחיד לפילטר "היום" בטבלה ול-KPI, כדי שלא ייפרדו.
+   *  1. מועד היום.
+   *  2. מועד שעבר ועדיין פתוחה — דורשת טיפול היום בדיוק כמו משימות היום.
+   *  3. משימת ליד נכנס בלי מועד יעד — נוצרת ב-createTaskForClaimedLead ללא dueDate,
+   *     ולכן נפלה בין הכיסאות ולא הופיעה כלל ברשימת היום. ליד חדש הוא הדבר הכי דחוף
+   *     שיש, אז הוא נכנס להיום.
+   */
+  const isTodayTask = (t: Task): boolean => {
+    if (t.status === 'DONE' || t.status === 'CANCELLED') return false;
+    const raw = t.dueDate ? new Date(t.dueDate) : null;
+    if (!raw || Number.isNaN(raw.getTime())) return !!t.incomingLeadId;
+    return raw.toLocaleDateString('en-CA') === todayStr || raw < today;
+  };
+
+  /**
+   * ── שייכת ל"באיחור"? — מקור אמת יחיד ל-KPI, לפילטר "באיחור" ולצביעה האדומה בטבלה ──
+   *
+   * מבחינים בין שני סוגי מועד, כי "עבר התוקף" אומר דבר אחר בכל אחד מהם:
+   *
+   *  • מועד עם שעה — דחייה למאוחר יותר (15 דק'/שעה/4 שעות/תאריך+שעה), פולואפ מתוזמן.
+   *    כאן ההשוואה היא לרגע הנוכחי: ברגע שהשעה עברה המשימה באיחור. קודם ההשוואה
+   *    הייתה מול תחילת היום, ולכן משימה שנדחתה בתוך אותו יום לא נספרה כאיחור עד
+   *    למחרת — גם כשהפופ-אפ כבר הכריז "משימה באיחור!". זה היה בולט במיוחד במשימת
+   *    "ליד חדש נכנס" שנדחתה: היא נשארה ירוקה ברשימה במקום להפוך לאדומה.
+   *
+   *  • מועד ללא שעה — נבחר ב-input type=date ונשמר בדיוק כחצות UTC. יום שלם הוא
+   *    הדדליין, ולכן הוא באיחור רק אחרי שהיום נגמר. בלי ההבחנה הזו כל משימה שנקבעה
+   *    "להיום" הייתה נצבעת אדום כבר מתחילת היום.
+   */
+  const isOverdueTask = (t: Task): boolean => {
+    const s = (t.status || '').toUpperCase();
+    if (s === 'DONE' || s === 'CANCELLED') return false;
+    if (!t.dueDate) return false;
+    const d = new Date(t.dueDate);
+    if (Number.isNaN(d.getTime())) return false;
+    const isDateOnly = /T00:00:00(\.000)?Z$/.test(String(t.dueDate));
+    return isDateOnly ? d < today : d.getTime() < Date.now();
+  };
+
+  /* ה-KPI מחושבים על אותו בסיס כמו הטבלה — מכבדים את הפילטר לפי עובד / "רק שלי". */
+  const kpiBaseTasks = filterWorkerId
+    ? effectiveTasks.filter((t) => t.ownerId === filterWorkerId)
+    : onlyMine
+    ? effectiveTasks.filter((t) => t.ownerId === currentUser.id)
+    : effectiveTasks;
+  const kpiToday = kpiBaseTasks.filter(isTodayTask).length;
+  const kpiOverdue = kpiBaseTasks.filter(isOverdueTask).length;
   const kpiWeek = kpiBaseTasks.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr && t.status !== 'DONE' && t.status !== 'CANCELLED'; }).length;
   const kpiDoneToday = kpiBaseTasks.filter((t) => { return t.status === 'DONE'; }).length;
   const kpiQuoteFollowup = kpiBaseTasks.filter((t) => (t.type || '').toUpperCase() === 'QUOTE_PREPARATION' && t.status !== 'DONE' && t.status !== 'CANCELLED').length;
 
-  /* ── ids of the 10 most-recently-created customers ── */
+  /* ── ids of the 10 customers the user most-recently *entered* ──
+   * מקור-אמת: recentViewIds (CustomerView). נפילה חזרה ל-createdAt אם אין היסטוריה. */
   const recentCustomerIds = useMemo(() => {
+    if (recentViewIds && recentViewIds.length > 0) {
+      return new Set(recentViewIds.slice(0, 10));
+    }
     return new Set(
       [...customers]
         .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
         .slice(0, 10)
         .map((c) => c.id)
     );
-  }, [customers]);
+  }, [customers, recentViewIds]);
 
   /* ── filtering ── */
   const filtered = useMemo(() => {
@@ -16414,13 +17951,15 @@ function TasksPage({
         (t.owner || '').toLowerCase().includes(q)
       );
     }
-    // only mine
-    if (onlyMine) list = list.filter((t) => t.ownerId === currentUser.id);
+    // סינון בעלות: עובד ספציפי גובר על "רק שלי"; אחרת "רק שלי" מסנן למשתמש הנוכחי.
+    if (filterWorkerId) list = list.filter((t) => t.ownerId === filterWorkerId);
+    else if (onlyMine) list = list.filter((t) => t.ownerId === currentUser.id);
     // quick filters
     if (quickFilter === 'today') {
-      list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d === todayStr; });
+      // אותו כלל בדיוק כמו ה-KPI "להיום" — כולל משימות באיחור ומשימות ליד נכנס ללא מועד.
+      list = list.filter(isTodayTask);
     } else if (quickFilter === 'overdue') {
-      list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate) : null; return d && d < today && t.status !== 'DONE' && t.status !== 'CANCELLED'; });
+      list = list.filter(isOverdueTask);
     } else if (quickFilter === 'week') {
       list = list.filter((t) => { const d = t.dueDate ? new Date(t.dueDate).toLocaleDateString('en-CA') : ''; return d >= todayStr && d <= weekEndStr; });
     } else if (quickFilter === 'open') {
@@ -16457,8 +17996,39 @@ function TasksPage({
         return !(dueMs && dueMs > nowMs); // עתידית → מוסתרת; הגיעה/עברה → מוצגת
       });
     }
+    // ── "ליד חדש נכנס" תמיד ראשון — לפני כל המשימות שבאיחור. ──
+    // משימת ליד נוצרת ללא dueDate, ולכן מיון ה-API (dueDate עולה, NULLS LAST) דוחף
+    // אותה לתחתית הרשימה — אחרי כל המשימות באיחור. כאן מרימים אותה לראש בלי לשנות את
+    // הסדר של שאר המשימות (Array.sort יציב ב-V8), כך שהאיחורים נשארים מסודרים כרגיל.
+    // מקביל ל-detectStep(t)===0 (לא נגיש כאן בגלל TDZ): ליד עם incomingLeadId שעדיין
+    // לא נפתח לו כרטיס לקוח ולא התקדם בזרימה.
+    const isNewIncomingLead = (t: Task): boolean => {
+      if (!t.incomingLeadId) return false;
+      const s = (t.status || 'OPEN').toUpperCase();
+      if (s === 'DONE' || s === 'CANCELLED' || s === 'IN_PROGRESS') return false;
+      // נפתח כרטיס לקוח → כבר לא "ליד חדש". יוצא מן הכלל: משימה שהועברה לעובד הזה —
+      // "העבר לעובד" שומר את כרטיס הלקוח לפני ההעברה, ולכן היא תמיד מגיעה עם customerId,
+      // ובלי החריג הזה היא הייתה צונחת מהראש לאמצע/תחתית הרשימה אצל מי שקיבל אותה.
+      if (t.customerId && !t.transferredAt) return false;
+      const tp = (t.type || 'GENERAL').toUpperCase();
+      const advanced = ['REVIEW','COLLECTION','REPORT_WRITING','STEP7','FIELD_WORK','STEP6','COORDINATION','STEP5','SALES_FOLLOWUP','STEP4','STEPQUOTE','QUOTE_PREPARATION','STEP3','STEP2'];
+      if (advanced.includes(tp)) return false;
+      return true;
+    };
+    // "מתי זה הגיע אליי" — רגע ההעברה אם הועברה, אחרת רגע היצירה.
+    const arrivedAt = (t: Task): number => Math.max(
+      t.transferredAt ? new Date(t.transferredAt).getTime() : 0,
+      t.createdAt ? new Date(t.createdAt).getTime() : 0,
+    );
+    list.sort((a, b) => {
+      const an = isNewIncomingLead(a) ? 0 : 1;
+      const bn = isNewIncomingLead(b) ? 0 : 1;
+      if (an !== bn) return an - bn;      // לידים חדשים לראש
+      if (an === 0) return arrivedAt(b) - arrivedAt(a); // בתוכם: מה שהגיע אחרון — ראשון
+      return 0;                            // שאר הסדר נשמר (מיון יציב)
+    });
     return list;
-  }, [effectiveTasks, searchQ, onlyMine, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
+  }, [effectiveTasks, searchQ, onlyMine, filterWorkerId, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
 
   /* ── מאמן המכירות: "מידע על השירות" — תוכן קבוע (hard-coded) לפי קטגוריית השירות, ──
      לא נשלף מ-AI כדי להבטיח דיוק עובדתי ועקביות. רק "התנגדויות" ו"משפטי סגירה" נשלפים מה-AI. */
@@ -16885,7 +18455,7 @@ function TasksPage({
      2) fallback to the linked lead's free-text service / serviceType field */
   const serviceNameFromProductId = (productName?: string | null, fallbackLead?: { service?: string | null; serviceType?: string | null } | null): string | undefined => {
     if (productName) {
-      for (const cat of SERVICE_CATEGORIES) {
+      for (const cat of serviceCategories) {
         for (const svc of cat.services) {
           if (svc.id === productName) return svc.name;
           if (svc.subServices) {
@@ -16902,7 +18472,7 @@ function TasksPage({
   /* ── resolve the price/unit of the service chosen back in שלב התאמת הפתרון ── */
   const servicePriceFromProductId = (productName?: string | null): { price: number; unit?: string } | undefined => {
     if (!productName) return undefined;
-    for (const cat of SERVICE_CATEGORIES) {
+    for (const cat of serviceCategories) {
       for (const svc of cat.services) {
         if (svc.id === productName) return svc.price !== undefined ? { price: svc.price, unit: svc.unit } : undefined;
         if (svc.subServices) {
@@ -16942,6 +18512,10 @@ function TasksPage({
      "שליחת דוח" חדשה עם תאריך יעד עתידי. היא מזוהה לפי קידומת הכותרת REPORT_REMINDER_PREFIX
      ומוסתרת מהרשימה עד למועד היעד (ראה filtered) — ואז קופצת שוב כמשימת שליחת דוח רגילה. */
   const createReportReminderTask = async (task: Task, days: number) => {
+    // מנעול לחיצה כפולה. מעבר לזה השרת מוודא תזכורת פתוחה אחת ללקוח (findDuplicateOf),
+    // כי בפועל נוצרו שתי תזכורות ל"תומר גולדפדר" — אחת מחיים ואחת מגלית, בהפרש 3 ימים.
+    if (reportReminderBusyRef.current[task.id]) return;
+    reportReminderBusyRef.current[task.id] = true;
     const due = new Date();
     due.setDate(due.getDate() + days);
     due.setHours(9, 0, 0, 0);
@@ -16968,6 +18542,7 @@ function TasksPage({
       });
       await onReloadTasks?.();
     } catch { /* silent — כישלון יצירת תזכורת לא מפיל את סגירת המשימה */ }
+    finally { reportReminderBusyRef.current[task.id] = false; }
   };
 
   /* ── הערות על התהליך/הלקוח: מאוחסנות ב-Task.processNotes כמערך JSON של { text, at } (הכי חדש בראש) ── */
@@ -17003,6 +18578,40 @@ function TasksPage({
     }
   };
 
+  // עריכת הערה לפי מיקום (index) במערך הממוין newest-first. שומר את חותמת הזמן המקורית.
+  // טקסט ריק → נמחק את ההערה (מונע הערות ריקות). כותב חזרה את המערך המלא ל-processNotes.
+  const editProcessNote = async (taskId: string, index: number, newText: string) => {
+    const text = (newText || '').trim();
+    setProcessNoteBusy((p) => ({ ...p, [taskId]: true }));
+    const task = tasks.find((t) => t.id === taskId);
+    const existing = parseProcessNotes(task?.processNotes);
+    if (index < 0 || index >= existing.length) { setProcessNoteBusy((p) => ({ ...p, [taskId]: false })); return; }
+    const next = text
+      ? existing.map((n, i) => (i === index ? { ...n, text } : n))
+      : existing.filter((_, i) => i !== index);
+    try {
+      await updateTaskField(taskId, { processNotes: JSON.stringify(next) });
+      setEditingNote(null);
+    } finally {
+      setProcessNoteBusy((p) => ({ ...p, [taskId]: false }));
+    }
+  };
+
+  const deleteProcessNote = async (taskId: string, index: number) => {
+    if (typeof window !== 'undefined' && !window.confirm('למחוק את ההערה?')) return;
+    setProcessNoteBusy((p) => ({ ...p, [taskId]: true }));
+    const task = tasks.find((t) => t.id === taskId);
+    const existing = parseProcessNotes(task?.processNotes);
+    if (index < 0 || index >= existing.length) { setProcessNoteBusy((p) => ({ ...p, [taskId]: false })); return; }
+    const next = existing.filter((_, i) => i !== index);
+    try {
+      await updateTaskField(taskId, { processNotes: JSON.stringify(next) });
+      if (editingNote?.key === `${taskId}:${index}`) setEditingNote(null);
+    } finally {
+      setProcessNoteBusy((p) => ({ ...p, [taskId]: false }));
+    }
+  };
+
   const deleteTask = async (taskId: string) => {
     // Optimistic removal so UI responds immediately
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
@@ -17017,7 +18626,6 @@ function TasksPage({
     } catch { void onReloadTasks?.(); }
   };
 
-  const markDone = (taskId: string) => updateTaskField(taskId, { status: 'DONE' });
   const postponeDay = (taskId: string, currentDue: string | null | undefined) => {
     const base = currentDue ? new Date(currentDue) : new Date();
     base.setDate(base.getDate() + 1);
@@ -17259,7 +18867,12 @@ function TasksPage({
 
   const saveCustomerForTask = async (task: Task): Promise<string | null> => {
     if (!task) return null;
-    if (task.customerId) {
+    // המשימה כפי שהיא ב-state עכשיו — האובייקט שהועבר עלול להיות ישן. למשל כפתור ההעברה
+    // קורא ל-saveCustomerForTask ואז ל-transferTaskToEmployee שקורא לו שוב עם
+    // tasks.find(...) — ובין השניים ה-PATCH של customerId טרם הגיע ל-state.
+    const freshTask = tasks.find((t) => t.id === task.id) || task;
+    const existingCustomerId = freshTask.customerId || task.customerId;
+    if (existingCustomerId) {
       // לקוח כבר קיים — לפני העברה/יצירת הצעה:
       //  (1) מעדכנים את פרטי הלקוח מהערכים שהוקלדו בצינור (טלפון/מייל/עיר/כתובת/איש קשר),
       //      אחרת עריכות שנעשו בפנייה לא נשמרות והעובד החדש רואה נתונים ישנים.
@@ -17279,16 +18892,19 @@ function TasksPage({
         if (cityE) patch.city = cityE;
         if (addressE) patch.address = addressE;
         if (Object.keys(patch).length > 0) {
-          await apiFetch(apiUrl(`/customers/${task.customerId}`), {
+          await apiFetch(apiUrl(`/customers/${existingCustomerId}`), {
             method: 'PATCH',
             authUser: currentUser,
             body: JSON.stringify(patch),
           }).catch(() => {});
         }
       }
-      await persistTaskContactsToCustomer(task.id, task.customerId);
-      return task.customerId;
+      await persistTaskContactsToCustomer(task.id, existingCustomerId);
+      return existingCustomerId;
     }
+    // אם כבר התחלנו ליצור לקוח למשימה הזו — מחזירים את אותה יצירה במקום לפתוח שנייה.
+    const pendingCreation = customerCreationForTask.current.get(task.id);
+    if (pendingCreation) return pendingCreation;
     const fd = callFormData[task.id];
     if (!fd) return null; // form never opened → nothing entered to save
     const fullName = [fd.firstName, fd.lastName].filter(Boolean).join(' ').trim() || fd.fullName || '';
@@ -17302,48 +18918,60 @@ function TasksPage({
       ? 'PRIVATE'
       : (presetCodes.includes(rawType) || classificationCodes.includes(rawType) ? rawType : 'COMPANY');
     const custName = (!isPrivate && fd.company?.trim()) ? fd.company.trim() : (fullName || 'לקוח חדש');
-    try {
-      const customerRes = await apiFetch(apiUrl('/customers'), {
-        method: 'POST',
-        authUser: currentUser,
-        body: JSON.stringify({
-          name: custName,
-          type: customerType,
-          contactName: fullName || custName,
-          phone: phone || '',
-          email: fd.email || '',
-          city: fd.city || '',
-          address: fd.address || null,
-          companyRegNumber: fd.companyRegNumber || null,
-          status: 'ACTIVE',
-          services: fd.serviceType ? [fd.serviceType] : [],
-          leadSource: fd.leadSource || null,
-          notes: fd.notes || null,
-        }),
-      });
-      if (!customerRes.ok) return null;
-      const createdCustomer = await customerRes.json();
-      // שומרים תמיד את אנשי הקשר שהוזנו בצינור (כולל טלפון+מייל) — גם ללקוח פרטי —
-      // אחרת בהעברת המשימה לעובד אחר פרטי הקשר חיים רק בזיכרון של העובד המקורי ואובדים.
-      // (persistTaskContactsToCustomer כולל דדופ, כך שאין כפילויות מול איש הקשר של הלקוח.)
-      await persistTaskContactsToCustomer(task.id, createdCustomer.id);
-      if (task.leadId) {
-        await apiFetch(apiUrl(`/leads/${task.leadId}`), {
+    // היצירה נשמרת ב-ref *לפני* ה-await הראשון — כל קורא נוסף על אותה משימה ימתין
+    // לאותה הבטחה ויקבל את אותו לקוח, במקום לפתוח POST מקביל.
+    const creation = (async (): Promise<string | null> => {
+      try {
+        const customerRes = await apiFetch(apiUrl('/customers/resolve'), {
+          method: 'POST',
+          authUser: currentUser,
+          body: JSON.stringify({
+            name: custName,
+            type: customerType,
+            contactName: fullName || custName,
+            phone: phone || '',
+            email: fd.email || '',
+            city: fd.city || '',
+            address: fd.address || null,
+            companyRegNumber: fd.companyRegNumber || null,
+            status: 'ACTIVE',
+            services: fd.serviceType ? [fd.serviceType] : [],
+            leadSource: fd.leadSource || null,
+            notes: fd.notes || null,
+          }),
+        });
+        if (!customerRes.ok) return null;
+        // /customers/resolve מחזיר { customer, created, matchedBy } — לקוח קיים
+        // מוחזר כמו שהוא במקום להיווצר מחדש.
+        const resolved = await customerRes.json();
+        const createdCustomer = resolved?.customer ?? resolved;
+        // שומרים תמיד את אנשי הקשר שהוזנו בצינור (כולל טלפון+מייל) — גם ללקוח פרטי —
+        // אחרת בהעברת המשימה לעובד אחר פרטי הקשר חיים רק בזיכרון של העובד המקורי ואובדים.
+        // (persistTaskContactsToCustomer כולל דדופ, כך שאין כפילויות מול איש הקשר של הלקוח.)
+        await persistTaskContactsToCustomer(task.id, createdCustomer.id);
+        if (task.leadId) {
+          await apiFetch(apiUrl(`/leads/${task.leadId}`), {
+            method: 'PATCH',
+            authUser: currentUser,
+            body: JSON.stringify({ customerId: createdCustomer.id }),
+          }).catch(() => {});
+        }
+        await apiFetch(apiUrl(`/tasks/${task.id}`), {
           method: 'PATCH',
           authUser: currentUser,
           body: JSON.stringify({ customerId: createdCustomer.id }),
         }).catch(() => {});
+        onCustomerCreated?.(createdCustomer);
+        return createdCustomer.id as string;
+      } catch {
+        return null;
       }
-      await apiFetch(apiUrl(`/tasks/${task.id}`), {
-        method: 'PATCH',
-        authUser: currentUser,
-        body: JSON.stringify({ customerId: createdCustomer.id }),
-      }).catch(() => {});
-      onCustomerCreated?.(createdCustomer);
-      return createdCustomer.id;
-    } catch {
-      return null;
-    }
+    })();
+    customerCreationForTask.current.set(task.id, creation);
+    const createdId = await creation;
+    // כשל ביצירה → משחררים את הנעילה כדי שניסיון חוזר יוכל לעבוד.
+    if (!createdId) customerCreationForTask.current.delete(task.id);
+    return createdId;
   };
 
   /* ── Close the expanded task workspace and return to the tasks list screen ──
@@ -17487,7 +19115,9 @@ function TasksPage({
               <button
                 key={u.id}
                 disabled={busy}
-                onClick={async () => { await saveCustomerForTask(task); await transferTaskToEmployee(task.id, u.id); returnToTasksScreen(); }}
+                // transferTaskToEmployee שומר/יוצר את הלקוח בעצמו — קריאה נוספת כאן
+                // הייתה יוצרת לקוח שני לאותה משימה.
+                onClick={async () => { await transferTaskToEmployee(task.id, u.id); returnToTasksScreen(); }}
                 className="w-full text-right px-3 py-2 rounded-xl text-sm font-bold text-slate-700 border border-slate-100 bg-slate-50 hover:bg-green-50 hover:text-green-700 hover:border-green-200 transition-colors disabled:opacity-40 flex items-center gap-2.5"
               >
                 <span className="flex items-center justify-center rounded-full bg-white border border-slate-200 flex-shrink-0" style={{ width: 28, height: 28, fontSize: 12, fontWeight: 800 }}>{(u.name || '?').trim().charAt(0)}</span>
@@ -17586,24 +19216,27 @@ function TasksPage({
   const renderStageActionBar = (
     t: Task,
     primary?: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean } | null,
+    secondary?: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean } | null,
   ) => {
     const universalActions = [
       { key: 'transfer' as const, label: 'העברה למומחה', circleBg: '#22c55e', activeRing: 'ring-4 ring-green-300', icon: <UserPlus className="h-7 w-7 text-white" /> },
       { key: 'snooze' as const, label: 'דחייה למאוחר יותר', circleBg: '#f59e0b', activeRing: 'ring-4 ring-amber-300', icon: <Timer className="h-7 w-7 text-white" /> },
       { key: 'lost' as const, label: 'לא רלוונטי', circleBg: '#ef4444', activeRing: 'ring-4 ring-red-300', icon: <X className="h-7 w-7 text-white" /> },
     ];
+    const renderPrimaryBtn = (b: { label: string; circleBg: string; icon: React.ReactNode; onClick: () => void; disabled?: boolean }) => (
+      <div className="relative flex flex-col items-center">
+        <button onClick={b.onClick} disabled={b.disabled} className="flex flex-col items-center gap-1.5 cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed">
+          <div className="flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl" style={{ background: b.circleBg, width: '56px', height: '56px' }}>
+            {b.icon}
+          </div>
+          <span className="font-extrabold text-center leading-tight text-slate-600" style={{ fontSize: '13px' }}>{b.label}</span>
+        </button>
+      </div>
+    );
     return (
       <div className="flex justify-center items-start gap-8 py-1">
-        {primary && (
-          <div className="relative flex flex-col items-center">
-            <button onClick={primary.onClick} disabled={primary.disabled} className="flex flex-col items-center gap-1.5 cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed">
-              <div className="flex items-center justify-center rounded-full shadow-lg transition-all duration-200 group-hover:scale-110 group-hover:shadow-xl" style={{ background: primary.circleBg, width: '56px', height: '56px' }}>
-                {primary.icon}
-              </div>
-              <span className="font-extrabold text-center leading-tight text-slate-600" style={{ fontSize: '13px' }}>{primary.label}</span>
-            </button>
-          </div>
-        )}
+        {primary && renderPrimaryBtn(primary)}
+        {secondary && renderPrimaryBtn(secondary)}
         {universalActions.map((act) => {
           const isPopupOpen = coachActionPopup?.taskId === t.id && coachActionPopup.type === act.key;
           const handleClick = () => {
@@ -17775,6 +19408,9 @@ function TasksPage({
                 const p = parseLeadBody(lead.body);
                 const recv = lead.receivedAt ? new Date(lead.receivedAt) : null;
                 const src = leadSourcePage(lead.subject, lead.body);
+                // ליד מתוכנית השותפים — מזוהה לפי המקור "תוכנית השותפים — <שם>". מציגים תג ייעודי.
+                const affMatch = /תוכנית השותפים\s*[—–-]\s*([^\n<>]+)/.exec(`${lead.fromName || ''}\n${lead.body || ''}`);
+                const affiliateName = affMatch ? affMatch[1].trim().replace(/[.,;]\s*$/, '') : '';
                 // "מהות הפנייה" — סוג השירות ואם אין, תוכן ההודעה; זה מה שמאפשר לשייך את הליד.
                 const essence = (p.serviceType || p.message || '').trim();
                 const isOpen = !!expandedIncomingLead[lead.id];
@@ -17784,15 +19420,21 @@ function TasksPage({
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-bold text-slate-800">{p.fullName || lead.fromName || lead.subject || 'ליד חדש'}</span>
-                          {/* מקור — מאיזה עמוד/אתר הגיע הליד (כדי שיהיה אפשר לשייך) */}
-                          {src ? (
+                          {/* תג "תוכנית השותפים — <שם השותף>" — ליד שהגיע מפורטל השותפים */}
+                          {affiliateName ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-200" title="הגיע מתוכנית השותפים">
+                              🤝 <span>תוכנית השותפים — {affiliateName}</span>
+                            </span>
+                          ) : null}
+                          {/* מקור — מאיזה עמוד/אתר הגיע הליד (כדי שיהיה אפשר לשייך). מוסתר אם זה ליד שותף. */}
+                          {src && !affiliateName ? (
                             <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-700" title="מקור הפנייה">
                               <ExternalLink className="h-3 w-3" /> <span dir="ltr">{src}</span>
                             </span>
                           ) : null}
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                          {p.phone ? <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} dir="ltr" className="font-semibold text-blue-600 hover:underline">{p.phone}</a> : null}
+                          {p.phone ? <a href={`tel:${p.phone.replace(/[^\d+]/g, '')}`} dir="ltr" className="font-semibold text-blue-600 hover:underline">{phoneToDisplay(p.phone)}</a> : null}
                           {recv && !isNaN(recv.getTime()) ? <span>{recv.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' })} {recv.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}</span> : null}
                         </div>
                         {/* מהות הפנייה — שורה קצרה תמיד גלויה; הכפתור פותח את הפירוט המלא */}
@@ -17904,21 +19546,33 @@ function TasksPage({
               onChange={(e) => setSearchQ(e.target.value)}
             />
           </div>
-          {/* ownership toggle — exactly one active (green) at a time */}
+          {/* ownership toggle — exactly one active (green) at a time. בחירת עובד מבטלת אותם. */}
           <button
-            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${onlyMine ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
-            style={onlyMine ? { background: galit.primary } : {}}
-            onClick={() => setOnlyMine(true)}
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${onlyMine && !filterWorkerId ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+            style={onlyMine && !filterWorkerId ? { background: galit.primary } : {}}
+            onClick={() => { setFilterWorkerId(''); setOnlyMine(true); }}
           >
             רק שלי
           </button>
           <button
-            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${!onlyMine ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
-            style={!onlyMine ? { background: galit.primary } : {}}
-            onClick={() => setOnlyMine(false)}
+            className={`rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 ${!onlyMine && !filterWorkerId ? 'text-white shadow-sm' : 'bg-slate-50 text-slate-600 hover:bg-slate-100'}`}
+            style={!onlyMine && !filterWorkerId ? { background: galit.primary } : {}}
+            onClick={() => { setFilterWorkerId(''); setOnlyMine(false); }}
           >
             של כולם
           </button>
+          {/* סינון לפי עובד ספציפי — בחירה מציגה רק את משימות אותו עובד */}
+          <select
+            className="rounded-xl px-3 py-2 text-xs font-medium transition-all duration-150 outline-none"
+            style={filterWorkerId ? { background: galit.primary, color: '#fff' } : { background: '#f8fafc', color: '#475569' }}
+            value={filterWorkerId}
+            onChange={(e) => setFilterWorkerId(e.target.value)}
+          >
+            <option value="">לפי עובד…</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id} style={{ color: '#0f172a' }}>{u.name}</option>
+            ))}
+          </select>
           <div className="h-5 w-px bg-slate-200" />
           {/* quick filter pills */}
           {filterBtns.map((fb) => {
@@ -17988,7 +19642,7 @@ function TasksPage({
                       </span>
                     </td>
                     <td className="px-4 py-2 hidden md:table-cell">
-                      {r.phone ? <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{r.phone}</a> : <span className="text-xs text-slate-400">-</span>}
+                      {r.phone ? <a href={`tel:${r.phone.replace(/[^\d+]/g, '')}`} className="text-xs text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()} dir="ltr">{phoneToDisplay(r.phone)}</a> : <span className="text-xs text-slate-400">-</span>}
                     </td>
                     <td className="px-4 py-2 hidden md:table-cell">
                       <span className="text-xs text-slate-500">{r.kind === 'lead' ? 'ליד' : 'לקוח'}</span>
@@ -18013,17 +19667,16 @@ function TasksPage({
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 50 }}>עדיפות</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">משימה</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">קשור ל</th>
-              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">לקוח / ליד</th>
+              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">שם איש קשר</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">טלפון</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit">תאריך יעד</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden md:table-cell">סטטוס</th>
               <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit hidden lg:table-cell">אחראי</th>
-              <th className="px-3 py-2 text-xs font-semibold text-slate-500 sticky top-0 bg-inherit" style={{ width: 90 }}>פעולות</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={10} className="py-8 text-center text-slate-400">
+              <tr><td colSpan={9} className="py-8 text-center text-slate-400">
                 <div className="flex flex-col items-center gap-2">
                   <ClipboardList className="h-8 w-8 text-slate-300" />
                   <span>אין משימות להצגה</span>
@@ -18035,11 +19688,23 @@ function TasksPage({
               const s = (t.status || 'OPEN').toUpperCase();
               const p = (t.priority || 'MEDIUM').toUpperCase();
               const isDone = s === 'DONE' || s === 'CANCELLED';
-              const isOverdue = t.dueDate && new Date(t.dueDate) < today && !isDone;
+              const isOverdue = isOverdueTask(t);
               const isNewLead = t.incomingLeadId && (manualStepOverride[t.id] ?? detectStep(t)) === 0 && !isDone;
+              const dot = taskDot({ isOverdue, isNewLead: Boolean(isNewLead) });
               const leadParsed = t.incomingLeadId ? parseLeadBody(t.description) : null;
               const contactName = t.leadName || t.customerName || leadParsed?.fullName || '';
-              const contactPhone = t.leadPhone || leadParsed?.phone || '';
+              // עמודת "משימה" מציגה את שם החברה / הלקוח הפרטי בלבד — בלי קידומת השלב.
+              const companyName = t.customerName || t.leadCompany || t.leadName || leadParsed?.fullName || '';
+              // עמודת "שם איש קשר" — האדם, ולא שם החברה. ללקוח קיים הוא יושב על
+              // כרטיס הלקוח (contactName), ולליד הוא השם שנמסר בפנייה.
+              const personName =
+                customers.find((c) => c.id === t.customerId)?.contactName
+                || t.leadName
+                || leadParsed?.fullName
+                || '';
+              // מעוצב לתצוגה: מספרים שהגיעו מפענוח מייל הליד / ייבוא נשמרים לרוב בלי מקף.
+              // קישורי tel:/וואטסאפ עוברים דרך phoneClean ולכן לא מושפעים מהעיצוב.
+              const contactPhone = formatIsraeliPhoneDisplay(t.leadPhone || leadParsed?.phone || t.customerPhone || '');
               const relatedTo = t.projectName || taskTypeLabel(t.type || 'GENERAL');
               const dueDisplay = t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '-';
               const dueTime = t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -18047,35 +19712,29 @@ function TasksPage({
               return (
                 <React.Fragment key={t.id}>
                   <tr
-                    className={`border-b border-slate-50 cursor-pointer transition-all duration-100 ${isDone ? 'opacity-60' : ''} ${isOverdue ? 'bg-red-50/40' : isNewLead ? 'bg-green-50/60 hover:bg-green-50' : 'hover:bg-slate-50/80'} ${isExpanded ? 'bg-slate-50' : ''}`}
+                    className={`border-b border-slate-50 cursor-pointer transition-all duration-100 ${isDone ? 'opacity-60' : ''} ${isOverdue ? 'bg-red-100/50 hover:bg-red-100' : isNewLead ? 'bg-green-100 hover:bg-green-200' : 'hover:bg-slate-50/80'} ${isExpanded ? 'bg-slate-50' : ''}`}
                     onClick={() => toggleExpand(t.id)}
                   >
                     {/* # */}
                     <td className="px-3 py-2 text-center text-xs text-slate-400">{idx + 1}</td>
                     {/* priority */}
                     <td className="px-3 py-2 text-center">
-                      <div className={`mx-auto h-2.5 w-2.5 rounded-full ${priorityDot(p)}`} title={priorityLabel(p)} />
+                      <div className={`mx-auto h-2.5 w-2.5 rounded-full ${dot.cls}`} title={dot.label} />
                     </td>
-                    {/* title + type */}
+                    {/* customer / company name */}
                     <td className="px-3 py-2">
-                      <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>{(() => {
-                        const step = manualStepOverride[t.id] ?? detectStep(t);
-                        if (t.incomingLeadId && step === 0) return `ליד חדש נכנס${contactName ? ' — ' + contactName : ''}`;
-                        const STAGE: Record<number, string> = { 0: 'פתיחת פנייה', 1: 'התאמת פתרון', 2: 'שיחת מכירה', 3: 'פולואפ', 4: 'תיאום', 5: 'ביצוע', 6: 'דוח', 7: 'גבייה', 8: 'משוב', 9: 'הושלם', 99: 'הצעת מחיר' };
-                        const base = STAGE[step] || taskTypeLabel(t.type || 'GENERAL');
-                        const detail = [t.projectName, contactName].filter(Boolean).join(' · ');
-                        return detail ? `${base} — ${detail}` : (t.title || base);
-                      })()}</div>
+                      <div className={`font-medium text-slate-800 ${isDone ? 'line-through' : ''}`}>
+                        {companyName || t.title || '-'}
+                      </div>
                       <div className="mt-0.5 text-[11px] text-slate-400">{taskTypeLabel(t.type || 'GENERAL')}</div>
                     </td>
                     {/* related to */}
                     <td className="px-3 py-2 hidden md:table-cell">
                       <span className="text-xs text-slate-600">{relatedTo}</span>
                     </td>
-                    {/* customer / lead */}
+                    {/* contact person */}
                     <td className="px-3 py-2 hidden md:table-cell">
-                      <span className="text-xs font-medium text-slate-700">{contactName || '-'}</span>
-                      {t.leadCompany && <div className="text-[10px] text-slate-400">{t.leadCompany}</div>}
+                      <span className="text-xs font-medium text-slate-700">{personName || '-'}</span>
                     </td>
                     {/* phone */}
                     <td className="px-3 py-2 hidden lg:table-cell">
@@ -18096,28 +19755,17 @@ function TasksPage({
                     <td className="px-3 py-2 hidden lg:table-cell">
                       <span className="text-xs text-slate-600">{t.owner || '-'}</span>
                     </td>
-                    {/* actions */}
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-1">
-                        {!isDone && (
-                          <button className="rounded-lg p-1.5 text-green-600 hover:bg-green-50 transition-colors" title="סמן הושלם" onClick={(e) => { e.stopPropagation(); markDone(t.id); }}>
-                            <CheckCircle2 className="h-4 w-4" />
-                          </button>
-                        )}
-                        {contactPhone && (
-                          <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" className="rounded-lg p-1.5 text-green-600 hover:bg-green-50 transition-colors" title="WhatsApp" onClick={(e) => e.stopPropagation()}>
-                            <MessageCircle className="h-4 w-4" />
-                          </a>
-                        )}
-                        <button className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 transition-colors" title={isExpanded ? 'סגור' : 'פתח'} onClick={(e) => { e.stopPropagation(); toggleExpand(t.id); }}>
-                          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </button>
-                      </div>
-                    </td>
+                    {/* עמודת "פעולות" הוסרה: לחיצה על השורה פותחת/סוגרת את המשימה,
+                        וסימון "הושלם" נעשה מתוך הפאנל המורחב. */}
                   </tr>
                   {/* ═══ EXPANDED ROW — TASK WORKSPACE ═══ */}
                   {isExpanded && (() => {
-                    const currentStep = manualStepOverride[t.id] ?? detectStep(t);
+                    /* שלב "דוח" (6) הוסר מהזרימה. משימה שעדיין יושבת עליו (type STEP7/
+                       REPORT_WRITING) הייתה נשארת בלי שלב מסומן בפס ובלי מסך — ולכן היא
+                       מוצגת כ"ביצוע", שם ממילא מצרפים ושולחים את הדוח. תצוגה בלבד; ה-type
+                       במסד לא משתנה. */
+                    const rawStep = manualStepOverride[t.id] ?? detectStep(t);
+                    const currentStep = rawStep === 6 ? 5 : rawStep;
                     /* גם כשמדלגים על שלב כרטיס הלקוח (כי הכרטיס כבר נוצר) — עדיין נטען את נתוני הלקוח לטופס מראש */
                     initCallFormIfNeeded(
                       t.id,
@@ -18126,19 +19774,24 @@ function TasksPage({
                       t.customerId ? customers.find((c) => c.id === t.customerId) : null
                     );
                     loadAttachmentsIfNeeded(t.id);
-                    /* UI-only: hide the דוח/גבייה/משוב/נסגר stages from the visual progress bar.
-                       progressSteps / detectStep / currentStep stay untouched — origIdx preserves
-                       the real stage index so colors, "current" highlighting and the smart header
-                       card (which reads progressSteps[currentStep]) keep working exactly as before. */
-                    const hiddenStageKeysUI = ['report', 'collection', 'feedback', 'closed'];
+                    /* UI-only: משוב/נסגר מוסתרים מפס ההתקדמות, וכך גם "דוח" — שליחת הדוח
+                       נעשית היום בתוך שלב "ביצוע" (ראה send-report-modal), ולכן שלב נפרד
+                       לדוח היה כפילות. "ביצוע" הועבר לסוף הזרימה: גובים תשלום ואז מבצעים
+                       ושולחים את הדוח.
+                       ההחלפה תצוגתית בלבד: progressSteps / detectStep לא משתנים, ו-origIdx
+                       שומר את אינדקס השלב האמיתי — כך שצבעים, סימון "נוכחי" והמסכים
+                       ממשיכים לעבוד. */
+                    const hiddenStageKeysUI = ['feedback', 'closed', 'report'];
+                    const stageOrderUI = ['customerCard', 'inquiry', 'call', 'followup', 'coordination', 'collection', 'execution'];
                     const visibleProgressSteps = progressSteps
                       .map((step, origIdx) => ({ ...step, origIdx }))
-                      .filter((step) => !hiddenStageKeysUI.includes(step.key));
+                      .filter((step) => !hiddenStageKeysUI.includes(step.key))
+                      .sort((a, b) => stageOrderUI.indexOf(a.key) - stageOrderUI.indexOf(b.key));
                     const QUOTE_STEP_IDX = 99; // display-only stage — not in progressSteps/detectStep
                     const visibleProgressStepsExtended = [
                       ...visibleProgressSteps.slice(0, 3), // 0=כרטיס לקוח, 1=התאמת הפתרון, 2=שיחת מכירה
                       { key: 'quotePrep', label: 'הצעת מחיר', color: '#2563eb', origIdx: QUOTE_STEP_IDX },
-                      ...visibleProgressSteps.slice(3), // 3=פולואפ, 4=תיאום, 5=ביצוע
+                      ...visibleProgressSteps.slice(3), // פולואפ, תיאום, ביצוע, גבייה, דוח
                     ];
                     const totalSteps = visibleProgressStepsExtended.length;
                     const stepsReversed = [...visibleProgressStepsExtended].reverse();
@@ -18174,7 +19827,7 @@ function TasksPage({
                     const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && fdGate.city?.trim() && fdGate.address?.trim() && (isPrivateGate || hasValidContactGate));
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
-                      <td colSpan={10} className="p-0">
+                      <td colSpan={9} className="p-0">
                         <div className="fixed inset-0 z-[9999] flex flex-col overflow-hidden" style={{ background: '#f1f5f9' }}>
 
                           {/* ──── COMPACT NAV HEADER ──── */}
@@ -18336,84 +19989,40 @@ function TasksPage({
                               className={`${taskSidebarOpen ? 'absolute inset-y-0 right-0 z-30 w-[248px] shadow-2xl' : 'hidden'} flex-shrink-0 bg-white border-l border-slate-200 overflow-y-auto md:static md:z-auto md:block md:w-[248px] md:shadow-none`}
                               style={{ direction: 'rtl', padding: 12 }}
                             >
-                              <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>פרטי לקוח</div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                {(() => {
-                                  type SidebarField = { icon: React.ElementType; label: string; value: string | null | undefined };
-                                  const baseFields: SidebarField[] = [
-                                    { icon: UserCircle2, label: 'שם', value: t.customerName || t.leadName },
-                                    { icon: Phone, label: 'טלפון', value: contactPhone },
-                                    { icon: Mail, label: 'אימייל', value: linkedLeadForHeader?.email || t.leadEmail || '' },
-                                    { icon: Building2, label: 'חברה', value: t.leadCompany || linkedLeadForHeader?.company || '' },
-                                    { icon: UserPlus, label: 'הגיע דרך', value: linkedLeadForHeader?.referralCompany || '' },
-                                    { icon: MapPin, label: 'עיר', value: linkedLeadForHeader?.city || '' },
-                                    { icon: Home, label: 'כתובת', value: linkedLeadForHeader?.address || '' },
-                                    { icon: ClipboardList, label: 'שירות', value: taskTypeLabel(t.type || 'GENERAL') },
-                                    { icon: CheckCircle2, label: 'סטטוס', value: taskStatusLabel(s) },
-                                    { icon: UserCircle2, label: 'אחראי', value: t.owner },
-                                  ];
-
-                                  /* ── Step-accumulated details: each stage that's been reached adds context for the next ── */
-                                  const progressFields: SidebarField[] = [];
-                                  if (currentStep >= 1 && (t.projectName || t.productName)) {
-                                    progressFields.push({ icon: Target, label: 'צורך / פרויקט', value: t.projectName || t.productName });
-                                  }
-                                  if (currentStep >= 3) {
-                                    const latestQuote = (allQuotes || [])
-                                      .filter((q) => (t.customerId && q.customerId === t.customerId) || (t.leadId && q.leadId === t.leadId))
-                                      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0];
-                                    if (latestQuote) {
-                                      const amt = latestQuote.totalAmount ?? latestQuote.amount;
-                                      const statusHe: Record<string, string> = { DRAFT: 'טיוטה', SENT: 'נשלחה', APPROVED: 'אושרה', REJECTED: 'נדחתה', EXPIRED: 'פג תוקף' };
-                                      progressFields.push({
-                                        icon: FileText,
-                                        label: 'הצעת מחיר אחרונה',
-                                        value: `${formatCurrencyILS(amt || 0)} · ${statusHe[latestQuote.status] || latestQuote.status}`,
-                                      });
-                                    }
-                                    if (t.dueDate) {
-                                      progressFields.push({
-                                        icon: Calendar,
-                                        label: 'פולואפ הבא',
-                                        value: new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }),
-                                      });
-                                    }
-                                  }
-
-                                  const renderField = (f: SidebarField) => {
-                                    if (!f.value) return null;
-                                    const FIcon = f.icon;
-                                    return (
-                                      <div key={f.label} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
-                                        <FIcon style={{ width: 13, height: 13, color: '#94a3b8', flexShrink: 0, marginTop: 1 }} />
-                                        <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{f.label}</div>
-                                          <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.value}</div>
-                                        </div>
+                              {/* ── תאריך פתיחת המשימה — קבוע בראש הרכיב הימני ── */}
+                              {(() => {
+                                const opened = t.createdAt ? new Date(t.createdAt) : null;
+                                const ok = !!opened && !Number.isNaN(opened.getTime());
+                                const days = ok
+                                  ? Math.floor((Date.now() - opened!.getTime()) / 86400000)
+                                  : null;
+                                const agoLabel =
+                                  days === null ? '' : days <= 0 ? 'היום' : days === 1 ? 'אתמול' : `לפני ${days} ימים`;
+                                return (
+                                  <div style={{ marginBottom: 12, borderRadius: 12, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px 12px' }}>
+                                    <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+                                      <Calendar style={{ width: 14, height: 14 }} />
+                                      נפתחה בתאריך
+                                    </div>
+                                    <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b' }}>
+                                      {ok ? opened!.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                                    </div>
+                                    {ok && (
+                                      <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', marginTop: 2 }}>
+                                        {opened!.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} · {agoLabel}
                                       </div>
-                                    );
-                                  };
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
-                                  return (
-                                    <>
-                                      {baseFields.map(renderField)}
-                                      {progressFields.some((f) => !!f.value) && (
-                                        <div style={{ marginTop: 4, paddingTop: 8, borderTop: '1px dashed #e2e8f0', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                          {progressFields.map(renderField)}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()}
-                              </div>
-
-                              {/* ── הערות על התהליך/הלקוח — מתחת לנתוני הלקוח, לאורך כל הזרימה ── */}
+                              {/* ── הערות על התהליך/הלקוח — הרכיב הימני מציג *רק* הערות (פרטי הלקוח הוסרו לבקשת המשתמש) ── */}
                               {(() => {
                                 const notes = parseProcessNotes(t.processNotes);
                                 const draft = processNoteDraft[t.id] || '';
                                 const busy = !!processNoteBusy[t.id];
                                 return (
-                                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
+                                  <div>
                                     <div style={{ fontSize: 12, fontWeight: 800, color: '#475569', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
                                       <StickyNote style={{ width: 14, height: 14 }} />
                                       הערות על התהליך
@@ -18442,10 +20051,72 @@ function TasksPage({
                                           const header = when && !isNaN(when.getTime())
                                             ? `${when.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' })} · ${when.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`
                                             : 'הערה';
+                                          const noteKey = `${t.id}:${i}`;
+                                          const isEditing = editingNote?.key === noteKey;
                                           return (
                                             <div key={i} style={{ borderRadius: 12, background: '#fffbeb', border: '1px solid #fde68a', padding: '10px 12px' }}>
-                                              <div style={{ fontSize: 12, fontWeight: 800, color: '#b45309', marginBottom: 4 }}>{header}</div>
-                                              <div style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{n.text}</div>
+                                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 6 }}>
+                                                <div style={{ fontSize: 12, fontWeight: 800, color: '#b45309' }}>{header}</div>
+                                                {!isEditing && (
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                                    <button
+                                                      type="button"
+                                                      title="ערוך הערה"
+                                                      onClick={() => setEditingNote({ key: noteKey, text: n.text })}
+                                                      disabled={busy}
+                                                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 8, border: '1px solid #fde68a', background: '#fff', color: '#b45309', cursor: busy ? 'default' : 'pointer' }}
+                                                    >
+                                                      <Pencil style={{ width: 13, height: 13 }} />
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      title="מחק הערה"
+                                                      onClick={() => void deleteProcessNote(t.id, i)}
+                                                      disabled={busy}
+                                                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, borderRadius: 8, border: '1px solid #fecaca', background: '#fff', color: '#dc2626', cursor: busy ? 'default' : 'pointer' }}
+                                                    >
+                                                      <Trash2 style={{ width: 13, height: 13 }} />
+                                                    </button>
+                                                  </div>
+                                                )}
+                                              </div>
+                                              {isEditing ? (
+                                                <div>
+                                                  <textarea
+                                                    value={editingNote.text}
+                                                    onChange={(e) => setEditingNote({ key: noteKey, text: e.target.value })}
+                                                    onKeyDown={(e) => {
+                                                      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); void editProcessNote(t.id, i, editingNote.text); }
+                                                      if (e.key === 'Escape') { e.preventDefault(); setEditingNote(null); }
+                                                    }}
+                                                    rows={3}
+                                                    autoFocus
+                                                    style={{ width: '100%', resize: 'vertical', borderRadius: 10, border: '1px solid #fcd34d', padding: '8px 10px', fontSize: 14, fontWeight: 600, color: '#1e293b', outline: 'none', lineHeight: 1.6, background: '#fff' }}
+                                                  />
+                                                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => void editProcessNote(t.id, i, editingNote.text)}
+                                                      disabled={busy}
+                                                      style={{ display: 'flex', alignItems: 'center', gap: 5, borderRadius: 9, background: '#2563eb', color: '#fff', padding: '7px 12px', fontSize: 13, fontWeight: 800, border: 'none', cursor: busy ? 'default' : 'pointer' }}
+                                                    >
+                                                      {busy ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Check style={{ width: 14, height: 14 }} />}
+                                                      שמור
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setEditingNote(null)}
+                                                      disabled={busy}
+                                                      style={{ display: 'flex', alignItems: 'center', gap: 5, borderRadius: 9, background: '#fff', color: '#64748b', padding: '7px 12px', fontSize: 13, fontWeight: 700, border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                                                    >
+                                                      <X style={{ width: 14, height: 14 }} />
+                                                      ביטול
+                                                    </button>
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <div style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{n.text}</div>
+                                              )}
                                             </div>
                                           );
                                         })}
@@ -18649,7 +20320,7 @@ function TasksPage({
                                     ? 'PRIVATE'
                                     : (presetCodes.includes(rawType) || classificationCodes.includes(rawType) ? rawType : 'COMPANY');
                                   const custName = (!isPrivate0 && fd.company?.trim()) ? fd.company.trim() : (saveFullName || 'לקוח חדש');
-                                  const customerRes = await apiFetch(apiUrl('/customers'), {
+                                  const customerRes = await apiFetch(apiUrl('/customers/resolve'), {
                                     method: 'POST',
                                     authUser: currentUser,
                                     body: JSON.stringify({
@@ -18668,7 +20339,10 @@ function TasksPage({
                                     }),
                                   });
                                   if (customerRes.ok) {
-                                    const createdCustomer = await customerRes.json();
+                                    // /customers/resolve מחזיר { customer, created, matchedBy } —
+                                    // לקוח קיים מוחזר כמו שהוא במקום להיווצר מחדש.
+                                    const resolved = await customerRes.json();
+                                    const createdCustomer = resolved?.customer ?? resolved;
                                     if (!isPrivate0) {
                                       for (const c of ccContacts0) {
                                         if (!c.fullName?.trim() && !c.phone?.trim() && !c.email?.trim()) continue;
@@ -18788,7 +20462,7 @@ function TasksPage({
                               const prefillContact = {
                                 id: `pending-${t.id}-1`,
                                 fullName: linkedCustomerForCard?.contactName || '',
-                                phone: linkedCustomerForCard?.phone || '',
+                                phone: formatIsraeliPhoneDisplay(linkedCustomerForCard?.phone),
                                 email: linkedCustomerForCard?.email || '',
                                 roleTitle: '',
                                 isPrimary: true,
@@ -18813,7 +20487,7 @@ function TasksPage({
                                           const p = parseLeadBody(lead.body || t.description);
                                           const rows = [
                                             { label: 'שם', value: p.fullName },
-                                            { label: 'טלפון', value: p.phone, href: p.phone ? `tel:${p.phone.replace(/[^\d+]/g, '')}` : '' },
+                                            { label: 'טלפון', value: phoneToDisplay(p.phone), href: p.phone ? `tel:${p.phone.replace(/[^\d+]/g, '')}` : '' },
                                             { label: 'אימייל', value: p.email, href: p.email ? `mailto:${p.email}` : '' },
                                             { label: 'סוג השירות / בדיקה', value: p.serviceType, full: true },
                                             { label: 'הודעה', value: p.message, full: true },
@@ -18897,7 +20571,7 @@ function TasksPage({
                                                     }}
                                                     className="w-full text-right px-3 py-2 text-[13px] font-semibold text-slate-700 hover:bg-blue-50"
                                                   >
-                                                    {c.name}{(c as any).phone ? <span className="text-slate-400 font-normal"> · {(c as any).phone}</span> : null}
+                                                    {c.name}{(c as any).phone ? <span className="text-slate-400 font-normal"> · {phoneToDisplay((c as any).phone)}</span> : null}
                                                   </button>
                                                 ))}
                                               </div>
@@ -19109,7 +20783,7 @@ function TasksPage({
                                       <div>
                                         <label className={ccLbl}>נייד ליצירת קשר *</label>
                                         <div className="relative">
-                                          <input className={ccInpIcon} placeholder="050-0000000" value={fd.phone} onChange={(e) => setF('phone', e.target.value)} />
+                                          <input className={ccInpIcon} placeholder="050-0000000" value={fd.phone} onChange={(e) => setF('phone', e.target.value)} onBlur={() => setF('phone', formatIsraeliPhoneDisplay(fd.phone))} />
                                           <Phone className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300" />
                                         </div>
                                       </div>
@@ -19215,7 +20889,7 @@ function TasksPage({
                                             </div>
                                             <div>
                                               <div className="text-[12px] font-semibold text-green-700 mb-1">טלפון</div>
-                                              <div className="text-[14px] text-green-900" dir="ltr" style={{ textAlign: 'right' }}>{fd.phone || '—'}</div>
+                                              <div className="text-[14px] text-green-900" dir="ltr" style={{ textAlign: 'right' }}>{phoneToDisplay(fd.phone)}</div>
                                             </div>
                                             <div className="col-span-2">
                                               <div className="text-[12px] font-semibold text-green-700 mb-1">אימייל</div>
@@ -19242,7 +20916,7 @@ function TasksPage({
                                             </div>
                                             <div>
                                               <label className="block text-[12px] font-semibold text-black mb-1">טלפון</label>
-                                              <input className={ccInp + ' !h-[42px] text-[14px]'} value={pc.phone} onChange={(e) => updateContact(pc.id, 'phone', e.target.value)} placeholder="050-0000000" />
+                                              <input className={ccInp + ' !h-[42px] text-[14px]'} value={pc.phone} onChange={(e) => updateContact(pc.id, 'phone', e.target.value)} onBlur={() => updateContact(pc.id, 'phone', formatIsraeliPhoneDisplay(pc.phone))} placeholder="050-0000000" />
                                             </div>
                                             <div>
                                               <label className="block text-[12px] font-semibold text-black mb-1">אימייל</label>
@@ -19317,7 +20991,7 @@ function TasksPage({
                                         <div className={ccLbl}>פרטי מי שפנה</div>
                                         <div className="flex flex-col gap-1 text-[15px] font-semibold text-slate-700">
                                           <span className="flex items-center gap-2"><UserCircle2 className="h-4 w-4 text-slate-300" />{linkedLead.fullName || linkedLead.name || '—'}</span>
-                                          {linkedLead.phone && <span className="flex items-center gap-2"><Phone className="h-4 w-4 text-slate-300" />{linkedLead.phone}</span>}
+                                          {linkedLead.phone && <span className="flex items-center gap-2"><Phone className="h-4 w-4 text-slate-300" />{phoneToDisplay(linkedLead.phone)}</span>}
                                           {linkedLead.email && <span className="flex items-center gap-2"><Mail className="h-4 w-4 text-slate-300" />{linkedLead.email}</span>}
                                         </div>
                                       </div>
@@ -19385,7 +21059,7 @@ function TasksPage({
                                   thermal:              { color: '#dc2626', light: '#fef2f2', Icon: Flame },
                                 };
                                 const derivedCatId = t.productName
-                                  ? SERVICE_CATEGORIES.find((c) =>
+                                  ? serviceCategories.find((c) =>
                                       c.services.some(
                                         (s) => s.id === t.productName || s.subServices?.some((sub) => sub.id === t.productName),
                                       ),
@@ -19393,7 +21067,7 @@ function TasksPage({
                                   : null;
                                 // '__none__' = user explicitly clicked back to grid; ignore derivedCatId
                                 const activeCatId = openCategoryId === '__none__' ? null : (openCategoryId ?? derivedCatId);
-                                const activeCat = SERVICE_CATEGORIES.find((c) => c.id === activeCatId);
+                                const activeCat = serviceCategories.find((c) => c.id === activeCatId);
                                 return (
                                   <div className="px-8 pb-4">
                                     <div className="rounded-xl border border-slate-200 bg-white shadow-sm p-4" style={{ direction: 'rtl' }}>
@@ -19409,6 +21083,12 @@ function TasksPage({
                                           // כי detectStep מחזיר אז שלב 2 והמשתמש היה "נזרק" מבחירת השירות מיד.
                                           // ההתקדמות נעשית ידנית בכפתור "מעבר לשיחת מכירה" (מופעל כשיש productName).
                                           updateTaskField(t.id, { productName: svcId });
+                                          // בחירת שירות ראדון פותחת מיד את זרימת הראדון (שאלון → מסלול → גלאים),
+                                          // במקום לחכות לשלב "תיאום". הפאנל עדיין זמין גם שם.
+                                          // לערכות אין זרימה — שם הפעולה היחידה היא תזכורת בשלב הביצוע.
+                                          if (isRadonTestSku(svcId) && !isRadonKitSku(svcId)) {
+                                            setRadonPanelTask({ taskId: t.id, sku: String(svcId).trim(), customerId: t.customerId ?? null });
+                                          }
                                           const custObj = customers.find((c) => c.id === t.customerId);
                                           const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
                                           const fixedServiceInfo = getServiceInfo(svcId, activeCat.id);
@@ -19546,8 +21226,8 @@ function TasksPage({
                                       })() : (
                                         (() => {
                                           const EXTRA_CAT_IDS = ['general', 'occupational-health'];
-                                          const mainCats = SERVICE_CATEGORIES.filter((c) => !EXTRA_CAT_IDS.includes(c.id));
-                                          const extraCats = SERVICE_CATEGORIES.filter((c) => EXTRA_CAT_IDS.includes(c.id));
+                                          const mainCats = serviceCategories.filter((c) => !EXTRA_CAT_IDS.includes(c.id));
+                                          const extraCats = serviceCategories.filter((c) => EXTRA_CAT_IDS.includes(c.id));
                                           const catGradients: Record<string, string> = {
                                             water:                  'linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%)',
                                             odor:                   'linear-gradient(135deg,#84cc16 0%,#4d7c0f 100%)',
@@ -19629,13 +21309,23 @@ function TasksPage({
                               })()}
 
                               <div className="px-8 pb-4 pt-2">
-                                {renderStageActionBar(t, {
-                                  label: 'מעבר לשיחת מכירה',
-                                  circleBg: '#16a34a',
-                                  icon: <ArrowUpRight className="h-7 w-7 text-white" />,
-                                  onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 })),
-                                  disabled: !t.productName,
-                                })}
+                                {renderStageActionBar(t,
+                                  {
+                                    label: 'מעבר לשיחת מכירה',
+                                    circleBg: '#16a34a',
+                                    icon: <ArrowUpRight className="h-7 w-7 text-white" />,
+                                    onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: 2 })),
+                                    disabled: !t.productName,
+                                  },
+                                  {
+                                    // דילוג ישר להצעת מחיר (בלי שיחת מכירה) — לכשמתאים, אחרי שנבחר השירות.
+                                    label: 'מעבר להצעת מחיר',
+                                    circleBg: '#2563eb',
+                                    icon: <FileText className="h-7 w-7 text-white" />,
+                                    onClick: () => setManualStepOverride((prev) => ({ ...prev, [t.id]: QUOTE_STEP_IDX })),
+                                    disabled: !t.productName,
+                                  },
+                                )}
                               </div>
                             </>
                             );
@@ -19910,7 +21600,6 @@ function TasksPage({
                             // Phone/email may live on the linked CUSTOMER (converted/imported tasks), not only on a lead.
                             const fu3Phone = (t.leadPhone || linkedLeadForHeader?.phone || linkedCustomerForGate?.phone || '').replace(/[^\d+]/g, '');
                             const fu3Email = t.leadEmail || linkedLeadForHeader?.email || linkedCustomerForGate?.email || '';
-                            const waLink3 = fu3Phone ? whatsAppLink(fu3Phone) : null;
                             /* ── לקוח עסקי: הבאנר חייב להציג גם חברה וגם איש קשר (שם + טלפון לכל אחד) ──
                                isPrivateGate/fdGate/ccContactsGate מגיעים מה-scope החיצוני של השורה. */
                             const fu3CompanyName = (
@@ -19923,22 +21612,71 @@ function TasksPage({
                               || ''
                             ).trim();
                             const fu3IsCompany = !isPrivateGate && !!fu3CompanyName;
-                            // איש הקשר: קודם איש הקשר שנבחר בכרטיס, אחר כך זה ששמור על הלקוח
-                            const fu3PrimaryContact = ccContactsGate.find((c) => c.id && c.id === (fdGate as any).contactId)
-                              || ccContactsGate.find((c) => c.isPrimary && (c.fullName?.trim() || c.phone?.trim()))
-                              || ccContactsGate.find((c) => c.fullName?.trim() || c.phone?.trim())
+                            // טעינת אנשי הקשר של הלקוח אם עדיין לא נטענו — כמו בשלב התיאום. בלי זה
+                            // ccContactsGate ריק, ואיש הקשר "נופל" לשם/טלפון החברה (מוצגות שתי כפילויות).
+                            if (t.customerId && ccContactsGate.length === 0) void hydrateTaskContacts(t.id, t.customerId);
+                            /* ── זיהוי "איש קשר" שהוא בעצם החברה עצמה ──
+                               בייבוא הלגסי נוצרו ~10,000 רשומות CustomerContact ש-fullName שלהן הוא
+                               *שם החברה* עם הטלפון הכללי, וחלקן מסומנות isPrimary — וגם
+                               Customer.contactName הועתק לשם החברה. לכן הבאנר הציג "שם איש קשר =
+                               שם החברה / טלפון איש קשר = טלפון החברה" במקום את האדם האמיתי.
+                               כאן מסננים אותן ומעדיפים רשומה עם נייד, שהיא מה שצריך לפולואפ. */
+                            const normNameGate = (s?: string | null) => (s || '').toString().replace(/[^0-9א-תA-Za-z]/g, '');
+                            const companyAliasesGate = new Set(
+                              [fu3CompanyName, linkedCustomerForGate?.name, (linkedCustomerForGate as any)?.companyname, t.leadCompany, t.customerName]
+                                .map(normNameGate)
+                                .filter(Boolean),
+                            );
+                            const isCompanyItselfGate = (name?: string | null) => {
+                              const n = normNameGate(name);
+                              return !!n && companyAliasesGate.has(n);
+                            };
+                            const isMobileGate = (p?: string | null) => /^(972|0)?5\d{8}$/.test((p || '').replace(/\D/g, ''));
+                            // אנשי קשר "אמיתיים" = לא החברה עצמה, ויש להם שם או טלפון.
+                            const realContactsGate = ccContactsGate.filter(
+                              (c) => (c.fullName?.trim() || c.phone?.trim()) && !isCompanyItselfGate(c.fullName),
+                            );
+                            // איש הקשר: קודם זה שנבחר בכרטיס; אחרת ראשי-עם-נייד → נייד → ראשי → הראשון.
+                            const fu3PrimaryContact = realContactsGate.find((c) => c.id && c.id === (fdGate as any).contactId)
+                              || realContactsGate.find((c) => c.isPrimary && isMobileGate(c.phone))
+                              || realContactsGate.find((c) => isMobileGate(c.phone))
+                              || realContactsGate.find((c) => c.isPrimary)
+                              || realContactsGate[0]
                               || null;
+                            // שם איש הקשר — רק ממקורות של איש קשר אמיתי. לא נופלים ל-followupCustomerName
+                            // ולא ל-contactName שהוא שם החברה, כדי לא להציג את שם החברה כאיש קשר.
                             const fu3ContactName = (
                               fu3PrimaryContact?.fullName
-                              || fdGate.contactName
-                              || linkedCustomerForGate?.contactName
-                              || (fu3IsCompany ? followupCustomerName : '')
+                              || [fdGate.contactName, linkedCustomerForGate?.contactName].find((v) => v && !isCompanyItselfGate(v))
                               || ''
                             ).trim();
+                            // טלפון איש הקשר — קודם הטלפון של איש הקשר עצמו. נופלים לטלפון הכללי רק אם יש
+                            // שם איש קשר אמיתי אך בלי טלפון, ורק אם הוא שונה מטלפון החברה (לא לכפול מספר).
                             const fu3ContactPhoneRaw = fu3PrimaryContact?.phone || '';
-                            const fu3ContactPhone = (fu3ContactPhoneRaw || fu3Phone || '').replace(/[^\d+]/g, '');
-                            // טלפון החברה: הטלפון הראשי של הלקוח/הליד. אם הוא זהה לטלפון איש הקשר — אין טעם לכפול.
-                            const fu3CompanyPhone = fu3Phone;
+                            const fu3CompanyPhone = fu3Phone; // טלפון החברה = הטלפון הראשי של הלקוח/הליד.
+                            const fu3ContactPhone = (
+                              fu3ContactPhoneRaw
+                                ? fu3ContactPhoneRaw
+                                : (fu3ContactName && fu3Phone && fu3Phone !== fu3CompanyPhone ? fu3Phone : '')
+                            ).replace(/[^\d+]/g, '');
+                            /* כותרת הפולואפ מנוסחת כפנייה אל נציג המכירות שאחראי על המשימה
+                               ("יורם, אתה מחכה להזמנה מהחברה X כבר: 3 ימים") — לכן שם פרטי של
+                               בעל המשימה, ובנפילה המשתמש המחובר. */
+                            const fu3RepFirstName = (t.owner || currentUser?.name || '').trim().split(/\s+/)[0] || '';
+                            const fu3WaitingFrom = fu3IsCompany ? `מהחברה ${fu3CompanyName}` : `מ${followupCustomerName}`;
+                            /* ── וואטסאפ/מייל בפולואפ פונים לאיש הקשר, לא למספר הכללי של החברה ──
+                               הפולואפ הוא שיחה עם האדם שמחזיק את ההצעה, ולכן הכפתורים מכוונים
+                               לטלפון/מייל של איש הקשר (בדיוק מה שמוצג בבאנר "טלפון איש קשר");
+                               אם לאיש הקשר אין טלפון/מייל — נפילה חזרה לפרטי הלקוח.
+                               רק ללקוח עסקי: אצל לקוח פרטי אין "איש קשר" והבאנר מציג את הטלפון
+                               של הלקוח עצמו, ולכן שם הכפתורים נשארים על פרטי הלקוח.
+                               מחושב כאן (ולא למעלה) כי fu3ContactPhone מוגדר רק אחרי זיהוי איש הקשר. */
+                            // לכפתורי וואטסאפ/חיוג: טלפון איש הקשר אם קיים, אחרת הטלפון הכללי (כדי שהכפתורים
+                            // תמיד יעבדו) — גם אם בתצוגה עמודת "טלפון איש קשר" ריקה כדי לא לכפול מספר.
+                            const fu3MsgPhone = fu3IsCompany ? (fu3ContactPhone || fu3Phone) : fu3Phone;
+                            const fu3MsgEmail = ((fu3IsCompany ? fu3PrimaryContact?.email : '') || fu3Email || '').trim();
+                            const waLink3 = fu3MsgPhone ? whatsAppLink(fu3MsgPhone) : null;
+                            const fu3MsgTarget = [fu3IsCompany ? fu3ContactName : followupCustomerName, fu3MsgPhone].filter(Boolean).join(' · ');
                             const coach = aiCoach[t.id];
                             const activeFollowupTab = followupTab[t.id] || 'service';
                             return (
@@ -19989,7 +21727,7 @@ function TasksPage({
                                       </div>
                                       <div>
                                         <div className="text-xl md:text-xl font-extrabold text-blue-900 leading-snug">
-                                          {followupCustomerName} מחכה להצעה שלו כבר{waitingSince ? ':' : ''}
+                                          {fu3RepFirstName ? `${fu3RepFirstName}, ` : ''}אתה מחכה להזמנה {fu3WaitingFrom} כבר{waitingSince ? ':' : ''}
                                         </div>
                                         {waitingSince ? (
                                           <div className="flex items-baseline gap-1.5 mt-1.5 flex-wrap">
@@ -20034,12 +21772,12 @@ function TasksPage({
                                         </a>
                                       )}
                                       {waLink3 && (
-                                        <a href={waLink3} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#25d366' }}>
+                                        <a href={waLink3} target="_blank" rel="noopener noreferrer" title={fu3MsgTarget ? `וואטסאפ ל${fu3IsCompany ? 'איש הקשר' : 'לקוח'} — ${fu3MsgTarget}` : 'וואטסאפ'} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#25d366' }}>
                                           <MessageCircle className="h-3.5 w-3.5" />וואטסאפ
                                         </a>
                                       )}
-                                      {fu3Email && (
-                                        <a href={`mailto:${fu3Email}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#3b82f6' }}>
+                                      {fu3MsgEmail && (
+                                        <a href={`mailto:${fu3MsgEmail}`} title={`מייל ל${(fu3IsCompany ? fu3ContactName : '') || followupCustomerName} — ${fu3MsgEmail}`} className="flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-bold text-white transition-all hover:scale-105" style={{ background: '#3b82f6' }}>
                                           <Mail className="h-3.5 w-3.5" />מייל
                                         </a>
                                       )}
@@ -20363,6 +22101,23 @@ function TasksPage({
                             // שם הפריט המלא (מתוך SERVICE_CATEGORIES לפי productName), למשל שם תת-שירות מלא —
                             // עדיף על ה-label המקוצר ("קרינה"). נופל חזרה ל-label המקוצר אם אין התאמה.
                             const coordFullItemName = (serviceNameFromProductId(t.productName, lead) || coordServiceLabel || '').trim();
+                            // ── השירותים בפועל מתוך הצעת המחיר האחרונה של הלקוח/ליד ──
+                            // הכותרת צריכה לשקף מה *באמת* הוצע (תיאורי פריטי ההצעה), לא רק את קטגוריית
+                            // המשימה הגנרית ("קרינה"). מושכים את תיאורי פריטי ה-lineItemsJson מההצעה האחרונה.
+                            const coordQuoteForTitle = (allQuotes || [])
+                              .filter((q) => (t.customerId && q.customerId === t.customerId) || (t.leadId && q.leadId === t.leadId))
+                              .sort((a, b) => new Date((b as any).createdAt || 0).getTime() - new Date((a as any).createdAt || 0).getTime())[0];
+                            const coordQuoteServices = (() => {
+                              const li = (coordQuoteForTitle as any)?.lineItemsJson;
+                              if (!Array.isArray(li)) return '';
+                              const names = li
+                                .map((row: any) => String(row?.description ?? row?.productDescription ?? row?.name ?? '').trim())
+                                .filter(Boolean);
+                              // מסירים כפילויות ומגבילים כדי לא להעמיס על ה-prompt.
+                              return Array.from(new Set(names)).slice(0, 6).join(', ');
+                            })();
+                            // בסיס השירות לניסוח: פריטי ההצעה בפועל > שם הפריט המלא > label קטגוריה.
+                            const coordServiceForTitle = (coordQuoteServices || coordFullItemName || coordServiceLabel || coordServiceRaw).trim();
                             // פרטים אישיים לניסוח הכותרת ע"י ה-GPT API (שם לקוח / שירות / עיר / כתובת / מיקום הפגישה).
                             const coordCustomerName = (t.customerName || t.leadName || customerLabel || '').trim();
                             const coordCity = (lead?.city || '').trim();
@@ -20379,14 +22134,23 @@ function TasksPage({
                             const titleBusy = !!coordTitleBusy[t.id];
                             const draftTitle = () => draftMeetingTitle(t.id, {
                               customerName: coordCustomerName,
-                              serviceName: coordServiceLabel || coordServiceRaw,
+                              // השירות לניסוח = פריטי הצעת המחיר בפועל (אם קיימת), אחרת קטגוריית המשימה.
+                              serviceName: coordServiceForTitle,
                               city: coordCity,
                               address: coordAddress,
                               location: coordMeetingLocation,
                             });
-                            // ניסוח אוטומטי פעם אחת בפתיחת שלב התיאום — רק אם המשתמש עדיין לא ערך כותרת ידנית.
-                            if (!coordTitleDraftedRef.current[t.id] && coordForms[t.id]?.subject === undefined) {
-                              coordTitleDraftedRef.current[t.id] = true; // סימון מיידי כדי למנוע ריצה כפולה
+                            // ניסוח אוטומטי בפתיחת שלב התיאום — רק אם המשתמש עדיין לא ערך כותרת ידנית.
+                            // מפתח הריצה כולל את השירות: אם ברנדר הראשון עוד לא היה שירות (הצעת המחיר/פרטי
+                            // הליד נטענו מאוחר יותר), נריץ שוב כשהשירות מתגלה — כדי שהכותרת תתבסס על השירות
+                            // הנבחר ולא תישאר על ה-fallback הגנרי. לא דורס כותרת שהמשתמש הקליד ידנית.
+                            const coordDraftKey = coordServiceForTitle || '(none)';
+                            if (
+                              coordTitleDraftedRef.current[t.id] !== coordDraftKey &&
+                              coordForms[t.id]?.subject === undefined &&
+                              !titleBusy
+                            ) {
+                              coordTitleDraftedRef.current[t.id] = coordDraftKey; // סימון מיידי למניעת ריצה כפולה
                               void draftTitle();
                             }
                             const ccContactsCoord = taskContactsMap[t.id] || [];
@@ -20532,15 +22296,10 @@ function TasksPage({
                                 }
                                 const data = await r.json();
                                 setCoordResult((p) => ({ ...p, [t.id]: data }));
-                                // שמירת נתוני הפגישה ב-TaskField. לא חוסמת המשך, אבל *כן* נבדקת:
-                                // אם השרת דילג (productName לא תואם ל-InspectionType / שדות חובה חסרים)
-                                // מציגים אזהרה במקום להיכשל בשקט. productName (קוד סוג הבדיקה)
-                                // מתורגם בשרת ל-inspectionTypeId (uuid) מתוך טבלת InspectionType.
-                                // השרת מחזיר { skipped: true, missing: [...] } כשלא ניתן לכתוב שורת TaskField
-                                // (נפוץ: למשימה אין productName, או שהקוד לא קיים ב-InspectionType).
-                                // מחכים לתוצאה כדי לדעת אם להתריע — אם השמירה נכשלה, משאירים את הפאנל פתוח
-                                // עם אזהרה במקום לקדם בשקט את המשימה בלי פרטי שדה.
-                                let fieldSaved = false;
+                                // שמירת נתוני הפגישה ב-TaskField — best-effort בלבד ולא חוסמת.
+                                // שורת TaskField כבר אינה נדרשת לקידום המשימה, לכן אם השרת מדלג
+                                // (skipped) או שהקריאה נכשלת — לא מציגים שגיאה למשתמש ולא עוצרים
+                                // את הזרימה; הפגישה כבר נוצרה ב-Outlook וזה מה שקובע.
                                 try {
                                   const fr = await apiFetch(apiUrl(`/tasks/${t.id}/field`), {
                                     method: 'POST',
@@ -20566,32 +22325,20 @@ function TasksPage({
                                       preVisitEmailEnabled: !!preVisitTest && sendPreVisitGuidelines,
                                     }),
                                   });
-                                  const fd = fr.ok ? await fr.json().catch(() => null) : null;
-                                  if (fr.ok && fd && !fd.skipped) {
-                                    fieldSaved = true;
-                                  } else {
-                                    const miss = Array.isArray(fd?.missing) ? fd.missing.join(', ') : '';
-                                    setCoordError((p) => ({
-                                      ...p,
-                                      [t.id]: `הפגישה נוצרה ב-Outlook, אך פרטי השדה לא נשמרו במשימה${miss ? ` (חסר: ${miss})` : ''}. בדקו שסוג הבדיקה מוגדר במשימה.`,
-                                    }));
+                                  if (!fr.ok) {
+                                    console.warn(`task field save skipped for ${t.id}: HTTP ${fr.status}`);
                                   }
-                                } catch {
-                                  setCoordError((p) => ({
-                                    ...p,
-                                    [t.id]: 'הפגישה נוצרה ב-Outlook, אך שמירת פרטי השדה במשימה נכשלה.',
-                                  }));
+                                } catch (e) {
+                                  console.warn('task field save failed', e);
                                 }
                                 // נקבעה פגישה ב-Outlook → שלב התיאום הסתיים. מקדמים את המשימה
                                 // לשלב הבא (ביצוע) — בלי לסמן DONE (שהיה מקפיץ אותה לשלב האחרון/סגור).
                                 // type=FIELD_WORK → detectStep מחזיר 5 (ביצוע). status נשאר פעיל.
                                 void updateTaskField(t.id, { type: 'FIELD_WORK' });
-                                // רק אם פרטי השדה נשמרו — חוזרים לרשימת המשימות. אם דילגנו,
-                                // משאירים את הפאנל פתוח כדי שהעובד יראה את האזהרה ויוכל לתקן.
-                                if (fieldSaved) {
-                                  setManualStepOverride((prev) => { const n = { ...prev }; delete n[t.id]; return n; });
-                                  setExpandedTaskId(null);
-                                }
+                                // הפגישה נוצרה → סוגרים את הפאנל וחוזרים לרשימת המשימות,
+                                // בלי תלות בהצלחת שמירת פרטי השדה.
+                                setManualStepOverride((prev) => { const n = { ...prev }; delete n[t.id]; return n; });
+                                setExpandedTaskId(null);
                               } catch {
                                 setCoordError((p) => ({ ...p, [t.id]: 'שגיאת רשת — נסו שוב' }));
                               } finally {
@@ -20613,7 +22360,8 @@ function TasksPage({
                                       </div>
                                       <div>
                                         <div className="text-xl md:text-xl font-extrabold text-blue-900 leading-snug">
-                                          {meetingTitle}
+                                          {/* מציג את הכותרת שנוסחה ב-AI (subject) — לא את ה-fallback הגנרי */}
+                                          {titleBusy && !form.subject ? '✨ מנסח כותרת…' : subject}
                                         </div>
                                         <div className="text-sm font-bold text-blue-700 mt-1">
                                           קביעת פגישה ביומן Outlook — אפשר לצרף עובדים נוספים והלקוח לתיאום משותף
@@ -20816,6 +22564,52 @@ function TasksPage({
                                       <div className="text-[12px] text-slate-400">אפשר לצרף קבצים לפגישה — הם יופיעו בהזמנת ה-Outlook.</div>
                                     )}
                                   </div>
+
+                                  {/* ── ערכת ראדון (61 / 10000) — הערכה אצל הלקוח, ואין מה לנהל
+                                      בזרימה. הפעולה היחידה: לתזמן לו תזכורת להחזיר אותה. ── */}
+                                  {isRadonKitSku(t.productName) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRadonReminderTask({
+                                        taskId: t.id,
+                                        sku: String(t.productName ?? '').trim(),
+                                      })}
+                                      className="flex w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-right transition hover:border-emerald-300 hover:bg-emerald-100/70"
+                                    >
+                                      <MessageCircle className="h-4 w-4 shrink-0 text-emerald-700" />
+                                      <span className="min-w-0">
+                                        <span className="block text-[13px] font-bold text-emerald-800">
+                                          תזכורת החזרת ערכה ללקוח
+                                        </span>
+                                        <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">
+                                          אישור מספר הטלפון, מועד התזכורת ונוסח ההודעה
+                                        </span>
+                                      </span>
+                                    </button>
+                                  )}
+
+                                  {/* ── זרימת ראדון — רק לבדיקות ראדון שאינן ערכה (10044 / 10017) ── */}
+                                  {isRadonTestSku(t.productName) && !isRadonKitSku(t.productName) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRadonPanelTask({
+                                        taskId: t.id,
+                                        sku: String(t.productName ?? '').trim(),
+                                        customerId: t.customerId ?? null,
+                                      })}
+                                      className="flex w-full items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/70 p-3.5 text-right transition hover:border-violet-300 hover:bg-violet-100/70"
+                                    >
+                                      <ClipboardList className="h-4 w-4 shrink-0 text-violet-700" />
+                                      <span className="min-w-0">
+                                        <span className="block text-[13px] font-bold text-violet-800">
+                                          פתח זרימת בדיקת ראדון
+                                        </span>
+                                        <span className="mt-0.5 block text-[11px] font-semibold text-violet-700">
+                                          שאלון פתיחה, קביעת מסלול, וניהול גלאים
+                                        </span>
+                                      </span>
+                                    </button>
+                                  )}
 
                                   {/* ── צ'קליסט הנחיות ללקוח — רק לבדיקות איכות אוויר שיש להן נוסח הנחיות ── */}
                                   {preVisitTest && (() => {
@@ -21110,6 +22904,46 @@ function TasksPage({
                               );
                             })()}
 
+                            {/* פאנל זרימת הראדון — z גבוה מפאנל המשימה המורחב (z-[9999]) */}
+                            {radonPanelTask?.taskId === t.id && (
+                              <RadonFlowPanel
+                                taskId={radonPanelTask.taskId}
+                                sku={radonPanelTask.sku}
+                                customerId={radonPanelTask.customerId}
+                                authUser={currentUser ? { id: currentUser.id, role: currentUser.role } : null}
+                                onClose={() => setRadonPanelTask(null)}
+                              />
+                            )}
+
+                            {/* ── ערכת ראדון: תזכורת החזרה ללקוח (הטופס היחיד בזרימת הערכה) ──
+                                z-[10050]: הפאנל המורחב הוא z-[9999]. */}
+                            {radonReminderTask?.taskId === t.id && (
+                              <div
+                                className="fixed inset-0 z-[10050] flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm"
+                                dir="rtl"
+                                onMouseDown={(e) => { if (e.target === e.currentTarget) setRadonReminderTask(null); }}
+                              >
+                                <div className="my-12 w-full max-w-lg rounded-2xl bg-white p-4 shadow-2xl">
+                                  <div className="mb-3 flex items-center justify-between">
+                                    <div className="text-[15px] font-bold text-slate-800">תזכורת החזרת ערכת ראדון</div>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRadonReminderTask(null)}
+                                      className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                                      aria-label="סגור"
+                                    >
+                                      <X className="h-5 w-5" />
+                                    </button>
+                                  </div>
+                                  <CustomerReminderCard
+                                    taskId={radonReminderTask.taskId}
+                                    sku={radonReminderTask.sku}
+                                    authUser={currentUser ? { id: currentUser.id, role: currentUser.role } : null}
+                                  />
+                                </div>
+                              </div>
+                            )}
+
                             {alreadySentTaskId === t.id && (
                               <MarkReportSentModal
                                 open
@@ -21145,7 +22979,7 @@ function TasksPage({
                                 }}
                                 currentUser={currentUser}
                                 defaultEmail={((customers.find((c) => c.id === t.customerId) as any)?.email as string | undefined) || t.leadEmail || ''}
-                                isPrivateCustomer={((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
+                                isPrivateCustomer={!isApprovalExempt(currentUser) && ((customers.find((c) => c.id === t.customerId) as any)?.type as string | undefined) === 'PRIVATE'}
                                 employees={users.filter((u) => u.email).map((u) => ({ id: u.id, name: u.name, email: u.email }))}
                                 onClose={() => setReportModalTaskId(null)}
                                 onSent={async ({ paymentStatus }) => {
@@ -21166,6 +23000,131 @@ function TasksPage({
                                   setExpandedTaskId(null);
                                 }}
                               />
+                            )}
+                          </div>
+                          ) : currentStep === 7 ? (
+                          /* ── שלב גבייה — הנפקת חשבונית (כספית) + דיווח תשלום ── */
+                          <div className="px-6 py-6 flex flex-col items-center justify-center text-center" style={{ direction: 'rtl' }}>
+                            <div className="flex items-center justify-center rounded-xl mb-3" style={{ width: 56, height: 56, background: '#eff6ff' }}>
+                              <FileText className="h-8 w-8" style={{ color: '#2563eb' }} />
+                            </div>
+                            <div className="text-xl font-extrabold text-slate-800 mb-1">גבייה</div>
+                            <div className="text-sm text-slate-500 mb-4">הפק חשבונית ללקוח בכספית, ודווח על קבלת התשלום.</div>
+                            {/* ── ארבעת סוגי המסמכים. הירוקים נושאים תקבול בפועל.
+                                אמצעי/תנאי התשלום ואיש הקשר נבחרים בדיאלוג שנפתח בלחיצה. ── */}
+                            <div className="grid w-full max-w-lg grid-cols-2 gap-2">
+                              {COLLECTION_DOC_KINDS.map((k) => (
+                                <button
+                                  key={k.kind}
+                                  type="button"
+                                  disabled={collectionInvoiceBusy === t.id}
+                                  // כל ארבעת הסוגים עוברים דרך הדיאלוג — שם נבחרים איש
+                                  // הקשר ותנאי/אמצעי התשלום, ולכן אין יותר בוררים כאן.
+                                  onClick={() => setPendingCollectionDoc({
+                                    taskId: t.id, kind: k.kind, label: k.label, paid: k.paid,
+                                  })}
+                                  className={cn(
+                                    'flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition active:scale-95 disabled:opacity-50',
+                                    k.paid
+                                      ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                      : 'border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100',
+                                  )}
+                                >
+                                  <FileText className="h-4 w-4 flex-shrink-0" /> {k.label}
+                                </button>
+                              ))}
+                            </div>
+                            {collectionInvoiceBusy === t.id && (
+                              <div className="mt-2 text-sm font-semibold text-slate-500">מנפיק מסמך בכספית…</div>
+                            )}
+                            {/* אישור תנאי תשלום לפני ההנפקה — מהם נגזר תאריך היעד בכספית */}
+                            {pendingCollectionDoc?.taskId === t.id && (
+                              <CollectionPaymentTermsModal
+                                taskId={pendingCollectionDoc.taskId}
+                                kindLabel={pendingCollectionDoc.label}
+                                paid={pendingCollectionDoc.paid}
+                                currentUser={currentUser}
+                                onCancel={() => setPendingCollectionDoc(null)}
+                                onConfirm={(v) => {
+                                  const doc = pendingCollectionDoc;
+                                  setPendingCollectionDoc(null);
+                                  if (doc) void issueCollectionInvoice(doc.taskId, doc.kind, v);
+                                }}
+                              />
+                            )}
+                            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                disabled={collectionInvoiceBusy === t.id}
+                                onClick={() => { void updateTaskField(t.id, { status: 'DONE' }); setExpandedTaskId(null); }}
+                                className="flex items-center gap-2 rounded-xl px-6 py-2 text-base font-bold text-white transition hover:brightness-110 active:scale-95 disabled:opacity-50"
+                                style={{ background: '#16a34a' }}
+                              >
+                                <CheckCircle2 className="h-5 w-5" /> סיים וסגור משימה
+                              </button>
+                            </div>
+                            {collectionInvoiceMsg && collectionInvoiceMsg.taskId === t.id && (
+                              <div className={`mt-3 text-sm font-semibold ${collectionInvoiceMsg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{collectionInvoiceMsg.text}</div>
+                            )}
+
+                            {/* ── אישור שליחה ללקוח — נפתח אחרי ההנפקה. בלי אישור כאן לא נשלח מייל.
+                                z-[10050]: הפאנל המורחב הוא z-[9999], ובלי זה המודל נופל מאחוריו. ── */}
+                            {emailPrompt && emailPrompt.taskId === t.id && (
+                              <div
+                                className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+                                onClick={() => !emailSending && closeEmailPrompt()}
+                              >
+                                <div
+                                  className="w-full max-w-md overflow-hidden rounded-xl bg-white text-right shadow-2xl"
+                                  onClick={(e) => e.stopPropagation()}
+                                  dir="rtl"
+                                >
+                                  <div className="border-b border-slate-100 px-4 py-4">
+                                    <div className="text-base font-bold text-slate-900">
+                                      לשלוח את המסמך ללקוח במייל?
+                                    </div>
+                                    <div className="mt-1 text-xs text-slate-500">
+                                      {emailPrompt.docLabel} {emailPrompt.number} הונפקה ונרשמה בכספית.
+                                      המייל יישלח מכספית עם המסמך מצורף.
+                                    </div>
+                                  </div>
+                                  <div className="space-y-3 p-4">
+                                    <div>
+                                      <label className="mb-1 block text-sm font-semibold text-slate-600">כתובת המייל של הלקוח</label>
+                                      <Input
+                                        type="email"
+                                        dir="ltr"
+                                        value={emailPrompt.to}
+                                        onChange={(e) => setEmailPrompt((p) => (p ? { ...p, to: e.target.value } : p))}
+                                        placeholder="name@example.com"
+                                        autoFocus
+                                      />
+                                      {!emailPrompt.to && (
+                                        <div className="mt-1 text-xs text-amber-600">
+                                          לא נמצאה כתובת מייל לאיש הקשר — אפשר להקליד ידנית.
+                                        </div>
+                                      )}
+                                    </div>
+                                    {emailPromptMsg && <div className="text-sm text-red-600">{emailPromptMsg}</div>}
+                                    <div className="flex justify-end gap-2 pt-1">
+                                      <Button
+                                        className="rounded-xl bg-slate-100 px-4 text-slate-700 hover:bg-slate-200"
+                                        onClick={() => { if (!emailSending) closeEmailPrompt(); }}
+                                      >
+                                        לא עכשיו
+                                      </Button>
+                                      <Button
+                                        style={{ background: galit.primary }}
+                                        className="rounded-xl px-4"
+                                        onClick={confirmSendDocumentEmail}
+                                        disabled={emailSending || !emailPrompt.to.trim()}
+                                      >
+                                        {emailSending ? 'שולח…' : 'שלח ללקוח'}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             )}
                           </div>
                           ) : (
@@ -21212,6 +23171,7 @@ function TasksPage({
           taskId={execPaymentGate.taskId}
           kind="EXEC_UNPAID_PRIVATE"
           isPrivateCustomer={
+            !isApprovalExempt(currentUser) &&
             ((customers.find(
               (c) => c.id === tasks.find((x) => x.id === execPaymentGate.taskId)?.customerId,
             ) as any)?.type as string | undefined) === 'PRIVATE'
@@ -21304,7 +23264,7 @@ function TasksPage({
             <FormField label="קשור לליד">
               <select className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm" value={form.leadId} onChange={(e) => setForm((p: any) => ({ ...p, leadId: e.target.value }))}>
                 <option value="">—</option>
-                {leads.map((l) => <option key={l.id} value={l.id}>{l.fullName || l.name || l.phone}</option>)}
+                {leads.map((l) => <option key={l.id} value={l.id}>{l.fullName || l.name || phoneToDisplay(l.phone)}</option>)}
               </select>
             </FormField>
           </div>
@@ -21500,6 +23460,17 @@ async function requestManagerApproval(
  *
  * העובד חסום עד שיורם/גיא מאשרים; אין יותר הצהרה עצמית.
  */
+/**
+ * מי פטור משער "לקוח פרטי שטרם שילם" — אותה רשימה כמו המאשרים בשרת
+ * (DEFAULT_APPROVER_EMAILS ב-approvals.service.ts). מאשר לא מבקש אישור מעצמו.
+ * הבדיקה לפי מייל ולא לפי role, כי גלית רשומה כ-TECHNICIAN.
+ */
+const APPROVAL_EXEMPT_EMAILS = ['yoram@galit.co.il', 'guy@galit.co.il', 'galit@galit.co.il'];
+function isApprovalExempt(user: { email?: string | null } | null | undefined): boolean {
+  const e = (user?.email || '').trim().toLowerCase();
+  return !!e && APPROVAL_EXEMPT_EMAILS.includes(e);
+}
+
 function PaymentApprovalGate({
   currentUser,
   taskId,
@@ -22196,6 +24167,9 @@ export default function GalitCRMPrototype() {
   const [loginError, setLoginError] = useState('');
   const [users, setUsers] = useState<AppUser[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  /** מזהי הלקוחות שהמשתמש נכנס אליהם לאחרונה, מהחדש לישן — ל"10 לקוחות אחרונים".
+   *  נטען מהשרת (CustomerView) ומתעדכן מיידית בכל כניסה ללקוח. */
+  const [recentViewIds, setRecentViewIds] = useState<string[]>([]);
   const [timeline] = useState<TimelineEvent[]>(timelineSeed);
   const [customerFull, setCustomerFull] = useState<any | null>(null);
   const [customerFullLoading, setCustomerFullLoading] = useState(false);
@@ -22248,16 +24222,21 @@ export default function GalitCRMPrototype() {
     if (!targetTaskId) return;
     // Advance to פולואפ (step index 3)
     setParentManualStepOverride((prev) => ({ ...prev, [targetTaskId!]: 3 }));
-    // Update the task type on the server
-    fetch(`/api/tasks/${targetTaskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'SALES_FOLLOWUP' }),
+    // Update the task stage on the server.
+    // היה כאן PUT ל-`/api/tasks/:id` — נתיב שאינו קיים: ה-API הוא Nest ב-origin נפרד
+    // וחושף @Patch, ואין route כזה ב-Next. הקריאה החזירה 404 ונבלעה ב-catch, ולכן
+    // המשימה לא קודמה בשרת בפועל: היא נראתה "תקועה" בהצעת מחיר, שני ה-helpers
+    // בשרת (advanceTaskToCoordination / advanceFollowupToCoordination) לא זיהו אותה,
+    // והמשתמש הריץ את הזרימה מחדש ממסלול אחר — עוד מקור לכפילות משימות.
+    // currentStage גובר על type בקביעת השלב, ולכן שולחים את שניהם, כמו סנכרון השלבים.
+    apiFetch(apiUrl(`/tasks/${targetTaskId}`), {
+      method: 'PATCH',
+      body: JSON.stringify({ type: 'step4', currentStage: 3, currentStageChangedAt: new Date().toISOString() }),
     }).catch(() => { /* silent */ });
     // Update local tasks array
     const tid = targetTaskId;
     setTasks((prev) => prev.map((tk) =>
-      tk.id === tid ? { ...tk, type: 'SALES_FOLLOWUP' } : tk
+      tk.id === tid ? { ...tk, type: 'step4', currentStage: 3 } : tk
     ));
   }, [quoteOriginTaskId, quotes, tasks, setTasks]);
 
@@ -22727,6 +24706,8 @@ export default function GalitCRMPrototype() {
         createdAt: q.createdAt ?? undefined,
         updatedAt: q.updatedAt ?? undefined,
         leadId: q.leadId ?? null,
+        // נדרש לניסוח כותרת הפגישה (שלב התיאום) — השירותים בפועל מפריטי ההצעה.
+        lineItemsJson: q.lineItemsJson ?? null,
       }));
       setQuotes(normalized);
     } catch {
@@ -22748,6 +24729,24 @@ export default function GalitCRMPrototype() {
     }
   }, [currentUser]);
 
+  /** טוען את "10 הלקוחות האחרונים" של המשתמש (CustomerView) — מהחדש לישן. */
+  const reloadRecentViews = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await apiFetch(apiUrl('/customers/recent-views'), { authUser: currentUser });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setRecentViewIds(data.map((c: { id: string }) => c.id).filter(Boolean));
+    } catch {
+      /* שקט — נפילה חזרה ל-createdAt */
+    }
+  }, [currentUser]);
+
+  // "10 לקוחות אחרונים" של המשתמש — נטען פעם אחת עם ההתחברות.
+  useEffect(() => {
+    void reloadRecentViews();
+  }, [reloadRecentViews]);
+
   const reloadTasks = useCallback(async () => {
     if (!currentUser) return;
     if (!canAccess(currentUser.role, 'tasks')) return;
@@ -22766,6 +24765,7 @@ export default function GalitCRMPrototype() {
         projectName: t.project?.name ?? undefined,
         customerId: t.customerId ?? undefined,
         customerName: t.customer?.name ?? undefined,
+        customerPhone: t.customer?.phone || t.customer?.contacts?.[0]?.phone || t.customer?.contacts?.[0]?.mobile || undefined,
         leadId: t.leadId ?? undefined,
         leadName: t.lead?.fullName ?? undefined,
         leadPhone: t.lead?.phone ?? undefined,
@@ -22780,6 +24780,7 @@ export default function GalitCRMPrototype() {
         currentStage: t.currentStage ?? null,
         currentStageChangedAt: t.currentStageChangedAt ?? null,
         incomingLeadId: t.incomingLeadId ?? null,
+        transferredAt: t.transferredAt ?? null,
         processNotes: t.processNotes ?? null,
         createdAt: t.createdAt ?? undefined,
       }));
@@ -23022,7 +25023,42 @@ export default function GalitCRMPrototype() {
     setCustomers((prev) => prev.map((row) => (row.id === c.id ? { ...row, ...c } : row)));
   }, [customerFull]);
 
+  /** רושם "כניסה" ללקוח: מקדם אותו לראש "10 לקוחות אחרונים" מיידית (אופטימי) ומודיע
+   *  לשרת (fire-and-forget). מזהה זמני (__new__ / ריק) לא נרשם. */
+  const recordCustomerView = useCallback(
+    (customerId?: string | null) => {
+      if (!customerId || customerId === '__new__') return;
+      setRecentViewIds((prev) => [customerId, ...prev.filter((id) => id !== customerId)].slice(0, 10));
+      if (!currentUser) return;
+      void apiFetch(apiUrl(`/customers/${customerId}/view`), {
+        method: 'POST',
+        authUser: currentUser,
+      }).catch(() => {
+        /* שקט — רישום "לקוח אחרון" הוא best-effort ולא חוסם את פתיחת הכרטיס */
+      });
+    },
+    [currentUser],
+  );
+
+  /* ── מנעול יצירת משימה ──
+     כל יוצרי המשימות שלמטה ("חדש → לקוח", "התחל תהליך", לקוח שנוצר מליד) שולחים
+     POST /tasks בלחיצה. בלי מנעול, לחיצה נוספת בזמן שהבקשה עדיין באוויר יצרה משימה
+     נוספת בכל פעם — כך נוצרו 4 עותקים של "כרטיס לקוח — תומר גולדפר" תוך 0.7 שניות.
+     השרת מזהה כפילות ומחזיר את הקיימת (ראו findDuplicateOf ב-tasks.service), אבל
+     המנעול חוסך את הסבב ומונע ריצוד ב-UI. המפתח = מזהה הפעולה (שם/מזהה לקוח). */
+  const taskCreateLockRef = useRef<Record<string, boolean>>({});
+  const withTaskCreateLock = useCallback(async (key: string, fn: () => Promise<void>) => {
+    if (taskCreateLockRef.current[key]) return;
+    taskCreateLockRef.current[key] = true;
+    try {
+      await fn();
+    } finally {
+      taskCreateLockRef.current[key] = false;
+    }
+  }, []);
+
   const openCustomerPage = (customer: Customer) => {
+    recordCustomerView(customer.id);
     setSelectedCustomer(customer);
     setSelectedLead(null);
     setIsNewCustomerMode(false);
@@ -23044,7 +25080,8 @@ export default function GalitCRMPrototype() {
   };
 
   /** חדש → לקוח: פותח משימה חדשה בשלב כרטיס לקוח (שלב 0) */
-  const handleNewCustomer = async (prefillName?: string) => {
+  const handleNewCustomer = async (prefillName?: string) =>
+    withTaskCreateLock(`new-customer:${prefillName || ''}`, async () => {
     try {
       const res = await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
@@ -23090,10 +25127,11 @@ export default function GalitCRMPrototype() {
         window.history.pushState({}, '', `${window.location.pathname}?view=new-customer`);
       }
     }
-  };
+  });
 
   /** ליד שהומר ללקוח: פותח משימה חדשה מקושרת ללקוח בשלב כרטיס לקוח (שלב 0), במקום כרטיס הלקוח הישן */
-  const openCustomerInTaskWorkspace = async (customer: Customer) => {
+  const openCustomerInTaskWorkspace = async (customer: Customer) =>
+    withTaskCreateLock(`customer-workspace:${customer.id}`, async () => {
     try {
       const res = await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
@@ -23116,7 +25154,7 @@ export default function GalitCRMPrototype() {
     } catch {
       openCustomerPage(customer);
     }
-  };
+  });
 
   const openLeadPage = (lead: Lead) => {
     setSelectedLead(lead);
@@ -23579,6 +25617,7 @@ export default function GalitCRMPrototype() {
       (u.name && u.name === currentUser.name)
     );
     const ownerId = dbUser?.id ?? currentUser.id;
+    return withTaskCreateLock(`process:${cust.id}`, async () => {
     try {
       const res = await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
@@ -23598,7 +25637,8 @@ export default function GalitCRMPrototype() {
         return;
       }
       const task = await res.json();
-      setTasks((prev) => [...prev, task]);
+      // השרת עשוי להחזיר משימה קיימת (מניעת כפילות) — מוסיפים רק אם היא באמת חדשה.
+      setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]));
       // מעבירים את איש הקשר הנבחר ל-TasksPage כדי שיזרע אותו לטופס הפנייה של המשימה.
       setPendingPrefillContact(contact || null);
       setPendingExpandTaskId(task.id);
@@ -23607,6 +25647,7 @@ export default function GalitCRMPrototype() {
     } catch (err) {
       console.error('[start process] task creation network error:', err);
     }
+    });
   };
 
   const startCustomerProcess = async (cust: Customer) => {
@@ -23692,6 +25733,71 @@ export default function GalitCRMPrototype() {
     setAuthBootstrapped(true);
   }, []);
 
+  // משחרר את נגן ההתראות במגע הראשון בדף (מדיניות autoplay של הדפדפן)
+  useEffect(() => primeNotifySound(), []);
+
+  /**
+   * ── התראה צידית: משימה הגיעה למועד היעד שלה ──
+   * אותו מיקום ואותה התנהגות כמו התראת "ליד חדש התקבל", עם כפתור לפתיחת המשימה.
+   * כללי הצגה:
+   *  - רק המשימות של המשתמש המחובר, שעדיין פתוחות.
+   *  - רק מועד שכבר עבר, ובחלון של 12 שעות — כדי שמשימות ישנות באיחור לא יציפו
+   *    את המסך בכל כניסה, אלא יתריעו רק כשהמועד באמת מגיע.
+   *  - כל משימה מתריעה פעם אחת ביום (נשמר ב-localStorage, מתאפס בכל יום חדש).
+   */
+  const DUE_TOAST_WINDOW_MS = 12 * 60 * 60 * 1000;
+  const [dueTaskToasts, setDueTaskToasts] = useState<{ id: string; title: string; who: string; overdueMin: number }[]>([]);
+  const notifiedDueTaskIds = useRef<Set<string>>(new Set());
+  const dueToastKey = `galit_due_task_notified_${currentUser?.id || 'anon'}`;
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(dueToastKey);
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved?.day === new Date().toLocaleDateString('en-CA') && Array.isArray(saved.ids)) {
+        notifiedDueTaskIds.current = new Set(saved.ids);
+      } else {
+        notifiedDueTaskIds.current = new Set();
+      }
+    } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    const check = () => {
+      const now = Date.now();
+      const fresh: { id: string; title: string; who: string; overdueMin: number }[] = [];
+      for (const t of tasks) {
+        if (!t.dueDate || notifiedDueTaskIds.current.has(t.id)) continue;
+        const s = (t.status || '').toUpperCase();
+        if (s === 'DONE' || s === 'CANCELLED') continue;
+        if (t.ownerId && t.ownerId !== currentUser?.id) continue;
+        const due = new Date(t.dueDate).getTime();
+        if (Number.isNaN(due) || due > now || now - due > DUE_TOAST_WINDOW_MS) continue;
+        notifiedDueTaskIds.current.add(t.id);
+        fresh.push({
+          id: t.id,
+          title: t.title || 'משימה',
+          who: t.customerName || t.leadName || '',
+          overdueMin: Math.floor((now - due) / 60000),
+        });
+      }
+      if (fresh.length === 0) return;
+      try {
+        window.localStorage.setItem(dueToastKey, JSON.stringify({
+          day: new Date().toLocaleDateString('en-CA'),
+          ids: Array.from(notifiedDueTaskIds.current).slice(-300),
+        }));
+      } catch { /* ignore */ }
+      setDueTaskToasts((prev) => [...fresh, ...prev].slice(0, 4));
+      playNotifyChime(); // צליל אחד לכל מנה של התראות, לא אחד לכל משימה
+    };
+    check();
+    const iv = window.setInterval(check, 60_000); // בדיקה כל דקה — כדי שההתראה תופיע בשעה עצמה
+    return () => window.clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks, currentUser?.id]);
+
   // ── התראה צידית גלובלית: לידים נכנסים חדשים (בכל עמוד) ──
   const [leadToasts, setLeadToasts] = useState<{ id: string; subject: string; taskId?: string | null; ownerId?: string | null; dedupeKey: string }[]>([]);
   // מפתחות לידים שכבר נסגרו (לפי internetMessageId — אותו מייל שהגיע לכמה תיבות = פריט אחד).
@@ -23764,6 +25870,18 @@ export default function GalitCRMPrototype() {
     return () => { cancelled = true; window.clearInterval(t); };
   }, [currentUser?.id]);
 
+  // ── צליל התראה לפופ-אפ "ליד חדש נכנס" ──
+  // ב-effect נפרד ולא בתוך ה-setState updater: updater חייב להישאר טהור (React קורא לו
+  // פעמיים ב-StrictMode, וזה היה מצלצל פעמיים). מנגן רק כשמופיע ליד שעוד לא צלצל עליו —
+  // כך סגירת פופ-אפ או ריענון הרשימה לא מפיקים צליל.
+  const chimedLeadIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const hasNew = leadToasts.some((x) => !chimedLeadIdsRef.current.has(x.id));
+    if (!hasNew) return;
+    for (const x of leadToasts) chimedLeadIdsRef.current.add(x.id);
+    playNotifyChime();
+  }, [leadToasts]);
+
   // ── ניטור גלובלי: כשעובד אחר "תופס"/מעביר ליד, המשימה "ליד חדש נכנס" צריכה להיעלם ──
   // רץ בכל טאב (לא רק בטאב "משימות"), כדי שהמשימה תיעלם מיד לכל העובדים ולא רק אצל מי
   // שנמצא כרגע ברשימת המשימות. כשליד שהיה NEW אצל העובד נעלם מ-/incoming-leads (עבר
@@ -23817,9 +25935,53 @@ export default function GalitCRMPrototype() {
 
   return (
     <div className="min-h-screen bg-slate-50" dir="rtl">
+      {/* ── התראות צידיות: משימות שהגיע מועד היעד שלהן (גלובלי, בכל עמוד) ── */}
+      {dueTaskToasts.length > 0 && (
+        <div className="fixed z-[10001] flex flex-col gap-2" style={{ top: 72, left: 16 }} dir="rtl">
+          {dueTaskToasts.map((dt) => (
+            <div key={dt.id} className="flex items-start gap-3 rounded-xl border border-amber-300 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#fef3c7' }}>
+                <Clock3 className="h-5 w-5 text-amber-600" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-amber-900">
+                  {dt.overdueMin < 5 ? 'הגיע מועד המשימה!' : 'משימה באיחור!'}
+                </div>
+                <div className="text-[12px] font-semibold text-slate-700 truncate">{dt.title}</div>
+                {dt.who && <div className="text-[11px] text-slate-500 truncate">{dt.who}</div>}
+                <div className="mt-0.5 text-[11px] font-bold text-amber-700">
+                  {dt.overdueMin < 5
+                    ? 'עכשיו'
+                    : dt.overdueMin < 60
+                      ? `באיחור של ${dt.overdueMin} דק׳`
+                      : `באיחור של ${Math.floor(dt.overdueMin / 60)} שע׳`}
+                </div>
+                <button
+                  onClick={() => {
+                    setPendingExpandTaskId(dt.id);
+                    navigateSafely('tasks');
+                    void reloadTasks();
+                    setDueTaskToasts((prev) => prev.filter((x) => x.id !== dt.id));
+                  }}
+                  className="mt-2 rounded-lg bg-amber-500 px-3 py-1 text-[11px] font-bold text-white hover:bg-amber-600"
+                >
+                  פתח את המשימה
+                </button>
+              </div>
+              <button
+                onClick={() => setDueTaskToasts((prev) => prev.filter((x) => x.id !== dt.id))}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── התראות צידיות: לידים נכנסים חדשים (גלובלי, בכל עמוד) ── */}
       {leadToasts.length > 0 && (
-        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72, left: 16 }} dir="rtl">
+        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: dueTaskToasts.length > 0 ? 72 + dueTaskToasts.length * 132 : 72, left: 16 }} dir="rtl">
           {leadToasts.map((lt) => (
             <div key={lt.id} className="flex items-start gap-3 rounded-xl border border-blue-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
               <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
@@ -24064,12 +26226,16 @@ export default function GalitCRMPrototype() {
           <CustomerSearchModal
             open={customerSearchOpen}
             customers={customers}
+            currentUser={currentUser}
             onClose={() => setCustomerSearchOpen(false)}
             onSelect={(customer) => {
               setCustomerSearchOpen(false);
               openCustomerPage(customer);
             }}
             onNewCustomer={handleNewCustomer}
+            // הרשימה הראשית מחזיקה עותק משלה של הלקוחות — בלי זה לקוח שנמחק
+            // מהחיפוש היה ממשיך להופיע במסך שמאחור עד לרענון.
+            onDeleted={(id) => setCustomers((prev) => prev.filter((c) => c.id !== id))}
           />
 
           {/* ── Quote Search Modal ── */}
@@ -24193,6 +26359,7 @@ export default function GalitCRMPrototype() {
               typeLabelMap={customerTypeLabelMap}
               classifications={customerClassifications}
               onReloadClassifications={reloadCustomerClassifications}
+              recentViewIds={recentViewIds}
             />
           )}
 
@@ -24330,6 +26497,12 @@ export default function GalitCRMPrototype() {
                     }
                   }}
                   onContactSelected={(id, name) => { setCustomerCardContactId(id ?? null); setCustomerCardContactName(name ?? null); }}
+                  // הכרטיס כבר קורא ל-onBack אחרי מחיקה; כאן רק מסירים את הלקוח
+                  // מהרשימה שברקע כדי שלא יופיע שוב עד לרענון.
+                  onCustomerDeleted={(id) => {
+                    setCustomers((prev) => prev.filter((c) => c.id !== id));
+                    setSelectedCustomer(null);
+                  }}
                   onNewQuote={(contactId) => {
                     setNewQuoteContactId(contactId ?? null);
                     setWorkspaceQuoteId(null);
@@ -24381,7 +26554,7 @@ export default function GalitCRMPrototype() {
                       (u.name && u.name === user.name)
                     );
                     const ownerId = dbUser?.id ?? user.id;
-                    void apiFetch(apiUrl('/tasks'), {
+                    void withTaskCreateLock(`process:${c.id}`, () => apiFetch(apiUrl('/tasks'), {
                       method: 'POST',
                       authUser: user,
                       body: JSON.stringify({
@@ -24399,12 +26572,13 @@ export default function GalitCRMPrototype() {
                         return;
                       }
                       const task = await res.json();
-                      setTasks((prev) => [...prev, task]);
+                      // ייתכן שהשרת החזיר משימה קיימת (מניעת כפילות) — לא מוסיפים פעמיים.
+                      setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]));
                       setParentExpandedTaskId(task.id);
                       void reloadTasks();
                     }).catch((err) => {
                       console.error('[onCustomerCreated] task creation network error:', err);
-                    });
+                    }));
                   }}
                 />
               </div>
@@ -24589,6 +26763,9 @@ export default function GalitCRMPrototype() {
             />
           )}
           {current === 'tests' && canAccess(currentUser.role, 'tests') && <EnvironmentalTestsPage />}
+          {current === 'affiliates' && canAccess(currentUser.role, 'affiliates') && (
+            <AffiliatesAdminPage currentUser={currentUser} />
+          )}
           {current === 'tasks' && canAccess(currentUser.role, 'tasks') && (
             <TasksPage
               tasks={tasks}
@@ -24607,6 +26784,7 @@ export default function GalitCRMPrototype() {
                 openInTab('lead-profile', `ליד: ${lead.fullName || ''}`, { leadId: lead.id });
               }}
               onOpenCustomer={(customer) => {
+                recordCustomerView(customer.id);
                 setSelectedCustomer(customer);
                 setSelectedLead(null);
                 setIsNewCustomerMode(false);
@@ -24643,6 +26821,8 @@ export default function GalitCRMPrototype() {
               onNavigate={navigateSafely}
               onNewCustomer={handleNewCustomer}
               onSearchCustomer={() => setCustomerSearchOpen(true)}
+              onOpenCustomerView={recordCustomerView}
+              recentViewIds={recentViewIds}
             />
           )}
           {current === 'alerts' && canAccess(currentUser.role, 'alerts') && <AlertsPage currentUser={currentUser} />}

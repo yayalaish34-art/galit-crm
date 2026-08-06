@@ -1,6 +1,6 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ChevronDown, Check, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Plus, Trash2, Copy, RefreshCw, Printer, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, ChevronDown, Check, FileText, LogOut, X, Search as SearchIcon, Pencil, Send, Mail, MessageCircle, Save, Loader2, GripVertical } from 'lucide-react';
 import { CustomerPickerModal, CustomerRow } from './customer-picker-modal';
 import { QuoteLookupModal, type QuoteLookupRow } from './quote-lookup-modal';
 import { apiUrl, apiFetch, type ApiAuthUser } from '../../lib/api-base';
@@ -10,7 +10,13 @@ import {
   mergeQuoteTemplateFull,
   type QuoteTemplateLineItem,
 } from '../../lib/quote-template-merge';
-import { SERVICE_CATEGORIES, flattenAllServices } from '../../lib/service-categories';
+import {
+  SERVICE_CATEGORIES,
+  mergeCatalogIntoCategories,
+  type CatalogRow,
+  type ServiceItem,
+  type ServiceCategory,
+} from '../../lib/service-categories';
 
 /* ── Quote line-item types & helpers ── */
 type LineItem = {
@@ -22,6 +28,8 @@ type LineItem = {
   qty: string;
   price: string;
   discountPct: string;
+  /** מסלול הקטלוג "קטגוריה › תת-קטגוריה" — לתצוגה כשהפריט נבחר מתת-שירות. אופציונלי. */
+  categoryPath?: string;
 };
 
 function calcTotal(item: LineItem): string {
@@ -58,7 +66,7 @@ function newLineItem(): LineItem {
   return {
     id: `${Date.now()}-${Math.random()}`,
     code: '', sku: '', description: '', channel: '',
-    qty: '1', price: '', discountPct: '0',
+    qty: '1', price: '', discountPct: '0', categoryPath: '',
   };
 }
 
@@ -349,7 +357,7 @@ function normalizeLineItemsFromApi(raw: unknown): LineItem[] {
   }
   if (!Array.isArray(arr)) return [];
   return arr
-    .map((row, i) => {
+    .map((row, i): LineItem | null => {
       if (!row || typeof row !== 'object') return null;
       const o = row as Record<string, unknown>;
       return {
@@ -361,6 +369,7 @@ function normalizeLineItemsFromApi(raw: unknown): LineItem[] {
         qty: String(o.qty ?? '1'),
         price: String(o.price ?? ''),
         discountPct: String(o.discountPct ?? '0'),
+        categoryPath: o.categoryPath != null ? String(o.categoryPath) : '',
       };
     })
     .filter((x): x is LineItem => x != null);
@@ -402,16 +411,23 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-/** Convert a Blob to a base64 string (chunked to avoid call-stack limits on large files) */
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
+/**
+ * Convert a Blob to a base64 string (without the data: prefix) via the browser-native
+ * FileReader.readAsDataURL — exactly like the Documents (מסמכים) upload path. This handles
+ * arbitrarily large files, unlike the previous manual chunk-encoder which loaded the whole
+ * file into memory and spread each chunk into String.fromCharCode(...) — that threw
+ * "Maximum call stack size exceeded" on large files, so big quote attachments failed.
+ */
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result);
+      resolve(s.includes(',') ? s.split(',')[1] : s);
+    };
+    fr.onerror = () => reject(new Error('read failed'));
+    fr.readAsDataURL(blob);
+  });
 }
 
 /* ── Quote template → service category mapping (for filtered merge picker) ──
@@ -445,12 +461,27 @@ const TEMPLATE_CATEGORY_KEYWORDS: { keyword: string; category: string }[] = [
   { keyword: 'בדיקות סביבתיות', category: 'general' },
 ];
 
-/** Find the service category id matching a quote template's name, by keyword */
-function getTemplateCategory(name: string): string | null {
-  for (const { keyword, category } of TEMPLATE_CATEGORY_KEYWORDS) {
-    if (name.includes(keyword)) return category;
+/**
+ * Find the service category id for a quote template. Prefers the template's
+ * explicit `serviceType` (the DB-assigned category — source of truth, editable
+ * without touching the template name), and only falls back to keyword-matching
+ * the template NAME when serviceType yields no match. This is what makes a
+ * template appear under its assigned category even when its NAME still mentions
+ * a different service (e.g. a "בנייה ירוקה …" template re-categorized to "תרמי").
+ */
+function getTemplateCategory(name: string, serviceType?: string | null): string | null {
+  const matchKeyword = (text: string): string | null => {
+    for (const { keyword, category } of TEMPLATE_CATEGORY_KEYWORDS) {
+      if (text.includes(keyword)) return category;
+    }
+    return null;
+  };
+  const svc = (serviceType || '').trim();
+  if (svc) {
+    const byService = matchKeyword(svc);
+    if (byService) return byService;
   }
-  return null;
+  return matchKeyword(name);
 }
 
 /* ── Default options for the תנאי תשלום dropdown ── */
@@ -484,25 +515,222 @@ const CAT_COLOR: Record<string, string> = {
 };
 
 /* ── ServiceTreePicker — hierarchical service selector for quote line items ── */
+type PickedService = { description: string; sku: string; price: string; categoryPath: string };
+
+/**
+ * מאחד את עץ השירותים הקבוע עם המחירון שב-DB.
+ *
+ * **הבאג שזה מתקן:** מסך ההגדרות → מחירון כותב ל-`QuoteItemCatalog`, אבל בורר
+ * השירותים רינדר את `SERVICE_CATEGORIES` — קובץ קבוע שנצרב ל-bundle. פריט
+ * שנוסף דרך הממשק נשמר כראוי ופשוט לא הופיע בשום מקום שאפשר לבחור בו.
+ * מקרה אמיתי: "טיפול וליווי בקבלת היתר הפעלה לשנאי – המשרד להגנת הסביבה"
+ * (10171, קרינה / ELF היתר) נשמר ולא נראה.
+ *
+ * משמש גם את הבורר וגם את מסך ההצעה, כדי ששניהם יראו בדיוק אותו קטלוג —
+ * אחרת שורה שנבחרה בבורר לא הייתה נמצאת בחיפוש המחיר של המסך.
+ */
+function useServiceCatalog(): {
+  serviceCategories: ServiceCategory[];
+  allServices: ServiceItem[];
+  serviceBySku: Map<string, PickedService>;
+} {
+  const [catalogRows, setCatalogRows] = useState<CatalogRow[]>([]);
+  useEffect(() => {
+    const user = getSessionUser();
+    if (!user) return;
+    apiFetch(apiUrl('/quote-item-catalog'), { authUser: user })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: unknown) => {
+        if (Array.isArray(rows)) setCatalogRows(rows as CatalogRow[]);
+      })
+      // כשל בטעינת המחירון לא משבית את הבורר — הוא מציג את העץ הקבוע בלבד.
+      .catch(() => undefined);
+  }, []);
+
+  const serviceCategories = useMemo(() => mergeCatalogIntoCategories(catalogRows), [catalogRows]);
+  const allServices = useMemo<ServiceItem[]>(() => {
+    const out: ServiceItem[] = [];
+    for (const cat of serviceCategories) {
+      for (const svc of cat.services) {
+        if (svc.subServices) out.push(...svc.subServices);
+        else out.push(svc);
+      }
+    }
+    return out;
+  }, [serviceCategories]);
+
+  /**
+   * מק"ט → הפריט המלא, כולל מסלול הקטגוריה.
+   * מאפשר להקליד מק"ט בשורת הפריט ולקבל את השירות מיד, בלי לפתוח את עץ השירותים.
+   * הערכים זהים למה ש-ServiceTreePicker מייצר בבחירה מהעץ (שם, מחיר, מסלול),
+   * כדי ששתי הדרכים יניבו בדיוק אותה שורה.
+   */
+  const serviceBySku = useMemo<Map<string, PickedService>>(() => {
+    const m = new Map<string, PickedService>();
+    const add = (key: string | undefined, item: PickedService) => {
+      const k = (key ?? '').trim();
+      // הראשון מנצח — עץ הקטגוריות הקבוע קודם לתוספות מהמחירון.
+      if (k && !m.has(k)) m.set(k, item);
+    };
+    for (const cat of serviceCategories) {
+      for (const svc of cat.services) {
+        if (svc.subServices?.length) {
+          for (const sub of svc.subServices) {
+            const item: PickedService = {
+              description: sub.name,
+              sku: (sub.sku ?? sub.id ?? '').trim(),
+              price: sub.price != null ? String(sub.price) : '',
+              categoryPath: [cat.name, svc.name].filter(Boolean).join(' › '),
+            };
+            add(sub.sku, item);
+            add(sub.id, item);
+          }
+        } else {
+          const item: PickedService = {
+            description: svc.name,
+            sku: (svc.sku ?? svc.id ?? '').trim(),
+            price: svc.price != null ? String(svc.price) : '',
+            categoryPath: cat.name,
+          };
+          add(svc.sku, item);
+          add(svc.id, item);
+        }
+      }
+    }
+    return m;
+  }, [serviceCategories]);
+
+  return { serviceCategories, allServices, serviceBySku };
+}
+
 function ServiceTreePicker({
   value,
   onSelect,
+  onAddMany,
 }: {
   value: string;
-  onSelect: (item: { description: string; sku: string; price: string }) => void;
+  onSelect: (item: { description: string; sku: string; price: string; categoryPath: string }) => void;
+  /** מוסיף פריטים נוספים כשורות חדשות (מעבר לראשון שממלא את השורה הנוכחית). */
+  onAddMany?: (items: PickedService[]) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [catId, setCatId] = useState<string | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
-  const closePanel = () => { setOpen(false); setCatId(null); setGroupId(null); };
+  // סימון-מרובה: מפתח = SKU, ערך = הפריט שנבחר (כולל מסלול קטגוריה). מתאפס בסגירה.
+  const [selected, setSelected] = useState<Record<string, PickedService>>({});
+  // סדר הבחירה — מערך SKU-ים לפי הסדר שבו ייכנסו כשורות בהצעה. ניתן לגרירה בפוטר.
+  const [selectedOrder, setSelectedOrder] = useState<string[]>([]);
+  // גרירה לשינוי סדר הבחירה בפוטר: dragEnabledSku = השורה שאחזו בידית שלה (רק היא draggable),
+  // dragSku = הנגררת, dragOverSku = היעד (לסימון ויזואלי).
+  const [dragEnabledSku, setDragEnabledSku] = useState<string | null>(null);
+  const [dragSku, setDragSku] = useState<string | null>(null);
+  const [dragOverSku, setDragOverSku] = useState<string | null>(null);
 
-  const activeCat = catId ? SERVICE_CATEGORIES.find((c) => c.id === catId) : null;
+  const { serviceCategories, allServices, serviceBySku } = useServiceCatalog();
+
+  // ── סדר מקומי של שורות השירותים ברשימת הקטלוג (Level 2/3) — ניתן לגרירה בלייב ──
+  // מפתח = catId (רמה 2) או `${catId}/${groupId}` (רמה 3); ערך = מערך מזהי שירותים לפי הסדר.
+  // מאותחל מהקטלוג ומשתנה בגרירה. לא נוגע ב-SERVICE_CATEGORIES הקבוע.
+  const [listOrder, setListOrder] = useState<Record<string, string[]>>({});
+  const [rowDragEnabled, setRowDragEnabled] = useState<string | null>(null); // id השורה שאחזו בידית שלה
+  const [rowDragId, setRowDragId] = useState<string | null>(null);
+  const [rowDragOverId, setRowDragOverId] = useState<string | null>(null);
+
+  /** מחזיר את רשימת השורות בסדר הנוכחי (המקומי אם שונה, אחרת סדר הקטלוג). */
+  const orderedRows = <T extends { id: string }>(key: string, rows: T[]): T[] => {
+    const ord = listOrder[key];
+    if (!ord || ord.length === 0) return rows;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const out: T[] = [];
+    for (const id of ord) { const r = byId.get(id); if (r) { out.push(r); byId.delete(id); } }
+    // שורות חדשות שלא היו בסדר השמור — בסוף, לפי סדר הקטלוג.
+    for (const r of rows) if (byId.has(r.id)) out.push(r);
+    return out;
+  };
+
+  /** גרירה חיה: מעביר שורה (fromId) למיקום שורת היעד (toId) ברשימה של key. */
+  const moveRow = (key: string, baseRows: { id: string }[], fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setListOrder((prev) => {
+      const current = (prev[key] && prev[key].length ? prev[key] : baseRows.map((r) => r.id)).slice();
+      const from = current.indexOf(fromId);
+      if (from < 0) return prev;
+      const [moved] = current.splice(from, 1);
+      const to = current.indexOf(toId);
+      if (to < 0) return prev;
+      current.splice(to, 0, moved);
+      return { ...prev, [key]: current };
+    });
+  };
+  const closePanel = () => {
+    setOpen(false); setCatId(null); setGroupId(null);
+    setSelected({}); setSelectedOrder([]); setDragSku(null); setDragOverSku(null); setDragEnabledSku(null);
+  };
+
+  /** מעביר SKU ממיקומו למיקום היעד (משתמש במיקום היעד אחרי ההסרה — מונע off-by-one). */
+  const moveSelected = (fromSku: string, toSku: string) => {
+    if (fromSku === toSku) return;
+    setSelectedOrder((prev) => {
+      const from = prev.indexOf(fromSku);
+      if (from < 0) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(from, 1);
+      const to = copy.indexOf(toSku);
+      if (to < 0) return prev;
+      copy.splice(to, 0, moved);
+      return copy;
+    });
+  };
+
+  /** הזזה לפי אינדקס (חיצים ▲▼) — חלופה לגרירה שעובדת גם במסך מגע/נייד. */
+  const moveSelectedByIndex = (from: number, to: number) => {
+    setSelectedOrder((prev) => {
+      if (from < 0 || to < 0 || from >= prev.length || to >= prev.length || from === to) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(from, 1);
+      copy.splice(to, 0, moved);
+      return copy;
+    });
+  };
+
+  const activeCat = catId ? serviceCategories.find((c) => c.id === catId) : null;
   const activeGroup = groupId && activeCat
     ? activeCat.services.find((s) => s.id === groupId && !!s.subServices)
     : null;
 
-  const pickService = (description: string, sku: string, price: number | undefined) => {
-    onSelect({ description, sku: sku ?? '', price: price != null ? String(price) : '' });
+  /** מסלול "קטגוריה › תת-קטגוריה" של הרמה הפעילה — ריק אם אין תת-קטגוריה. */
+  const pathFor = (withGroup: boolean): string => {
+    const cat = activeCat?.name ?? '';
+    const grp = withGroup ? (activeGroup?.name ?? '') : '';
+    return [cat, grp].filter(Boolean).join(' › ');
+  };
+
+  const toggle = (svc: { name: string; sku?: string; id: string; price?: number }, withGroup: boolean) => {
+    const sku = svc.sku ?? svc.id;
+    const item: PickedService = {
+      description: svc.name,
+      sku: sku ?? '',
+      price: svc.price != null ? String(svc.price) : '',
+      categoryPath: pathFor(withGroup),
+    };
+    setSelected((prev) => {
+      const next = { ...prev };
+      if (next[sku]) delete next[sku];
+      else next[sku] = item;
+      return next;
+    });
+    // שמירת סדר הבחירה: הוספה בסוף, הסרה מוציאה מהמערך.
+    setSelectedOrder((prev) => (prev.includes(sku) ? prev.filter((s) => s !== sku) : [...prev, sku]));
+  };
+
+  const selectedCount = selectedOrder.length;
+
+  /** מחיל את הבחירה לפי הסדר שנקבע: הראשון ממלא את השורה הנוכחית, השאר נוספים כשורות חדשות. */
+  const commitSelection = () => {
+    const items = selectedOrder.map((sku) => selected[sku]).filter(Boolean);
+    if (items.length === 0) return;
+    onSelect(items[0]);
+    if (items.length > 1 && onAddMany) onAddMany(items.slice(1));
     closePanel();
   };
 
@@ -574,7 +802,7 @@ function ServiceTreePicker({
             {!catId ? (
               /* Level 1: category grid */
               <div className="grid grid-cols-3 gap-1.5">
-                {SERVICE_CATEGORIES.map((cat) => {
+                {serviceCategories.map((cat) => {
                   const color = CAT_COLOR[cat.id] ?? '#64748b';
                   return (
                     <button
@@ -593,37 +821,75 @@ function ServiceTreePicker({
                 })}
               </div>
             ) : !groupId ? (
-              /* Level 2: services in category */
+              /* Level 2: services in category — ניתנות לגרירה לשינוי סדר בלייב */
               <div className="flex flex-col gap-1">
-                {activeCat!.services.map((svc) => {
+                {orderedRows(catId!, activeCat!.services).map((svc) => {
                   const color = CAT_COLOR[catId] ?? '#64748b';
+                  const rowKey = catId!;
+                  const isRowDragging = rowDragId === svc.id;
+                  const isRowOver = rowDragOverId === svc.id && rowDragId !== null && rowDragId !== svc.id;
+                  const dragWrap = (inner: React.ReactNode) => (
+                    <div
+                      key={svc.id}
+                      draggable={rowDragEnabled === svc.id}
+                      onDragStart={(e) => {
+                        if (rowDragEnabled !== svc.id) { e.preventDefault(); return; }
+                        setRowDragId(svc.id); e.dataTransfer.effectAllowed = 'move';
+                        try { e.dataTransfer.setData('text/plain', svc.id); } catch { /* ignore */ }
+                      }}
+                      onDragEnd={() => { setRowDragId(null); setRowDragOverId(null); setRowDragEnabled(null); }}
+                      onDragOver={(e) => { if (rowDragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (rowDragOverId !== svc.id) setRowDragOverId(svc.id); } }}
+                      onDrop={(e) => { e.preventDefault(); if (rowDragId && rowDragId !== svc.id) moveRow(rowKey, activeCat!.services, rowDragId, svc.id); setRowDragId(null); setRowDragOverId(null); setRowDragEnabled(null); }}
+                      className={`flex items-stretch gap-1 rounded-xl transition-all ${isRowDragging ? 'opacity-40' : ''} ${isRowOver ? 'ring-2 ring-blue-400' : ''}`}
+                    >
+                      {/* ידית גרירה — אחיזה בה מפעילה draggable על השורה */}
+                      <span
+                        onMouseDown={() => setRowDragEnabled(svc.id)}
+                        onTouchStart={() => setRowDragEnabled(svc.id)}
+                        title="גרור כדי לשנות את הסדר"
+                        className="flex-shrink-0 flex items-center text-gray-300 hover:text-blue-600 cursor-grab active:cursor-grabbing select-none px-0.5"
+                      >
+                        <GripVertical size={15} />
+                      </span>
+                      {inner}
+                    </div>
+                  );
                   if (svc.subServices) {
-                    return (
+                    return dragWrap(
                       <button
-                        key={svc.id}
                         type="button"
                         onClick={() => setGroupId(svc.id)}
-                        className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm font-semibold text-[13px]"
+                        className="flex-1 min-w-0 text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:shadow-sm font-semibold text-[13px]"
                         style={{ background: `${color}10`, color: '#1e293b', border: `1px solid ${color}25` }}
                       >
                         <span className="flex-shrink-0 w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black text-white" style={{ background: color }}>
                           {svc.subServices.length}
                         </span>
-                        <span className="flex-1">{svc.name}</span>
+                        <span className="flex-1 truncate">{svc.name}</span>
                         <ChevronLeft size={13} style={{ color, flexShrink: 0 }} />
                       </button>
                     );
                   }
-                  return (
+                  const sku = svc.sku ?? svc.id;
+                  const isSel = !!selected[sku];
+                  return dragWrap(
                     <button
-                      key={svc.id}
                       type="button"
-                      onClick={() => pickService(svc.name, svc.sku ?? svc.id, svc.price)}
-                      className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm text-[13px] font-medium"
-                      style={{ background: `${color}08`, color: '#334155', border: `1px solid ${color}18` }}
+                      onClick={() => toggle(svc, false)}
+                      className="flex-1 min-w-0 text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:shadow-sm text-[13px] font-medium"
+                      style={{
+                        background: isSel ? `${color}22` : `${color}08`,
+                        color: '#334155',
+                        border: `1.5px solid ${isSel ? color : `${color}18`}`,
+                      }}
                     >
-                      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                      <span className="flex-1">{svc.name}</span>
+                      <span
+                        className="flex-shrink-0 w-4 h-4 rounded flex items-center justify-center border transition-colors"
+                        style={{ background: isSel ? color : '#fff', borderColor: isSel ? color : `${color}55` }}
+                      >
+                        {isSel && <Check size={11} className="text-white" strokeWidth={3} />}
+                      </span>
+                      <span className="flex-1 truncate">{svc.name}</span>
                       {svc.price != null && (
                         <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${color}15`, color }}>
                           {svc.price === 0 ? 'כלול' : `₪${svc.price.toLocaleString('he-IL')}`}
@@ -635,32 +901,166 @@ function ServiceTreePicker({
                 })}
               </div>
             ) : (
-              /* Level 3: sub-services */
+              /* Level 3: sub-services — ניתנות לגרירה לשינוי סדר בלייב */
               <div className="flex flex-col gap-1">
-                {activeGroup!.subServices!.map((sub) => {
+                {orderedRows(`${catId}/${groupId}`, activeGroup!.subServices!).map((sub) => {
                   const color = CAT_COLOR[catId] ?? '#64748b';
+                  const sku = sub.sku ?? sub.id;
+                  const isSel = !!selected[sku];
+                  const rowKey = `${catId}/${groupId}`;
+                  const isRowDragging = rowDragId === sub.id;
+                  const isRowOver = rowDragOverId === sub.id && rowDragId !== null && rowDragId !== sub.id;
                   return (
-                    <button
+                    <div
                       key={sub.id}
-                      type="button"
-                      onClick={() => pickService(sub.name, sub.sku ?? sub.id, sub.price)}
-                      className="w-full text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:scale-[1.01] hover:shadow-sm text-[12px] font-medium"
-                      style={{ background: `${color}08`, color: '#334155', border: `1px solid ${color}18` }}
+                      draggable={rowDragEnabled === sub.id}
+                      onDragStart={(e) => {
+                        if (rowDragEnabled !== sub.id) { e.preventDefault(); return; }
+                        setRowDragId(sub.id); e.dataTransfer.effectAllowed = 'move';
+                        try { e.dataTransfer.setData('text/plain', sub.id); } catch { /* ignore */ }
+                      }}
+                      onDragEnd={() => { setRowDragId(null); setRowDragOverId(null); setRowDragEnabled(null); }}
+                      onDragOver={(e) => { if (rowDragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (rowDragOverId !== sub.id) setRowDragOverId(sub.id); } }}
+                      onDrop={(e) => { e.preventDefault(); if (rowDragId && rowDragId !== sub.id) moveRow(rowKey, activeGroup!.subServices!, rowDragId, sub.id); setRowDragId(null); setRowDragOverId(null); setRowDragEnabled(null); }}
+                      className={`flex items-stretch gap-1 rounded-xl transition-all ${isRowDragging ? 'opacity-40' : ''} ${isRowOver ? 'ring-2 ring-blue-400' : ''}`}
                     >
-                      <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                      <span className="flex-1">{sub.name}</span>
-                      {sub.price != null && (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${color}15`, color }}>
-                          {sub.price === 0 ? 'כלול' : `₪${sub.price.toLocaleString('he-IL')}`}
-                          {sub.unit ? ` ${sub.unit}` : ''}
+                      <span
+                        onMouseDown={() => setRowDragEnabled(sub.id)}
+                        onTouchStart={() => setRowDragEnabled(sub.id)}
+                        title="גרור כדי לשנות את הסדר"
+                        className="flex-shrink-0 flex items-center text-gray-300 hover:text-blue-600 cursor-grab active:cursor-grabbing select-none px-0.5"
+                      >
+                        <GripVertical size={15} />
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggle(sub, true)}
+                        className="flex-1 min-w-0 text-right px-3 py-2 rounded-xl flex items-center gap-2 transition-all hover:shadow-sm text-[12px] font-medium"
+                        style={{
+                          background: isSel ? `${color}22` : `${color}08`,
+                          color: '#334155',
+                          border: `1.5px solid ${isSel ? color : `${color}18`}`,
+                        }}
+                      >
+                        <span
+                          className="flex-shrink-0 w-4 h-4 rounded flex items-center justify-center border transition-colors"
+                          style={{ background: isSel ? color : '#fff', borderColor: isSel ? color : `${color}55` }}
+                        >
+                          {isSel && <Check size={11} className="text-white" strokeWidth={3} />}
                         </span>
-                      )}
-                    </button>
+                        <span className="flex-1 truncate">{sub.name}</span>
+                        {sub.price != null && (
+                          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: `${color}15`, color }}>
+                            {sub.price === 0 ? 'כלול' : `₪${sub.price.toLocaleString('he-IL')}`}
+                            {sub.unit ? ` ${sub.unit}` : ''}
+                          </span>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>
             )}
           </div>
+
+          {/* Footer — רשימת השירותים שנבחרו (ניתנת לגרירה לשינוי סדר) + כפתור הוספה */}
+          {selectedCount > 0 && (
+            <div className="flex-shrink-0 border-t border-gray-100 bg-gray-50/90 px-3 py-2.5">
+              {/* רשימת הבחירה בסדר שבו הפריטים ייכנסו להצעה — אוחזים בידית ⋮⋮ וגוררים,
+                  או משתמשים בחיצים ▲▼. */}
+              {selectedCount >= 1 && (
+                <div className="mb-2">
+                  <div className="text-[10px] font-semibold text-gray-400 mb-1 px-0.5">
+                    {selectedCount > 1 ? 'סדר הוספה — אחוז בידית ⋮⋮ וגרור, או השתמש בחיצים ▲▼:' : 'נבחרו — הוסף עוד וסדר בגרירה או בחיצים:'}
+                  </div>
+                  <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
+                    {selectedOrder.map((sku, i) => {
+                      const it = selected[sku];
+                      if (!it) return null;
+                      const isDragging = dragSku === sku;
+                      const isOver = dragOverSku === sku && dragSku !== null && dragSku !== sku;
+                      return (
+                        <div
+                          key={sku}
+                          draggable={dragEnabledSku === sku}
+                          onDragStart={(e) => {
+                            if (dragEnabledSku !== sku) { e.preventDefault(); return; }
+                            setDragSku(sku); e.dataTransfer.effectAllowed = 'move';
+                            try { e.dataTransfer.setData('text/plain', sku); } catch { /* ignore */ }
+                          }}
+                          onDragEnd={() => { setDragSku(null); setDragOverSku(null); setDragEnabledSku(null); }}
+                          onDragOver={(e) => { if (dragSku) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverSku !== sku) setDragOverSku(sku); } }}
+                          onDrop={(e) => { e.preventDefault(); if (dragSku && dragSku !== sku) moveSelected(dragSku, sku); setDragSku(null); setDragOverSku(null); setDragEnabledSku(null); }}
+                          className={`flex items-center gap-2 rounded-lg border bg-white px-2 py-1.5 text-[11px] transition-colors ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-blue-400 border-dashed ring-2 ring-blue-300' : 'border-gray-200'}`}
+                        >
+                          {/* ידית גרירה — אחיזה בה מפעילה draggable על השורה */}
+                          <span
+                            onMouseDown={() => setDragEnabledSku(sku)}
+                            onTouchStart={() => setDragEnabledSku(sku)}
+                            title="גרור כדי לשנות את סדר ההוספה"
+                            className="flex-shrink-0 text-gray-400 hover:text-blue-600 cursor-grab active:cursor-grabbing select-none"
+                          >
+                            <GripVertical size={14} />
+                          </span>
+                          {/* חיצים ▲▼ — חלופה לגרירה, עובד גם בנייד/מסך מגע */}
+                          <div className="flex-shrink-0 flex flex-col">
+                            <button
+                              type="button"
+                              disabled={i === 0}
+                              title="העבר למעלה"
+                              onClick={(e) => { e.stopPropagation(); moveSelectedByIndex(i, i - 1); }}
+                              className="h-3 w-4 flex items-center justify-center text-gray-400 hover:text-blue-600 disabled:opacity-30"
+                            >
+                              <ChevronDown size={11} className="rotate-180" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={i === selectedOrder.length - 1}
+                              title="העבר למטה"
+                              onClick={(e) => { e.stopPropagation(); moveSelectedByIndex(i, i + 1); }}
+                              className="h-3 w-4 flex items-center justify-center text-gray-400 hover:text-blue-600 disabled:opacity-30"
+                            >
+                              <ChevronDown size={11} />
+                            </button>
+                          </div>
+                          <span className="flex-shrink-0 w-4 h-4 rounded-full bg-gray-100 text-gray-500 text-[9px] font-bold flex items-center justify-center">{i + 1}</span>
+                          <span className="flex-1 truncate text-gray-700">{it.description}</span>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setSelected((prev) => { const n = { ...prev }; delete n[sku]; return n; }); setSelectedOrder((prev) => prev.filter((s) => s !== sku)); }}
+                            className="flex-shrink-0 text-gray-300 hover:text-red-500 transition-colors"
+                            title="הסר מהבחירה"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setSelected({}); setSelectedOrder([]); }}
+                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-700 px-2 py-1 rounded-lg hover:bg-gray-200 transition-colors"
+                >
+                  נקה
+                </button>
+                <span className="text-[11px] text-gray-500">
+                  נבחרו <span className="font-bold text-gray-700">{selectedCount}</span> פריטים
+                </span>
+                <button
+                  type="button"
+                  onClick={commitSelection}
+                  className="mr-auto flex items-center gap-1.5 rounded-xl bg-green-500 px-4 py-2 text-sm font-bold text-white hover:bg-green-600 shadow-sm transition-colors"
+                >
+                  <Plus size={16} />
+                  הוסף {selectedCount > 1 ? `(${selectedCount})` : ''}
+                </button>
+              </div>
+            </div>
+          )}
           </div>
         </>
       )}
@@ -708,6 +1108,9 @@ export function QuoteNewScreen({
   /** Called when user wants to delete a persisted attachment. Resolves true on success. */
   onDeleteAttachment?: (att: { id: string; fileName: string }) => Promise<boolean> | boolean;
 }) {
+  // אותו קטלוג שהבורר מציג — כולל פריטים שקיימים רק במחירון ה-DB. בלי זה,
+  // שורה שנבחרה בבורר לא הייתה נמצאת כאן בחיפוש המחיר/השם.
+  const { allServices, serviceBySku } = useServiceCatalog();
   const [tab, setTab] = useState<'פרטי תשלום' | 'מלל' | 'הערות' | 'שונות' | 'תחזית' | 'מסמכים מקושרים'>('תחזית');
   const [quoteNo, setQuoteNo] = useState('חדש');
   const [customer, setCustomer] = useState('');
@@ -730,6 +1133,14 @@ export function QuoteNewScreen({
   const [priceList, setPriceList] = useState('לקוח החברה');
   const [reference, setReference] = useState(genLocalRef);
   const [orderNo, setOrderNo] = useState('');
+  /**
+   * מספר ההצעה להצגה. מספר ההצעה והסימוכין הם אותו מספר רץ, ולכן כל עוד השרת
+   * לא החזיר quoteNumber (הצעה חדשה שטרם נשמרה) מציגים את הסימוכין — במקום 'חדש'.
+   */
+  const displayQuoteNo =
+    (quoteNo && quoteNo !== 'חדש' ? quoteNo : '') ||
+    (reference && reference !== '…' ? reference : '') ||
+    'חדש';
   const [copiedFrom, setCopiedFrom] = useState('');
   const [rate, setRate] = useState('1.0000');
   const [phone, setPhone] = useState('');
@@ -773,6 +1184,31 @@ export function QuoteNewScreen({
   const [quoteUserRows, setQuoteUserRows] = useState<QuoteUserRow[]>([]);
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [selectedLineIdx, setSelectedLineIdx] = useState<number | null>(null);
+  // גרירה לשינוי סדר הפריטים: dragIdx = השורה הנגררת, dragOverIdx = היעד (לסימון ויזואלי).
+  // dragEnabledIdx = השורה שאחזו בידית שלה (mousedown) — רק היא draggable, כדי לא לשבש הקלדה.
+  const [dragEnabledIdx, setDragEnabledIdx] = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  // מעביר פריט ממיקום → מיקום ושומר את הבחירה על אותו פריט שנבחר (לא על אינדקס קבוע).
+  const moveLineItem = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0) return;
+    setLineItems((prev) => {
+      if (from >= prev.length || to >= prev.length) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(from, 1);
+      copy.splice(to, 0, moved);
+      return copy;
+    });
+    // מעדכן את השורה הנבחרת כך שתישאר על הפריט שזז (או מתקנת אינדקסים שהוסטו).
+    setSelectedLineIdx((sel) => {
+      if (sel === null) return sel;
+      if (sel === from) return to;
+      if (from < sel && to >= sel) return sel - 1;
+      if (from > sel && to <= sel) return sel + 1;
+      return sel;
+    });
+  };
   const salesRepDefaultAppliedRef = useRef(false);
   const rootRef = useRef<HTMLElement>(null);
 
@@ -833,7 +1269,7 @@ export function QuoteNewScreen({
     if (prefilledServiceNameRef.current === prefillServiceName) return; // כבר הוזרק בדיוק השירות הזה
     const prevPrefill = prefilledServiceNameRef.current;
     prefilledServiceNameRef.current = prefillServiceName;
-    const allSvcs = flattenAllServices();
+    const allSvcs = allServices;
     const svcMatch = allSvcs.find((s) => s.name === prefillServiceName);
     const svcSku = svcMatch?.sku ?? '';
     const svcPrice = svcMatch?.price != null ? String(svcMatch.price) : '';
@@ -969,6 +1405,10 @@ export function QuoteNewScreen({
   /* ── When embedded in a task workspace (no explicit quote id given), look up any draft quote already linked to this task ── */
   const [taskLinkedQuoteId, setTaskLinkedQuoteId] = useState<string | null>(null);
   const [taskLookupChecked, setTaskLookupChecked] = useState<boolean>(!taskId);
+  // מזהה המשימה שאליה ההצעה מקושרת (linkedEntityId), נלכד מטעינת ההצעה — כדי שבמסך
+  // העצמאי (/quotes/new, בלי existingAttachments prop) נוכל לשלוף את הקבצים המצורפים בעצמנו.
+  const [selfLinkedTaskId, setSelfLinkedTaskId] = useState<string | null>(null);
+  const [selfAttachments, setSelfAttachments] = useState<Array<{ id: string; fileName: string; mimeType: string; createdAt: string }>>([]);
   const [lastMergedDocPath, setLastMergedDocPath] = useState<string | null>(null);
   // OneDrive — עריכה ב-Word עם שמירה-חזרה אוטומטית: webUrl לפתיחה + דגל "פעיל".
   const [onedriveWebUrl, setOnedriveWebUrl] = useState<string | null>(null);
@@ -976,6 +1416,9 @@ export function QuoteNewScreen({
   const [onedriveBusy, setOnedriveBusy] = useState(false);
   // מזהי קבצים שנמצאים כרגע בתהליך מחיקה מ"קבצים שנוצרו" (לפי attId, ואם אין — לפי שם)
   const [deletingFileKeys, setDeletingFileKeys] = useState<Record<string, boolean>>({});
+  // עקיפת-שם מקומית לקבצים ב"קבצים שנוצרו" אחרי עריכת-שם ידנית — לפי attId. משמש כדי
+  // שהשם החדש יוצג מיד גם כשהמקור הוא existingAttachments (prop שמנוהל ע"י ההורה).
+  const [renamedByAttId, setRenamedByAttId] = useState<Record<string, string>>({});
   // כתובת המייל של חשבון ה-Microsoft המחובר — מוצגת בהנחיה כשWord מבקש כניסה
   const [msAccountEmail, setMsAccountEmail] = useState<string | null>(null);
   useEffect(() => {
@@ -1043,6 +1486,8 @@ export function QuoteNewScreen({
       .then((q: Record<string, unknown> | null) => {
         if (!q || cancelled) return;
         if (q.id) { setQuoteId(String(q.id)); setSavedOnce(true); }
+        // לוכדים את המשימה המקושרת — לשליפת קבצים מצורפים במסך העצמאי (בלי existingAttachments prop).
+        if (typeof q.linkedEntityId === 'string' && q.linkedEntityId) setSelfLinkedTaskId(String(q.linkedEntityId));
         if (q.quoteNumber != null) setQuoteNo(String(q.quoteNumber));
         if (q.customerId) setCustomerId(String(q.customerId));
         const cust = q.customer as { name?: string } | undefined;
@@ -1149,6 +1594,48 @@ export function QuoteNewScreen({
       cancelled = true;
     };
   }, [initialQuoteId, taskId, taskLookupChecked, taskLinkedQuoteId]);
+
+  // ── שליפה עצמית של קבצים מצורפים כשלא סופק existingAttachments prop (מסך /quotes/new עצמאי) ──
+  // בלי זה, במסך העצמאי כל הקבצים המצורפים בשרת לא מוצגים כלל אחרי רענון (סיבה מרכזית ל"נעלמים").
+  const needsSelfAttachments = existingAttachments === undefined;
+  const selfAttachTaskId = taskId || selfLinkedTaskId;
+  const reloadSelfAttachments = useCallback(() => {
+    if (!needsSelfAttachments || !selfAttachTaskId) return;
+    const user = getSessionUser();
+    if (!user) return;
+    apiFetch(apiUrl(`/tasks/${selfAttachTaskId}/attachments`), { authUser: user })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list) => setSelfAttachments(Array.isArray(list) ? list : []))
+      .catch(() => {});
+  }, [needsSelfAttachments, selfAttachTaskId]);
+  useEffect(() => { reloadSelfAttachments(); }, [reloadSelfAttachments]);
+
+  // רשימת הקבצים המצורפים בפועל + מטפלי הורדה/מחיקה: מ-props אם סופקו (embedded בדשבורד),
+  // אחרת מהשליפה העצמית (מסך עצמאי). כך הקבצים המצורפים תמיד מוצגים, בשני המסלולים.
+  const effectiveExistingAttachments = existingAttachments ?? (needsSelfAttachments ? selfAttachments : []);
+  const effectiveDownloadAttachment = onDownloadAttachment ?? (async (att: { id: string; fileName: string }) => {
+    if (!selfAttachTaskId) return;
+    const user = getSessionUser();
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${selfAttachTaskId}/attachments/${att.id}`), { authUser: user });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = att.fileName;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch { /* ignore */ }
+  });
+  const effectiveDeleteAttachment = onDeleteAttachment ?? (async (att: { id: string; fileName: string }): Promise<boolean> => {
+    if (!selfAttachTaskId) return false;
+    const user = getSessionUser();
+    try {
+      const res = await apiFetch(apiUrl(`/tasks/${selfAttachTaskId}/attachments/${att.id}`), { authUser: user, method: 'DELETE' });
+      if (!res.ok) return false;
+      setSelfAttachments((prev) => prev.filter((a) => a.id !== att.id));
+      return true;
+    } catch { return false; }
+  });
 
   useEffect(() => {
     const mergeWithDefaults = (apiRows: Array<{ id: string; label: string }>) => {
@@ -1463,6 +1950,13 @@ export function QuoteNewScreen({
   // להיחסם ע"י חוסם ה-popup, ומפנים אותו לקישור אחרי הכנתו. הקישור נבנה ב-whatsAppLink המשותף
   // (wa.me עם מספר → מעביר לאפליקציית WhatsApp Desktop הקיימת; בלי מספר → בורר נמען).
   const waHref = (phone: string, text: string) => whatsAppLink(phone, text);
+  /**
+   * המספר שאליו נשלח בוואטסאפ: קודם כל מה שמוצג עכשיו בשדה "טלפון" ב"פרטי לקוח"
+   * (המספר שהמשתמש רואה ועורך), ורק אם הוא ריק — המספר שהשרת החזיר.
+   * בלי זה עריכת טלפון איש הקשר לא הגיעה לשליחה: טוקן החתימה — ואיתו המספר — נשמר
+   * במטמון לכל הסשן (signTokenRef), כך שהשליחה חזרה על המספר מלפני העריכה.
+   */
+  const waPhoneNow = (serverPhone: string) => (phone || '').replace(/\D/g, '') || serverPhone;
 
   // "שלח במייל" הפשוט — מצרף את ההצעה כ-PDF + את הפרופיל+רישיונות כ-PDF, בלי כפתורים ובלי חתימה.
   async function sendQuoteEmailPlain() {
@@ -1520,9 +2014,11 @@ export function QuoteNewScreen({
   }
 
   // "שלח בווצאפ" הפשוט — פותח וואטסאפ מיד עם קישור להורדת ה-PDF של ההצעה.
-  async function sendQuoteWhatsAppPlain() {
+  // preWin: כשמופעל מ-runSelectedSends החלון כבר נפתח סינכרונית שם (אנטי-חוסם) — נשתמש בו
+  // במקום לפתוח חדש, כדי שהוואטסאפ ירוץ במקביל למייל מאותה לחיצה.
+  async function sendQuoteWhatsAppPlain(preWin?: Window | null) {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
-    const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
+    const w = preWin !== undefined ? preWin : (typeof window !== 'undefined' ? window.open('', '_blank') : null); // פתיחה סינכרונית (אנטי-חוסם)
     setEmailSending(true);
     setStatusMsg('מכין קובץ…');
     // markRequested=false — PDF נקי להורדה (בלי כפתור חתימה) ובלי לסמן "נשלח לחתימה".
@@ -1532,16 +2028,16 @@ export function QuoteNewScreen({
     const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf`);
     const ref = (reference || quoteNo || '').trim();
     const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה".\nלצפייה והורדה:\n${pdfUrl}`;
-    const url = waHref(phone, msg);
+    const url = waHref(waPhoneNow(phone), msg);
     if (w) w.location.href = url; else window.open(url, '_blank');
     setEmailModalOpen(false);
   }
 
   // "שלח בווצאפ עם חתימה" — פותח וואטסאפ מיד עם קישור ל-PDF של ההצעה (btn=1), שבעמוד האחרון
   // שלו מוטמע כפתור "לחץ כאן לחתימה" המוביל לטופס החתימה — כמו בזרימת המייל עם חתימה.
-  async function sendQuoteWhatsAppSign() {
+  async function sendQuoteWhatsAppSign(preWin?: Window | null) {
     if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
-    const w = typeof window !== 'undefined' ? window.open('', '_blank') : null; // פתיחה סינכרונית (אנטי-חוסם)
+    const w = preWin !== undefined ? preWin : (typeof window !== 'undefined' ? window.open('', '_blank') : null); // פתיחה סינכרונית (אנטי-חוסם)
     setSignBusy(true);
     setStatusMsg('מכין קובץ לחתימה…');
     const { token, phone, error } = await ensureSignToken();
@@ -1550,9 +2046,34 @@ export function QuoteNewScreen({
     const pdfUrl = apiUrl(`/public/sign/${encodeURIComponent(token)}/pdf?btn=1`);
     const ref = (reference || quoteNo || '').trim();
     const msg = `שלום${contact ? ' ' + contact : ''}, מצורפת הצעת המחיר${ref ? ' ' + ref : ''} מ"גלית – החברה לאיכות הסביבה" לחתימה.\nפתחו את הקובץ, גללו לעמוד האחרון ולחצו "לחץ כאן לחתימה":\n${pdfUrl}`;
-    const url = waHref(phone, msg);
+    const url = waHref(waPhoneNow(phone), msg);
     if (w) w.location.href = url; else window.open(url, '_blank');
     setEmailModalOpen(false);
+  }
+
+  /**
+   * מריץ את כל ערוצי השליחה שנבחרו (מייל ו/או וואטסאפ) *במקביל* מלחיצה אחת.
+   * אילוץ חוסם-popup: את חלון הוואטסאפ *חייבים* לפתוח סינכרונית בתוך ה-click, לפני כל await —
+   * לכן פותחים אותו כאן ראשון ומעבירים אותו לפונקציית הוואטסאפ. המייל (צד-שרת) רץ במקביל.
+   * וריאנט אחד לכל ערוץ כבר מובטח ע"י toggleSend, כך שנפתח לכל היותר חלון וואטסאפ אחד.
+   */
+  async function runSelectedSends() {
+    if (!emailForm.quoteId) { setStatusMsg('יש לשמור את ההצעה לפני שליחה'); return; }
+    const wantEmail = sendSel.emailPlain || sendSel.emailSign;
+    const wantWa = sendSel.waPlain || sendSel.waSign;
+    if (!wantEmail && !wantWa) { setStatusMsg('בחר לפחות ערוץ שליחה אחד'); setTimeout(() => setStatusMsg(''), 3000); return; }
+
+    // פתיחת חלון הוואטסאפ סינכרונית (אנטי-חוסם) — לפני כל await.
+    const waWin = wantWa && typeof window !== 'undefined' ? window.open('', '_blank') : null;
+
+    const jobs: Promise<unknown>[] = [];
+    if (sendSel.emailPlain) jobs.push(sendQuoteEmailPlain());
+    else if (sendSel.emailSign) jobs.push(sendQuoteEmail());
+    if (sendSel.waPlain) jobs.push(sendQuoteWhatsAppPlain(waWin));
+    else if (sendSel.waSign) jobs.push(sendQuoteWhatsAppSign(waWin));
+
+    // כל job מטפל בשגיאות ובהודעות שלו עצמו; allSettled כדי שכשל בערוץ אחד לא יבטל את השני.
+    await Promise.allSettled(jobs);
   }
 
   // ליבה: יוצר בקשת חתימה ומחזיר את קישור ה-/sign (גם מעדכן state). מחזיר '' בכישלון.
@@ -1601,7 +2122,7 @@ export function QuoteNewScreen({
   // פותח את הקישור בוואטסאפ של הלקוח (אם יש מספר), אחרת בורר נמען
   function shareSignViaWhatsApp() {
     const msg = `שלום, הצעת המחיר מ"גלית – החברה לאיכות הסביבה" מוכנה לחתימה.\nלצפייה וחתימה מהנייד:\n${signLink}`;
-    window.open(whatsAppLink(signPhone, msg), '_blank');
+    window.open(whatsAppLink(waPhoneNow(signPhone), msg), '_blank');
   }
 
   async function copySignLink() {
@@ -1629,6 +2150,15 @@ export function QuoteNewScreen({
   function setQuoteId(id: string | null) { quoteIdRef.current = id; _setQuoteId(id); }
   // מונע יצירת משימת "מעקב" כפולה עבור אותה הצעה (מיפתח = מזהה ההצעה שכבר נוצרה לה משימה)
   const followupTaskCreatedForQuoteRef = useRef<string | null>(null);
+  /**
+   * האם המשתמש נגע בתאריך "למעקב" בפועל בסשן הזה.
+   * תאריך המעקב מתמלא אוטומטית ל-היום+3 בכל הצעה חדשה, ו-doSave הפעיל את זרימת
+   * המעקב בכל שמירה — ולכן לחיצה על "שמור" בלבד פתחה משימת מעקב בלי שהמשתמש ביקש.
+   * הדגל הזה מצמצם את הזרימה לפעולה מפורשת: כפתורי "מעקב", או עריכה ידנית של השדה.
+   */
+  const followTouchedRef = useRef(false);
+  /** נעילת לחיצה כפולה על "מעקב" — ref ולא state, כי state לא מתעדכן בתוך אותו פריים. */
+  const followBusyRef = useRef(false);
   const [customerId, setCustomerId] = useState<string>('');
   const [quoteContactRows, setQuoteContactRows] = useState<QuoteContactRow[]>([]);
   const [customerContactId, setCustomerContactId] = useState('');
@@ -1681,6 +2211,25 @@ export function QuoteNewScreen({
   const [signLink, setSignLink] = useState('');
   const [signPhone, setSignPhone] = useState('');
   const [signCopied, setSignCopied] = useState(false);
+  // בחירת ערוצי שליחה — ניתן לבחור כמה במקביל. מייל ו-וואטסאפ עצמאיים; בכל ערוץ
+  // וריאנט אחד בלבד (רגיל / עם חתימה) — בחירת וריאנט מבטלת את השני באותו ערוץ.
+  // ריצה במקביל: המייל נשלח בצד-שרת בזמן שחלון הוואטסאפ נפתח (ר' runSelectedSends).
+  const [sendSel, setSendSel] = useState({
+    emailPlain: false,
+    emailSign: false,
+    waPlain: false,
+    waSign: false,
+  });
+  const toggleSend = (key: 'emailPlain' | 'emailSign' | 'waPlain' | 'waSign') =>
+    setSendSel((p) => {
+      const next = { ...p, [key]: !p[key] };
+      // וריאנט אחד לכל ערוץ — הדלקת אחד מכבה את התאום שלו.
+      if (key === 'emailPlain' && next.emailPlain) next.emailSign = false;
+      if (key === 'emailSign' && next.emailSign) next.emailPlain = false;
+      if (key === 'waPlain' && next.waPlain) next.waSign = false;
+      if (key === 'waSign' && next.waSign) next.waPlain = false;
+      return next;
+    });
   // AI ניסוח
   const [aiBusy, setAiBusy] = useState(false);
   const [aiInstruction, setAiInstruction] = useState('');
@@ -1807,7 +2356,9 @@ export function QuoteNewScreen({
   const paymentXDisplay = installmentsCountParsed > 0 ? installmentEach.toFixed(2) : '';
 
   /* ── Build the full quote payload from current form state — shared by doSave() and the silent autosave ── */
-  function buildQuotePayload(): Record<string, unknown> {
+  /** @param followOverride תאריך מעקב (yyyy-mm-dd) לשמירה הזו, כשה-state עדיין מיושן. */
+  function buildQuotePayload(followOverride?: string): Record<string, unknown> {
+    const followForPayload = followOverride ?? follow;
     // Prisma DateTime fields reject date-only strings ("2026-03-27") — must be full ISO-8601
     const toISO = (s: string | null | undefined): string | null => {
       if (!s) return null;
@@ -1857,11 +2408,13 @@ export function QuoteNewScreen({
       customerName: customer || null,
       customerContactId: customerContactId.trim() || null,
       service: 'הצעת מחיר',
+      // מספר ההצעה = הסימוכין. השרת משלים/מקצה את המספר כששדה זה ריק.
       quoteNumber: quoteNo !== 'חדש' ? quoteNo : undefined,
       quoteDate: toISO(date) || new Date().toISOString(),
-      followupDate: toISO(follow) || null,
+      followupDate: toISO(followForPayload) || null,
       status: status || 'DRAFT',
-      orderReferenceNumber: reference || null,
+      // '…' הוא מציין-הטעינה עד ש-/quotes/next-reference עונה — לא נשמר כסימוכין.
+      orderReferenceNumber: reference && reference !== '…' ? reference : null,
       salesRepresentativeName: salesRep || null,
       executorName: contact || null,
       phoneSummary: phone || null,
@@ -1904,6 +2457,18 @@ export function QuoteNewScreen({
     return payload;
   }
 
+  /**
+   * מסנכרן את מספר ההצעה והסימוכין מתשובת השרת. השרת הוא הסמכות: הוא מקצה את
+   * המספר הרץ בשמירה הראשונה, ומשלים מספר להצעה ישנה שנשמרה בלי אחד.
+   */
+  function syncQuoteNumberFromServer(saved: unknown) {
+    const q = (saved ?? {}) as Record<string, unknown>;
+    const no = q.quoteNumber != null ? String(q.quoteNumber).trim() : '';
+    const ref = q.orderReferenceNumber != null ? String(q.orderReferenceNumber).trim() : '';
+    if (no) setQuoteNo(no);
+    if (ref) setReference(ref);
+  }
+
   /* ── Silent autosave: persists the current draft (line items, generated docs link, etc.) without alerts/validation ── */
   const autosaveBusyRef = useRef(false);
   async function silentSaveDraft(): Promise<string | null> {
@@ -1920,9 +2485,9 @@ export function QuoteNewScreen({
       if (!r.ok) return null;
       const saved = await r.json();
       const savedId = saved?.id ? String(saved.id) : null;
+      syncQuoteNumberFromServer(saved);
       if (!currentId && savedId) {
         setQuoteId(savedId);
-        if (saved.quoteNumber != null) setQuoteNo(String(saved.quoteNumber));
         // Standalone mode: reflect the new id in the URL so a refresh restores this draft
         if (!taskId && typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
@@ -2091,9 +2656,24 @@ export function QuoteNewScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onedriveActive]);
 
+  /* ── האם לטיוטה יש תוכן אמיתי ששווה לשמור ──
+   * הקריטריון זהה לזה שמסנן את lineItemsJson בשמירה: פריט עם תיאור או מחיר.
+   * מעליו — כל דבר שהמשתמש יצר במסך (הערות, בחירת תבנית, קובץ שנוצר). */
+  function hasDraftContent(): boolean {
+    const hasItem = lineItems.some((li) => li.description.trim() || (parseFloat(li.price) || 0) > 0);
+    return hasItem || !!notes.trim() || !!internalNotes.trim() || !!quoteTemplateId || mergedFiles.length > 0;
+  }
+
   /* ── Debounced autosave of the draft quote — keeps line items / DOCX link alive across page refreshes ── */
   useEffect(() => {
     if (!draftReady || !customerId) return;
+    /* ── לא יוצרים הצעה חדשה רק כי המסך נפתח ──
+     * customerId מגיע מ-prefill של המשימה, ולכן עצם הכניסה לשלב "הצעת מחיר" הספיקה כדי
+     * שהשמירה האוטומטית תיצור הצעה ריקה: היא תפסה מספר רץ, נרשמה על המשימה, וכיוון
+     * שרשימת ההצעות של המשימה ממוינת מהחדש לישן — היא הסתירה לצמיתות את ההצעה האמיתית
+     * (כך "גילת רשתות לוין" ראתה הצעה ריקה במקום הצעה 18373 עם הפריטים והקובץ).
+     * עדכון של הצעה קיימת (PATCH) ממשיך לרוץ כרגיל; רק *יצירה* דורשת תוכן. */
+    if (!quoteIdRef.current && !hasDraftContent()) return;
     const t = setTimeout(() => { void silentSaveDraft(); }, 1500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2102,7 +2682,9 @@ export function QuoteNewScreen({
     paymentValidityDate, paymentDueDate, notes, internalNotes, discountPercent, vatPercent,
     paymentsCount, follow, customerContactId, salesRep, contact, customerAddress, customerCity,
     customerEmail, fax, accountingNo, companyNo, priceList, orderSource, rate, fFunctional,
-    fClosePercent, status, quoteTemplateId, date,
+    // mergedFiles — נספר ב-hasDraftContent, ולכן חייב להיות בתלויות כדי שקובץ שנוצר
+    // ישחרר את שמירת-הטיוטה גם אם שום שדה אחר לא השתנה.
+    fClosePercent, status, quoteTemplateId, date, mergedFiles,
   ]);
 
   /* ── Save (POST new / PATCH existing) — returns saved id or null on failure ── */
@@ -2136,8 +2718,10 @@ export function QuoteNewScreen({
       setQuoteContactRows((prev) =>
         prev.map((r) => (r.id === customerContactId ? { ...r, ...patch } : r)),
       );
-    } else if (quoteContactRows.length === 0) {
-      // No contacts on this customer — update the customer record itself.
+    } else {
+      // אין איש קשר נבחר (גם אם ללקוח יש אנשי קשר) — מעדכנים את רשומת הלקוח עצמה.
+      // קודם התנאי היה quoteContactRows.length === 0, ולכן לחיצה על "שמור" בלי איש קשר
+      // נבחר לא שמרה כלום אבל הציגה "נשמר".
       const patch: Record<string, string> = {};
       if (phoneVal) patch.phone = phoneVal;
       if (emailVal) patch.email = emailVal;
@@ -2169,55 +2753,141 @@ export function QuoteNewScreen({
     }
   }
 
+  /** קישור ההצעה למשימה שמטפלת בה. בלעדיו פתיחת המשימה משלב "הצעת מחיר" לא מוצאת את
+   *  ההצעה, המסך נפתח כ"הצעה חדשה", והשמירה האוטומטית יוצרת הצעה ריקה שמסתירה את האמיתית. */
+  async function linkQuoteToTask(
+    savedQuoteId: string,
+    taskIdToLink: string,
+    user: ReturnType<typeof getSessionUser>,
+  ): Promise<void> {
+    try {
+      await apiFetch(apiUrl(`/quotes/${encodeURIComponent(savedQuoteId)}`), {
+        method: 'PATCH',
+        body: JSON.stringify({ linkedEntityId: taskIdToLink }),
+        authUser: user,
+      });
+      setSelfLinkedTaskId(taskIdToLink);
+    } catch { /* לא פוגע בשמירת ההצעה */ }
+  }
+
   /**
-   * יצירת משימת "פולואפ" מתאריך "למעקב" של ההצעה (רק כשאין taskId מקושר).
-   * המשימה נכנסת בשלב "פולואפ" (step4), עם dueDate = תאריך המעקב, ומקושרת ללקוח וההצעה.
-   * מונע כפילות דרך followupTaskCreatedForQuoteRef.
+   * "מעקב" על הצעת מחיר — מעביר את משימת הלקוח *הקיימת* לשלב פולואפ, ויוצר משימה
+   * חדשה רק כשאין משימה כזו בכלל.
+   *
+   * זה היה מקור הכפילויות: "מעקב" מתוך משימה עשה PATCH על אותה משימה, אבל "מעקב"
+   * ממסך הצעה עצמאי (כרטיס לקוח / חדש→הצעה / /quotes/new) עשה POST /tasks — ולכן
+   * לקוח שכבר היה לו "פנייה - X" פתוח קיבל משימת מעקב מקבילה. בייצור נמצאו 15 קבוצות
+   * כפולות (יורם גבאי — 8 עותקים, cardo systems — 4, וזוגות בהפרש 0 דקות).
+   * findDuplicateOf בשרת לא תפס את זה כי הוא משווה כותרת מדויקת, והכותרות שונות
+   * ("פנייה - X" מול "X — שירות").
+   *
+   * שלושת המנעולים הישנים כולם דלפו: ref בזיכרון (נאבד ברענון/טאב שני),
+   * Quote.linkedEntityId (נכתב רק כשיש taskId, ו-catch ריק נפל ליצירה), ו-findDuplicateOf.
+   * לכן הפתרון כאן אינו מנעול נוסף אלא שינוי הפעולה עצמה: קודם *מאתרים* יעד, ורק
+   * בהיעדר יעד יוצרים. השרת מכריע מיהו היעד — ראה findPromotableForCustomer.
    */
-  async function maybeCreateFollowupTask(savedQuoteId: string, user: ReturnType<typeof getSessionUser>): Promise<void> {
+  async function promoteOrCreateFollowupTask(
+    savedQuoteId: string,
+    user: ReturnType<typeof getSessionUser>,
+    /** מספר ההצעה כפי שהוחזר מהשרת בשמירה. ה-state `quoteNo` עדיין מחזיק 'חדש' בסגירה
+     *  הנוכחית בשמירה הראשונה, ולכן משימות המעקב הישנות נוצרו בלי מספר הצעה בתיאור. */
+    savedQuoteNumber: string | null | undefined,
+    /** תאריך המעקב כמחרוזת yyyy-mm-dd. מועבר במפורש ולא נקרא מה-state `follow`:
+     *  scheduleFollowupQuick קורא setFollow ומיד await doSave באותה סגירה, ולכן קריאה
+     *  מה-state החזירה את הערך *הקודם* — לחיצה על "מחר" יצרה משימה ל-3 ימים. */
+    followYmd: string,
+  ): Promise<void> {
+    if (!user || !customerId) return;
     let followIso: string | null = null;
-    if (follow && follow.trim()) {
-      try { const d = new Date(follow); followIso = isNaN(d.getTime()) ? null : d.toISOString(); } catch { followIso = null; }
+    if (followYmd && followYmd.trim()) {
+      try { const d = new Date(followYmd); followIso = isNaN(d.getTime()) ? null : d.toISOString(); } catch { followIso = null; }
     }
     if (!followIso) return; // לא מולא תאריך מעקב תקין
-    if (!customerId) return;
-    if (!user) return;
-    if (followupTaskCreatedForQuoteRef.current === savedQuoteId) return; // כבר נוצרה
+
+    // ── 1. איתור המשימה שההצעה שייכת אליה ──
+    // preferTaskId = הקישור הקיים של ההצעה. השרת מאמת שהמשימה עדיין קיימת (אין FK על
+    // linkedEntityId, ויש בייצור מצביעים למשימות שנמחקו), פעילה, ובשלב טרום-מכירה.
+    let targetTaskId = '';
+    try {
+      const linkedRes = await apiFetch(apiUrl(`/quotes/${encodeURIComponent(savedQuoteId)}`), { authUser: user });
+      const linkedId = linkedRes.ok
+        ? String(((await linkedRes.json()) as { linkedEntityId?: unknown })?.linkedEntityId ?? '').trim()
+        : '';
+      const qs = linkedId ? `?preferTaskId=${encodeURIComponent(linkedId)}` : '';
+      const res = await apiFetch(
+        apiUrl(`/tasks/active-for-customer/${encodeURIComponent(customerId)}${qs}`),
+        { authUser: user },
+      );
+      if (res.ok) {
+        const found = await res.json().catch(() => null);
+        if (found?.id) targetTaskId = String(found.id);
+      }
+    } catch { /* שקט — נופלים ליצירה */ }
+
+    // ── 2. יש משימה → מעבירים *אותה* לפולואפ (זהה למסלול שבתוך משימה) ──
+    if (targetTaskId) {
+      const r = await apiFetch(apiUrl(`/tasks/${encodeURIComponent(targetTaskId)}`), {
+        method: 'PATCH',
+        // currentStage 3 = פולואפ. השלב נקבע לפי currentStage (הוא גובר על type),
+        // ולכן הערך הישן 4 פתח את המשימה ב"תיאום" במקום בפולואפ.
+        body: JSON.stringify({ dueDate: followIso, currentStage: 3, type: 'step4', priority: 'HIGH' }),
+        authUser: user,
+      });
+      if (r.ok) {
+        followupTaskCreatedForQuoteRef.current = savedQuoteId;
+        await linkQuoteToTask(savedQuoteId, targetTaskId, user);
+        return;
+      }
+      // PATCH נכשל (למשל המשימה נמחקה בין השליפה לעדכון) → ממשיכים ליצירה.
+    }
+
+    // ── 3. אין משימה לקדם → יצירה, פעם אחת בלבד ל-mount ──
+    if (followupTaskCreatedForQuoteRef.current === savedQuoteId) return;
     const productName = (prefillServiceName || lineItems.find((li) => li.description.trim())?.description || '').trim();
     const title = [customer.trim(), productName].filter(Boolean).join(' — ') || 'מעקב הצעת מחיר';
+    const quoteNoForDesc = (savedQuoteNumber || '').trim() || (quoteNo !== 'חדש' ? quoteNo : '');
     const body: Record<string, unknown> = {
       title,
-      description: `מעקב להצעת מחיר${quoteNo && quoteNo !== 'חדש' ? ` מס' ${quoteNo}` : ''}`,
+      description: `מעקב להצעת מחיר${quoteNoForDesc ? ` מס' ${quoteNoForDesc}` : ''}`,
       dueDate: followIso,
       customerId,
       ownerId: user.id, // SALES/TECHNICIAN → נכפה בשרת ל-user; ADMIN/MANAGER → נדרש במפורש
       type: 'step4',
-      currentStage: 4,
+      currentStage: 3, // פולואפ
       productName: productName || null,
     };
     const r = await apiFetch(apiUrl('/tasks'), { method: 'POST', body: JSON.stringify(body), authUser: user });
-    if (r.ok) {
-      followupTaskCreatedForQuoteRef.current = savedQuoteId;
-    }
+    if (!r.ok) return;
+    followupTaskCreatedForQuoteRef.current = savedQuoteId;
+
+    const created = await r.json().catch(() => null);
+    const newTaskId = created?.id ? String(created.id) : '';
+    if (newTaskId) await linkQuoteToTask(savedQuoteId, newTaskId, user);
   }
 
   /**
-   * כפתורי "מעקב" מהירים במודל "הצעת מחיר חדשה" (חדש → הצעה), במקביל לשלב הצעת המחיר
-   * שבתוך משימה: לחיצה קובעת את תאריך המעקב ושומרת את ההצעה — כך שהמעקב נפתח מיד כמשימת
-   * פולואפ (דרך maybeCreateFollowupTask שרץ ב-doSave כשאין taskId מקושר).
+   * כפתורי "מעקב" מהירים במסך הצעה עצמאי, במקביל לשלב הצעת המחיר שבתוך משימה:
+   * לחיצה קובעת את תאריך המעקב ושומרת — וההצעה עוברת לפולואפ דרך
+   * promoteOrCreateFollowupTask שרץ ב-doSave.
+   *
+   * התאריך מועבר ל-doSave *במפורש* ולא דרך ה-state: setFollow ו-await doSave יושבים
+   * באותה סגירה, ולכן doSave קרא את הערך הקודם — לחיצה על "מחר" קבעה מעקב ל-3 ימים,
+   * והלחיצה הראשונה על הצעה חדשה לא עשתה כלום (אבל הציגה ✓), מה שגרם ללחוץ שוב.
    * @param date תאריך היעד למעקב.
    */
   async function scheduleFollowupQuick(date: Date): Promise<void> {
-    if (followQuickBusy) return;
+    if (followBusyRef.current) return; // ref ולא state — state לא מתעדכן באותו פריים
     const yyyy = date.getFullYear();
     const mm = String(date.getMonth() + 1).padStart(2, '0');
     const dd = String(date.getDate()).padStart(2, '0');
-    setFollow(`${yyyy}-${mm}-${dd}`);
+    const ymd = `${yyyy}-${mm}-${dd}`;
+    followTouchedRef.current = true;
+    setFollow(ymd);
     setFollowManualOpen(false);
+    followBusyRef.current = true;
     setFollowQuickBusy(true);
     try {
-      // doSave מייצר את משימת הפולואפ (maybeCreateFollowupTask) כשאין taskId מקושר.
-      const savedId = await doSave({ advanceStage: false });
+      const savedId = await doSave({ advanceStage: false, followYmd: ymd });
       if (savedId) {
         setFollowQuickDone(true);
         window.setTimeout(() => setFollowQuickDone(false), 3000);
@@ -2225,6 +2895,7 @@ export function QuoteNewScreen({
     } catch {
       /* שקט — doSave כבר מציג שגיאה במידת הצורך */
     } finally {
+      followBusyRef.current = false;
       setFollowQuickBusy(false);
     }
   }
@@ -2235,7 +2906,10 @@ export function QuoteNewScreen({
     return scheduleFollowupQuick(d);
   };
 
-  async function doSave(opts?: { advanceStage?: boolean }): Promise<string | null> {
+  async function doSave(opts?: { advanceStage?: boolean; followYmd?: string }): Promise<string | null> {
+    // תאריך המעקב האפקטיבי לשמירה הזו. כפתורי "מעקב" מעבירים אותו במפורש כי ה-state
+    // עדיין מחזיק את הערך הקודם בסגירה הנוכחית (ראה scheduleFollowupQuick).
+    const followForSave = opts?.followYmd ?? follow;
     if (!customerId) { alert('נא לבחור לקוח לפני השמירה'); return null; }
     if (customerContactId.trim() && !quoteContactRows.some((r) => r.id === customerContactId)) {
       alert('איש הקשר שנבחר אינו שייך ללקוח הנוכחי — נא לבחור איש קשר מחדש.');
@@ -2247,7 +2921,7 @@ export function QuoteNewScreen({
     if (!phone.trim()) missing.push('טלפון');
     if (!paymentTerms.trim()) missing.push('תנאי תשלום');
     if (!validityDays.trim()) missing.push('תוקף (ימים)');
-    if (lineItems.filter((li) => li.description.trim() || parseFloat(li.price) > 0).length === 0) missing.push('פריט אחד לפחות');
+    // אין דרישת מינימום פריטים — הצעת מחיר עם 0 פריטים היא תקינה (לפי בקשת המשתמש).
     if (missing.length > 0) {
       alert(`שדות חובה חסרים:\n${missing.join('\n')}`);
       return null;
@@ -2257,7 +2931,7 @@ export function QuoteNewScreen({
     setIsBusy(true);
     setStatusMsg('שומר...');
     try {
-      const payload = buildQuotePayload();
+      const payload = buildQuotePayload(followForSave);
       const currentId = quoteIdRef.current;
       const url = currentId ? apiUrl(`/quotes/${currentId}`) : apiUrl('/quotes');
       const method = currentId ? 'PATCH' : 'POST';
@@ -2270,10 +2944,9 @@ export function QuoteNewScreen({
       }
       const saved = await r.json();
       const savedId = saved.id as string;
-      if (!currentId) {
-        setQuoteId(savedId);
-        setQuoteNo(String(saved.quoteNumber ?? quoteNo));
-      }
+      if (!currentId) setQuoteId(savedId);
+      // המספר/סימוכין נקבעים בשרת (גם בעדכון של הצעה ישנה שנשמרה בלי מספר) — מסנכרנים חזרה.
+      syncQuoteNumberFromServer(saved);
       // Propagate edited טלפון/אימייל back to the customer's contact/record.
       // Non-fatal — the quote itself is already saved.
       try { await syncContactInfoToDb(user); } catch { /* ignore */ }
@@ -2304,12 +2977,22 @@ export function QuoteNewScreen({
       }
       setStatusMsg('');
       if (savedId) setSavedOnce(true);
-      // ── "למעקב" → יצירת משימת פולואפ ──
-      // כשההצעה נפתחה מ"חדש → הצעת מחיר חדשה" (ללא taskId) ומולא תאריך "למעקב",
-      // נוצרת משימת פולואפ לאותו תאריך. כשההצעה נפתחה מתוך משימה קיימת (taskId),
-      // הקידום לשלב "פולואפ" מטופל ע"י מסך המשימות — לכן לא יוצרים כאן משימה כפולה.
-      if (savedId && !taskId) {
-        try { await maybeCreateFollowupTask(savedId, user); } catch { /* לא פוגע בשמירת ההצעה */ }
+      // ── "למעקב" → העברת משימת הלקוח לשלב פולואפ ──
+      // כשההצעה נפתחה מתוך משימה קיימת (taskId), הקידום מטופל ע"י מסך המשימות.
+      //
+      // followTouchedRef: תאריך המעקב מתמלא אוטומטית ל-היום+3 בכל הצעה חדשה, ולכן עד
+      // כה לחיצה על "שמור" בלבד פתחה משימת מעקב בלי שהמשתמש ביקש — מקור שקט לכפילויות.
+      // מעכשיו הזרימה רצה רק אחרי פעולה מפורשת: כפתורי "מעקב" או עריכת שדה התאריך.
+      if (savedId && !taskId && followTouchedRef.current) {
+        const savedNo = (saved as Record<string, unknown>)?.quoteNumber;
+        try {
+          await promoteOrCreateFollowupTask(
+            savedId,
+            user,
+            savedNo != null ? String(savedNo) : null,
+            followForSave,
+          );
+        } catch { /* לא פוגע בשמירת ההצעה */ }
       }
       if (savedId && (opts?.advanceStage ?? true) && onQuoteSaved) onQuoteSaved(savedId);
       return savedId;
@@ -2364,7 +3047,7 @@ export function QuoteNewScreen({
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>הצעת מחיר ${escHtml(quoteNo)}</title>
+  <title>הצעת מחיר ${escHtml(displayQuoteNo)}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2454,7 +3137,7 @@ export function QuoteNewScreen({
   <div class="doc-title">הצעת מחיר</div>
 
   <div class="hgrid">
-    ${hfield('מספר הצעה:', quoteNo)}
+    ${hfield('מספר הצעה:', displayQuoteNo)}
     ${hfield('סימוכין:', reference)}
     ${hfield('לקוח:', customer)}
     ${hfield('תאריך:', date)}
@@ -2541,8 +3224,8 @@ export function QuoteNewScreen({
   }
 
   async function handleMergeClick() {
-    if (lineItems.length === 0 || !paymentTerms.trim()) {
-      alert('יש להוסיף לפחות פריט אחד בהצעת המחיר ולמלא תנאי תשלום לפני המיזוג');
+    if (!paymentTerms.trim()) {
+      alert('יש למלא תנאי תשלום לפני המיזוג');
       return;
     }
     const user = getSessionUser();
@@ -2584,7 +3267,7 @@ export function QuoteNewScreen({
       const filteredRows = lineItemCats.size === 0
         ? []
         : rows.filter((r) => {
-            const tplCat = getTemplateCategory(r.label);
+            const tplCat = getTemplateCategory(r.label, r.subLabel);
             // רק התאמה מדויקת לקטגוריה; תבניות 'general'/כללי לא מוצגות אוטומטית
             // (פריטי תוספת נפוצים כמו הוצאות הגעה/משלוח שייכים ל-general והיו גוררים תבניות כלליות בכל מיזוג)
             return tplCat !== null && tplCat !== 'general' && lineItemCats.has(tplCat);
@@ -2854,6 +3537,7 @@ export function QuoteNewScreen({
               }
             } catch { /* ignore */ }
             onAttachmentSaved?.();
+            reloadSelfAttachments(); // מסך עצמאי: לרענן את רשימת המצורפים מהשרת
           }
           if (currentQuoteId) {
             await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
@@ -2893,6 +3577,11 @@ export function QuoteNewScreen({
   async function handleAddGeneratedFile(file: File) {
     if (!file) return;
     const user = getSessionUser();
+    // צירוף קובץ הוא פעולה מפורשת של המשתמש — מוודאים שיש הצעה שמורה לקשור אליה את הקובץ
+    // (השמירה האוטומטית לבדה כבר לא יוצרת הצעה בלי תוכן, ראה hasDraftContent).
+    if (!quoteIdRef.current && customerId) {
+      await silentSaveDraft();
+    }
     const url = URL.createObjectURL(file);
     const fileName = file.name;
     setMergedFiles((prev) => [...prev, { name: fileName, url }]);
@@ -2923,6 +3612,7 @@ export function QuoteNewScreen({
             }
           } catch { /* ignore */ }
           onAttachmentSaved?.();
+          reloadSelfAttachments(); // מסך עצמאי: לרענן את רשימת המצורפים מהשרת
         }
         if (currentQuoteId) {
           await apiFetch(apiUrl(`/quotes/${currentQuoteId}/save-merged-doc`), {
@@ -2950,16 +3640,8 @@ export function QuoteNewScreen({
       // שמנהל את existingAttachments), ואם לא סופק — ישירות מול נתיב המשימה.
       let serverOk = true;
       if (attId) {
-        if (onDeleteAttachment) {
-          serverOk = await Promise.resolve(onDeleteAttachment({ id: attId, fileName }));
-        } else if (taskId) {
-          const user = getSessionUser();
-          const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${attId}`), {
-            authUser: user,
-            method: 'DELETE',
-          });
-          serverOk = res.ok;
-        }
+        // effectiveDeleteAttachment מטפל בשני המסלולים: prop מההורה (דשבורד) או שליפה עצמית (מסך עצמאי).
+        serverOk = await Promise.resolve(effectiveDeleteAttachment({ id: attId, fileName }));
       }
       if (attId && !serverOk) {
         setStatusMsg('מחיקת הקובץ נכשלה');
@@ -2976,6 +3658,59 @@ export function QuoteNewScreen({
       setTimeout(() => setStatusMsg(''), 4000);
     } finally {
       setDeletingFileKeys((prev) => { const n = { ...prev }; delete n[key]; return n; });
+    }
+  }
+
+  // עריכת שם קובץ ידנית ב"קבצים שנוצרו". שומר את הסיומת המקורית (כדי שלא יאבד סוג הקובץ),
+  // מעדכן בשרת אם הקובץ שמור (יש attId + taskId), ומשקף מיד בתצוגה. קובץ לא-שמור (בליטה
+  // בלבד, ללא attId) משתנה מקומית בלבד.
+  async function handleRenameGeneratedFile(opts: { attId?: string; fileName: string }) {
+    const { attId, fileName } = opts;
+    if (typeof window === 'undefined') return;
+    // שומרים את הסיומת המקורית ומאפשרים לערוך רק את שם הבסיס — כדי לא לשבור את סוג הקובץ.
+    const dot = fileName.lastIndexOf('.');
+    const ext = dot > 0 ? fileName.slice(dot) : '';
+    const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+    const input = window.prompt('שם הקובץ החדש:', base);
+    if (input === null) return; // בוטל
+    const newBase = input.trim();
+    if (!newBase) { setStatusMsg('שם קובץ ריק — לא נשמר'); setTimeout(() => setStatusMsg(''), 3000); return; }
+    const newName = newBase + ext;
+    if (newName === fileName) return; // ללא שינוי
+
+    try {
+      const user = getSessionUser();
+      // עדכון בשרת רק לקובץ שמור (attId + taskId). קובץ בליטה ללא attId — מקומי בלבד.
+      if (attId && taskId) {
+        const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${attId}`), {
+          method: 'PATCH',
+          authUser: user,
+          body: JSON.stringify({ fileName: newName }),
+        });
+        if (!res.ok) { setStatusMsg('שינוי שם הקובץ נכשל'); setTimeout(() => setStatusMsg(''), 4000); return; }
+      }
+      // סנכרון מיידי של השם *ב-OneDrive* — גם כשהמסך נפתח בלי משימה (יש רק quoteId).
+      // best-effort: אם אין קובץ פעיל ב-OneDrive / אין הצעה שמורה — פשוט לא קורה כלום.
+      const qid = quoteIdRef.current;
+      if (qid) {
+        void apiFetch(apiUrl(`/quotes/${qid}/onedrive-rename`), {
+          method: 'POST',
+          authUser: user,
+          body: JSON.stringify({ fileName: newName }),
+        }).catch(() => { /* שקט — סנכרון OneDrive best-effort */ });
+      }
+      // שיקוף מיידי בתצוגה: גם על קבצי הסשן (mergedFiles) וגם על קבצי השרת (renamedByAttId).
+      setMergedFiles((prev) => prev.map((m) => {
+        const isMatch = attId ? m.attId === attId : m.name === fileName;
+        return isMatch ? { ...m, name: newName } : m;
+      }));
+      if (attId) setRenamedByAttId((prev) => ({ ...prev, [attId]: newName }));
+      setStatusMsg('שם הקובץ עודכן');
+      setTimeout(() => setStatusMsg(''), 3000);
+    } catch (e) {
+      console.error('Failed to rename generated file:', e);
+      setStatusMsg('שינוי שם הקובץ נכשל');
+      setTimeout(() => setStatusMsg(''), 4000);
     }
   }
 
@@ -3172,7 +3907,8 @@ export function QuoteNewScreen({
   /* ── shared input classes ── */
   const inp = 'h-11 w-full rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 transition-colors';
   const lbl = 'text-sm font-medium text-gray-500 mb-0.5';
-  const canMerge = lineItems.length > 0 && paymentTerms.trim() !== '';
+  // מיזוג מותר גם ללא פריטים כלל — הדרישה היחידה היא תנאי תשלום.
+  const canMerge = paymentTerms.trim() !== '';
 
   return (
     <div ref={rootRef} className="flex flex-col min-h-screen bg-gray-50" dir="rtl">
@@ -3184,7 +3920,7 @@ export function QuoteNewScreen({
             <h1 className="text-base font-bold text-gray-800 leading-tight">הצעת מחיר {initialQuoteId ? '' : 'חדשה'}</h1>
             <p className="text-[10px] text-gray-400 leading-tight">גלית CRM</p>
           </div>
-          {quoteNo && <span className="mr-3 rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-500">{quoteNo}</span>}
+          <span className="mr-3 rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-500">{displayQuoteNo}</span>
           <div className="mr-2 flex items-center gap-1">
             <span className="text-xs text-gray-400">סימוכין:</span>
             <input className="h-8 w-28 rounded-lg border border-gray-200 bg-gray-50 px-2 text-sm outline-none focus:border-blue-400" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="מס׳ סימוכין" />
@@ -3202,7 +3938,7 @@ export function QuoteNewScreen({
             <span className="h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center text-green-500 hover:bg-green-50 hover:text-green-600"><Save size={18} /></span>
             <span className="text-[10px] text-gray-500">שמור</span>
           </button>
-          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!savedOnce || !canMerge} title={!savedOnce ? 'יש לשמור את ההצעה לפני המיזוג' : (!canMerge ? 'יש להוסיף לפחות פריט אחד ולמלא תנאי תשלום לפני המיזוג' : undefined)} onClick={() => handleMergeClick()}>
+          <button type="button" className="flex flex-col items-center gap-0.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" disabled={!savedOnce || !canMerge} title={!savedOnce ? 'יש לשמור את ההצעה לפני המיזוג' : (!canMerge ? 'יש למלא תנאי תשלום לפני המיזוג' : undefined)} onClick={() => handleMergeClick()}>
             <span className={`h-10 w-10 rounded-full border border-gray-200 bg-white flex items-center justify-center ${savedOnce ? 'text-green-500 hover:bg-green-50 hover:text-green-600' : 'text-gray-400 hover:bg-gray-50 hover:text-gray-600'}`}><FileText size={18} /></span>
             <span className="text-[10px] text-gray-500">מיזוג</span>
           </button>
@@ -3288,6 +4024,8 @@ export function QuoteNewScreen({
             signTokenRef.current = null; // טוקן חתימה טרי לכל פתיחת חלון (משקף את הגרסה העדכנית)
             setCcDropdownOpen(false);
             setBccDropdownOpen(false);
+            // ברירת מחדל: מייל רגיל מסומן (הפעולה הראשית הקודמת) — אפשר להוסיף עוד ערוצים לשליחה מקבילה.
+            setSendSel({ emailPlain: true, emailSign: false, waPlain: false, waSign: false });
             setEmailModalOpen(true);
             if (!draftReady) void generateEmailDraft(id); // אין ניסוח עדיין — מנסחים עכשיו (יתעדכן חי)
           }}>
@@ -3319,6 +4057,63 @@ export function QuoteNewScreen({
                   {phone.trim() && (
                     <a href={`tel:${phone.trim()}`} className="mt-1 inline-block text-xl font-bold text-blue-700 tracking-wide hover:underline" dir="ltr">{phone.trim()}</a>
                   )}
+                </div>
+              )}
+              {/*
+                מעקב — מוצג בראש הטופס (כמו בשלב הצעת המחיר שבתוך משימה, שם הסרגל מוצג ע"י
+                הדשבורד מעל המסך). מוצג רק כשאין taskId; לחיצה קובעת תאריך מעקב + שומרת →
+                משימת הלקוח הקיימת עוברת לפולואפ (promoteOrCreateFollowupTask ב-doSave).
+              */}
+              {!taskId && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl bg-blue-50/60 border border-blue-100 px-4 py-3">
+                  {/* הכפתור מעביר את משימת הלקוח הקיימת לפולואפ (ויוצר חדשה רק אם אין) —
+                      לכן הכיתוב כבר לא "פתח כמשימה", שתיאר את ההתנהגות שיצרה כפילויות. */}
+                  <span className="text-sm font-extrabold text-slate-800">מעקב:</span>
+                  {[
+                    { label: 'מחר', days: 1 },
+                    { label: '3 ימים', days: 3 },
+                    { label: 'שבוע', days: 7 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.days}
+                      type="button"
+                      disabled={followQuickBusy}
+                      onClick={() => { void scheduleFollowupInDays(opt.days); }}
+                      className="rounded-full px-3 py-1 text-[12px] font-bold transition-colors bg-white text-slate-600 border border-blue-100 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40"
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setFollowManualOpen((v) => !v)}
+                    className={`rounded-full px-3 py-1 text-[12px] font-bold transition-colors ${followManualOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-blue-100 hover:bg-blue-100'}`}
+                  >
+                    ידני
+                  </button>
+                  {followManualOpen && (
+                    <>
+                      <input
+                        type="date"
+                        value={follow}
+                        onChange={(e) => { followTouchedRef.current = true; setFollow(e.target.value); }}
+                        className="rounded-lg border border-blue-100 bg-white px-2 py-1 text-[12px] font-bold"
+                      />
+                      <button
+                        type="button"
+                        disabled={followQuickBusy || !follow.trim()}
+                        onClick={() => {
+                          const d = new Date(follow);
+                          if (!isNaN(d.getTime())) { d.setHours(9, 0, 0, 0); void scheduleFollowupQuick(d); }
+                        }}
+                        className="rounded-xl px-3 py-1 text-[12px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40"
+                      >
+                        קבע
+                      </button>
+                    </>
+                  )}
+                  {followQuickBusy && <span className="text-[12px] font-bold text-blue-600">שומר…</span>}
+                  {followQuickDone && !followQuickBusy && <span className="text-[12px] font-bold text-green-600">✓ נקבע מעקב</span>}
                 </div>
               )}
               <div className="flex items-center justify-between mb-2">
@@ -3398,23 +4193,101 @@ export function QuoteNewScreen({
                   {lineItems.map((item, idx) => {
                     const total = calcTotal(item);
                     const sel = idx === selectedLineIdx;
+                    const isDragging = dragIdx === idx;
+                    const isDragOver = dragOverIdx === idx && dragIdx !== null && dragIdx !== idx;
                     return (
-                      <div key={item.id} className={`rounded-xl border-2 ${sel ? 'border-blue-200 bg-blue-50/40 shadow-sm' : 'border-gray-100 bg-gray-50/30'} p-3 transition-all cursor-pointer hover:border-blue-100`} onClick={() => setSelectedLineIdx(idx)}>
+                      <div
+                        key={item.id}
+                        draggable={dragEnabledIdx === idx}
+                        className={`rounded-xl border-2 ${sel ? 'border-blue-200 bg-blue-50/40 shadow-sm' : 'border-gray-100 bg-gray-50/30'} ${isDragging ? 'opacity-40' : ''} ${isDragOver ? 'border-blue-400 border-dashed ring-2 ring-blue-300' : ''} p-3 transition-all hover:border-blue-100`}
+                        onClick={() => setSelectedLineIdx(idx)}
+                        onDragStart={(e) => {
+                          // גרירה מתחילה רק כשאחזו בידית (dragEnabledIdx נקבע ב-mousedown על הידית).
+                          if (dragEnabledIdx !== idx) { e.preventDefault(); return; }
+                          setDragIdx(idx); e.dataTransfer.effectAllowed = 'move';
+                          try { e.dataTransfer.setData('text/plain', String(idx)); } catch { /* ignore */ }
+                        }}
+                        onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); setDragEnabledIdx(null); }}
+                        onDragOver={(e) => { if (dragIdx !== null) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragOverIdx !== idx) setDragOverIdx(idx); } }}
+                        onDrop={(e) => { e.preventDefault(); if (dragIdx !== null && dragIdx !== idx) moveLineItem(dragIdx, idx); setDragIdx(null); setDragOverIdx(null); setDragEnabledIdx(null); }}
+                      >
                         <div className="grid gap-2 items-end sm:grid-cols-2 lg:grid-cols-12">
+                          {/* ידית גרירה — לחיצה עליה מפעילה draggable על כל השורה (mousedown/touchstart),
+                              כך שאפשר לגרור מכל מקום בשורה בלי לשבש הקלדה בשדות. */}
+                          <div className="flex col-span-full sm:col-span-2 lg:col-span-full items-center justify-center -mb-1">
+                            <span
+                              onMouseDown={() => setDragEnabledIdx(idx)}
+                              onTouchStart={() => setDragEnabledIdx(idx)}
+                              onClick={(e) => e.stopPropagation()}
+                              title="גרור כדי לשנות את סדר הפריטים"
+                              className="flex items-center gap-1 text-gray-400 hover:text-blue-600 cursor-grab active:cursor-grabbing select-none px-3 py-1 rounded-lg hover:bg-blue-50"
+                            >
+                              <GripVertical size={16} />
+                              <span className="text-[11px] font-bold">גרור לשינוי סדר</span>
+                            </span>
+                          </div>
                           <div className="lg:col-span-1">
                             <div className="text-sm font-medium text-gray-400 mb-0.5">מק&quot;ט</div>
-                            <input value={item.sku} onChange={(e) => setLineItems((prev) => prev.map((r, i) => i === idx ? { ...r, sku: e.target.value } : r))} className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400" />
+                            <input
+                              value={item.sku}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                const hit = serviceBySku.get(raw.trim());
+                                setLineItems((prev) => prev.map((r, i) => {
+                                  if (i !== idx) return r;
+                                  // מק"ט שאינו בקטלוג — שומרים אותו כטקסט חופשי ולא נוגעים
+                                  // בתיאור/מחיר, כדי לא למחוק מה שהמשתמש כתב בזמן ההקלדה.
+                                  if (!hit) return { ...r, sku: raw };
+                                  return {
+                                    ...r,
+                                    sku: raw,
+                                    description: hit.description,
+                                    price: hit.price,
+                                    categoryPath: hit.categoryPath,
+                                  };
+                                }));
+                              }}
+                              placeholder="מק״ט"
+                              title="הקלדת מק״ט מהקטלוג ממלאת אוטומטית את התיאור והמחיר"
+                              className="h-11 w-full rounded-lg border border-gray-200 bg-white px-2 text-base outline-none focus:border-blue-400"
+                            />
+                            {/* חיווי שהמק"ט זוהה — כדי שיהיה ברור שהמילוי אוטומטי ולא הקלדה */}
+                            {item.sku.trim() && serviceBySku.has(item.sku.trim()) && (
+                              <div className="mt-1 text-[11px] font-semibold text-emerald-600">✓ זוהה בקטלוג</div>
+                            )}
                           </div>
                           <div className="sm:col-span-2 lg:col-span-5">
                             <div className="text-sm font-medium text-gray-400 mb-0.5">תיאור השירות / מוצר</div>
                             <ServiceTreePicker
                               value={item.description}
-                              onSelect={({ description, sku, price }) => {
+                              onSelect={({ description, sku, price, categoryPath }) => {
                                 setLineItems((prev) => prev.map((r, i) =>
-                                  i === idx ? { ...r, description, sku, price } : r
+                                  i === idx ? { ...r, description, sku, price, categoryPath } : r
                                 ));
                               }}
+                              onAddMany={(items) => {
+                                // מוסיף את שאר הפריטים שנבחרו כשורות חדשות מיד אחרי השורה הנוכחית.
+                                setLineItems((prev) => {
+                                  const rows = items.map((it) => ({
+                                    ...newLineItem(),
+                                    description: it.description,
+                                    sku: it.sku,
+                                    price: it.price,
+                                    categoryPath: it.categoryPath,
+                                  }));
+                                  const copy = [...prev];
+                                  copy.splice(idx + 1, 0, ...rows);
+                                  return copy;
+                                });
+                              }}
                             />
+                            {/* מסלול הקטלוג (קטגוריה › תת-קטגוריה) — כשהפריט נבחר מתת-שירות */}
+                            {item.categoryPath ? (
+                              <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                                <span className="inline-block h-1.5 w-1.5 rounded-full bg-slate-300" />
+                                {item.categoryPath}
+                              </div>
+                            ) : null}
                             {/* Free-text override — shown below the picker */}
                             <input
                               value={item.description}
@@ -3425,7 +4298,7 @@ export function QuoteNewScreen({
                           </div>
                           <div className="lg:col-span-2">
                             {(() => {
-                              const catalogSvc = flattenAllServices().find((s) => s.sku === item.sku || s.id === item.sku);
+                              const catalogSvc = allServices.find((s) => s.sku === item.sku || s.id === item.sku);
                               // "מחיר ברירת מחדל" מהקטלוג — לתצוגה והתרעה בלבד; אפשר לקבוע מחיר נמוך יותר.
                               const recommendedPrice = catalogSvc?.price && catalogSvc.price > 0 ? catalogSvc.price : null;
                               const enteredPrice = parseFloat(item.price) || 0;
@@ -3468,6 +4341,15 @@ export function QuoteNewScreen({
                               <div className="text-sm font-medium text-gray-400 mb-0.5">סה&quot;כ</div>
                               <div className="h-11 flex items-center text-base font-bold text-gray-800 whitespace-nowrap">{total} ₪</div>
                             </div>
+                            {/* חיצים למעלה/למטה — חלופה לגרירה (עובד גם בנייד) */}
+                            <div className="mb-0.5 flex flex-col">
+                              <button type="button" disabled={idx === 0} title="הזז למעלה" className="h-4 w-6 shrink-0 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-colors disabled:opacity-30 disabled:hover:bg-transparent" onClick={(e) => { e.stopPropagation(); moveLineItem(idx, idx - 1); }}>
+                                <ChevronDown size={13} className="rotate-180" />
+                              </button>
+                              <button type="button" disabled={idx === lineItems.length - 1} title="הזז למטה" className="h-4 w-6 shrink-0 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 flex items-center justify-center transition-colors disabled:opacity-30 disabled:hover:bg-transparent" onClick={(e) => { e.stopPropagation(); moveLineItem(idx, idx + 1); }}>
+                                <ChevronDown size={13} />
+                              </button>
+                            </div>
                             <button type="button" className="mb-0.5 h-8 w-8 shrink-0 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center transition-colors" onClick={(e) => { e.stopPropagation(); setLineItems((prev) => prev.filter((_, i) => i !== idx)); setSelectedLineIdx(null); }}>
                               <Trash2 size={14} />
                             </button>
@@ -3481,14 +4363,14 @@ export function QuoteNewScreen({
             </section>
 
             {/* ── קבצים שנוצרו ── */}
-            {(mergedFiles.length > 0 || (existingAttachments && existingAttachments.length > 0) || (!!quoteId && !!lastMergedDocPath) || !!quoteId || !!taskId) && (
+            {(mergedFiles.length > 0 || (effectiveExistingAttachments && effectiveExistingAttachments.length > 0) || (!!quoteId && !!lastMergedDocPath) || !!quoteId || !!taskId) && (
               <section className="rounded-2xl bg-white border border-green-100 shadow-sm p-4" dir="rtl">
                 <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
                   <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg bg-green-50 text-green-500">
                     <FileText size={12} />
                   </span>
                   קבצים שנוצרו
-                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (existingAttachments?.filter((att) => !mergedFiles.some((f) => f.name === att.fileName)).length ?? 0) + (quoteId && lastMergedDocPath ? 1 : 0)})</span>
+                  <span className="text-xs font-normal text-gray-400 mr-1">({mergedFiles.length + (effectiveExistingAttachments?.filter((att) => !mergedFiles.some((f) => f.attId && f.attId === att.id)).length ?? 0) + (mergedFiles.length === 0 && !(effectiveExistingAttachments?.length) && quoteId && lastMergedDocPath ? 1 : 0)})</span>
                 </h3>
                 <div className="space-y-2">
                   {(() => {
@@ -3523,6 +4405,17 @@ export function QuoteNewScreen({
                         </button>
                       );
                     };
+                    /* כפתור קטן "שם" פר-קובץ — עריכה ידנית של שם הקובץ (שומר את הסיומת). */
+                    const renameBtn = (attId: string | undefined, name: string) => (
+                      <button
+                        type="button"
+                        onClick={() => handleRenameGeneratedFile({ attId, fileName: name })}
+                        title="ערוך את שם הקובץ"
+                        className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                      >
+                        <Pencil size={12} /> שם
+                      </button>
+                    );
                     /* ── קובץ פעיל = הכי חדש בלבד ──
                        מאחדים את כל הקבצים (ממוזגים-בסשן + מצורפים-בשרת + lastMergedDocPath) לרשימה
                        אחת, ממיינים לפי createdAt, ומסמנים ירוק (=פעיל) *רק* את הקובץ העדכני ביותר.
@@ -3535,19 +4428,24 @@ export function QuoteNewScreen({
                     const files: UFile[] = [];
                     // קבצים שמוזגו/נוספו בסשן הנוכחי — נוצרו "עכשיו", אבל אם יש להם attId נעדיף את ה-createdAt
                     // מהשרת (מ-existingAttachments) כדי שמיון יהיה עקבי בין סשנים.
+                    // עקיפת-שם מקומית אחרי עריכה ידנית (renamedByAttId) גוברת על השם המקורי.
+                    const displayName = (attId: string | undefined, original: string) =>
+                      (attId && renamedByAttId[attId]) || original;
                     for (const f of mergedFiles) {
-                      const match = f.attId ? existingAttachments?.find((a) => a.id === f.attId) : undefined;
+                      const match = f.attId ? effectiveExistingAttachments?.find((a) => a.id === f.attId) : undefined;
                       files.push({
-                        key: `m:${f.attId || f.name}`, name: f.name, attId: f.attId,
+                        key: `m:${f.attId || f.name}`, name: displayName(f.attId, f.name), attId: f.attId,
                         createdAt: match ? new Date(match.createdAt).getTime() : Date.now(),
                         kind: 'merged', url: f.url, serverBacked: f.serverBacked,
                       });
                     }
-                    // קבצים מצורפים בשרת שאין להם כפילות בקבצי הסשן (לפי attId או שם).
-                    for (const att of existingAttachments ?? []) {
-                      if (mergedFiles.some((f) => f.attId === att.id || f.name === att.fileName)) continue;
+                    // קבצים מצורפים בשרת. דדופ *לפי attId בלבד* — אותו קובץ פיזי מזוהה ע"י
+                    // המזהה, לא לפי שם. דדופ לפי שם היה מסתיר קבצים שונים בעלי אותו שם (למשל
+                    // מיזוג-מחדש לאותו לקוח/שירות → אותו שם קובץ), וזו הייתה סיבה מרכזית ל"קבצים נעלמים".
+                    for (const att of effectiveExistingAttachments ?? []) {
+                      if (mergedFiles.some((f) => f.attId && f.attId === att.id)) continue;
                       files.push({
-                        key: `a:${att.id}`, name: att.fileName, attId: att.id,
+                        key: `a:${att.id}`, name: displayName(att.id, att.fileName), attId: att.id,
                         createdAt: new Date(att.createdAt).getTime(), kind: 'attachment', att,
                       });
                     }
@@ -3575,7 +4473,7 @@ export function QuoteNewScreen({
                       ? `${new Date(f.createdAt).toLocaleDateString('he-IL')} ${new Date(f.createdAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`
                       : '';
                     const onClick =
-                      f.kind === 'attachment' && f.att ? () => onDownloadAttachment?.(f.att!)
+                      f.kind === 'attachment' && f.att ? () => effectiveDownloadAttachment(f.att!)
                       : f.kind === 'path' ? () => handleDownloadMergedDoc()
                       : (f.serverBacked && quoteId) ? () => handleDownloadMergedDoc(f.name)
                       : undefined; // 'merged' לא-server-backed → קישור <a> להורדה ישירה
@@ -3603,6 +4501,7 @@ export function QuoteNewScreen({
                             {inner}
                           </a>
                         )}
+                        {f.kind !== 'path' && renameBtn(f.attId, f.name)}
                         {editBtn(f.attId, f.name)}
                         {f.kind !== 'path' && delBtn(f.attId, f.name)}
                       </div>
@@ -3678,64 +4577,9 @@ export function QuoteNewScreen({
                   </div>
                   <div>
                     <div className={lbl}>למעקב</div>
-                    <input type="date" className={inp} value={follow} onChange={(e) => setFollow(e.target.value)} />
+                    <input type="date" className={inp} value={follow} onChange={(e) => { followTouchedRef.current = true; setFollow(e.target.value); }} />
                   </div>
                 </div>
-                {/*
-                  כפתורי "מעקב" מהירים — מוצגים רק במודל "הצעת מחיר חדשה" (ללא taskId).
-                  בשלב הצעת המחיר שבתוך משימה, הסרגל המקביל מוצג ע"י הדשבורד מעל המסך, לכן
-                  כאן מוסתר כדי לא לשכפל. לחיצה קובעת תאריך מעקב + שומרת → נפתחת משימת פולואפ.
-                */}
-                {!taskId && (
-                  <div className="mt-1 flex flex-wrap items-center gap-2 rounded-lg bg-blue-50/60 border border-blue-100 px-3 py-2">
-                    <span className="text-[12px] font-bold text-slate-700">פתח מעקב כמשימה:</span>
-                    {[
-                      { label: 'מחר', days: 1 },
-                      { label: '3 ימים', days: 3 },
-                      { label: 'שבוע', days: 7 },
-                    ].map((opt) => (
-                      <button
-                        key={opt.days}
-                        type="button"
-                        disabled={followQuickBusy}
-                        onClick={() => { void scheduleFollowupInDays(opt.days); }}
-                        className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors bg-white text-slate-600 border border-blue-100 hover:bg-blue-100 hover:text-blue-700 disabled:opacity-40"
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setFollowManualOpen((v) => !v)}
-                      className={`rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${followManualOpen ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-blue-100 hover:bg-blue-100'}`}
-                    >
-                      ידני
-                    </button>
-                    {followManualOpen && (
-                      <>
-                        <input
-                          type="date"
-                          value={follow}
-                          onChange={(e) => setFollow(e.target.value)}
-                          className="rounded-lg border border-blue-100 bg-white px-2 py-1 text-[11px] font-bold"
-                        />
-                        <button
-                          type="button"
-                          disabled={followQuickBusy || !follow.trim()}
-                          onClick={() => {
-                            const d = new Date(follow);
-                            if (!isNaN(d.getTime())) { d.setHours(9, 0, 0, 0); void scheduleFollowupQuick(d); }
-                          }}
-                          className="rounded-xl px-3 py-1 text-[11px] font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40"
-                        >
-                          קבע
-                        </button>
-                      </>
-                    )}
-                    {followQuickBusy && <span className="text-[11px] font-bold text-blue-600">שומר…</span>}
-                    {followQuickDone && !followQuickBusy && <span className="text-[11px] font-bold text-green-600">✓ המעקב נפתח כמשימה</span>}
-                  </div>
-                )}
               </div>
             </section>
 
@@ -4269,23 +5113,43 @@ export function QuoteNewScreen({
                 const busy = emailSending || signBusy;
                 const emailDisabled = busy || !emailHasDraft || noRecipient || !emailForm.quoteId;
                 const waDisabled = busy || !emailForm.quoteId;
+                // אפשר לבחור כמה ערוצים במקביל. כרטיס נבחר = מודגש; לחיצה על "שלח" מריצה את כולם יחד.
+                const selCount = Number(sendSel.emailPlain) + Number(sendSel.emailSign) + Number(sendSel.waPlain) + Number(sendSel.waSign);
+                const chip = (active: boolean, disabled: boolean, tone: 'blue' | 'green') => {
+                  const base = 'relative flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-base font-bold transition-colors disabled:opacity-50 border-2 ';
+                  if (active) return base + (tone === 'blue' ? 'bg-blue-600 text-white border-blue-600' : 'bg-green-600 text-white border-green-600');
+                  return base + (tone === 'blue' ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100');
+                };
+                const tick = (on: boolean) => on ? <Check size={16} className="absolute right-2 top-2" /> : null;
                 return (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {/* שורה 1: שליחה רגילה (הצעה + פרופיל כקבצים מצורפים, בלי כפתורים ובלי חתימה) */}
-                    <button type="button" disabled={emailDisabled} className="flex items-center justify-center gap-2 rounded-xl bg-blue-500 px-6 py-3 text-base font-bold text-white hover:bg-blue-600 transition-colors disabled:opacity-50" onClick={sendQuoteEmailPlain} title="שולח מייל עם ההצעה + הפרופיל והרישיונות כקבצים מצורפים (PDF)">
-                      <Mail size={18} /> שלח במייל
+                  <>
+                    <div className="mb-2 text-xs text-gray-500">בחר ערוץ אחד או יותר — הם יישלחו במקביל בלחיצה על "שלח":</div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {/* שורה 1: שליחה רגילה (הצעה + פרופיל כקבצים מצורפים, בלי כפתורים ובלי חתימה) */}
+                      <button type="button" disabled={emailDisabled} className={chip(sendSel.emailPlain, emailDisabled, 'blue')} onClick={() => toggleSend('emailPlain')} title="שולח מייל עם ההצעה + הפרופיל והרישיונות כקבצים מצורפים (PDF)">
+                        {tick(sendSel.emailPlain)}<Mail size={18} /> שלח במייל
+                      </button>
+                      <button type="button" disabled={waDisabled} className={chip(sendSel.waPlain, waDisabled, 'green')} onClick={() => toggleSend('waPlain')} title="פותח וואטסאפ עם קישור להורדת ה-PDF של ההצעה">
+                        {tick(sendSel.waPlain)}<MessageCircle size={18} /> שלח בוואטסאפ
+                      </button>
+                      {/* שורה 2: שליחה לחתימה (קישור לעמוד /sign שבו הלקוח חותם באצבע) */}
+                      <button type="button" disabled={emailDisabled} className={chip(sendSel.emailSign, emailDisabled, 'blue')} onClick={() => toggleSend('emailSign')} title="שולח מייל עם כפתור צפייה וחתימה בהצעה">
+                        {tick(sendSel.emailSign)}<Mail size={18} /> 🖊️ שלח במייל עם חתימה
+                      </button>
+                      <button type="button" disabled={waDisabled} className={chip(sendSel.waSign, waDisabled, 'green')} onClick={() => toggleSend('waSign')} title="פותח וואטסאפ עם קישור לחתימת הלקוח מהנייד">
+                        {tick(sendSel.waSign)}<MessageCircle size={18} /> 🖊️ שלח בוואטסאפ עם חתימה
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy || selCount === 0 || !emailForm.quoteId || ((sendSel.emailPlain || sendSel.emailSign) && (emailDisabled))}
+                      className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-l from-blue-600 to-green-600 px-6 py-3 text-base font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                      onClick={runSelectedSends}
+                    >
+                      {busy ? <Loader2 size={18} className="animate-spin" /> : <Mail size={18} />}
+                      {busy ? 'שולח…' : selCount > 1 ? `שלח ב-${selCount} ערוצים במקביל` : 'שלח'}
                     </button>
-                    <button type="button" disabled={waDisabled} className="flex items-center justify-center gap-2 rounded-xl bg-green-500 px-6 py-3 text-base font-bold text-white hover:bg-green-600 transition-colors disabled:opacity-50" onClick={sendQuoteWhatsAppPlain} title="פותח וואטסאפ עם קישור להורדת ה-PDF של ההצעה">
-                      <MessageCircle size={18} /> שלח בוואטסאפ
-                    </button>
-                    {/* שורה 2: שליחה לחתימה (קישור לעמוד /sign שבו הלקוח חותם באצבע) */}
-                    <button type="button" disabled={emailDisabled} className="flex items-center justify-center gap-2 rounded-xl border-2 border-blue-300 bg-blue-50 px-6 py-3 text-base font-bold text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50" onClick={sendQuoteEmail} title="שולח מייל עם כפתור צפייה וחתימה בהצעה">
-                      <Mail size={18} /> 🖊️ שלח במייל עם חתימה
-                    </button>
-                    <button type="button" disabled={waDisabled} className="flex items-center justify-center gap-2 rounded-xl border-2 border-green-300 bg-green-50 px-6 py-3 text-base font-bold text-green-700 hover:bg-green-100 transition-colors disabled:opacity-50" onClick={sendQuoteWhatsAppSign} title="פותח וואטסאפ עם קישור לחתימת הלקוח מהנייד">
-                      <MessageCircle size={18} /> 🖊️ שלח בוואטסאפ עם חתימה
-                    </button>
-                  </div>
+                  </>
                 );
               })()}
               <div className="mt-3 flex justify-end">

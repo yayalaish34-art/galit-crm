@@ -1,0 +1,148 @@
+[
+  [
+    {
+      "id": "97514892-1ed3-4f64-a128-90fd6f951301",
+      "title": "🔁 תזכורת: שליחת דוח חוזר — תומר גולדפדר",
+      "customerId": "14120646-4691-4bf6-aeff-62b893a6d5a3",
+      "ownerId": "a0f8719f-25cc-4407-9760-8fbad6a1df89",
+      "type": "step6",
+      "currentStage": null,
+      "dueDate": "2026-10-17T06:00:00.000Z",
+      "createdAt": "2026-07-19T11:41:53.516Z",
+      "description": "תזכורת אוטומטית לשליחת דוח חוזר לתומר גולדפדר.",
+      "processNotes": null,
+      "customer": {
+        "name": "תומר גולדפדר"
+      },
+      "_count": {
+        "linkedQuotes": 0,
+        "attachments": 0
+      },
+      "taskField": null
+    },
+    {
+      "id": "9b87ecae-2f17-4252-9857-f0e91346d460",
+      "title": "🔁 תזכורת: שליחת דוח חוזר — תומר גולדפדר",
+      "customerId": "14120646-4691-4bf6-aeff-62b893a6d5a3",
+      "ownerId": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "type": "step6",
+      "currentStage": null,
+      "dueDate": "2026-10-20T06:00:00.000Z",
+      "createdAt": "2026-07-22T12:07:32.850Z",
+      "description": "תזכורת אוטומטית לשליחת דוח חוזר לתומר גולדפדר.",
+      "processNotes": null,
+      "customer": {
+        "name": "תומר גולדפדר"
+      },
+      "_count": {
+        "linkedQuotes": 0,
+        "attachments": 0
+      },
+      "taskField": null
+    }
+  ],
+  [
+    {
+      "id": "fd927774-1cda-46a5-b60d-8f10eb95cb76",
+      "title": "פנייה - cardo systems",
+      "customerId": "62ce0434-b961-490e-92ec-30383bb8f9a9",
+      "ownerId": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "type": "step6",
+      "currentStage": 5,
+      "dueDate": null,
+      "createdAt": "2026-07-21T12:12:32.006Z",
+      "description": "סוג לקוח: COMPANY",
+      "processNotes": null,
+      "customer": {
+        "name": "cardo systems"
+      },
+      "_count": {
+        "linkedQuotes": 0,
+        "attachments": 0
+      },
+      "taskField": null
+    },
+    {
+      "id": "76894c47-8cd3-4a67-946f-e6818a5009c7",
+      "title": "פנייה - cardo systems",
+      "customerId": "62ce0434-b961-490e-92ec-30383bb8f9a9",
+      "ownerId": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "type": "stepQuote",
+      "currentStage": 99,
+      "dueDate": null,
+      "createdAt": "2026-07-21T12:29:42.792Z",
+      "description": "סוג לקוח: COMPANY",
+      "processNotes": null,
+      "customer": {
+        "name": "cardo systems"
+      },
+      "_count": {
+        "linkedQuotes": 1,
+        "attachments": 1
+      },
+      "taskField": null
+    },
+    {
+      "id": "d5e15b1c-43d9-417e-8eed-3ed1e25457e8",
+      "title": "פנייה - cardo systems",
+      "customerId": "62ce0434-b961-490e-92ec-30383bb8f9a9",
+      "ownerId": "c40dbe2c-2367-4b57-9537-0eddd03bafc6",
+      "type": "step5",
+      "currentStage": 4,
+      "dueDate": null,
+      "createdAt": "2026-07-21T12:32:09.526Z",
+      "description": null,
+      "processNotes": null,
+      "customer": {
+        "name": "cardo systems"
+      },
+      "_count": {
+        "linkedQuotes": 0,
+        "attachments": 0
+      },
+      "taskField": null
+    }
+  ],
+  [
+    {
+      "id": "2b55b92a-2be1-4b68-b526-f5075ae596c7",
+      "title": "פנייה - אשל הנדסה",
+      "customerId": "fac17e90-c5af-4a6c-a4fe-447ecd407720",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "type": "stepQuote",
+      "currentStage": 99,
+      "dueDate": null,
+      "createdAt": "2026-07-26T06:55:39.648Z",
+      "description": "סוג לקוח: POTENTIAL",
+      "processNotes": "[{\"text\":\"סשה שימי לב .....\",\"at\":\"2026-07-26T08:40:27.239Z\"}]",
+      "customer": {
+        "name": "אשל הנדסה"
+      },
+      "_count": {
+        "linkedQuotes": 1,
+        "attachments": 2
+      },
+      "taskField": null
+    },
+    {
+      "id": "1646aadf-f343-44b3-8e1f-5ebb99e155e2",
+      "title": "פנייה - אשל הנדסה",
+      "customerId": "fac17e90-c5af-4a6c-a4fe-447ecd407720",
+      "ownerId": "c7f229a5-f182-4f85-8be7-2465fb3ca389",
+      "type": "stepQuote",
+      "currentStage": 99,
+      "dueDate": "2026-08-03T06:00:00.000Z",
+      "createdAt": "2026-07-26T09:58:53.730Z",
+      "description": "סוג לקוח: COMPANY",
+      "processNotes": null,
+      "customer": {
+        "name": "אשל הנדסה"
+      },
+      "_count": {
+        "linkedQuotes": 1,
+        "attachments": 1
+      },
+      "taskField": null
+    }
+  ]
+]

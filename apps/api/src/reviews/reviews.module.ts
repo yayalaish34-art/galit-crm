@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { MicrosoftModule } from '../microsoft/microsoft.module';
 import { ReviewRequestService } from './review-request.service';
+import { ReviewSchedulerService } from './review-scheduler.service';
+import { ReviewsController } from './reviews.controller';
 
 /**
  * שירות בקשות דירוג (5 פרצופים) שנשלחות ללקוח אוטומטית אחרי שליחת דוח.
@@ -9,7 +11,8 @@ import { ReviewRequestService } from './review-request.service';
  */
 @Module({
   imports: [MicrosoftModule],
-  providers: [ReviewRequestService],
+  controllers: [ReviewsController],
+  providers: [ReviewRequestService, ReviewSchedulerService],
   exports: [ReviewRequestService],
 })
 export class ReviewsModule {}

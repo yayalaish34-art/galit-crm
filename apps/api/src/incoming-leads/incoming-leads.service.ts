@@ -125,19 +125,31 @@ export class IncomingLeadsService implements OnModuleInit {
 
     // ליד נכנס *לא* יוצר משימה — הוא ממתין ב"לידים נכנסים" (פופ-אפ + רשימה) עד שעובד
     // לוחץ "התחל טיפול"/"העבר". המשימה נוצרת רק בתפיסה, ישירות על שם התופס.
-    await this.prisma.incomingLead.create({
-      data: {
-        messageId: m.id,
-        internetMessageId: m.internetMessageId || null,
-        subject: m.subject,
-        body: body || null,
-        fromName: m.fromName || null,
-        fromEmail: m.fromEmail || null,
-        receivedAt: m.receivedDateTime ? new Date(m.receivedDateTime) : new Date(),
-        ownerId,
-        status: 'NEW',
-      },
-    });
+    try {
+      await this.prisma.incomingLead.create({
+        data: {
+          messageId: m.id,
+          internetMessageId: m.internetMessageId || null,
+          subject: m.subject,
+          body: body || null,
+          fromName: m.fromName || null,
+          fromEmail: m.fromEmail || null,
+          receivedAt: m.receivedDateTime ? new Date(m.receivedDateTime) : new Date(),
+          ownerId,
+          status: 'NEW',
+        },
+      });
+    } catch (e: any) {
+      // P2002 = הפרת ייחודיות (messageId או internetMessageId). זו בדיוק המשמעות של
+      // "אותו מייל כבר נקלט" — duplicateOfExistingLead הוא check-then-act ולכן לא מספיק
+      // לבדו כששני סבבי-סריקה/שתי תיבות מגיעים לאותה הודעה במקביל. האינדקס הוא הבלם
+      // האמיתי; כאן רק בולעים אותו בשקט במקום להפיל את הסבב.
+      if (e?.code === 'P2002') {
+        this.logger.log(`Skipping duplicate lead "${m.subject}" (unique constraint — already ingested)`);
+        return;
+      }
+      throw e;
+    }
     this.logger.log(`New incoming lead "${m.subject}" (mailbox owner ${ownerId}) — waiting to be claimed`);
   }
 
@@ -204,25 +216,45 @@ export class IncomingLeadsService implements OnModuleInit {
   }
 
   /**
-   * מבטיח שלליד תהיה משימה על שם הבעלים החדש, בתפיסה/העברה:
-   *  - אם הליד מחזיק taskId והמשימה *עדיין קיימת* → מעדכן לה את הבעלים.
-   *  - אם taskId ריק, או שהוא מצביע על משימה שכבר *נמחקה* (מודל ישן / ניקוי אחים) → יוצר משימה
-   *    חדשה ומקשר אותה לליד. זה מונע את הבאג שבו tx.task.update על משימה מחוקה זרק והתגלגל
-   *    אחורה, והשאיר ליד ACTIVE בלי שום משימה אצל העובד.
+   * מבטיח שלליד תהיה משימה *אחת* על שם הבעלים החדש, בתפיסה/העברה.
+   *
+   * חשוב: החיפוש נעשה לפי Task.incomingLeadId ולא לפי lead.taskId שנקרא לפני הטרנזקציה.
+   * ה-snapshot הזה יכול להיות מיושן (נקרא ב-assertOwner מחוץ ל-tx), וכשהוא היה null בעוד
+   * שבפועל כבר קיימת משימה לליד — נוצרה משימה שנייה. כך ליד 20d5b17e קיבל שלוש משימות.
+   * קריאה לפי incomingLeadId *בתוך* הטרנזקציה היא מקור האמת היחיד, ומגובה באינדקס
+   * הייחודי החלקי Task_incomingLeadId_key (מיגרציה 20260802140000).
+   *
+   *  - קיימת כבר משימה לליד → מעדכן לה את הבעלים (העברה) ומיישר את lead.taskId.
+   *  - אין משימה (או שהישנה נמחקה) → יוצר חדשה ומקשר אותה לליד.
    */
   private async assignOrCreateTask(
     tx: Prisma.TransactionClient,
     lead: { id: string; body: string | null; taskId: string | null },
     ownerId: string,
   ): Promise<void> {
-    if (lead.taskId) {
-      const existing = await tx.task.findUnique({ where: { id: lead.taskId }, select: { id: true } });
-      if (existing) {
-        await tx.task.update({ where: { id: lead.taskId }, data: { ownerId } });
-        return;
+    const existing =
+      (await tx.task.findFirst({
+        where: { incomingLeadId: lead.id },
+        select: { id: true, ownerId: true },
+        orderBy: { createdAt: 'asc' },
+      })) ??
+      // גיבוי למשימות ישנות מלפני שדה incomingLeadId — מקושרות רק דרך lead.taskId.
+      (lead.taskId
+        ? await tx.task.findUnique({ where: { id: lead.taskId }, select: { id: true, ownerId: true } })
+        : null);
+
+    if (existing) {
+      // החלפת בעלים = העברה: transferredAt מרים את המשימה לראש הרשימה של המקבל.
+      await tx.task.update({
+        where: { id: existing.id },
+        data: existing.ownerId === ownerId ? { ownerId } : { ownerId, transferredAt: new Date() },
+      });
+      if (lead.taskId !== existing.id) {
+        await tx.incomingLead.update({ where: { id: lead.id }, data: { taskId: existing.id } });
       }
-      // taskId מצביע על משימה שנמחקה — מנתקים ויוצרים חדשה במקום להיכשל.
+      return;
     }
+
     await this.createTaskForClaimedLead(tx, lead, ownerId);
   }
 

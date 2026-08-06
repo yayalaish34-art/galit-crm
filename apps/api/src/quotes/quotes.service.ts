@@ -185,13 +185,24 @@ export class QuotesService {
   private static readonly QUOTE_NUMBER_START = 13763;
 
   /**
+   * נרמול ערך מספר/סימוכין. מחזיר '' לכל ערך שאינו מספר אמיתי — כולל '…',
+   * מציין-הטעינה שמסך ההצעה מציג עד שהשרת מחזיר את המספר הרץ (genLocalRef),
+   * שאסור שיישמר כמספר ההצעה.
+   */
+  private static normQuoteNumber(v: unknown): string {
+    const s = (v == null ? '' : String(v)).trim();
+    if (!s || s === '…' || s === '...') return '';
+    return s;
+  }
+
+  /**
    * Next display reference for new quotes — a plain sequential number (e.g. 13763, 13764).
    * Continues from the highest existing plain-numeric quote number, or from QUOTE_NUMBER_START.
    * Legacy "Q-YYYYMM-NNNN" numbers are ignored when computing the max.
    */
   async getNextReference(): Promise<{ reference: string }> {
-    // The displayed quote number is stored in orderReferenceNumber (quoteNumber is legacy/null).
-    // Keep only pure-numeric values (the new format) and continue from the highest.
+    // המספר נשמר בשני השדות (quoteNumber = orderReferenceNumber, ראה create) — סורקים
+    // את שניהם. Keep only pure-numeric values (the new format) and continue from the highest.
     const rows = await this.prisma.quote.findMany({
       select: { orderReferenceNumber: true, quoteNumber: true },
     });
@@ -208,12 +219,40 @@ export class QuotesService {
     return { reference: String(maxNum + 1) };
   }
 
-  create(data: any, user?: { id?: string; role?: string }) {
+  async create(data: any, user?: { id?: string; role?: string }) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
     if (!QUOTE_ALLOWED_ROLES.has(role)) throw new ForbiddenException();
 
     const clean = this.sanitizeQuoteInput(data);
+
+    // ── מספר ההצעה = הסימוכין ────────────────────────────────────────────────
+    // "מספר הצעה" (quoteNumber) ו"סימוכין" (orderReferenceNumber) הם אותו מספר רץ.
+    // מסך ההצעה שולח רק סימוכין, ולכן עד כה quoteNumber נשאר null וההצעה הופיעה
+    // בלי מספר ברשימות, במסמכי ה-Word ובמיילים. כאן שני השדות מקבלים אותו ערך.
+    {
+      const givenNo = QuotesService.normQuoteNumber((clean as any).quoteNumber);
+      const givenRef = QuotesService.normQuoteNumber((clean as any).orderReferenceNumber);
+      let num = givenNo || givenRef;
+
+      // המספר שהמסך מציג נשלף בעת פתיחת ההצעה. אם בינתיים נשמרה הצעה אחרת עם אותו
+      // מספר (שני משתמשים במקביל) — מקצים את הבא בתור; התשובה מסנכרנת את המסך.
+      if (num && /^\d{4,6}$/.test(num)) {
+        const taken = await this.prisma.quote.findFirst({
+          where: { OR: [{ quoteNumber: num }, { orderReferenceNumber: num }] },
+          select: { id: true },
+        });
+        if (taken) num = '';
+      }
+
+      if (!num) {
+        num = (await this.getNextReference()).reference;
+        (clean as any).orderReferenceNumber = num;
+      } else {
+        (clean as any).orderReferenceNumber = givenRef || num;
+      }
+      (clean as any).quoteNumber = num;
+    }
 
     // Prisma 7.x + @prisma/adapter-pg requires Date objects for DateTime fields,
     // not ISO strings. Convert every DateTime field in the sanitized payload.
@@ -304,6 +343,36 @@ export class QuotesService {
     if (!existing) throw new NotFoundException('Quote not found');
 
     const next: any = { ...this.sanitizeQuoteInput(data) };
+
+    // ── מספר ההצעה = הסימוכין (ראה create) ───────────────────────────────────
+    // בעדכון: ערך ריק/'…' מהלקוח לא מוחק מספר קיים, הצעה ישנה שנשמרה בלי מספר
+    // מקבלת אחד, ושינוי ידני של הסימוכין גורר את מספר ההצעה כשהשניים היו זהים.
+    {
+      const norm = QuotesService.normQuoteNumber;
+      const existingNo = norm(existing.quoteNumber);
+      const existingRef = norm((existing as any).orderReferenceNumber);
+      const patchNo = 'quoteNumber' in next ? norm(next.quoteNumber) : '';
+      const patchRef = 'orderReferenceNumber' in next ? norm(next.orderReferenceNumber) : '';
+
+      if ('quoteNumber' in next && !patchNo) delete next.quoteNumber;
+      if ('orderReferenceNumber' in next && !patchRef) delete next.orderReferenceNumber;
+
+      const no = patchNo || existingNo;
+      const ref = patchRef || existingRef;
+      if (!no) {
+        const num = ref || (await this.getNextReference()).reference;
+        next.quoteNumber = num;
+        if (!ref) next.orderReferenceNumber = num;
+      } else if (!ref) {
+        next.orderReferenceNumber = no;
+      } else if (
+        patchRef && patchRef !== existingRef &&   // הסימוכין שונה ידנית
+        existingNo === existingRef &&             // ועד עכשיו הוא היה זהה למספר ההצעה
+        (!patchNo || patchNo === existingNo)      // ומספר ההצעה עצמו לא שונה במפורש
+      ) {
+        next.quoteNumber = patchRef;
+      }
+    }
 
     // Prisma 7.x + @prisma/adapter-pg requires Date objects for DateTime fields
     const DATETIME_FIELDS_UPD = [
@@ -412,7 +481,107 @@ export class QuotesService {
         throw e;
       });
     };
-    return tryUpdate(next);
+    const updated = await tryUpdate(next);
+
+    // אם להצעה יש כבר קובץ פעיל ב-OneDrive והשם הקנוני שלה השתנה (שם לקוח/שירות/כתובת) —
+    // מסנכרנים את שם הקובץ ב-OneDrive לשם החדש, כדי שהוא לא יישאר עם השם הישן.
+    // best-effort: כישלון כאן לא מפיל את עדכון ההצעה (בדיוק כמו syncFromOneDrive).
+    await this.renameOnedriveToMatch(id).catch(() => null);
+
+    return updated;
+  }
+
+  /**
+   * מסנכרן את שם הקובץ ב-OneDrive לשם הקנוני העדכני של ההצעה (buildQuoteDocName).
+   * פועל רק על הצעה עם קובץ *ממוזג* פעיל (לא על קובץ מצורף ספציפי — לו יש שם משלו).
+   * אם השם כבר תואם, או שאין קובץ ב-OneDrive — לא עושה כלום. שקט לגמרי בכל שגיאה.
+   */
+  private async renameOnedriveToMatch(id: string): Promise<void> {
+    const ref = await this.getOnedriveRef(id);
+    // קובץ מצורף ספציפי מקבל שם ייחודי משלו (ראה openInOneDrive) — לא נוגעים בו.
+    if (!ref || ref.attachmentId) return;
+
+    // שם ידני מנצח — אם המשתמש ערך ידנית את שם הקובץ, לא דורסים אותו בשם הקנוני.
+    try {
+      const locked: any = await (this.prisma.quote.findUnique as any)({
+        where: { id },
+        select: { onedriveNameLocked: true },
+      });
+      if (locked?.onedriveNameLocked) return;
+    } catch { /* עמודה עדיין לא הוגרה — ממשיכים כרגיל */ }
+
+    const quote = await this.prisma.quote.findUnique({
+      where: { id },
+      include: { customer: true, quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 } },
+    });
+    if (!quote) return;
+
+    const desired = this.buildQuoteFileName(quote); // ללא סיומת
+    const current = await this.graphFiles.getItem(ref.ownerId, ref.itemId);
+    if (!current) return; // הקובץ נמחק ב-OneDrive
+    const currentBase = (current.name || '').replace(/\.docx$/i, '').trim();
+    if (currentBase === desired.trim()) return; // כבר תואם — אין מה לשנות
+
+    const renamed = await this.graphFiles.renameItem(ref.ownerId, ref.itemId, desired);
+    if (!renamed) return;
+    // rename משנה את webUrl — מעדכנים את ההפניה השמורה כדי שקישורי הפתיחה יישארו תקינים.
+    try {
+      await (this.prisma.quote.update as any)({
+        where: { id },
+        data: { onedriveWebUrl: renamed.webUrl },
+      });
+    } catch {
+      // עמודת OneDrive עדיין לא קיימת ב-DB — נתעלם בשקט (מיושר עם שאר הקוד כאן).
+    }
+  }
+
+  /**
+   * עריכה ידנית של שם קובץ → משנה גם את שם הקובץ ב-OneDrive (אם קיים קובץ מקושר),
+   * ונועל את השם כדי שהסנכרון האוטומטי לא ידרוס אותו. best-effort — כישלון כאן לא מפיל
+   * את שינוי השם ב-DB (שכבר בוצע ע"י tasks.service). מקבל את שם הקובץ *עם* הסיומת.
+   * @returns true אם הקובץ שונה בפועל ב-OneDrive.
+   */
+  async renameOnedriveForTask(taskId: string, fileName: string): Promise<boolean> {
+    if (!taskId) return false;
+    // הצעה מקושרת למשימה עם קובץ פעיל ב-OneDrive (העמודות עשויות שלא להתקיים לפני מיגרציה).
+    const quote = await this.prisma.quote
+      .findFirst({
+        where: { linkedEntityId: taskId, onedriveItemId: { not: null } } as any,
+        select: { id: true },
+      })
+      .catch(() => null);
+    if (!quote?.id) return false;
+    return this.renameOnedriveForQuote(quote.id, fileName);
+  }
+
+  /**
+   * עריכה ידנית של שם קובץ להצעה מסוימת → משנה גם את שם הקובץ ב-OneDrive (אם קיים קובץ
+   * פעיל) ונועל את השם (השם הידני מנצח, הסנכרון האוטומטי לא ידרוס). best-effort.
+   * @returns true אם הקובץ שונה בפועל ב-OneDrive.
+   */
+  async renameOnedriveForQuote(quoteId: string, fileName: string): Promise<boolean> {
+    const desired = (fileName || '').replace(/\.docx$/i, '').trim();
+    if (!quoteId || !desired) return false;
+
+    const ref = await this.getOnedriveRef(quoteId);
+    // אין קובץ פעיל ב-OneDrive (ההצעה מעולם לא נפתחה ב-Word) — אין מה לשנות שם.
+    if (!ref) return false;
+
+    try {
+      const renamed = await this.graphFiles.renameItem(ref.ownerId, ref.itemId, desired);
+      // נועלים את השם ומעדכנים webUrl גם אם ה-rename לא החזיר (best-effort).
+      await (this.prisma.quote.update as any)({
+        where: { id: quoteId },
+        data: {
+          onedriveNameLocked: true,
+          ...(renamed?.webUrl ? { onedriveWebUrl: renamed.webUrl } : {}),
+        },
+      }).catch(() => null);
+      return !!renamed;
+    } catch (e: any) {
+      this.logger.warn?.(`renameOnedriveForQuote failed (quote=${quoteId}): ${e?.message || e}`);
+      return false;
+    }
   }
 
   async remove(id: string, user?: { id?: string; role?: string }) {
@@ -668,8 +837,11 @@ export class QuotesService {
     const taskId = quote?.linkedEntityId;
     if (!taskId) return;
 
-    const att = await this.prisma.taskAttachment
-      .findFirst({
+    // בלי onedriveAttachmentId מפורש — לא ניתן לדעת בוודאות *איזה* קובץ נערך. אם למשימה
+    // כמה DOCX שונים, דריסת ה"עדכני ביותר" עלולה להחליף בייטים של קובץ אחר לגמרי (אובדן תוכן).
+    // לכן דורסים רק כשיש בדיוק DOCX אחד; אחרת מדלגים (בטוח יותר מלאבד קובץ).
+    const docxAtts = await this.prisma.taskAttachment
+      .findMany({
         where: {
           taskId,
           OR: [{ mimeType: DOCX_MIME }, { fileName: { endsWith: '.docx' } }],
@@ -677,11 +849,18 @@ export class QuotesService {
         orderBy: { createdAt: 'desc' },
         select: { id: true },
       })
-      .catch(() => null);
-    if (!att?.id) return;
+      .catch(() => [] as { id: string }[]);
+    if (docxAtts.length !== 1) {
+      if (docxAtts.length > 1) {
+        this.logger.warn(
+          `refreshLinkedTaskAttachmentDocx: task ${taskId} has ${docxAtts.length} DOCX attachments and no onedriveAttachmentId — skipping to avoid overwriting the wrong file`,
+        );
+      }
+      return;
+    }
 
     await this.prisma.taskAttachment
-      .update({ where: { id: att.id }, data: { data: Uint8Array.from(buffer), createdAt: new Date() } })
+      .update({ where: { id: docxAtts[0].id }, data: { data: Uint8Array.from(buffer), createdAt: new Date() } })
       .catch(() => null);
   }
 

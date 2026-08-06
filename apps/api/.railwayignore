@@ -4,10 +4,13 @@ dist
 .env
 .env.*
 storage
+# גיבוי מקומי של scripts/fix-sig-table-orientation.ts — 15MB של DOCX שאינם נדרשים בזמן ריצה
+sig-table-backup
 test
 *.md
 _*.mjs
 _*.json
+*.ndjson
 *.log
 templates/*.bak
 templates/*.doc

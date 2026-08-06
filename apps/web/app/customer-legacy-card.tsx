@@ -1,11 +1,15 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiFetch, apiUrl } from './lib/api-base';
+import { autoFormatIsraeliPhone, blurFormatPhone, formatIsraeliPhoneDisplay } from './lib/phone-format';
 import { parseApiErrorResponse } from './lib/api-error';
 import { whatsAppLink } from './lib/whatsapp';
 import { SignedQuotesSection } from './signed-quotes-section';
+import { ManualIncomeSection } from './manual-income-section';
 import { ProducedReportsSection } from './produced-reports-section';
+import { CaspitDocumentsSection } from './caspit-documents-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -179,6 +183,16 @@ function customerEmailLooksValid(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
 }
 
+/** פתיחת איש קשר לעריכה = הצבה אוטומטית של מספרים בשדות — לכן מעוצבים עם מקף. */
+function contactWithFormattedPhones<T extends { phone?: string | null; mobile?: string | null; fax?: string | null }>(c: T): T {
+  return {
+    ...c,
+    phone: formatIsraeliPhoneDisplay(c.phone),
+    mobile: formatIsraeliPhoneDisplay(c.mobile),
+    fax: formatIsraeliPhoneDisplay(c.fax),
+  };
+}
+
 /** Israeli phone validation — accepts landlines (0X-XXXXXXX) and mobiles (05X-XXXXXXX) */
 function israeliPhoneLooksValid(phone: string): boolean {
   const t = phone.trim().replace(/[\s\-()]+/g, '');
@@ -187,33 +201,8 @@ function israeliPhoneLooksValid(phone: string): boolean {
   return /^0[2-9]\d{7,8}$/.test(t);
 }
 
-/**
- * Auto-format an Israeli phone number by inserting a dash on blur.
- * Mobile (05X): 0501234567 → 050-1234567
- * Landline (02-9): 039876543 → 03-9876543
- * If the value already contains a dash, or is partial/invalid, return as-is.
- */
-function autoFormatIsraeliPhone(raw: string): string {
-  const trimmed = raw.trim();
-  // Already has a dash — don't touch
-  if (trimmed.includes('-')) return trimmed;
-  // Strip everything except digits
-  const digits = trimmed.replace(/\D/g, '');
-  // Mobile: 05X + 7 digits = 10 digits total
-  if (/^05\d{8}$/.test(digits)) {
-    return digits.slice(0, 3) + '-' + digits.slice(3);
-  }
-  // Landline: 0[2-4,8-9] + 7 digits = 9 digits total
-  if (/^0[2-489]\d{7}$/.test(digits)) {
-    return digits.slice(0, 2) + '-' + digits.slice(2);
-  }
-  // Landline: 07[1-9] + 7 digits = 10 digits (special landline/voip)
-  if (/^07[1-9]\d{7}$/.test(digits)) {
-    return digits.slice(0, 3) + '-' + digits.slice(3);
-  }
-  // Doesn't match known patterns — return as-is, don't break input
-  return trimmed;
-}
+// autoFormatIsraeliPhone / blurFormatPhone מיובאים מ-lib/phone-format —
+// מקור אמת יחיד המשותף לשדות הקלט כאן ולתצוגת הטלפון בשאר המסכים.
 
 /** סיווג לקוח — classification dropdown options */
 const CUSTOMER_CLASSIFICATION_OPTIONS: string[] = [
@@ -238,7 +227,7 @@ const LEAD_SOURCE_OPTIONS: string[] = [
   'טיק טוק',
   'גוגל אדס',
   'אינסטגרם',
-  'אתר',
+  'אתר אינטרנט',
   'המלצה',
   'לקוח חוזר',
   'אחר',
@@ -591,6 +580,15 @@ function newDocumentTabRow(): CustomerDocumentTabRow {
   };
 }
 
+/** תאריך (yyyy-mm-dd) → ISO בצהריים, או null. משותף לשמירה ולהעלאת מסמכים. */
+function isoNoonDate(d: string): string | null {
+  return d ? `${d}T12:00:00.000Z` : null;
+}
+/** בדיקה אם מזהה הוא UUID אמיתי (מסמך שמור ב-DB) ולא placeholder מקומי. */
+function isRealUuid(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
 function mapUnknownToDocumentRow(item: unknown, fallbackId: string): CustomerDocumentTabRow | null {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
   const o = item as Record<string, unknown>;
@@ -613,12 +611,20 @@ function mapUnknownToDocumentRow(item: unknown, fallbackId: string): CustomerDoc
   };
 }
 
+/**
+ * דוחות שהופקו והצעות מחיר חתומות נשמרים באותה טבלת Document עם ה-customerId, אך יש
+ * להם סקשנים ייעודיים ("דוחות שהופקו" / "הצעות מחיר חתומות"). לכן לא מציגים אותם שוב
+ * בטאב "מסמכים" — שם מוצגים רק מסמכים שהועלו ידנית (ברירת מחדל OTHER וסוגים אחרים).
+ */
+const DOCUMENTS_TAB_HIDDEN_TYPES = new Set(['REPORT', 'SIGNED_QUOTE']);
+
 function buildDocumentRowsFromFull(full: CustomerFull | null): CustomerDocumentTabRow[] {
   const raw = full?.documents;
   if (!Array.isArray(raw)) return [];
   return raw
     .map((item, i) => mapUnknownToDocumentRow(item, `doc-${i}`))
-    .filter((r): r is CustomerDocumentTabRow => r != null);
+    .filter((r): r is CustomerDocumentTabRow => r != null)
+    .filter((r) => !DOCUMENTS_TAB_HIDDEN_TYPES.has(String(r.docType || '').toUpperCase()));
 }
 
 /** טאב נתונים נוספים — עמודות כמסך ישן (שדות גנריים) */
@@ -851,7 +857,6 @@ function resolveCustomerTypeLabel(type: string, labelMap: Record<string, string>
 
 type LowerTabKey =
   | 'contacts'
-  | 'finance'
   | 'source'
   | 'questionnaires'
   | 'copy'
@@ -862,19 +867,22 @@ type LowerTabKey =
   | 'quotes'
   | 'signedQuotes'
   | 'producedReports'
+  | 'caspitDocuments'
+  | 'requests'
   | 'additionalData'
   | 'moreDetails'
   | 'externalData';
 
 const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'contacts', label: 'אנשי קשר' },
-  { key: 'finance', label: 'נתונים כספיים' },
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
+  { key: 'requests', label: 'בקשות' },
   { key: 'documents', label: 'מסמכים' },
-  { key: 'producedReports', label: 'דוחות שהופקו' },
   { key: 'quotes', label: 'הצעות מחיר' },
   { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
+  { key: 'producedReports', label: 'דוחות שהופקו' },
+  { key: 'caspitDocuments', label: 'חשבוניות/קבלות' },
 ];
 
 function formatLegacyDate(v: unknown): string {
@@ -920,6 +928,7 @@ export function CustomerLegacyCard({
   isNew = false,
   onCustomerCreated,
   onBack,
+  onCustomerDeleted,
   showCustomerQuotesTab = false,
   customerQuotesRefreshKey = 0,
   initialLowerTab,
@@ -948,6 +957,8 @@ export function CustomerLegacyCard({
   onCustomerCreated?: (created: CustomerCardCustomer) => void;
   /** Navigate back to the previous page (e.g. customers list) */
   onBack?: () => void;
+  /** נקרא אחרי מחיקת הלקוח מהכרטיס — ההורה אמור לצאת מהכרטיס ולרענן את הרשימה. */
+  onCustomerDeleted?: (customerId: string) => void;
   /** When true, show the lower tab "הצעות מחיר" (requires quotes API access). */
   showCustomerQuotesTab?: boolean;
   /** Incremented by the parent after a quote is saved — forces refetch of GET /quotes?customerId=… */
@@ -963,6 +974,13 @@ export function CustomerLegacyCard({
     setIsNewMode(isNew);
   }, [isNew]);
   const [mode, setMode] = useState<'view' | 'edit'>('edit');
+  // שליחת משוב ידנית (בקשת דירוג 5 פרצופים) ללקוח — כפתור בכותרת הכרטיס.
+  const [feedbackSending, setFeedbackSending] = useState(false);
+  const [deletingCustomer, setDeletingCustomer] = useState(false);
+  /** אותה הרשאה שנאכפת בשרת (ADMIN/MANAGER או canDeleteCustomers על המשתמש). */
+  const canDeleteCustomer =
+    ['admin', 'manager'].includes((currentUser?.role || '').toLowerCase()) ||
+    !!(currentUser as { canDeleteCustomers?: boolean } | undefined)?.canDeleteCustomers;
   const [activeLowerTab, setActiveLowerTab] = useState<LowerTabKey>(initialLowerTab ?? 'contacts');
   const prevCustomerIdForTabRef = useRef(customer?.id);
   useEffect(() => {
@@ -974,6 +992,90 @@ export function CustomerLegacyCard({
   const [customerQuotes, setCustomerQuotes] = useState<CustomerQuoteListRow[]>([]);
   const [customerQuotesLoading, setCustomerQuotesLoading] = useState(false);
   const [customerQuotesError, setCustomerQuotesError] = useState('');
+
+  // ── "בקשות" — מיילים מ-Outlook שתויקו לכרטיס הלקוח ──
+  type EmailRequestRow = { id: string; requestNumber?: number | null; source?: string | null; serviceTypeGuess?: string | null; subject?: string | null; fromName?: string | null; fromEmail?: string | null; receivedAt?: string | null; bodyText?: string | null; attachedByName?: string | null; createdAt?: string | null };
+  type InboxMsg = { id: string; subject: string; fromName: string; fromEmail: string; receivedDateTime: string; bodyPreview: string; bodyText: string };
+  const [emailRequests, setEmailRequests] = useState<EmailRequestRow[]>([]);
+  const [emailRequestsLoading, setEmailRequestsLoading] = useState(false);
+  const [emailRequestsError, setEmailRequestsError] = useState('');
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxMsgs, setInboxMsgs] = useState<InboxMsg[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState('');
+  const [attachingId, setAttachingId] = useState<string | null>(null);
+
+  const loadEmailRequests = useCallback(async () => {
+    if (!customer?.id || isNewMode || customer.id === '__new__') { setEmailRequests([]); return; }
+    setEmailRequestsLoading(true);
+    setEmailRequestsError('');
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}/email-requests`), { authUser: currentUser });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      setEmailRequests(Array.isArray(data) ? data : []);
+    } catch {
+      setEmailRequestsError('טעינת הבקשות נכשלה');
+      setEmailRequests([]);
+    } finally {
+      setEmailRequestsLoading(false);
+    }
+  }, [customer?.id, isNewMode, currentUser]);
+
+  const openInboxPicker = useCallback(async () => {
+    setInboxOpen(true);
+    setInboxLoading(true);
+    setInboxError('');
+    try {
+      const res = await apiFetch(apiUrl('/customers/inbox/recent?top=20'), { authUser: currentUser });
+      if (!res.ok) {
+        const msg = await parseApiErrorResponse(res).catch(() => '');
+        throw new Error(msg || 'שליפת המיילים נכשלה');
+      }
+      const data = await res.json();
+      setInboxMsgs(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setInboxError(e instanceof Error && e.message ? e.message : 'שליפת המיילים מ-Outlook נכשלה — ודא שחשבון ה-Outlook מחובר');
+      setInboxMsgs([]);
+    } finally {
+      setInboxLoading(false);
+    }
+  }, [currentUser]);
+
+  const attachEmailAsRequest = useCallback(async (messageId: string) => {
+    if (!customer?.id) return;
+    setAttachingId(messageId);
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}/email-requests`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ messageId }),
+      });
+      if (!res.ok) throw new Error();
+      await loadEmailRequests();
+      setInboxOpen(false);
+    } catch {
+      setInboxError('צירוף המייל נכשל — נסה שוב');
+    } finally {
+      setAttachingId(null);
+    }
+  }, [customer?.id, currentUser, loadEmailRequests]);
+
+  const deleteEmailRequest = useCallback(async (requestId: string) => {
+    if (!customer?.id) return;
+    if (typeof window !== 'undefined' && !window.confirm('למחוק את הבקשה?')) return;
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}/email-requests/${requestId}`), {
+        method: 'DELETE',
+        authUser: currentUser,
+      });
+      if (res.ok) setEmailRequests((prev) => prev.filter((r) => r.id !== requestId));
+    } catch { /* silent */ }
+  }, [customer?.id, currentUser]);
+
+  useEffect(() => {
+    if (activeLowerTab === 'requests') void loadEmailRequests();
+  }, [activeLowerTab, loadEmailRequests]);
   const lowerTabsVisible = useMemo(() => {
     if (showCustomerQuotesTab) return LOWER_TABS;
     return LOWER_TABS.filter((t) => t.key !== 'quotes' && t.key !== 'signedQuotes');
@@ -1014,10 +1116,12 @@ export function CustomerLegacyCard({
       companyRegNumber: (c.companyRegNumber as string) || (x.companyNumber as string) || '',
       customerSize: (c.customerSize ?? (x.customerSize as string)) || '',
       managementProfile: (c.managementProfile as string) || '',
-      phone: c.phone || '',
-      phone2: (c.phone2 as string) || '',
-      phone3: (c.phone3 as string) || '',
-      fax: (c.fax as string) || '',
+      // טעינת הלקוח לטופס = הצבה אוטומטית של מספר בשדה — לכן מעוצב עם מקף כבר בכניסה,
+      // גם אם הרשומה הישנה ב-DB נשמרה בלי.
+      phone: formatIsraeliPhoneDisplay(c.phone),
+      phone2: formatIsraeliPhoneDisplay(c.phone2 as string),
+      phone3: formatIsraeliPhoneDisplay(c.phone3 as string),
+      fax: formatIsraeliPhoneDisplay(c.fax as string),
       address: (c.address as string) || '',
       city: c.city || '',
       email: c.email || '',
@@ -1088,6 +1192,13 @@ export function CustomerLegacyCard({
     setCustomerForm(buildFormFromCustomer(customer));
   }, [customer, buildFormFromCustomer, isNewMode]);
 
+  /**
+   * טאב "נתונים כספיים" הוסר מהממשק, אבל ה-state הזה נשאר בכוונה — אין להסיר אותו.
+   * השדות שלו (priceList, totalPurchases, creditDays, financeToken ועוד ~20) הם עמודות
+   * אמיתיות בלקוח והם נשלחים ב-PATCH של "שמור כרטיס לקוח". בלי ה-state הזה כל שמירה
+   * הייתה שולחת null ומוחקת נתונים כספיים קיימים של לקוחות ותיקים.
+   * הוא נטען מהלקוח ונשלח חזרה כמות שהוא — round-trip בלבד, בלי מסך לעריכה.
+   */
   const [financeForm, setFinanceForm] = useState<CustomerFinanceTabForm>(() => buildFinanceFormFromCustomer(customer));
 
   useEffect(() => {
@@ -1277,6 +1388,121 @@ export function CustomerLegacyCard({
 
   const [documentRows, setDocumentRows] = useState<CustomerDocumentTabRow[]>(() => buildDocumentRowsFromFull(full));
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  // העלאה/צפייה אמיתית של מסמכים בטאב "מסמכים" (מקביל ל"דוחות שהופקו").
+  const [docBusy, setDocBusy] = useState(false);
+  const [docErr, setDocErr] = useState('');
+  /** קבצים שנבחרו וממתינים לשמירה (לפי מזהה שורה) — נשמרים רק בלחיצה על "שמור". */
+  const [pendingDocFiles, setPendingDocFiles] = useState<Record<string, File>>({});
+  /** מזהה המסמך שנטען כרגע לצפייה — לחיווי "פותח…" על הכפתור. */
+  const [docViewBusyId, setDocViewBusyId] = useState<string | null>(null);
+
+  /** קורא קובץ כ-base64 (בלי תחילית data:) — לשליחה ל-API. */
+  const fileToBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => { const s = String(fr.result); resolve(s.includes(',') ? s.split(',')[1] : s); };
+      fr.onerror = () => reject(new Error('read failed'));
+      fr.readAsDataURL(file);
+    });
+
+  /** base64 → Blob לצפייה/הורדה. */
+  const base64ToBlob = (b64: string, mime: string): Blob => {
+    const clean = b64.includes(',') ? b64.split(',')[1] : b64;
+    const chars = atob(clean);
+    const bytes = new Uint8Array(chars.length);
+    for (let i = 0; i < chars.length; i++) bytes[i] = chars.charCodeAt(i);
+    return new Blob([bytes], { type: mime || 'application/octet-stream' });
+  };
+
+  /** העלאת קובץ אמיתי למסמך לקוח: base64 → POST /customers/:id/documents, ואז רענון. מחזיר האם הצליח. */
+  const uploadCustomerDocument = useCallback(async (file: File, existingRow?: CustomerDocumentTabRow): Promise<boolean> => {
+    if (!customer?.id || customer.id === '__new__') { setDocErr('יש לשמור את הלקוח לפני צירוף מסמכים'); return false; }
+    setDocBusy(true); setDocErr('');
+    try {
+      const b64 = await fileToBase64(file);
+      const r = await apiFetch(apiUrl(`/customers/${customer.id}/documents`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({
+          name: (existingRow?.fileName || '').trim() || file.name,
+          documentType: existingRow?.docType || 'OTHER',
+          documentDate: existingRow?.dateStr ? isoNoonDate(existingRow.dateStr) : null,
+          description: (existingRow?.description || '').trim() || null,
+          mimeType: file.type || 'application/octet-stream',
+          sizeBytes: file.size,
+          dataBase64: b64,
+        }),
+      });
+      if (!r.ok) { setDocErr('העלאת המסמך נכשלה'); return false; }
+      // שורת placeholder ריקה (שנוצרה ב"+") — מסירים כדי לא להשאיר כפילות; הרענון יביא את החדש.
+      if (existingRow && !isRealUuid(existingRow.id)) {
+        setDocumentRows((rows) => rows.filter((x) => x.id !== existingRow.id));
+      }
+      await onFullReload();
+      return true;
+    } catch {
+      setDocErr('העלאת המסמך נכשלה');
+      return false;
+    } finally {
+      setDocBusy(false);
+    }
+  }, [customer?.id, currentUser, onFullReload]);
+
+  /** שמירת הקובץ שנבחר לשורה (ממתין) — נקרא בלחיצה על כפתור "שמור". */
+  const saveStagedDocument = useCallback(async (row: CustomerDocumentTabRow) => {
+    const file = pendingDocFiles[row.id];
+    if (!file) return;
+    const ok = await uploadCustomerDocument(file, row);
+    if (ok) {
+      setPendingDocFiles((p) => { const n = { ...p }; delete n[row.id]; return n; });
+    }
+  }, [pendingDocFiles, uploadCustomerDocument]);
+
+  /** צפייה במסמך: שולף את הבייטים ופותח בטאב חדש. עובד גם ל-dataBase64 וגם ל-URL/filePath. */
+  const viewCustomerDocument = useCallback(async (row: CustomerDocumentTabRow) => {
+    const p = (row.filePath || '').trim();
+    if (p && (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('/'))) {
+      window.open(p, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    if (!customer?.id || !isRealUuid(row.id)) { setDocErr('אין קובץ לצפייה — צרף קובץ קודם'); return; }
+    setDocErr('');
+    // חייבים לפתוח את החלון *סינכרונית*, לפני ה-await: window.open שרץ אחרי fetch
+    // כבר לא נחשב "פעולת משתמש" וחוסם החלונות הקופצים של הדפדפן בולע אותו בשקט —
+    // וזו הסיבה שהכפתור נראה כאילו הוא לא עושה כלום.
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(
+        '<!doctype html><meta charset="utf-8"><title>טוען…</title>' +
+        '<body style="font-family:system-ui,sans-serif;direction:rtl;padding:24px;color:#334155">טוען את המסמך…</body>',
+      );
+    }
+    const fail = (msg: string) => { try { win?.close(); } catch { /* ignore */ } setDocErr(msg); };
+    setDocViewBusyId(row.id);
+    try {
+      // שולפים את המסמך הבודד עם ה-base64 (רשימת המסמכים כוללת dataBase64).
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}/documents`), { authUser: currentUser });
+      if (!res.ok) { fail('טעינת המסמך נכשלה'); return; }
+      const list: any[] = await res.json();
+      const doc = Array.isArray(list) ? list.find((d) => d.id === row.id) : null;
+      if (!doc?.dataBase64) { fail('למסמך אין קובץ שמור לצפייה'); return; }
+      const url = URL.createObjectURL(base64ToBlob(doc.dataBase64, doc.mimeType || 'application/octet-stream'));
+      // אם החלון נחסם בכל זאת — ניסיון פתיחה שני, ואם גם הוא נכשל מורידים את הקובץ.
+      if (win) {
+        win.location.href = url;
+      } else if (!window.open(url, '_blank')) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = row.fileName || doc.name || 'document';
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      fail('טעינת המסמך נכשלה');
+    } finally {
+      setDocViewBusyId(null);
+    }
+  }, [customer?.id, currentUser]);
 
   useEffect(() => {
     setDocumentRows(buildDocumentRowsFromFull(full));
@@ -1338,6 +1564,69 @@ export function CustomerLegacyCard({
 
   /** Combined contacts: real (from DB) + pending (local, for new customers) */
   const allContacts = useMemo(() => [...contacts, ...pendingContacts], [contacts, pendingContacts]);
+
+  // שליחת בקשת משוב ידנית (5 פרצופים) ללקוח — נשלחת מתיבת ה-Outlook של המשתמש.
+  const onSendFeedback = async () => {
+    if (feedbackSending) return;
+    if (isNewMode || !customer?.id) { setLegacyMsg('יש לשמור את הלקוח לפני שליחת משוב.'); return; }
+    if (!window.confirm(`לשלוח בקשת משוב (דירוג) ללקוח "${customer.name || ''}"?`)) return;
+    setFeedbackSending(true);
+    setLegacyMsg('');
+    try {
+      const res = await apiFetch(apiUrl('/reviews/send'), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ customerId: customer.id }),
+      });
+      if (res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setLegacyMsg(`✓ בקשת משוב נשלחה${j?.toEmail ? ` אל ${j.toEmail}` : ''}`);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setLegacyMsg(err?.message || 'שליחת בקשת המשוב נכשלה');
+      }
+    } catch {
+      setLegacyMsg('שליחת בקשת המשוב נכשלה');
+    } finally {
+      setFeedbackSending(false);
+      setTimeout(() => setLegacyMsg(''), 5000);
+    }
+  };
+
+  /**
+   * מחיקת הלקוח מהכרטיס. פעולה בלתי הפיכה, ולכן דורשת אישור שמציג את שם הלקוח
+   * ומפרט מה נגרר איתו (הצעות נמחקות; משימות/לידים מתנתקים). ההרשאה נאכפת גם
+   * בשרת — הכפתור מוסתר כאן רק כדי לא להציע פעולה שתיכשל.
+   */
+  const onDeleteCustomer = async () => {
+    if (deletingCustomer) return;
+    if (isNewMode || !customer?.id) return;
+    if (!window.confirm(
+      `למחוק לצמיתות את הלקוח "${customer.name || ''}"?\n\n` +
+      `הפעולה אינה הפיכה. הצעות המחיר של הלקוח יימחקו, ומשימות/לידים ינותקו ממנו.`,
+    )) return;
+    setDeletingCustomer(true);
+    setLegacyMsg('');
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}`), {
+        method: 'DELETE',
+        authUser: currentUser,
+      });
+      if (res.ok) {
+        onCustomerDeleted?.(customer.id);
+        onBack?.();
+        return;
+      }
+      let msg = res.status === 403 ? 'אין לך הרשאה למחוק לקוחות' : 'מחיקת הלקוח נכשלה';
+      try { const e = await res.json(); if (e?.message) msg = Array.isArray(e.message) ? e.message.join(', ') : e.message; } catch { /* ignore */ }
+      setLegacyMsg(msg);
+    } catch {
+      setLegacyMsg('מחיקת הלקוח נכשלה — בעיית תקשורת');
+    } finally {
+      setDeletingCustomer(false);
+      setTimeout(() => setLegacyMsg(''), 6000);
+    }
+  };
 
   const onSaveCustomerMain = async () => {
     if (saveMainInFlightRef.current) return;
@@ -2145,6 +2434,8 @@ export function CustomerLegacyCard({
                           const v = e.target.value;
                           setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, phone: v } : c));
                         }}
+                        onBlur={() => blurFormatPhone(pc.phone, (f) =>
+                          setPendingContacts((prev) => prev.map((c) => c.id === pc.id ? { ...c, phone: f } : c)))}
                         placeholder="050-0000000"
                       />
                     </div>
@@ -2245,6 +2536,28 @@ export function CustomerLegacyCard({
             </div>
           </div>
           <div className="flex items-center gap-2.5">
+            {!isNewMode && canDeleteCustomer && (
+              <button
+                type="button"
+                disabled={deletingCustomer}
+                onClick={onDeleteCustomer}
+                title="מחיקת הלקוח לצמיתות"
+                className="h-[38px] rounded-[14px] border border-[#F3C9C9] bg-[#FFF3F3] px-4 text-[13px] font-medium text-[#B3261E] hover:bg-[#FCE6E6] disabled:opacity-50 transition-all"
+              >
+                {deletingCustomer ? 'מוחק…' : '🗑️ מחק לקוח'}
+              </button>
+            )}
+            {!isNewMode && (
+              <button
+                type="button"
+                disabled={feedbackSending}
+                onClick={onSendFeedback}
+                title="שליחת בקשת משוב (דירוג) ללקוח במייל"
+                className="h-[38px] rounded-[14px] border border-[#F0D9C0] bg-[#FFF7EE] px-4 text-[13px] font-medium text-[#9A6A2E] hover:bg-[#FCEFDD] disabled:opacity-50 transition-all"
+              >
+                {feedbackSending ? 'שולח…' : '✉️ שליחת משוב ידנית'}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setMode(mode === 'edit' ? 'view' : 'edit')}
@@ -2335,7 +2648,7 @@ export function CustomerLegacyCard({
                     {phoneWarn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phoneWarn}</div>}
                   </div>
                 ) : (
-                  <div className={viewClass}>{customerForm.phone || '—'}</div>
+                  <div className={viewClass}>{formatIsraeliPhoneDisplay(customerForm.phone) || '—'}</div>
                 )}
               </Field>
 
@@ -2352,7 +2665,7 @@ export function CustomerLegacyCard({
                     {phone2Warn && <div className="mt-0.5 text-[10px] font-medium text-red-600">{phone2Warn}</div>}
                   </div>
                 ) : (
-                  <div className={viewClass}>{customerForm.phone2 || '—'}</div>
+                  <div className={viewClass}>{formatIsraeliPhoneDisplay(customerForm.phone2) || '—'}</div>
                 )}
               </Field>
 
@@ -2362,10 +2675,11 @@ export function CustomerLegacyCard({
                     className={inputConnected}
                     value={customerForm.fax}
                     onChange={(e) => setCustomerForm((p) => ({ ...p, fax: e.target.value }))}
+                    onBlur={() => blurFormatPhone(customerForm.fax, (f) => setCustomerForm((p) => ({ ...p, fax: f })))}
                     placeholder="09-9621007"
                   />
                 ) : (
-                  <div className={viewClass}>{customerForm.fax || '—'}</div>
+                  <div className={viewClass}>{formatIsraeliPhoneDisplay(customerForm.fax) || '—'}</div>
                 )}
               </Field>
 
@@ -2564,6 +2878,7 @@ export function CustomerLegacyCard({
                       placeholder="טלפון"
                       value={contactEdit.phone || ''}
                       onChange={(e) => setContactEdit((p) => (p ? { ...p, phone: e.target.value } : p))}
+                      onBlur={() => blurFormatPhone(contactEdit.phone, (f) => setContactEdit((p) => (p ? { ...p, phone: f } : p)))}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -2573,6 +2888,7 @@ export function CustomerLegacyCard({
                       placeholder="סלולארי"
                       value={contactEdit.mobile || ''}
                       onChange={(e) => setContactEdit((p) => (p ? { ...p, mobile: e.target.value } : p))}
+                      onBlur={() => blurFormatPhone(contactEdit.mobile, (f) => setContactEdit((p) => (p ? { ...p, mobile: f } : p)))}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -2638,14 +2954,14 @@ export function CustomerLegacyCard({
                             : 'hover:bg-[#F8FBFF]',
                         )}
                         style={{ borderBottom: '1px solid #EDF2F8' }}
-                        onClick={() => { setContactEdit(c); onContactSelected?.(c.id, c.fullName); }}
+                        onClick={() => { setContactEdit(contactWithFormattedPhones(c)); onContactSelected?.(c.id, c.fullName); }}
                       >
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               className="w-7 h-7 rounded-lg bg-[#EDF3F8] flex items-center justify-center text-[#5E7186] hover:bg-[#DCE7F2] transition-all text-xs"
-                              onClick={(e) => { e.stopPropagation(); setContactEdit(c); }}
+                              onClick={(e) => { e.stopPropagation(); setContactEdit(contactWithFormattedPhones(c)); }}
                               title="ערוך"
                             >
                               ✎
@@ -2668,287 +2984,14 @@ export function CustomerLegacyCard({
                         </td>
                         <td className="px-4 py-3 text-[#66768B]">{c.roleTitle || '—'}</td>
                         <td className="px-4 py-3 font-semibold text-black">{c.fullName || '—'}</td>
-                        <td className="px-4 py-3 text-black">{c.phone || '—'}</td>
-                        <td className="px-4 py-3 text-black">{c.mobile || '—'}</td>
+                        <td className="px-4 py-3 text-black">{formatIsraeliPhoneDisplay(c.phone) || '—'}</td>
+                        <td className="px-4 py-3 text-black">{formatIsraeliPhoneDisplay(c.mobile) || '—'}</td>
                         <td className="px-4 py-3 text-black" dir="ltr">{c.email || '—'}</td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-        )}
-
-        {activeLowerTab === 'finance' && (
-          <div className="space-y-2" dir="rtl">
-            <div className="rounded-lg border-2 border-blue-700 bg-white p-3 shadow-sm">
-              <p className="mb-3 rounded border border-amber-300 bg-amber-50 px-2 py-2 text-right text-[11px] font-semibold leading-snug text-amber-950">
-                שדות נתונים כספיים: אין כרגע מיפוי ל־Prisma על מודל הלקוח (מלבד אפשרות עתידית לטעון אובייקט{' '}
-                <span dir="ltr" className="font-mono text-[10px]">
-                  financeTab
-                </span>
-                ). הערכים נשמרים רק במצב מקומי בדפדפן עד שיוגדר API — לא נשלחים ב־PATCH.
-              </p>
-
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:gap-6">
-                {/* עמודה ימנית (כמו במסך הישן): סיכומים ואשראי */}
-                <div className="w-full shrink-0 space-y-2 border-b border-slate-200 pb-4 xl:w-[min(100%,20rem)] xl:border-b-0 xl:border-l xl:border-slate-200 xl:pb-0 xl:pl-5">
-                  {(
-                    [
-                      ['סה"כ קניות', 'totalPurchases'],
-                      ['סה"כ מכירות', 'totalSales'],
-                      ['אחוז', 'percent'],
-                      ['תנאי תשלום', 'paymentTerms'],
-                      ['ימי אשראי', 'creditDays'],
-                    ] as const
-                  ).map(([heLabel, key]) => (
-                    <div key={key} className="flex items-center gap-2">
-                      <label className="w-[7.25rem] shrink-0 text-right text-xs font-semibold text-slate-800">{heLabel}</label>
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm[key]}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, [key]: e.target.value }))}
-                      />
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-2 pt-1">
-                    <label className="flex w-[7.25rem] shrink-0 items-center justify-end gap-2 text-xs font-semibold text-slate-800">
-                      <span>אשראי</span>
-                    </label>
-                    <div className="flex flex-1 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        title="במסך הישן: רדיו — כאן תיבת סימון לאותו מצב פעיל/לא פעיל"
-                        className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-500 accent-blue-700"
-                        disabled={!isEdit}
-                        checked={financeForm.creditOn}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, creditOn: e.target.checked }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="w-[7.25rem] shrink-0 text-right text-xs font-semibold text-slate-800">מספר אשראי</label>
-                    <input
-                      type="text"
-                      className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                      disabled={!isEdit}
-                      value={financeForm.creditNumber}
-                      onChange={(e) => setFinanceForm((p) => ({ ...p, creditNumber: e.target.value }))}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <label className="w-[7.25rem] shrink-0 text-right text-xs font-semibold text-slate-800">תוקף</label>
-                    <input
-                      type="text"
-                      className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                      disabled={!isEdit}
-                      value={financeForm.validity}
-                      onChange={(e) => setFinanceForm((p) => ({ ...p, validity: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                {/* מרכז + שמאל: מחירון… TOKEN + עמודת שדות ללא תווית */}
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">מחירון</label>
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm.priceList}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, priceList: e.target.value }))}
-                      />
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem]" />
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">מעוגל</label>
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm.rounded}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, rounded: e.target.value }))}
-                      />
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem]" />
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">מספר עובדים</label>
-                      <select
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm.employeeCount}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, employeeCount: e.target.value }))}
-                      >
-                        <option value=""> </option>
-                      </select>
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem] sm:pt-0">
-                      <input
-                        type="text"
-                        title="שדה ללא תווית (מסך ישן)"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full')}
-                        disabled={!isEdit}
-                        value={financeForm.unnamedAux1}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, unnamedAux1: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">לקוח בהנהלה</label>
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm.customerInManagement}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, customerInManagement: e.target.value }))}
-                      />
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem]">
-                      <input
-                        type="text"
-                        title="שדה ללא תווית (מסך ישן)"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full')}
-                        disabled={!isEdit}
-                        value={financeForm.unnamedAux2}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, unnamedAux2: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">מספר 1</label>
-                      <div className="flex min-w-0 flex-1 items-center gap-1">
-                        <button
-                          type="button"
-                          title="חיפוש (לא מחובר)"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-slate-300 bg-slate-100 text-sm disabled:opacity-50"
-                          disabled={!isEdit}
-                          tabIndex={-1}
-                        >
-                          🔍
-                        </button>
-                        <input
-                          type="text"
-                          className={cn(isEdit ? inputClass : viewClass, 'min-w-0 flex-1')}
-                          disabled={!isEdit}
-                          value={financeForm.number1}
-                          onChange={(e) => setFinanceForm((p) => ({ ...p, number1: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem]">
-                      <input
-                        type="text"
-                        title="שדה ללא תווית (מסך ישן)"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full')}
-                        disabled={!isEdit}
-                        value={financeForm.unnamedAux3}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, unnamedAux3: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800 sm:pt-1">מספר 2</label>
-                      <div className="flex min-w-0 flex-1 items-center gap-1">
-                        <button
-                          type="button"
-                          title="חיפוש (לא מחובר)"
-                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-slate-300 bg-slate-100 text-sm disabled:opacity-50"
-                          disabled={!isEdit}
-                          tabIndex={-1}
-                        >
-                          🔍
-                        </button>
-                        <input
-                          type="text"
-                          className={cn(isEdit ? inputClass : viewClass, 'w-14 shrink-0 sm:w-16')}
-                          disabled={!isEdit}
-                          value={financeForm.number2Small}
-                          onChange={(e) => setFinanceForm((p) => ({ ...p, number2Small: e.target.value }))}
-                        />
-                        <input
-                          type="text"
-                          className={cn(isEdit ? inputClass : viewClass, 'min-w-0 flex-1')}
-                          disabled={!isEdit}
-                          value={financeForm.number2Large}
-                          onChange={(e) => setFinanceForm((p) => ({ ...p, number2Large: e.target.value }))}
-                        />
-                      </div>
-                    </div>
-                    <div className="w-full shrink-0 sm:w-[4.85rem]">
-                      <input
-                        type="text"
-                        title="שדה ללא תווית (מסך ישן)"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full')}
-                        disabled={!isEdit}
-                        value={financeForm.unnamedAux4}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, unnamedAux4: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
-                    <div className="flex min-w-0 flex-1 items-center gap-2">
-                      <label className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">מספר 3</label>
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'flex-1')}
-                        disabled={!isEdit}
-                        value={financeForm.number3}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, number3: e.target.value }))}
-                      />
-                    </div>
-                    <div className="hidden w-[4.85rem] shrink-0 sm:block" aria-hidden />
-                  </div>
-
-                  <div className="border-t border-slate-200 pt-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="w-[7.5rem] shrink-0 text-right text-xs font-semibold text-slate-800">TOKEN</span>
-                      <input
-                        type="checkbox"
-                        title="במסך הישן: רדיו — כאן תיבת סימון לאותו מצב פעיל/לא פעיל"
-                        className="h-4 w-4 shrink-0 rounded-full border-2 border-slate-500 accent-blue-700"
-                        disabled={!isEdit}
-                        checked={financeForm.tokenOn}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, tokenOn: e.target.checked }))}
-                      />
-                    </div>
-                    <div className="mt-2 flex flex-col gap-2 sm:mr-[7.5rem]">
-                      <input
-                        type="text"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full max-w-md')}
-                        disabled={!isEdit}
-                        value={financeForm.tokenText}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, tokenText: e.target.value }))}
-                      />
-                      <input
-                        type="date"
-                        className={cn(isEdit ? inputClass : viewClass, 'w-full max-w-[11rem]', 'text-right')}
-                        dir="ltr"
-                        disabled={!isEdit}
-                        value={financeForm.tokenDate}
-                        onChange={(e) => setFinanceForm((p) => ({ ...p, tokenDate: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         )}
@@ -3534,6 +3577,132 @@ export function CustomerLegacyCard({
           </div>
         )}
 
+        {activeLowerTab === 'requests' && (
+          <div className="space-y-2" dir="rtl">
+            <div className="rounded-lg border-2 border-blue-700 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="rounded border border-blue-200 bg-blue-50/80 px-2 py-2 text-right text-[11px] text-slate-800">
+                  בקשות שהגיעו במייל ל-Outlook שלך ולא נכנסו כליד — צרף אותן לכרטיס הלקוח. הצירוף שולף את 20 המיילים האחרונים מהתיבה שלך.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void openInboxPicker()}
+                  disabled={isNewMode || !customer?.id}
+                  className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  ✉️ צרף בקשה מ-Outlook
+                </button>
+              </div>
+
+              {emailRequestsError && <div className="mb-2 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{emailRequestsError}</div>}
+
+              {emailRequestsLoading ? (
+                <div className="p-4 text-center text-sm text-slate-500">טוען…</div>
+              ) : emailRequests.length === 0 ? (
+                <div className="rounded border-2 border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
+                  אין בקשות מצורפות — לחץ &quot;צרף בקשה מ-Outlook&quot; כדי לצרף מייל.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {emailRequests.map((r) => (
+                    <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {r.requestNumber != null && (
+                              <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">REQ-{r.requestNumber}</span>
+                            )}
+                            {r.source === 'OUTLOOK_ADDIN' && (
+                              <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">Outlook</span>
+                            )}
+                            {r.serviceTypeGuess && (
+                              <span className="shrink-0 rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">{r.serviceTypeGuess}</span>
+                            )}
+                          </div>
+                          <div className="truncate text-sm font-bold text-slate-800">{r.subject || '(ללא נושא)'}</div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">
+                            {r.fromName || r.fromEmail || 'שולח לא ידוע'}
+                            {r.fromEmail && r.fromName ? ` · ${r.fromEmail}` : ''}
+                            {r.receivedAt ? ` · ${formatLegacyDate(r.receivedAt)}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void deleteEmailRequest(r.id)}
+                          title="מחק בקשה"
+                          className="shrink-0 rounded border border-red-200 px-2 py-1 text-[11px] font-bold text-red-600 hover:bg-red-50"
+                        >
+                          מחק
+                        </button>
+                      </div>
+                      {r.bodyText && (
+                        <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-white p-2 text-[12px] leading-relaxed text-slate-700">
+                          {r.bodyText}
+                        </div>
+                      )}
+                      {r.attachedByName && <div className="mt-1 text-[10px] text-slate-400">צורף ע&quot;י {r.attachedByName}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ── פופ-אפ בחירת מייל מ-Outlook — מוצג דרך portal ל-body כדי שיכסה את כל הדף
+                 ולא ייחתך בתוך הקומפוננטה (ancestor עם transform/overflow) ── */}
+            {inboxOpen && typeof document !== 'undefined' && createPortal(
+              <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4" onClick={() => setInboxOpen(false)}>
+                <div className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-2xl" dir="rtl" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center justify-between border-b px-4 py-3">
+                    <div className="text-base font-bold text-slate-800">בחר מייל לצירוף כבקשה</div>
+                    <button type="button" onClick={() => setInboxOpen(false)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</button>
+                  </div>
+                  <div className="flex items-center justify-between px-4 py-2 text-[11px] text-slate-500">
+                    <span>20 המיילים האחרונים בתיבה שלך</span>
+                    <button type="button" onClick={() => void openInboxPicker()} disabled={inboxLoading} className="rounded border px-2 py-1 font-medium hover:bg-slate-50 disabled:opacity-50">רענן</button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+                    {inboxError && <div className="mb-2 rounded bg-red-50 px-3 py-2 text-xs text-red-700">{inboxError}</div>}
+                    {inboxLoading ? (
+                      <div className="py-10 text-center text-sm text-slate-500">טוען מיילים…</div>
+                    ) : inboxMsgs.length === 0 && !inboxError ? (
+                      <div className="py-10 text-center text-sm text-slate-400">אין מיילים להצגה</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {inboxMsgs.map((m) => {
+                          const already = emailRequests.some((r) => r.subject === m.subject && (r.fromEmail || '') === (m.fromEmail || ''));
+                          return (
+                            <div key={m.id} className="rounded-lg border border-slate-200 p-3 hover:border-blue-300">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-bold text-slate-800">{m.subject || '(ללא נושא)'}</div>
+                                  <div className="mt-0.5 text-[11px] text-slate-500">
+                                    {m.fromName || m.fromEmail}{m.fromEmail && m.fromName ? ` · ${m.fromEmail}` : ''}
+                                    {m.receivedDateTime ? ` · ${formatLegacyDate(m.receivedDateTime)}` : ''}
+                                  </div>
+                                  {m.bodyPreview && <div className="mt-1 line-clamp-2 text-[12px] text-slate-600">{m.bodyPreview}</div>}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => void attachEmailAsRequest(m.id)}
+                                  disabled={attachingId === m.id || already}
+                                  className="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[12px] font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                  {attachingId === m.id ? 'מצרף…' : already ? 'כבר צורף' : 'צרף'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )}
+          </div>
+        )}
+
         {activeLowerTab === 'documents' && (
           <div className="space-y-2" dir="rtl">
             <div className="rounded-lg border-2 border-blue-700 bg-white p-2 shadow-sm">
@@ -3571,11 +3740,12 @@ export function CustomerLegacyCard({
                           <tr
                             key={row.id}
                             className={cn(
-                              'border-b border-slate-100 text-right hover:bg-slate-50/90',
-                              isEdit && 'cursor-pointer',
-                              selectedDocumentId === row.id && isEdit && 'bg-blue-50/60',
+                              'cursor-pointer border-b border-slate-100 text-right hover:bg-slate-50/90',
+                              selectedDocumentId === row.id && 'bg-blue-50/60',
                             )}
-                            onClick={() => isEdit && setSelectedDocumentId(row.id)}
+                            /* בחירת שורה חייבת לעבוד גם במצב צפייה (לא רק בעריכה) —
+                               אחרת selectedDocumentId נשאר null וכפתור "צפייה" תמיד מושבת. */
+                            onClick={() => setSelectedDocumentId(row.id)}
                           >
                             <td className="max-w-[14rem] px-2 py-1.5 align-top">
                               <div className="space-y-1">
@@ -3597,22 +3767,51 @@ export function CustomerLegacyCard({
                                 {isEdit && (
                                   <>
                                     <label className="block text-[10px] text-slate-600">
-                                      בחירת קובץ מקומית מעדכנת את שם הקובץ לשמירה (מטא־דאטה בלבד).
+                                      בחר קובץ ולחץ "שמור" כדי להעלות אותו (תומך בקבצים גדולים).
                                     </label>
                                     <input
                                       type="file"
-                                      className="w-full max-w-full text-xs file:mr-2 file:rounded file:border file:border-slate-300 file:bg-slate-50 file:px-2 file:py-1"
+                                      disabled={docBusy}
+                                      className="w-full max-w-full text-xs file:mr-2 file:rounded file:border file:border-slate-300 file:bg-slate-50 file:px-2 file:py-1 disabled:opacity-50"
                                       onClick={(e) => e.stopPropagation()}
                                       onChange={(e) => {
                                         const f = e.target.files?.[0];
                                         if (!f) return;
+                                        // מסמנים את הקובץ כ"ממתין לשמירה" — לא מעלים מיד. ממלאים שם קובץ אם ריק.
+                                        setPendingDocFiles((p) => ({ ...p, [row.id]: f }));
                                         setDocumentRows((rows) =>
-                                          rows.map((r) =>
-                                            r.id === row.id ? { ...r, fileName: f.name || r.fileName } : r,
-                                          ),
+                                          rows.map((r) => (r.id === row.id && !r.fileName.trim() ? { ...r, fileName: f.name } : r)),
                                         );
+                                        setDocErr('');
+                                        e.target.value = '';
                                       }}
                                     />
+                                    {pendingDocFiles[row.id] && (
+                                      <div className="flex items-center gap-2">
+                                        <span className="min-w-0 flex-1 truncate text-[10px] text-slate-600" title={pendingDocFiles[row.id].name}>
+                                          {pendingDocFiles[row.id].name}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          disabled={docBusy}
+                                          className="shrink-0 rounded border border-blue-700 bg-blue-600 px-2.5 py-0.5 text-[11px] font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                                          onClick={(e) => { e.stopPropagation(); void saveStagedDocument(row); }}
+                                        >
+                                          {docBusy ? 'שומר…' : 'שמור'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={docBusy}
+                                          className="shrink-0 text-[11px] text-slate-400 hover:text-red-500 disabled:opacity-50"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setPendingDocFiles((p) => { const n = { ...p }; delete n[row.id]; return n; });
+                                          }}
+                                        >
+                                          בטל
+                                        </button>
+                                      </div>
+                                    )}
                                   </>
                                 )}
                               </div>
@@ -3721,23 +3920,30 @@ export function CustomerLegacyCard({
                   </button>
                   <button
                     type="button"
-                    className="rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-40"
-                    disabled={
-                      !isEdit ||
-                      !selectedDocumentId ||
-                      !documentRows.find((r) => r.id === selectedDocumentId)?.filePath
+                    title={
+                      selectedDocumentId
+                        ? 'פתיחת המסמך הנבחר בטאב חדש'
+                        : 'בחר שורת מסמך בטבלה כדי לצפות בו'
                     }
+                    className="rounded border border-slate-300 bg-white px-3 py-2 text-sm hover:bg-slate-100 disabled:opacity-40"
+                    disabled={(() => {
+                      if (docViewBusyId) return true;
+                      const row = documentRows.find((r) => r.id === selectedDocumentId);
+                      if (!row) return true;
+                      // ניתן לצפות אם המסמך שמור (UUID → יש בייטים ב-DB) או שיש לו נתיב/URL.
+                      return !(isRealUuid(row.id) || (row.filePath || '').trim());
+                    })()}
                     onClick={() => {
                       const row = documentRows.find((r) => r.id === selectedDocumentId);
-                      const p = row?.filePath?.trim();
-                      if (!p) return;
-                      if (p.startsWith('http://') || p.startsWith('https://') || p.startsWith('/')) {
-                        window.open(p, '_blank', 'noopener,noreferrer');
-                      }
+                      if (row) void viewCustomerDocument(row);
                     }}
                   >
-                    פתיחה
+                    {docViewBusyId ? 'פותח…' : 'צפייה'}
                   </button>
+                  {!selectedDocumentId && documentRows.length > 0 && (
+                    <div className="text-[11px] text-slate-500">בחר שורה בטבלה כדי לצפות במסמך</div>
+                  )}
+                  {docErr && <div className="text-[11px] font-semibold text-red-600">{docErr}</div>}
                 </div>
               </div>
             </div>
@@ -3747,7 +3953,19 @@ export function CustomerLegacyCard({
         {activeLowerTab === 'producedReports' && (
           <div className="space-y-3" dir="rtl">
             <div className="text-lg font-bold text-black">דוחות שהופקו</div>
-            <ProducedReportsSection customerId={customer?.id ?? null} currentUser={currentUser} />
+            <ProducedReportsSection
+              customerId={customer?.id ?? null}
+              customerName={customerForm.name || ''}
+              defaultEmail={customerForm.email || ''}
+              currentUser={currentUser}
+            />
+          </div>
+        )}
+
+        {activeLowerTab === 'caspitDocuments' && (
+          <div className="space-y-3" dir="rtl">
+            <div className="text-lg font-bold text-black">חשבוניות / קבלות</div>
+            <CaspitDocumentsSection customerId={customer?.id ?? null} currentUser={currentUser} />
           </div>
         )}
 
@@ -3755,6 +3973,8 @@ export function CustomerLegacyCard({
           <div className="space-y-3" dir="rtl">
             <div className="text-lg font-bold text-black">הצעות מחיר חתומות</div>
             <SignedQuotesSection customerId={customer?.id ?? null} currentUser={currentUser} />
+            {/* הכנסה ידנית — מתחת ל"הצעות מחיר חתומות". נספרת בהכנסות הדשבורד. */}
+            <ManualIncomeSection customerId={customer?.id ?? null} currentUser={currentUser} />
           </div>
         )}
 

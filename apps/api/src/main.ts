@@ -6,10 +6,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Allow large request bodies — merged DOCX quotes are sent as base64 (~2-5 MB).
-  // Default Express limit is 100 KB which rejected every quote send/save.
-  app.use(json({ limit: '25mb' }));
-  app.use(urlencoded({ limit: '25mb', extended: true }));
+  // Allow large request bodies — מסמכים/דוחות/הצעות מצורפים נשלחים כ-base64 (מנפח ~33%),
+  // ואין להגביל את גודל הקובץ שאפשר לצרף. ברירת מחדל גבוהה מאוד (500MB), ניתן לכוונון ב-BODY_LIMIT.
+  const bodyLimit = process.env.BODY_LIMIT || '500mb';
+  app.use(json({ limit: bodyLimit }));
+  app.use(urlencoded({ limit: bodyLimit, extended: true }));
 
   app.useGlobalPipes(
     new ValidationPipe({

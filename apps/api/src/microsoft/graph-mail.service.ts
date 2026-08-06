@@ -106,6 +106,52 @@ export class GraphMailService {
     return GraphMailService.LEAD_SENDER_ALLOWLIST.includes(String(fromEmail || '').trim().toLowerCase());
   }
 
+  /**
+   * שולף את N ההודעות האחרונות מתיבת הדואר של המשתמש (ללא סינון שולח/תאריך) — לצירוף
+   * ידני של מייל כ"בקשה" לכרטיס לקוח. דורש Mail.Read (כבר ב-SCOPES).
+   * מחזיר פרטים בסיסיים + גוף כטקסט נקי; ללא צרופות.
+   */
+  async listRecentInbox(
+    userId: string,
+    top = 20,
+  ): Promise<
+    {
+      id: string;
+      internetMessageId: string;
+      subject: string;
+      bodyText: string;
+      bodyPreview: string;
+      fromName: string;
+      fromEmail: string;
+      receivedDateTime: string;
+    }[]
+  > {
+    const accessToken = await this.auth.getAccessToken(userId);
+    const capped = Math.max(1, Math.min(50, Math.floor(top) || 20));
+    const url =
+      'https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages' +
+      '?$select=id,internetMessageId,subject,bodyPreview,body,from,receivedDateTime' +
+      `&$orderby=receivedDateTime desc&$top=${capped}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      this.logger.warn(`listRecentInbox for ${userId}: ${res.status} ${t.slice(0, 160)}`);
+      throw new BadRequestException('לא ניתן לשלוף מיילים מ-Outlook — ודא שחשבון ה-Outlook מחובר');
+    }
+    const data: any = await res.json();
+    const items: any[] = Array.isArray(data?.value) ? data.value : [];
+    return items.map((m) => ({
+      id: String(m?.id || ''),
+      internetMessageId: String(m?.internetMessageId || m?.id || ''),
+      subject: String(m?.subject || ''),
+      bodyText: this.htmlToText(m?.body?.content || m?.bodyPreview || ''),
+      bodyPreview: String(m?.bodyPreview || '').trim(),
+      fromName: String(m?.from?.emailAddress?.name || ''),
+      fromEmail: String(m?.from?.emailAddress?.address || ''),
+      receivedDateTime: String(m?.receivedDateTime || ''),
+    }));
+  }
+
   /** שולף הודעות מנתיב נתון (תיבה או תיקייה) עם אותו פילטר זמן ושדות. */
   private async fetchMessagesFrom(
     accessToken: string,
@@ -216,6 +262,12 @@ export class GraphMailService {
     }
     if (msg.requestDeliveryReceipt) {
       message.isDeliveryReceiptRequested = true;
+    }
+    // דיאגנוסטיקה: מתעד אם הדגלים אכן מגיעים ל-Graph (לאבחון "אישור מסירה לא עובד").
+    if (msg.requestReadReceipt || msg.requestDeliveryReceipt) {
+      this.logger.log(
+        `sendMail receipts → read=${!!msg.requestReadReceipt} delivery=${!!msg.requestDeliveryReceipt} (to=${msg.to})`,
+      );
     }
 
     if (msg.attachments?.length) {

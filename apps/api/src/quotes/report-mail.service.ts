@@ -24,6 +24,10 @@ export interface SendReportEmailOpts {
   includeSignature?: boolean;
   signatureId?: string;
   customerName?: string;
+  /** אישור קריאה — Graph isReadReceiptRequested (התראה כשהנמען פותח את המייל). */
+  requestReadReceipt?: boolean;
+  /** אישור מסירה — Graph isDeliveryReceiptRequested (התראה כשהמייל מגיע לתיבה). */
+  requestDeliveryReceipt?: boolean;
   /** המשתמש השולח (לתיבת ה-Outlook שלו + חתימה). */
   userId?: string;
   /**
@@ -33,6 +37,27 @@ export interface SendReportEmailOpts {
   sendReviewRequest?: boolean;
   /** host הבקשה — לבניית קישור ה-API הציבורי שנצרב במייל הדירוג. */
   requestHost?: string | null;
+}
+
+/**
+ * שליחת דוח קיים (Document, documentType=REPORT) מכרטיס הלקוח — ללא משימה משויכת.
+ * זהה ל-SendReportEmailOpts אך בלי side-effects של משימה: לא מסמן DONE ולא שולח
+ * בקשת דירוג. הקובץ תמיד נשלף לפי documentId של מסמך קיים.
+ */
+export interface SendDocumentEmailOpts {
+  documentId: string;
+  to?: string;
+  toList?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  body?: string;
+  includeSignature?: boolean;
+  signatureId?: string;
+  customerName?: string;
+  requestReadReceipt?: boolean;
+  requestDeliveryReceipt?: boolean;
+  userId?: string;
 }
 
 /**
@@ -86,24 +111,138 @@ export class ReportMailService {
       throw new BadRequestException('לא צורף דוח לשליחה');
     }
 
-    // ── המרת הדוח ל-PDF אם הוא לא כבר PDF (best-effort) ──
-    const isPdf = /\.pdf$/i.test(fileName) || mime === 'application/pdf';
-    if (!isPdf) {
-      const isDocx = /\.docx$/i.test(fileName) || mime === DOCX_MIME;
+    const sent = await this.deliverReport({
+      userId: opts.userId,
+      to,
+      toList: opts.toList,
+      cc: opts.cc,
+      bcc: opts.bcc,
+      subject: opts.subject,
+      body: opts.body,
+      includeSignature: opts.includeSignature,
+      signatureId: opts.signatureId,
+      customerName: opts.customerName,
+      requestReadReceipt: opts.requestReadReceipt,
+      requestDeliveryReceipt: opts.requestDeliveryReceipt,
+      graphReady,
+      fileBuf,
+      fileName,
+      mime,
+    });
+
+    // ── סימון משימת הביצוע כ-DONE ──
+    try {
+      await this.prisma.task.update({ where: { id: taskId }, data: { status: 'DONE' as any } });
+    } catch (e: any) {
+      this.logger.warn(`mark task ${taskId} DONE failed: ${e?.message || e}`);
+    }
+
+    // ── תזמון מייל "בקשת דירוג" (5 פרצופים) ל-09:00 למחרת (best-effort) ──
+    // לא נשלח מיד — נכנס לתור ונשלח למחרת בבוקר ע"י ה-cron dispatcher, מתיבת
+    // ה-Outlook של שולח הדוח. נמען ראשי בלבד. כישלון כאן לא מפיל את שליחת הדוח.
+    if (opts.sendReviewRequest !== false) {
       try {
-        if (isDocx && (graphReady || this.pdfConvert.enabled)) {
-          // DOCX: מנוע Graph (Word) עם נפילה-חזרה ל-CloudConvert + הקפאת תאריכים, כמו בהצעת מחיר.
-          fileBuf = await this.pdfConvert.docxToPdf(fileBuf, fileName, opts.userId);
-        } else if (graphReady) {
-          // כל פורמט אחר (DOC ישן / XLS / XLSX / תמונה וכו') — דרך Graph בלבד.
-          fileBuf = await this.pdfConvert.fileToPdf(fileBuf, fileName, mime, opts.userId);
-        } else {
-          throw new Error('no conversion engine available');
-        }
-        fileName = fileName.replace(/\.[a-z0-9]+$/i, '') + '.pdf';
-        mime = 'application/pdf';
+        await this.reviewRequest.enqueueReviewRequest({
+          toEmail: sent.sentTo,
+          customerName: (opts.customerName || '').trim() || undefined,
+          taskId,
+          customerId: task.customerId || undefined,
+          userId: opts.userId,
+          requestHost: opts.requestHost,
+        });
       } catch (e: any) {
-        this.logger.warn(`PDF conversion failed for "${fileName}" — sending original file: ${e?.message || e}`);
+        this.logger.warn(`schedule review request failed for task ${taskId}: ${e?.message || e}`);
+      }
+    }
+
+    return { success: true, sentTo: sent.sentTo, fileName: sent.fileName, via: 'graph' };
+  }
+
+  /**
+   * שליחת דוח קיים מכרטיס הלקוח במייל — ללא משימה. לא מסמן DONE ולא שולח בקשת דירוג.
+   */
+  async sendDocumentEmail(
+    opts: SendDocumentEmailOpts,
+  ): Promise<{ success: true; sentTo: string; fileName: string; via: 'graph' }> {
+    const graphReady = opts.userId ? (await this.msAuth.getStatus(opts.userId)).connected : false;
+    if (!graphReady || !opts.userId) {
+      throw new BadRequestException('שליחת הדוח דורשת חיבור ל-Outlook — חבר חשבון Outlook ונסה שוב');
+    }
+
+    const to = (opts.to || '').trim();
+    if (!to || !to.includes('@')) throw new BadRequestException('כתובת מייל לא תקינה');
+
+    if (!opts.documentId) throw new BadRequestException('לא צורף דוח לשליחה');
+    const doc: any = await this.prisma.document.findUnique({ where: { id: opts.documentId } });
+    if (!doc || !doc.dataBase64) throw new BadRequestException('הדוח לא נמצא או ריק');
+
+    const sent = await this.deliverReport({
+      userId: opts.userId,
+      to,
+      toList: opts.toList,
+      cc: opts.cc,
+      bcc: opts.bcc,
+      subject: opts.subject,
+      body: opts.body,
+      includeSignature: opts.includeSignature,
+      signatureId: opts.signatureId,
+      customerName: opts.customerName,
+      requestReadReceipt: opts.requestReadReceipt,
+      requestDeliveryReceipt: opts.requestDeliveryReceipt,
+      graphReady,
+      fileBuf: Buffer.from(doc.dataBase64, 'base64'),
+      fileName: doc.name || 'דוח.pdf',
+      mime: doc.mimeType || DOCX_MIME,
+    });
+
+    return { success: true, sentTo: sent.sentTo, fileName: sent.fileName, via: 'graph' };
+  }
+
+  /**
+   * ליבת השליחה המשותפת: המרת PDF, חתימה, בניית נמענים ושליחה דרך Graph.
+   * חסרת side-effects של משימה (DONE / בקשת דירוג) — הקוראים אחראים לכך בעצמם.
+   */
+  private async deliverReport(args: {
+    userId?: string;
+    to: string;
+    toList?: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject?: string;
+    body?: string;
+    includeSignature?: boolean;
+    signatureId?: string;
+    customerName?: string;
+    requestReadReceipt?: boolean;
+    requestDeliveryReceipt?: boolean;
+    graphReady: boolean;
+    fileBuf: Buffer;
+    fileName: string;
+    mime: string;
+  }): Promise<{ sentTo: string; fileName: string }> {
+    const opts = args;
+    const graphReady = args.graphReady;
+    let fileBuf = args.fileBuf;
+    let fileName = args.fileName;
+    let mime = args.mime;
+
+    // ── המרה ל-PDF בזמן השליחה — *בדיוק* כמו בהצעת מחיר (quote-mail.service). ──
+    // מנוע ראשי: Microsoft Graph (Word — עיצוב נאמן); גיבוי: CloudConvert. הקפאת תאריכים לעברית
+    // מתבצעת בתוך docxToPdf. ממירים DOCX בלבד (כמו בהצעה); כל פורמט אחר (PDF/DOC ישן/תמונה) נשלח
+    // כמות שהוא — כדי לא לפגוע בנאמנות (בדיוק ההתנהגות של שליחת ההצעה).
+    const isDocx = /\.docx$/i.test(fileName) || mime === DOCX_MIME;
+    const canConvert = (graphReady && !!opts.userId) || this.pdfConvert.enabled;
+    if (isDocx) {
+      if (!canConvert) {
+        this.logger.warn(`PDF conversion not configured (Outlook/CloudConvert) — sending "${fileName}" as DOCX`);
+      } else {
+        try {
+          fileBuf = await this.pdfConvert.docxToPdf(fileBuf, fileName, opts.userId);
+          fileName = fileName.replace(/\.docx$/i, '') + '.pdf';
+          mime = 'application/pdf';
+        } catch (e: any) {
+          this.logger.warn(`PDF conversion failed for "${fileName}" — sending DOCX: ${e?.message || e}`);
+        }
       }
     }
 
@@ -156,7 +295,7 @@ ${signatureHtml}
 
     // נמענים: To = ראשי + נוספים; CC נפרד. ניקוי וכפילויות.
     const toAll = Array.from(
-      new Set([to, ...((opts.toList || []).map((e) => e.trim()))].filter((e) => e.includes('@'))),
+      new Set([opts.to, ...((opts.toList || []).map((e) => e.trim()))].filter((e) => e.includes('@'))),
     );
     const cc = Array.from(
       new Set((opts.cc || []).map((e) => e.trim()).filter((e) => e.includes('@') && !toAll.includes(e))),
@@ -189,33 +328,11 @@ ${signatureHtml}
       subject,
       html,
       attachments,
+      requestReadReceipt: opts.requestReadReceipt,
+      requestDeliveryReceipt: opts.requestDeliveryReceipt,
     });
 
-    // ── סימון משימת הביצוע כ-DONE ──
-    try {
-      await this.prisma.task.update({ where: { id: taskId }, data: { status: 'DONE' as any } });
-    } catch (e: any) {
-      this.logger.warn(`mark task ${taskId} DONE failed: ${e?.message || e}`);
-    }
-
-    // ── שליחת מייל "בקשת דירוג" (5 פרצופים) ללקוח מיד אחרי הדוח (best-effort) ──
-    // נשלח לנמען הראשי בלבד. כישלון כאן לא מפיל את שליחת הדוח.
-    if (opts.sendReviewRequest !== false) {
-      try {
-        await this.reviewRequest.sendReviewRequest({
-          toEmail: toAll[0],
-          customerName: custName || undefined,
-          taskId,
-          customerId: task.customerId || undefined,
-          userId: opts.userId,
-          requestHost: opts.requestHost,
-        });
-      } catch (e: any) {
-        this.logger.warn(`auto review request failed for task ${taskId}: ${e?.message || e}`);
-      }
-    }
-
-    return { success: true, sentTo: toAll[0], fileName, via: 'graph' };
+    return { sentTo: toAll[0], fileName };
   }
 
   /** טקסט חופשי → HTML בטוח (escape + שורות חדשות). */

@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { LeadStage, LeadStatus, Prisma, ProjectStatus, QuoteStatus, UserRole, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { formatIsraeliPhone } from '../common/phone.util';
 
 @Injectable()
 export class LeadsService {
@@ -108,7 +109,7 @@ export class LeadsService {
         name,
         type: 'COMPANY',
         contactName: lead.fullName || name,
-        phone: lead.phone || '',
+        phone: formatIsraeliPhone(lead.phone),
         email: lead.email || '',
         city: lead.city || '',
         status: 'ACTIVE',
@@ -320,7 +321,7 @@ export class LeadsService {
     }
 
     setIf('fullName', fullName);
-    setIf('phone', data.phone ?? undefined);
+    setIf('phone', data.phone == null ? data.phone ?? undefined : formatIsraeliPhone(data.phone));
     setIf('email', data.email ?? undefined);
     setIf('city', data.city ?? undefined);
     setIf('address', data.address ?? undefined);

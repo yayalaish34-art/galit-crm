@@ -33,6 +33,12 @@ interface SignerInfo {
 interface SignatureMeta {
   /** סוד אקראי לא-ניתן-לניחוש — הבסיס לקישור הציבורי (capability URL). */
   secret: string;
+  /**
+   * סודות שהונפקו קודם לאותה הצעה. קישור שכבר נשלח ללקוח (וואטסאפ/מייל) חייב להמשיך
+   * לעבוד גם אם הסוד התגלגל מסיבה כלשהי — אחרת הלקוח מקבל "הקישור אינו זמין" ימים
+   * אחרי שקיבל אותו, בלי שאיש ידע. נשמרים 10 האחרונים.
+   */
+  previousSecrets?: string[];
   /** ה-PDF המקורי (ללא חתימה) — מאוחסן base64 לתצוגה בעמוד החתימה. */
   unsignedPdfBase64?: string;
   /** ה-PDF החתום (אחרי שהלקוח חתם). */
@@ -93,6 +99,9 @@ export class QuoteSignatureService {
       where: { id: quoteId },
       include: {
         customer: { select: { id: true, name: true, email: true, phone: true } },
+        // איש הקשר שנבחר בהצעה — הטלפון שמוצג ונערך במסך "פרטי לקוח" נשמר עליו,
+        // ולכן הוא המקור העדכני ביותר לשליחה בוואטסאפ (ולא Customer.phone).
+        customerContact: { select: { phone: true, mobile: true, email: true } },
         quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
         quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
       },
@@ -130,10 +139,22 @@ export class QuoteSignatureService {
     // שליחה (או ערוץ אחר) לא מגלגלת סוד חדש ולא פוסלת קישורים שכבר נשלחו ללקוח
     // ("קישור החתימה אינו תקף או שפג תוקפו"). ה-PDF עצמו כן מתרענן מהמסמך העדכני. ──
     const existingMeta = (quote.digitalCertificateMeta as SignatureMeta | null) || null;
-    const secret =
-      existingMeta?.secret && quote.digitalSignatureStatus !== 'SIGNED'
-        ? existingMeta.secret
-        : randomUUID().replace(/-/g, '');
+    const reuseSecret = !!existingMeta?.secret && quote.digitalSignatureStatus !== 'SIGNED';
+    const secret = reuseSecret ? existingMeta!.secret : randomUUID().replace(/-/g, '');
+    // ── רשת ביטחון: גם אם בכל זאת גלגלנו סוד (הצעה שסומנה SIGNED במסלול אחר, meta
+    // שנמחקה, וכו') — הסודות הקודמים נשמרים ומתקבלים ב-loadByToken. בלי זה כל גלגול
+    // הורג *בשקט* כל קישור שכבר בידי לקוחות, והתסמין מתגלה רק כשלקוח מתלונן. ──
+    const previousSecrets = Array.from(
+      new Set([
+        ...(existingMeta?.previousSecrets ?? []),
+        ...(existingMeta?.secret && existingMeta.secret !== secret ? [existingMeta.secret] : []),
+      ]),
+    ).slice(-10);
+    if (!reuseSecret && existingMeta?.secret) {
+      this.logger.warn(
+        `quote ${quoteId}: signature secret rotated (digitalSignatureStatus=${quote.digitalSignatureStatus}) — previous link kept valid`,
+      );
+    }
     const token = `${quoteId}~${secret}`;
     const baseName = fileName.replace(/\.(docx|pdf)$/i, '');
 
@@ -142,6 +163,7 @@ export class QuoteSignatureService {
     // וגם שליחה לחתימה, והמסמך החתום הסופי נשאר נקי מעצם היותו מבוסס על המקור.
     const meta: SignatureMeta = {
       secret,
+      previousSecrets,
       unsignedPdfBase64: pdfBuffer.toString('base64'),
       fileName: `${baseName}.pdf`,
       requestedById: userId ?? null,
@@ -165,7 +187,15 @@ export class QuoteSignatureService {
       quoteNumber: quote.quoteNumber || quote.importLegacyId || '',
       customerName: quote.customer?.name || '',
       customerEmail: quote.customer?.email || '',
-      customerPhone: quote.customer?.phone || '',
+      // עדיפות: איש הקשר של ההצעה → הטלפון שנשמר על ההצעה → טלפון הלקוח. עריכת הטלפון
+      // במסך ההצעה נשמרת על CustomerContact (ועל phoneSummary), לא על Customer.phone —
+      // בלי השרשור הזה הוואטסאפ נשלח למספר הישן של הלקוח.
+      customerPhone:
+        (quote.customerContact?.phone || '').trim() ||
+        (quote.customerContact?.mobile || '').trim() ||
+        (quote.phoneSummary || '').trim() ||
+        quote.customer?.phone ||
+        '',
       // מיידע את המנהל היכן תיצרב החתימה: 'marker' = במקום שסומן בתבנית; 'default' = תחתית-ימין.
       signaturePlacement: marker ? 'marker' : 'default',
     };
@@ -441,7 +471,10 @@ export class QuoteSignatureService {
     // linkedEntityId (מזהה המשימה שממנה נוצרה ההצעה) ו-customerId נטענים דרך include/scalar
     // ברירת-מחדל של findUnique — משמשים ב-advanceTaskToCoordination אחרי החתימה.
     const meta = (quote?.digitalCertificateMeta as SignatureMeta | null) || null;
-    if (!quote || !meta?.secret || meta.secret !== secret) {
+    // מתקבל הסוד הנוכחי *או* כל סוד שהונפק קודם לאותה הצעה — קישור שכבר נשלח ללקוח
+    // לא מפסיק לעבוד רק מפני שההצעה נשלחה שוב מהמערכת.
+    const accepted = meta?.secret ? [meta.secret, ...(meta.previousSecrets ?? [])] : [];
+    if (!quote || !meta?.secret || !accepted.includes(secret)) {
       throw new NotFoundException('קישור החתימה אינו תקף או שפג תוקפו');
     }
     return { quote, meta };

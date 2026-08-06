@@ -55,7 +55,9 @@ export const SERVICE_CATEGORIES: ServiceCategory[] = [
     services: [
       { id: '10148', sku: '10148', name: 'בנייה ירוקה – הכנת אוגדן מקדמי שלב א׳ לאישור מכון ההתעדה בהתאם לתכניות האדריכליות ולהנחיות התקן', price: 20000 },
       { id: '10149', sku: '10149', name: 'בנייה ירוקה – הכנת אוגדן שלב ב׳ כולל ביקור בשטח והנחיות לצוות הניהול והעובדים בשטח',               price: 0     },
-      { id: '10150', sku: '10150', name: 'ייעוץ תרמי והנחיות לבנייה ירוקה בהתאם לת״י 1045 ודוח אנרגטי 5282',                                  price: 12000 },
+      { id: '10170', sku: '10170', name: 'בנייה ירוקה – הכנת דוחות מיקרו אקלים והצללות',                                                    price: 0     },
+      // SKU 10150 ("ייעוץ תרמי…") שייך לקטגוריית "תרמי" בלבד — הוסר מכאן כדי שפריט זה
+      // יזוהה כתרמי ויציג את תבניות התרמי (היה כפול-קטגוריה וגרם ל"אין תבניות").
     ],
   },
 
@@ -145,8 +147,8 @@ export const SERVICE_CATEGORIES: ServiceCategory[] = [
         name: 'ELF היתר',
         subServices: [
           { id: '10036', sku: '10036', name: 'קרינה – בדיקת קרינה רקע RF + ELF בתחילת הבנייה לצורך אישור בנייה ירוקה',  price: 600  },
+          { id: '10006', sku: '10006', name: 'קרינה – הכנת דוח חיזוי וייעוץ קרינה לפרויקט',                                price: 4600 },
           { id: '10041', sku: '10041', name: 'קרינה – הכנת מפרט למיגון קרינה לדוח חזוי',                                  price: 1800 },
-          { id: '10006', sku: '10006', name: 'קרינה – ייעוץ ופיקוח עליון לאחר בנייה',                                      price: 4600 },
           { id: '10165', sku: '10165', name: 'בדיקת קרינה מרשת החשמל למתן היתר',                                            price: 1200 },
         ],
       },
@@ -395,6 +397,29 @@ export function getCategoryName(id: string): string {
   return SERVICE_CATEGORIES.find((c) => c.id === id)?.name ?? id;
 }
 
+/**
+ * Hebrew display name of a subgroup (a service that holds subServices), by its
+ * id — e.g. "radiation_shielding" → "מיגון קרינה". Returns null if not found.
+ */
+export function getSubgroupName(subgroupId: string): string | null {
+  for (const cat of SERVICE_CATEGORIES) {
+    for (const svc of cat.services) {
+      if (svc.subServices && svc.id === subgroupId) return svc.name;
+    }
+  }
+  return null;
+}
+
+/**
+ * The Hebrew sub-category name for a leaf service SKU/id, or null when the SKU
+ * isn't nested in a subgroup. Convenience wrapper over getSubgroupIdForSku +
+ * getSubgroupName — used to auto-fill the "תת-קטגוריה" field on item edit.
+ */
+export function getSubgroupNameForSku(skuOrId: string): string | null {
+  const id = getSubgroupIdForSku(skuOrId);
+  return id ? getSubgroupName(id) : null;
+}
+
 /** Get the category (family) id for a leaf service SKU/id. Returns undefined if not found. */
 export function getCategoryForSku(skuOrId: string): string | undefined {
   for (const cat of SERVICE_CATEGORIES) {
@@ -410,4 +435,105 @@ export function getCategoryForSku(skuOrId: string): string | undefined {
 export function formatPrice(price: number): string {
   if (price === 0) return 'כלול';
   return `₪${price.toLocaleString('he-IL')}`;
+}
+
+// ── Catalog merge (DB → picker) ──────────────────────────────────────────────
+
+/**
+ * שורת מחירון כפי שהיא מגיעה מ-`GET /quote-item-catalog`.
+ * רק השדות שהבורר צריך — לא כל העמודות של QuoteItemCatalog.
+ */
+export type CatalogRow = {
+  itemCode: string;
+  name: string;
+  serviceCategory?: string | null;
+  serviceSubType?: string | null;
+  basePrice?: number | null;
+  billingUnit?: string | null;
+  isActive?: boolean;
+};
+
+/** כל ה-SKU-ים שכבר מופיעים בעץ הקבוע. */
+function knownSkus(cats: ServiceCategory[]): Set<string> {
+  const out = new Set<string>();
+  for (const cat of cats) {
+    for (const svc of cat.services) {
+      if (svc.sku) out.add(svc.sku);
+      out.add(svc.id);
+      for (const sub of svc.subServices ?? []) {
+        if (sub.sku) out.add(sub.sku);
+        out.add(sub.id);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * ממזג את שורות המחירון מה-DB לתוך עץ הקטגוריות הקבוע.
+ *
+ * **הבאג שזה מתקן:** `SERVICE_CATEGORIES` הוא קובץ קבוע שנצרב ל-bundle, ואילו
+ * מסך ההגדרות → מחירון כותב ל-`QuoteItemCatalog` ב-DB. שני המקורות מעולם לא
+ * דיברו: פריט שנוסף דרך הממשק נשמר כראוי — ופשוט לא הופיע בבורר השירותים,
+ * כי הבורר רינדר את הקובץ הקבוע. מקרה אמיתי: "טיפול וליווי בקבלת היתר הפעלה
+ * לשנאי – המשרד להגנת הסביבה" (10171) נשמר תחת קרינה / ELF היתר ולא נראה.
+ *
+ * הכיוון: הקובץ הקבוע נשאר **מקור הסדר** (סדר הקטגוריות, הקיבוץ לתתי-קבוצות),
+ * וכל שורה פעילה שקיימת ב-DB ואינה בעץ מתווספת למקום הנכון לפיה
+ * `serviceCategory` / `serviceSubType`. קטגוריה או תת-קבוצה שאינן קיימות בעץ
+ * נוצרות — אחרת פריט בקטגוריה חדשה היה נעלם בדיוק כמו קודם.
+ *
+ * טהור: אינו משנה את `SERVICE_CATEGORIES` אלא מחזיר עץ חדש.
+ */
+export function mergeCatalogIntoCategories(rows: CatalogRow[] | null | undefined): ServiceCategory[] {
+  // עותק בעומק המספיק כדי שלא נדרוס את הקבוע המיוצא.
+  const merged: ServiceCategory[] = SERVICE_CATEGORIES.map((c) => ({
+    ...c,
+    services: c.services.map((s) => ({
+      ...s,
+      ...(s.subServices ? { subServices: [...s.subServices] } : {}),
+    })),
+  }));
+  if (!rows?.length) return merged;
+
+  const seen = knownSkus(merged);
+
+  for (const row of rows) {
+    if (row?.isActive === false) continue;
+    const sku = String(row?.itemCode ?? '').trim();
+    const name = String(row?.name ?? '').trim();
+    if (!sku || !name || seen.has(sku)) continue;
+
+    const catName = String(row.serviceCategory ?? '').trim();
+    if (!catName) continue; // בלי מחלקה אין לאן לשייך — נשאר רק בטבלת המחירון
+
+    const leaf: ServiceItem = {
+      id: sku,
+      sku,
+      name,
+      price: Number(row.basePrice ?? 0) || 0,
+      ...(row.billingUnit ? { unit: String(row.billingUnit) } : {}),
+    };
+
+    let cat = merged.find((c) => c.name === catName);
+    if (!cat) {
+      cat = { id: `db_${sku}_cat`, name: catName, services: [] };
+      merged.push(cat);
+    }
+
+    const subName = String(row.serviceSubType ?? '').trim();
+    if (subName) {
+      let group = cat.services.find((s) => s.name === subName && s.subServices);
+      if (!group) {
+        group = { id: `db_${catName}_${subName}`, name: subName, subServices: [] };
+        cat.services.push(group);
+      }
+      group.subServices = [...(group.subServices ?? []), leaf];
+    } else {
+      cat.services.push(leaf);
+    }
+    seen.add(sku);
+  }
+
+  return merged;
 }

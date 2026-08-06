@@ -1,6 +1,7 @@
 'use client';
 
 import { apiUrl, apiFetch } from './lib/api-base';
+import { formatIsraeliPhoneDisplay } from './lib/phone-format';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FileDown, FileSpreadsheet, Upload } from 'lucide-react';
 import {
@@ -602,7 +603,7 @@ export function CustomerImportSection({
                     <tr key={p.rowIndex} className={cn('border-t border-slate-100', p.errors.length ? 'bg-red-50/50' : '')}>
                       <td className="px-2 py-1.5 tabular-nums">{p.rowIndex}</td>
                       <td className="px-2 py-1.5">{p.name || '—'}</td>
-                      <td className="px-2 py-1.5">{p.phone || '—'}</td>
+                      <td className="px-2 py-1.5">{formatIsraeliPhoneDisplay(p.phone) || '—'}</td>
                       <td className="px-2 py-1.5">{p.email || '—'}</td>
                       <td className="px-2 py-1.5">{typeLabelMap[p.typeCode] || p.typeCode}</td>
                       <td className="px-2 py-1.5 font-medium">

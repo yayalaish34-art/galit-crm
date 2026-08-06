@@ -11,6 +11,10 @@ import {
   toBool,
   toNumber,
 } from './followup-normalize';
+import { formatIsraeliPhone } from '../common/phone.util';
+
+/** normStr + עיצוב ישראלי — כל מספר שנכנס בייבוא נשמר עם מקף. */
+const normPhone = (v: unknown): string => formatIsraeliPhone(normStr(v));
 
 export type ImportEntityKind = 'customers' | 'contacts' | 'quotes' | 'orders' | 'activities' | 'auto';
 
@@ -120,19 +124,20 @@ function mapCustomerRow(r: Record<string, unknown>): NormalizedCustomer | null {
   const name = normStr(pickField(row, 'CUSTOMER_NAME', 'Customer_Name', 'שם', 'NAME'));
   if (!legacyCode && !name) return null;
 
-  const phone = normStr(pickField(row, 'TELEPHONE_1', 'Telephone_1', 'PHONE', 'טלפון'));
+  // ה-hash של legacyCode נשען על הערך הגולמי — עיצוב המקף לא ישנה מפתחות של ייבוא קודם.
+  const phoneRaw = normStr(pickField(row, 'TELEPHONE_1', 'Telephone_1', 'PHONE', 'טלפון'));
   const email = normEmail(pickField(row, 'EMAIL', 'EMail', 'E_MAIL'));
   const notes = normStr(pickField(row, 'REM', 'Rem', 'NOTES'));
   const internalNotes = normStr(pickField(row, 'REM2', 'Rem2', 'INTERNAL_NOTES'));
 
   return {
-    legacyCode: legacyCode || stableHash(['cust', name, phone, email]),
+    legacyCode: legacyCode || stableHash(['cust', name, phoneRaw, email]),
     name: name || `לקוח ${legacyCode || '—'}`,
     contactName: name || '—',
-    phone,
-    phone2: normStr(pickField(row, 'TELEPHONE_2', 'Telephone_2')),
-    phone3: normStr(pickField(row, 'TELEPHONE_3', 'Telephone_3')),
-    fax: normStr(pickField(row, 'CUSTOMER_FAX', 'Customer_Fax', 'FAX')),
+    phone: formatIsraeliPhone(phoneRaw),
+    phone2: normPhone(pickField(row, 'TELEPHONE_2', 'Telephone_2')),
+    phone3: normPhone(pickField(row, 'TELEPHONE_3', 'Telephone_3')),
+    fax: normPhone(pickField(row, 'CUSTOMER_FAX', 'Customer_Fax', 'FAX')),
     email,
     city: normStr(pickField(row, 'CITY', 'Customer_City', 'עיר')),
     addressLine1: normStr(pickField(row, 'CUSTOMER_KTOVET', 'Customer_Ktovet', 'ADDRESS', 'כתובת')),
@@ -175,9 +180,9 @@ function mapContactRow(r: Record<string, unknown>): NormalizedContact | null {
     customerLegacy,
     contactLegacy: cl,
     fullName: fullName || `איש קשר ${cl}`,
-    phone: normStr(pickField(row, 'ISH_KESHER_TELEPHONE', 'Ish_Kesher_Telephone', 'PHONE', 'טלפון')),
-    mobile: normStr(pickField(row, 'ISHKESHERCELLPHONE', 'IshKesherCellPhone', 'MOBILE', 'נייד')),
-    fax: normStr(pickField(row, 'ISH_KESHER_FAX', 'Ish_Kesher_Fax')),
+    phone: normPhone(pickField(row, 'ISH_KESHER_TELEPHONE', 'Ish_Kesher_Telephone', 'PHONE', 'טלפון')),
+    mobile: normPhone(pickField(row, 'ISHKESHERCELLPHONE', 'IshKesherCellPhone', 'MOBILE', 'נייד')),
+    fax: normPhone(pickField(row, 'ISH_KESHER_FAX', 'Ish_Kesher_Fax')),
     email: normEmail(pickField(row, 'ISH_KESHEREMAIL', 'Ish_KesherEMail', 'EMAIL')),
     address: normStr(pickField(row, 'ISH_KESHER_KTOVET', 'Ish_Kesher_Ktovet')),
     city: normStr(pickField(row, 'ISH_KESHER_CITY', 'Ish_Kesher_City')),

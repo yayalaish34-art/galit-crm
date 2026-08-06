@@ -30,6 +30,7 @@ import {
   Bot,
   Mic,
   Bell,
+  Handshake,
 } from 'lucide-react';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
@@ -830,6 +831,15 @@ export function CrmLegacyTopNav({
                   title={!canAccess(role, 'reports') ? 'אין הרשאה' : 'דוחות'}
                   active={current === 'reports'}
                   onClick={() => go('reports')}
+                />
+                <Sep />
+                <NavBtn
+                  label="שותפים"
+                  Icon={Handshake}
+                  disabled={!canAccess(role, 'affiliates')}
+                  title={!canAccess(role, 'affiliates') ? 'אין הרשאה' : 'שותפים — הפניות ועמלות'}
+                  active={current === 'affiliates'}
+                  onClick={() => go('affiliates')}
                 />
                 <Sep />
                 <NavBtn

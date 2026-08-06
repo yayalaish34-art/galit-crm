@@ -29,8 +29,10 @@ export class DashboardController {
    * נפתח בלחיצה על כרטיס "שביעות רצון". period=last30|quarter|half|year.
    */
   @Get('reviews-analytics')
-  @Roles('ADMIN', 'MANAGER')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   reviewsAnalytics(@Req() req: any, @Query('period') period?: string) {
+    // מנהל/אדמין מקבלים את כל הביקורות; עובד רגיל מקבל רק את הביקורות של הלקוחות
+    // שהוא טיפל בהם (הסינון לפי ownerId נעשה בשירות).
     return this.dashboardService.reviewsAnalytics(req.user, period);
   }
 
@@ -44,11 +46,35 @@ export class DashboardController {
     return this.dashboardService.revenueAnalytics(req.user, period);
   }
 
-  /** עדכון יעד המכירות השנתי (נשמר כיעד חודשי = שנתי ÷ 12). מנהל/אדמין בלבד. */
+  /**
+   * אנליטיקת "מקור הגעה" של לקוחות — פילוח לפי מקור, עם פילטר זמן ושם לקוח.
+   * מנהל/אדמין בלבד.
+   */
+  @Get('customer-source-analytics')
+  @Roles('ADMIN', 'MANAGER')
+  customerSourceAnalytics(
+    @Req() req: any,
+    @Query('period') period?: string,
+    @Query('name') name?: string,
+  ) {
+    return this.dashboardService.customerSourceAnalytics(req.user, period, name);
+  }
+
+  /**
+   * עדכון יעד המכירות החודשי (נשמר ישירות). לתאימות לאחור מתקבל גם annualRevenueTarget
+   * (יומר ל-חודשי ÷ 12). מנהל/אדמין בלבד.
+   */
   @Post('target')
   @Roles('ADMIN', 'MANAGER')
-  setTarget(@Req() req: any, @Body('annualRevenueTarget') annualRevenueTarget: number) {
-    return this.dashboardService.setAnnualRevenueTarget(annualRevenueTarget, req.user);
+  setTarget(
+    @Req() req: any,
+    @Body('monthlyRevenueTarget') monthlyRevenueTarget: number,
+    @Body('annualRevenueTarget') annualRevenueTarget: number,
+  ) {
+    return this.dashboardService.setRevenueTarget(
+      { monthlyRevenueTarget, annualRevenueTarget },
+      req.user,
+    );
   }
 
   @Get('me')

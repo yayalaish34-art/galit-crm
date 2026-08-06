@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { formatIsraeliPhoneDisplay } from '../../lib/phone-format';
 
 type InquiryTab = 'תיאור תקלה' | 'הערות סטטוס אחרון' | 'פרטי פנייה';
 
@@ -92,6 +93,7 @@ export function InquiryNewScreen({ embedded = true }: { embedded?: boolean }) {
             label="טלפון"
             value={form.phone}
             onChange={(v) => setForm((p) => ({ ...p, phone: v }))}
+            onBlur={() => setForm((p) => ({ ...p, phone: formatIsraeliPhoneDisplay(p.phone) }))}
           />
           <Field
             label="H"
@@ -215,10 +217,12 @@ function Field({
   label,
   value,
   onChange,
+  onBlur,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  onBlur?: () => void;
 }) {
   return (
     <label className="text-xs">
@@ -227,6 +231,7 @@ function Field({
         className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
       />
     </label>
   );

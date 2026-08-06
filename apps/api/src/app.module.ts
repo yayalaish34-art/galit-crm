@@ -30,9 +30,13 @@ import { IncomingLeadsModule } from './incoming-leads/incoming-leads.module';
 import { BackupModule } from './backup/backup.module';
 import { VoiceAssistantModule } from './voice-assistant/voice-assistant.module';
 import { ApprovalsModule } from './approvals/approvals.module';
+import { RadonModule } from './radon/radon.module';
+import { AffiliateModule } from './affiliate/affiliate.module';
+import { OutlookModule } from './integrations/outlook/outlook.module';
+import { CaspitModule } from './caspit/caspit.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -17,7 +17,7 @@ import { ReviewsModule } from '../reviews/reviews.module';
   imports: [PrismaModule, MicrosoftModule, ReviewsModule],
   controllers: [QuotesController, QuoteSignatureController, ReportMailController, CompanyProfileController],
   providers: [QuotesService, QuoteMailService, PdfConvertService, QuoteSignatureService, ReportMailService, CompanyProfileService],
-  exports: [QuotesService],
+  exports: [QuotesService, ReportMailService],
 })
 export class QuotesModule {}
 

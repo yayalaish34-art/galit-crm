@@ -1,8 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileSignature, Upload, Trash2, Eye, Loader2, FileText } from 'lucide-react';
+import { FileSignature, Upload, Trash2, Eye, Loader2, FileText, X, CheckCircle2 } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
+
+/** קורא קובץ ל-base64 (ללא תחילית data:). */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result);
+      resolve(s.includes(',') ? s.split(',')[1] : s);
+    };
+    fr.onerror = () => reject(new Error('read failed'));
+    fr.readAsDataURL(file);
+  });
+}
+
+/** פורמט מספר עם מפרידי אלפים לתצוגה. */
+function fmtAmount(n: number): string {
+  return n.toLocaleString('he-IL');
+}
 
 type SignedDoc = {
   id: string;
@@ -42,9 +60,19 @@ export function SignedQuotesSection({
   const [docs, setDocs] = useState<SignedDoc[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [parsing, setParsing] = useState(false);
   const [err, setErr] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const valid = !!customerId && customerId !== '__new__';
+
+  // מודל אישור סכום — נפתח אחרי בחירת קובץ, לפני השמירה.
+  const [pending, setPending] = useState<{
+    file: File;
+    b64: string;
+    amount: string; // כטקסט לעריכה
+    quoteNumber: string;
+    detected: boolean; // האם הסכום זוהה אוטומטית מה-PDF
+  } | null>(null);
 
   const load = useCallback(async () => {
     if (!valid) return;
@@ -67,38 +95,86 @@ export function SignedQuotesSection({
     void load();
   }, [load]);
 
+  // בחירת קובץ → חילוץ סכום מ-PDF → פתיחת מודל אישור.
   const onPick = async (file: File) => {
     if (!valid || !file) return;
+    setParsing(true);
+    setErr('');
+    try {
+      const b64 = await fileToBase64(file);
+      let detectedAmount: number | null = null;
+      try {
+        const r = await apiFetch(apiUrl(`/customers/${customerId}/signed-quote/parse`), {
+          method: 'POST',
+          authUser: currentUser as never,
+          body: JSON.stringify({ dataBase64: b64, mimeType: file.type || '' }),
+        });
+        if (r.ok) {
+          const j = await r.json();
+          if (typeof j?.total === 'number') detectedAmount = j.total;
+        }
+      } catch {
+        /* חילוץ נכשל — נמשיך עם קלט ידני */
+      }
+      setPending({
+        file,
+        b64,
+        amount: detectedAmount != null ? String(detectedAmount) : '',
+        quoteNumber: '',
+        detected: detectedAmount != null,
+      });
+    } catch {
+      setErr('קריאת הקובץ נכשלה');
+    } finally {
+      setParsing(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  // אישור המודל → יצירת מסמך SIGNED_QUOTE + Quote SIGNED + קידום משימה.
+  const confirmUpload = async () => {
+    if (!valid || !pending) return;
+    const amount = Number(String(pending.amount).replace(/[,\s₪]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setErr('יש להזין סכום סופי תקין');
+      return;
+    }
     setUploading(true);
     setErr('');
     try {
-      const b64 = await new Promise<string>((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => {
-          const s = String(fr.result);
-          resolve(s.includes(',') ? s.split(',')[1] : s);
-        };
-        fr.onerror = () => reject(new Error('read failed'));
-        fr.readAsDataURL(file);
-      });
-      const r = await apiFetch(apiUrl(`/customers/${customerId}/documents`), {
+      const r = await apiFetch(apiUrl(`/customers/${customerId}/signed-quote`), {
         method: 'POST',
         authUser: currentUser as never,
         body: JSON.stringify({
-          name: file.name,
-          documentType: 'SIGNED_QUOTE',
-          mimeType: file.type || 'application/octet-stream',
-          sizeBytes: file.size,
-          dataBase64: b64,
+          name: pending.file.name,
+          dataBase64: pending.b64,
+          mimeType: pending.file.type || 'application/octet-stream',
+          sizeBytes: pending.file.size,
+          finalAmount: amount,
+          quoteNumber: pending.quoteNumber.trim() || undefined,
         }),
       });
-      if (r.ok) await load();
-      else setErr('העלאת הקובץ נכשלה');
-    } catch {
-      setErr('העלאת הקובץ נכשלה');
+      if (r.ok) {
+        setPending(null);
+        await load();
+      } else {
+        // מציגים את הסיבה האמיתית מהשרת — הודעה גנרית הסתירה כאן שגיאת P2028
+        // (timeout של טרנזקציה) שקרתה רק בקבצים גדולים, ואי אפשר היה לאבחן אותה מהמסך.
+        let detail = '';
+        try {
+          const body = await r.text();
+          const parsed = body ? JSON.parse(body) : null;
+          detail = parsed?.message
+            ? (Array.isArray(parsed.message) ? parsed.message.join(', ') : String(parsed.message))
+            : body.slice(0, 200);
+        } catch { /* גוף לא-JSON — נסתפק בקוד הסטטוס */ }
+        setErr(`צירוף ההצעה נכשל (${r.status})${detail ? ` — ${detail}` : ''}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '';
+      setErr(`צירוף ההצעה נכשל${msg ? ` — ${msg}` : ' — החיבור נותק'}`);
     } finally {
       setUploading(false);
-      if (inputRef.current) inputRef.current.value = '';
     }
   };
 
@@ -144,18 +220,18 @@ export function SignedQuotesSection({
         </div>
         <label
           className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-white transition ${
-            valid && !uploading ? 'cursor-pointer hover:brightness-110' : 'cursor-not-allowed opacity-50'
+            valid && !uploading && !parsing ? 'cursor-pointer hover:brightness-110' : 'cursor-not-allowed opacity-50'
           }`}
           style={{ background: '#16a34a' }}
         >
-          {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {uploading ? 'מעלה…' : 'צרף הצעה חתומה'}
+          {parsing || uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+          {parsing ? 'קורא…' : uploading ? 'מעלה…' : 'צרף הצעה חתומה'}
           <input
             ref={inputRef}
             type="file"
             accept=".pdf,image/*"
             className="hidden"
-            disabled={!valid || uploading}
+            disabled={!valid || uploading || parsing}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void onPick(f);
@@ -220,6 +296,91 @@ export function SignedQuotesSection({
       )}
 
       {err && <div className="mt-2 text-xs text-red-500">{err}</div>}
+
+      {pending && (
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-4"
+          dir="rtl"
+          onClick={() => !uploading && setPending(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-100">
+                  <FileSignature className="h-4.5 w-4.5 text-green-600" />
+                </div>
+                <div className="text-sm font-bold text-slate-800">צירוף הצעה חתומה</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !uploading && setPending(null)}
+                className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mb-3 flex items-center gap-2 rounded-xl border border-green-100 bg-green-50/60 px-3 py-2">
+              <FileText className="h-4 w-4 shrink-0 text-green-600" />
+              <span className="truncate text-xs font-medium text-slate-700">{pending.file.name}</span>
+            </div>
+
+            <label className="mb-1 block text-xs font-bold text-slate-600">סכום סופי (₪)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              value={pending.amount}
+              onChange={(e) => setPending((p) => (p ? { ...p, amount: e.target.value, detected: false } : p))}
+              placeholder="לדוגמה: 45000"
+              className="mb-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-green-400"
+            />
+            {pending.detected && Number(String(pending.amount).replace(/[,\s₪]/g, '')) > 0 ? (
+              <div className="mb-3 flex items-center gap-1 text-[11px] text-green-600">
+                <CheckCircle2 className="h-3 w-3" />
+                זוהה אוטומטית מההצעה — {fmtAmount(Number(String(pending.amount).replace(/[,\s₪]/g, '')))} ₪. ניתן לתקן.
+              </div>
+            ) : (
+              <div className="mb-3 text-[11px] text-slate-400">הזן את הסכום הכולל שנחתם.</div>
+            )}
+
+            <label className="mb-1 block text-xs font-bold text-slate-600">מס׳ הצעה / הזמנה (רשות)</label>
+            <input
+              type="text"
+              value={pending.quoteNumber}
+              onChange={(e) => setPending((p) => (p ? { ...p, quoteNumber: e.target.value } : p))}
+              placeholder="—"
+              className="mb-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-green-400"
+            />
+
+            {err && <div className="mb-2 text-xs text-red-500">{err}</div>}
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => !uploading && setPending(null)}
+                disabled={uploading}
+                className="rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmUpload()}
+                disabled={uploading}
+                className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                style={{ background: '#16a34a' }}
+              >
+                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                {uploading ? 'מצרף…' : 'אישור וצירוף'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

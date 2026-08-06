@@ -104,6 +104,36 @@ export class GraphFilesService {
   }
 
   /**
+   * משנה את שם הקובץ ב-OneDrive (PATCH על הפריט). לא נוגע בתוכן — רק בשם.
+   * מקבל שם ידידותי ללא סיומת (או עם), מנקה תווים לא-חוקיים ומוודא סיומת .docx,
+   * בדיוק כמו uploadEditable, כדי שהשם ב-OneDrive יישאר עקבי עם שם ההעלאה המקורי.
+   * מחזיר את הפריט המעודכן, או null אם הפריט נמחק/לא נמצא (404) — best-effort לקורא.
+   */
+  async renameItem(
+    userId: string,
+    itemId: string,
+    fileName: string,
+  ): Promise<{ itemId: string; webUrl: string; webDavUrl: string; name: string } | null> {
+    const token = await this.auth.getFilesAccessToken(userId);
+    const safe =
+      (fileName.replace(/\.docx$/i, '') || 'quote').replace(/[^A-Za-z0-9._\-א-ת ]+/g, '_').trim().slice(0, 120) ||
+      'quote';
+    const res = await fetch(`${GRAPH}/me/drive/items/${itemId}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `${safe}.docx` }),
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error(`OneDrive rename failed: ${res.status} ${t.slice(0, 200)}`);
+    }
+    const item: any = await res.json();
+    const webDavUrl: string = item.webDavUrl || this.deriveWebDavUrl({ webUrl: item.webUrl, name: item.name });
+    return { itemId: item.id, webUrl: item.webUrl, webDavUrl, name: item.name };
+  }
+
+  /**
    * מוריד את התוכן העדכני של הקובץ מ-OneDrive (הגרסה שנערכה ונשמרה ב-Word).
    * Graph מחזיר בד"כ 302 לכתובת אחסון מאומתת-מראש — מפנים אליה ללא כותרת Authorization.
    */

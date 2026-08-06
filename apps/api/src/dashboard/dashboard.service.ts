@@ -35,6 +35,22 @@ function startOfTodayIsrael(now = new Date()): Date {
   return new Date(new Date(`${ymd}T00:00:00Z`).getTime() - offsetMs);
 }
 
+/**
+ * סכום ההכנסה של הצעת מחיר — **לפני מע"מ** (לבקשת המנהל: הכנסות = מחיר לפני מע"מ).
+ * מקור עדיף: amountBeforeVat. אם חסר (הצעות ישנות) — גוזרים מ-totalAmount לפי vatPercent,
+ * ואם גם זה חסר — נופלים ל-totalAmount/amount כפי שהיה (כדי לא לאבד הכנסה).
+ */
+function revenueAmountOf(q: any): number {
+  const beforeVat = Number(q?.amountBeforeVat ?? 0);
+  if (beforeVat > 0) return beforeVat;
+  const total = Number(q?.totalAmount ?? q?.amount ?? 0);
+  if (total <= 0) return 0;
+  const vat = Number(q?.vatPercent);
+  // אם יש אחוז מע"מ תקין — מחלצים את הסכום לפני מע"מ מהסכום הכולל.
+  if (Number.isFinite(vat) && vat > 0) return Math.round((total / (1 + vat / 100)) * 100) / 100;
+  return total; // אין נתוני מע"מ — משאירים כפי שהוא
+}
+
 @Injectable()
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
@@ -60,21 +76,33 @@ export class DashboardService {
   }
 
   /**
-   * מעדכן את יעד ההכנסות השנתי (SystemSetting key="targets"). המנהל מזין יעד *שנתי*
-   * בכרטיס "עמידה ביעד מכירות שנתי", ואנחנו שומרים אותו כיעד *חודשי* (שנתי ÷ 12),
-   * כי כל שאר הדשבורד עובד מול היעד החודשי. משמר שדות אחרים שקיימים ב-value.
-   * מנהל/אדמין בלבד. מחזיר את היעד השנתי והחודשי שנשמרו.
+   * מעדכן את יעד ההכנסות (SystemSetting key="targets"). המנהל מזין יעד *חודשי*
+   * בכרטיס "עמידה ביעד מכירות חודשי" — נשמר ישירות כיעד חודשי, כי כל שאר הדשבורד
+   * עובד מול היעד החודשי. לתאימות לאחור עדיין מתקבל גם annualRevenueTarget (שנתי ÷ 12).
+   * משמר שדות אחרים שקיימים ב-value. מנהל/אדמין בלבד. מחזיר את היעד החודשי והשנתי שנשמרו.
    */
-  async setAnnualRevenueTarget(annualTarget: number, user?: { id?: string; role?: string }) {
+  async setRevenueTarget(
+    input: { monthlyRevenueTarget?: number; annualRevenueTarget?: number },
+    user?: { id?: string; role?: string },
+  ) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
     if (role !== 'ADMIN' && role !== 'MANAGER') throw new ForbiddenException();
 
-    const annual = Math.round(Number(annualTarget));
-    if (!Number.isFinite(annual) || annual <= 0) {
-      throw new BadRequestException('יעד שנתי חייב להיות מספר חיובי');
+    // יעד חודשי גובר; אחרת נגזר מיעד שנתי (÷ 12) לתאימות לאחור.
+    let monthly: number;
+    if (input.monthlyRevenueTarget != null) {
+      monthly = Math.round(Number(input.monthlyRevenueTarget));
+      if (!Number.isFinite(monthly) || monthly <= 0) {
+        throw new BadRequestException('יעד חודשי חייב להיות מספר חיובי');
+      }
+    } else {
+      const annual = Math.round(Number(input.annualRevenueTarget));
+      if (!Number.isFinite(annual) || annual <= 0) {
+        throw new BadRequestException('יעד חייב להיות מספר חיובי');
+      }
+      monthly = Math.round(annual / 12);
     }
-    const monthly = Math.round(annual / 12);
 
     const existing: any = await this.prisma.systemSetting.findUnique({ where: { key: 'targets' } }).catch(() => null);
     const prevValue = existing && typeof existing.value === 'object' && existing.value ? existing.value : {};
@@ -110,13 +138,14 @@ export class DashboardService {
       users,
       opportunities,
       quotes,
-      leads,
+      incomingLeads,
       projects,
       tasks,
       reportsWaitingCount,
       ratedReviews,
       customerTypeCounts,
       classifications,
+      directInquiries,
     ] = await Promise.all([
       this.prisma.user.findMany({
         where: {
@@ -178,14 +207,82 @@ export class DashboardService {
         select: { code: true, labelHe: true, sortOrder: true },
         orderBy: [{ sortOrder: 'asc' }, { labelHe: 'asc' }],
       }),
+
+      // ── פניות שנפתחו ישירות, לא דרך ליד נכנס ──
+      // פותחים "פנייה חדשה" רק כשמישהו פונה אלינו — ולכן זה ליד לכל דבר, גם אם
+      // לא הגיע במייל. בלי זה הדשבורד הראה כמחצית מהפניות בפועל (14 יום אחרונים:
+      // 32 לידים נכנסים מול 25 פניות ישירות שלא נספרו כלל).
+      //
+      // הסינון: `type='step1'` הוא שלב "פתיחת פנייה" — השלב הראשון בצינור.
+      // שלבים מאוחרים (step4/step5/stepQuote…) הם המשך טיפול בפנייה קיימת ואינם
+      // פנייה חדשה, ולכן אינם נספרים. `incomingLeadId`/`leadId` ריקים = לא הגיע
+      // דרך ליד, אחרת הוא כבר נספר ב-IncomingLead והיה נספר פעמיים.
+      this.prisma.task.findMany({
+        where: {
+          type: 'step1',
+          incomingLeadId: null,
+          leadId: null,
+        },
+        select: {
+          id: true, title: true, status: true, createdAt: true, updatedAt: true,
+          ownerId: true, customerId: true, productName: true,
+          customer: { select: { name: true } },
+        },
+        orderBy: [{ createdAt: 'desc' }],
+      }),
     ]);
+
+    // ── איחוד מקורות הפניות ──────────────────────────────────────────────────
+    // מכאן והלאה `leads` = כל הפניות: אלה שהגיעו כליד נכנס במייל + אלה שנפתחו
+    // ידנית. שתי הצורות מנורמלות לאותו מבנה כדי שכל חישובי הלידים בהמשך
+    // (ספירות, רבעון, פילוח, רשימות) יעבדו עליהן בלי הבחנה.
+    const directAsLeads = directInquiries.map((t) => ({
+      id: t.id,
+      // "כרטיס לקוח — X" / "פנייה - X" הם כותרות פנימיות; ללקוח מחובר עדיף שמו.
+      fromName:
+        t.customer?.name ??
+        ((t.title || '').replace(/^(כרטיס לקוח\s*[—-]\s*|פנייה\s*-\s*)/, '') || null),
+      fromEmail: null as string | null,
+      subject: t.productName || t.title || 'פנייה',
+      body: null as string | null,
+      // פנייה שנפתחה ידנית כבר בטיפול של מי שפתח אותה; פנייה שבוטלה יורדת
+      // מהספירה בדיוק כמו ליד DISMISSED.
+      status: (String(t.status) === 'CANCELLED' ? 'DISMISSED' : 'ACTIVE') as string,
+      ownerId: t.ownerId ?? null,
+      taskId: t.id,
+      customerId: t.customerId ?? null,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      receivedAt: t.createdAt,
+      /** מבדיל בין המקורות בתצוגות שמראות רשימה. */
+      sourceKind: 'direct' as const,
+    }));
+
+    const leads: any[] = [
+      ...incomingLeads.map((l) => ({ ...l, sourceKind: 'incoming' as const })),
+      ...directAsLeads,
+    ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     // Won revenue this month: approved/signed quotes updated this month (best available proxy)
     const wonQuotesThisMonth = quotes.filter((q) =>
       (q.status === QuoteStatus.APPROVED || q.status === (QuoteStatus as any).SIGNED) &&
       q.updatedAt >= som,
     );
-    const wonRevenueThisMonth = wonQuotesThisMonth.reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+    const wonRevenueThisMonth = wonQuotesThisMonth.reduce((a, q) => a + revenueAmountOf(q), 0);
+
+    // ── הכנסה רבעונית אמיתית (חלון מתגלגל של 90 יום אחרונים) ──
+    // מחליף את האומדן המזויף שהיה בפרונט (wonRevenueThisMonth × 3.1). מקור-אמת זהה
+    // ל-revenueAnalytics: הצעה "נחתמה" אם status=APPROVED/SIGNED *או* digitalSignatureStatus=SIGNED
+    // (הצעות ישנות נשארו ב-SENT), ותאריך ההכנסה = signedAt כשקיים אחרת updatedAt.
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const isWonQuote = (q: any) =>
+      q.status === QuoteStatus.APPROVED ||
+      q.status === (QuoteStatus as any).SIGNED ||
+      (q as any).digitalSignatureStatus === 'SIGNED';
+    const revenueDateOf = (q: any): Date => ((q as any).signedAt as Date | null) ?? q.updatedAt;
+    const wonRevenueThisQuarter = quotes
+      .filter((q) => isWonQuote(q) && revenueDateOf(q) >= ninetyDaysAgo)
+      .reduce((a, q) => a + revenueAmountOf(q), 0);
 
     // Pipeline: open opportunities (not WON/LOST) sum estimatedValue
     const openOpps = opportunities.filter((o) => o.pipelineStage !== OpportunityStage.WON && o.pipelineStage !== OpportunityStage.LOST);
@@ -223,7 +320,7 @@ export class DashboardService {
       const repLostOpps = repOpps.filter((o) => o.pipelineStage === OpportunityStage.LOST);
 
       const repWonQuotesThisMonth = wonQuotesThisMonth.filter((q) => q.opportunity?.assignedUserId === rep.id);
-      const repWonRevenueThisMonth = repWonQuotesThisMonth.reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+      const repWonRevenueThisMonth = repWonQuotesThisMonth.reduce((a, q) => a + revenueAmountOf(q), 0);
 
       const repPipelineValue = repOpenOpps.reduce((a, o) => a + Number(o.estimatedValue ?? 0), 0);
 
@@ -343,14 +440,19 @@ export class DashboardService {
       for (const r of repRows) {
         const repWonUpTo = wonQuotesThisMonth
           .filter((q) => q.opportunity?.assignedUserId === r.repId && q.updatedAt <= cutoff)
-          .reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+          .reduce((a, q) => a + revenueAmountOf(q), 0);
         row[r.repName] = r.quotaTarget ? Math.min(100, Math.round((repWonUpTo / r.quotaTarget) * 100)) : 0;
       }
       return row;
     });
 
     // Conversion funnel: leads -> quotes sent -> won (approved)
-    const leadsCount = leads.length;
+    // סופרים פניות שנספרות בפועל (ללא נדחו/בוטלו), כמו כל שאר מדדי הלידים.
+    // קודם זה היה `leads.length` הגולמי, שכלל גם 25 לידים שנדחו; משצורפו גם
+    // הפניות הישירות (59 מתוכן בוטלו) ראש המשפך היה מנופח ל-155 מול 71
+    // פניות אמיתיות — ומשפך שמתחיל במספר שאינו מייצג כלום אינו מדיד.
+    // (leadStatusOf מוגדר בהמשך הקובץ; כאן ההשוואה ישירה כדי לא להסתמך על TDZ.)
+    const leadsCount = leads.filter((l) => String(l?.status || '').toUpperCase() !== 'DISMISSED').length;
     const quotesSentCount = quotes.filter((q) => q.status === QuoteStatus.SENT && q.createdAt >= som).length;
     const wonCount = wonQuotesThisMonth.length;
     const conversionFunnel = [
@@ -462,6 +564,53 @@ export class DashboardService {
       ? Math.round(((leadsNewThisQuarter - leadsNewPrevQuarter) / leadsNewPrevQuarter) * 100)
       : null;
 
+    // ── לידים יומי — הפניות שנכנסו היום (שעון ישראל), מול אתמול ומול ממוצע 7 ימים ──
+    // אותו מקור ואותו סינון כמו הכרטיס הרבעוני (IncomingLead ללא DISMISSED), כדי ששתי
+    // הקוביות לא יציגו שני מספרים סותרים על אותו יום. גבול היום נלקח מ-startOfTodayIsrael
+    // ולא מ-setHours של השרת — הפרודקשן רץ ב-UTC, ושם "היום" מתחיל 2-3 שעות מאוחר מדי.
+    const dayMs = 86_400_000;
+    const todayStart = startOfTodayIsrael(now);
+    const yesterdayStart = new Date(todayStart.getTime() - dayMs);
+    const leadsToday = countableLeads.filter((l) => l.createdAt >= todayStart).length;
+    const leadsYesterday = countableLeads.filter(
+      (l) => l.createdAt >= yesterdayStart && l.createdAt < todayStart,
+    ).length;
+    // אם אתמול נכנסו 0 לידים אין בסיס לאחוז שינוי (null) — הפרונט מציג טקסט במקום.
+    const leadsDayChangePct = leadsYesterday > 0
+      ? Math.round(((leadsToday - leadsYesterday) / leadsYesterday) * 100)
+      : null;
+    // מגמת 7 הימים האחרונים כולל היום, מהישן לחדש — לגרף העמודות במודאל.
+    const dayLabelFmt = new Intl.DateTimeFormat('he-IL', {
+      timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric',
+    });
+    const dailyLeadsSeries = Array.from({ length: 7 }, (_, i) => {
+      const start = new Date(todayStart.getTime() - (6 - i) * dayMs);
+      const end = new Date(start.getTime() + dayMs);
+      return {
+        date: start.toISOString(),
+        label: dayLabelFmt.format(start),
+        value: countableLeads.filter((l) => l.createdAt >= start && l.createdAt < end).length,
+      };
+    });
+    const dailyLeadsAvg7 =
+      Math.round((dailyLeadsSeries.reduce((a, d) => a + d.value, 0) / dailyLeadsSeries.length) * 10) / 10;
+    // הלידים של היום עצמם — לרשימה שנפתחת בלחיצה על הקוביה. החדש ביותר ראשון.
+    const dailyLeadsList = countableLeads
+      .filter((l) => l.createdAt >= todayStart)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((l) => {
+        const owner = l.ownerId ? users.find((u) => u.id === l.ownerId) : null;
+        return {
+          id: l.id,
+          name: l.fromName || l.subject || 'ליד',
+          subject: l.subject || '—',
+          from: l.fromEmail || '—',
+          createdAt: l.createdAt.toISOString(),
+          status: leadStatusOf(l),
+          ownerName: owner?.name || null,
+        };
+      });
+
     // ── שביעות רצון לקוחות מתוך הביקורות שנקלטו בפועל (ReviewRequest.rating) ──
     const reviewRatings = ratedReviews.map((r) => Number(r.rating)).filter((n) => n >= 1 && n <= 5);
     const reviewsCount = reviewRatings.length;
@@ -533,6 +682,7 @@ export class DashboardService {
       kpis: {
         monthlyRevenueTarget,
         wonRevenueThisMonth,
+        wonRevenueThisQuarter,
         attainmentPct: monthlyRevenueTarget ? wonRevenueThisMonth / monthlyRevenueTarget : 0,
         openPipelineValue,
         pipelinePctOfTarget: monthlyRevenueTarget ? openPipelineValue / monthlyRevenueTarget : 0,
@@ -575,6 +725,14 @@ export class DashboardService {
         projectsInField: projectsInFieldCount,
         reportsWaiting: reportsWaitingCount,
       },
+      dailyLeads: {
+        today: leadsToday,
+        yesterday: leadsYesterday,
+        changePct: leadsDayChangePct,
+        avg7: dailyLeadsAvg7,
+        series: dailyLeadsSeries,
+        list: dailyLeadsList,
+      },
       reviews: {
         count: reviewsCount,
         avg: Math.round(reviewsAvg * 10) / 10, // עיגול לספרה אחת אחרי הנקודה (למשל 4.6)
@@ -585,6 +743,7 @@ export class DashboardService {
       assumptions: {
         monthlyRevenueTarget: 'From SystemSetting("targets").monthlyRevenueTarget (manager-configured), default 450,000',
         wonRevenueThisMonth: 'Sum of APPROVED (and legacy SIGNED) quotes where updatedAt is within current month',
+        wonRevenueThisQuarter: 'Sum of won quotes (APPROVED/SIGNED or digitalSignatureStatus=SIGNED) with signedAt??updatedAt within the trailing 90 days',
         pipeline: 'Sum of estimatedValue for opportunities not WON/LOST',
         winRate: 'Opportunities WON / (WON+LOST)',
         weeklyActivity: 'Count of leads updated this week with leadStatus FU_1/FU_2 (no meetings/events table yet)',
@@ -612,7 +771,7 @@ export class DashboardService {
       const som = startOfMonth(now);
 
       const [me, leads, opportunities, quotes, tasks] = await Promise.all([
-        this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true } }),
+        this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true, email: true } }),
         this.prisma.incomingLead.findMany({
           where: { ownerId: userId },
           orderBy: [{ createdAt: 'desc' }],
@@ -632,7 +791,7 @@ export class DashboardService {
               { lead: { assignedUserId: userId } },
             ],
           },
-          select: { id: true, status: true, totalAmount: true, amount: true, updatedAt: true },
+          select: { id: true, status: true, totalAmount: true, amount: true, amountBeforeVat: true, vatPercent: true, updatedAt: true },
         }),
         this.prisma.task.findMany({
           where: { ownerId: userId },
@@ -652,10 +811,10 @@ export class DashboardService {
       const quotesSent = quotes.filter((q) => q.status === QuoteStatus.SENT).length;
       const quotesApproved = quotes.filter(isWon).length;
       const openQuotes = quotes.filter((q) => q.status === QuoteStatus.DRAFT || q.status === QuoteStatus.SENT).length;
-      const wonRevenueTotal = quotes.filter(isWon).reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+      const wonRevenueTotal = quotes.filter(isWon).reduce((a, q) => a + revenueAmountOf(q), 0);
       const wonRevenueThisMonth = quotes
         .filter((q) => isWon(q) && q.updatedAt >= som)
-        .reduce((a, q) => a + Number(q.totalAmount ?? q.amount ?? 0), 0);
+        .reduce((a, q) => a + revenueAmountOf(q), 0);
 
       const openOpps = opportunities.filter((o) => o.pipelineStage !== OpportunityStage.WON && o.pipelineStage !== OpportunityStage.LOST);
       const pipelineValue = openOpps.reduce((a, o) => a + Number(o.estimatedValue ?? 0), 0);
@@ -697,6 +856,26 @@ export class DashboardService {
         createdAt: l.createdAt ? l.createdAt.toISOString() : null,
       }));
 
+      // גלית (אחראית הכספים) מקבלת בדשבורד שלה פילוח לקוחות לפי מקור הגעה,
+      // כולל רשימת לקוחות עם המקור של כל אחד — חלון של שנה אחורה. אצל שאר
+      // העובדים השדה נשאר null (הכרטיס לא מוצג).
+      const meName = (me?.name || '').trim();
+      const meEmail = (me?.email || '').trim().toLowerCase();
+      const isGalit = meName.includes('גלית') || meEmail === 'galit@galit.co.il';
+      let customerSources: {
+        totalCustomers: number;
+        bySource: Array<{ name: string; count: number; pct: number }>;
+        customers: Array<{ id: string; customerName: string; source: string; date: string }>;
+      } | null = null;
+      if (isGalit) {
+        try {
+          const { start: csStart } = this.leadPeriodWindow('year', now);
+          customerSources = await this.computeCustomerSources(csStart);
+        } catch {
+          customerSources = { totalCustomers: 0, bySource: [], customers: [] };
+        }
+      }
+
       return {
         updatedAt: now.toISOString(),
         user: { id: me?.id || userId, name: me?.name || '', role: me?.role || role },
@@ -721,6 +900,7 @@ export class DashboardService {
         leadsBySource,
         leadsByServiceType,
         recentLeads,
+        customerSources,
       };
     } catch {
       return this.meEmptyPayload(userId, role);
@@ -752,6 +932,7 @@ export class DashboardService {
       leadsBySource: [],
       leadsByServiceType: [],
       recentLeads: [],
+      customerSources: null,
     };
   }
 
@@ -767,7 +948,7 @@ export class DashboardService {
     if (!s) return 'לא צוין';
     const map: Record<string, string> = {
       PHONE: 'טלפון', 'טלפון': 'טלפון',
-      SITE: 'אתר', 'אתר': 'אתר', WEBSITE: 'אתר',
+      SITE: 'אתר אינטרנט', 'אתר': 'אתר אינטרנט', WEBSITE: 'אתר אינטרנט', 'אתר אינטרנט': 'אתר אינטרנט',
       WHATSAPP: 'וואטסאפ', 'וואטסאפ': 'וואטסאפ',
       FACEBOOK: 'פייסבוק', 'פייסבוק': 'פייסבוק',
       INSTAGRAM: 'אינסטגרם', 'אינסטגרם': 'אינסטגרם',
@@ -775,8 +956,14 @@ export class DashboardService {
       GOOGLE: 'גוגל אדס', 'גוגל': 'גוגל אדס', 'גוגל אדס': 'גוגל אדס', 'גוגל אדוורדס': 'גוגל אדס',
       REFERRAL: 'המלצה', 'הפניה': 'המלצה', 'המלצה': 'המלצה',
       RETURNING_CUSTOMER: 'לקוח חוזר', CUSTOMER: 'לקוח חוזר', 'לקוח חוזר': 'לקוח חוזר',
-      OTHER: 'אחר', 'אחר': 'אחר',
+      // "אחר" גולמי = לא הוקלד מקור אמיתי (בטופס, בחירת "אחר" פותחת שדה חופשי
+      // שדורס את הערך). לכן הוא נחשב "לא צוין" ולא קטגוריה בפילוח.
+      OTHER: 'לא צוין', 'אחר': 'לא צוין',
+      // "galit" (שם החברה עצמה) אינו מקור הגעה אמיתי — נחשב "לא צוין" בפילוח.
+      GALIT: 'לא צוין', 'גלית': 'לא צוין',
     };
+    // גם ערך "galit-*" חופשי (דומיין/וריאציה) נחשב "לא צוין".
+    if (/^galit\b/i.test(s) || /^גלית\b/.test(s)) return 'לא צוין';
     return map[s] || map[s.toUpperCase()] || s;
   }
 
@@ -858,6 +1045,7 @@ export class DashboardService {
       rating: number;
       reason: string | null;
       ratedAt: string | null;
+      ownerId: string | null;
       ownerName: string | null;
       customerType: string | null;
       customerTypeLabel: string | null;
@@ -873,9 +1061,9 @@ export class DashboardService {
       taskIds.length
         ? this.prisma.task.findMany({
             where: { id: { in: taskIds } },
-            select: { id: true, owner: { select: { name: true } } },
+            select: { id: true, ownerId: true, owner: { select: { name: true } } },
           })
-        : Promise.resolve([] as Array<{ id: string; owner: { name: string | null } | null }>),
+        : Promise.resolve([] as Array<{ id: string; ownerId: string | null; owner: { name: string | null } | null }>),
       customerIds.length
         ? this.prisma.customer.findMany({
             where: { id: { in: customerIds } },
@@ -886,6 +1074,7 @@ export class DashboardService {
     ]);
 
     const ownerByTask = new Map(tasks.map((t) => [t.id, t.owner?.name || null]));
+    const ownerIdByTask = new Map(tasks.map((t) => [t.id, t.ownerId || null]));
     const typeByCustomer = new Map(customers.map((c) => [c.id, c.type || null]));
     const labelByCode = new Map(
       (classifications as Array<{ code: string; labelHe: string }>).map((c) => [c.code, c.labelHe]),
@@ -899,6 +1088,7 @@ export class DashboardService {
         rating: Number(r.rating),
         reason: (r.feedback || '').trim() || null,
         ratedAt: r.ratedAt ? r.ratedAt.toISOString() : null,
+        ownerId: r.taskId ? ownerIdByTask.get(r.taskId) || null : null,
         ownerName: r.taskId ? ownerByTask.get(r.taskId) || null : null,
         customerType: type,
         customerTypeLabel: type ? labelByCode.get(type) || type : null,
@@ -1046,7 +1236,11 @@ export class DashboardService {
   async reviewsAnalytics(user?: { id?: string; role?: string }, periodRaw?: string) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException();
-    if (role !== 'ADMIN' && role !== 'MANAGER') throw new ForbiddenException();
+    // מנהל/אדמין רואים את כל הביקורות בארגון; כל עובד אחר רואה רק את הביקורות של
+    // הלקוחות/המשימות שהוא טיפל בהם (סינון לפי ownerId למטה).
+    const isManagerView = role === 'ADMIN' || role === 'MANAGER';
+    const scopeToOwnerId = isManagerView ? null : (user?.id || null);
+    if (!isManagerView && !scopeToOwnerId) throw new ForbiddenException();
 
     const period = ['quarter', 'half', 'year', 'last30'].includes((periodRaw || '').toLowerCase())
       ? (periodRaw as string).toLowerCase()
@@ -1065,14 +1259,19 @@ export class DashboardService {
       const inWindow = rated.filter((r) => r.ratedAt && r.ratedAt >= start);
       const inPrevWindow = rated.filter((r) => r.ratedAt && r.ratedAt >= prevStart && r.ratedAt < start);
 
-      const list = await this.enrichReviews(inWindow);
+      // enrich מוסיף ownerId (העובד המטפל דרך המשימה). לתצוגת עובד מסננים לביקורות שלו בלבד.
+      const ownerFilter = <T extends { ownerId: string | null }>(rows: T[]): T[] =>
+        scopeToOwnerId ? rows.filter((r) => r.ownerId === scopeToOwnerId) : rows;
+
+      const list = ownerFilter(await this.enrichReviews(inWindow));
+      const prevList = ownerFilter(await this.enrichReviews(inPrevWindow));
 
       const ratings = list.map((r) => r.rating);
       const count = ratings.length;
       const avg = count ? Math.round((ratings.reduce((a, n) => a + n, 0) / count) * 10) / 10 : 0;
       const csat = count ? Math.round((ratings.filter((n) => n >= 4).length / count) * 100) : null;
 
-      const prevRatings = inPrevWindow.map((r) => Number(r.rating)).filter((n) => n >= 1 && n <= 5);
+      const prevRatings = prevList.map((r) => Number(r.rating)).filter((n) => n >= 1 && n <= 5);
       const prevCsat = prevRatings.length
         ? Math.round((prevRatings.filter((n) => n >= 4).length / prevRatings.length) * 100)
         : null;
@@ -1179,7 +1378,7 @@ export class DashboardService {
       ]);
       const userName = new Map<string, string>(users.map((u) => [u.id, u.name]));
 
-      const amountOf = (q: any) => Number(q.totalAmount ?? q.amount ?? 0);
+      const amountOf = (q: any) => revenueAmountOf(q);
       // תאריך ההכנסה: signedAt כשיש (מדויק — מתי הלקוח באמת חתם), אחרת updatedAt.
       const dateOf = (q: any): Date => (q.signedAt as Date | null) ?? q.updatedAt;
       const inWindow = quotes.filter((q) => dateOf(q) >= start);
@@ -1262,6 +1461,114 @@ export class DashboardService {
     }
   }
 
+  /**
+   * אנליטיקת "מקור הגעה" (איך כל לקוח הגיע) לסקשן דשבורד חדש.
+   *
+   * המקור נשמר ב-Customer.leadSource (טופס "פתיחת פנייה" / כרטיס הלקוח).
+   * מציגים אך ורק לקוחות שיש להם מקור ידוע — לקוחות ללא מקור (רוב היבוא הישן)
+   * מסוננים החוצה לגמרי, לפי בקשת המשתמש, כדי שהתצוגה תהיה שימושית ולא
+   * מוצפת ב"לא ידוע".
+   *
+   * מסונן לפי createdAt של הלקוח בתוך חלון התקופה (אותם חלונות של שאר
+   * האנליטיקות). name (חלק משם הלקוח) מצמצם ל-ILIKE כדי לאפשר פילטר לפי לקוח.
+   *
+   * מחזיר:
+   *  - stats: סה"כ לקוחות עם מקור ידוע בתקופה.
+   *  - bySource: פילוח לפי מקור, ממוין יורד, עם אחוז (מתוך הידועים).
+   *  - customers: רשימת הלקוחות עם מקור ידוע (שם, מקור, תאריך).
+   */
+  async customerSourceAnalytics(
+    user?: { id?: string; role?: string },
+    periodRaw?: string,
+    nameFilter?: string,
+  ) {
+    const role = (user?.role || '').toUpperCase();
+    if (!role) throw new UnauthorizedException();
+    if (role !== 'ADMIN' && role !== 'MANAGER') throw new ForbiddenException();
+
+    const period = ['month', 'quarter', 'half', 'year', 'last30'].includes((periodRaw || '').toLowerCase())
+      ? (periodRaw as string).toLowerCase()
+      : 'last30';
+    const now = new Date();
+    const { start, spanDays } = this.leadPeriodWindow(period, now);
+
+    try {
+      const core = await this.computeCustomerSources(start, nameFilter);
+      return {
+        updatedAt: now.toISOString(),
+        period,
+        range: { start: start.toISOString(), end: now.toISOString(), spanDays },
+        stats: { totalCustomers: core.totalCustomers },
+        bySource: core.bySource,
+        customers: core.customers,
+      };
+    } catch (e) {
+      return {
+        updatedAt: now.toISOString(),
+        period,
+        range: { start: start.toISOString(), end: now.toISOString(), spanDays },
+        stats: { totalCustomers: 0 },
+        bySource: [],
+        customers: [],
+        error: 'unavailable',
+      };
+    }
+  }
+
+  /**
+   * ליבת חישוב "מקור הגעה" של לקוחות — משותפת ל-customerSourceAnalytics (מנהל)
+   * ולסקשן הפילוח בדשבורד של גלית (אחראית הכספים). מחזירה רק לקוחות עם מקור
+   * ידוע (Customer.leadSource לא ריק), נספרים לפי מקור + רשימה עם המקור של כל אחד.
+   * מסונן לפי createdAt >= start ולפי שם (ILIKE) אם ניתן nameFilter.
+   */
+  private async computeCustomerSources(start: Date, nameFilter?: string) {
+    const q = (nameFilter || '').trim();
+    const customers = await this.prisma.customer.findMany({
+      where: {
+        createdAt: { gte: start },
+        leadSource: { not: null },
+        NOT: { leadSource: '' },
+        ...(q ? { name: { contains: q, mode: 'insensitive' as const } } : {}),
+      },
+      select: { id: true, name: true, leadSource: true, createdAt: true },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+
+    const srcMap = new Map<string, number>();
+    for (const c of customers) {
+      const raw = (c.leadSource || '').trim();
+      if (!raw) continue;
+      // נירמול מקור הגעה לתווית קנונית אחת (למשל "אתר"/SITE/WEBSITE → "אתר אינטרנט"),
+      // כדי שווריאציות של אותו מקור ייספרו כפרוסה אחת ולא ייראו כקטגוריות נפרדות.
+      const src = this.normalizeLeadSource(raw);
+      // "לא צוין" (כולל "אחר" גולמי בלי טקסט חופשי) אינו מקור אמיתי — לא מוצג בפילוח.
+      if (src === 'לא צוין') continue;
+      srcMap.set(src, (srcMap.get(src) || 0) + 1);
+    }
+
+    // סה"כ = רק לקוחות עם מקור ידוע (אחרי הנירמול), כך שהאחוזים מסתכמים ל-100%.
+    const totalCustomers = Array.from(srcMap.values()).reduce((a, b) => a + b, 0);
+    const bySource = Array.from(srcMap.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        pct: totalCustomers ? Math.round((count / totalCustomers) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    const customersList = customers
+      .map((c) => ({
+        id: c.id,
+        customerName: c.name,
+        source: this.normalizeLeadSource((c.leadSource || '').trim()),
+        date: c.createdAt.toISOString(),
+      }))
+      .filter((c) => c.source !== 'לא צוין')
+      .slice(0, 500);
+
+    return { totalCustomers, bySource, customers: customersList };
+  }
+
   private managerEmptyPayload() {
     const now = new Date();
     const monthlyRevenueTarget = DashboardService.DEFAULT_MONTHLY_REVENUE_TARGET;
@@ -1271,6 +1578,7 @@ export class DashboardService {
       kpis: {
         monthlyRevenueTarget,
         wonRevenueThisMonth: 0,
+        wonRevenueThisQuarter: 0,
         attainmentPct: 0,
         openPipelineValue: 0,
         pipelinePctOfTarget: 0,
@@ -1307,6 +1615,7 @@ export class DashboardService {
         projectsInField: 0,
         reportsWaiting: 0,
       },
+      dailyLeads: { today: 0, yesterday: 0, changePct: null, avg7: 0, series: [], list: [] },
       reviews: { count: 0, avg: 0, satisfiedPct: null, list: [] },
       workingNowEmployees: [],
       assumptions: {

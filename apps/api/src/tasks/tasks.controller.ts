@@ -19,6 +19,20 @@ export class TasksController {
     return this.tasksService.findAll({ projectId, scope, user: req.user });
   }
 
+  /**
+   * המשימה הפעילה של הלקוח שאליה צריך להיצמד "מעקב" של הצעת מחיר, במקום לפתוח
+   * משימה שנייה. מחזיר null כשאין מועמדת — ורק אז הקורא רשאי ליצור משימה חדשה.
+   * חייב להיות מוצהר *לפני* @Get(':id') — Nest מתאים נתיבים לפי סדר ההצהרה.
+   */
+  @Get('active-for-customer/:customerId')
+  findPromotableForCustomer(
+    @Param('customerId') customerId: string,
+    @Req() req: any,
+    @Query('preferTaskId') preferTaskId?: string,
+  ) {
+    return this.tasksService.findPromotableForCustomer(customerId, preferTaskId, req.user);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.tasksService.findOne(id);
@@ -77,6 +91,18 @@ export class TasksController {
   async removeAttachment(@Param('attachmentId') attachmentId: string) {
     await this.tasksService.removeAttachment(attachmentId);
     return { ok: true };
+  }
+
+  /** שינוי שם קובץ מצורף (עריכה ידנית של שם הקובץ) */
+  @Patch(':id/attachments/:attachmentId')
+  async renameAttachment(
+    @Param('attachmentId') attachmentId: string,
+    @Body() body: { fileName?: string },
+  ) {
+    if (!body?.fileName || !body.fileName.trim()) {
+      throw new BadRequestException('fileName is required');
+    }
+    return this.tasksService.renameAttachment(attachmentId, body.fileName);
   }
 
   /** יצירה/עדכון נתוני שדה (פגישה מתואמת) — נשמר בעת לחיצה על "צור פגישה ב-Outlook" */

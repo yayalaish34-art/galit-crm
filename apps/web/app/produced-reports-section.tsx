@@ -1,8 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { FileBarChart, Upload, Download, Trash2, Eye, Loader2, FileText } from 'lucide-react';
+import type { DragEvent } from 'react';
+import { FileBarChart, Upload, Download, Trash2, Eye, Loader2, FileText, Mail, Pencil } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
+import { CustomerReportEmailModal } from './customer-report-email-modal';
+import { ReportEditModal } from './report-edit-modal';
 
 type ReportDoc = {
   id: string;
@@ -10,6 +13,8 @@ type ReportDoc = {
   mimeType?: string | null;
   sizeBytes?: number | null;
   dataBase64?: string | null;
+  description?: string | null;
+  documentDate?: string | null;
   createdAt?: string;
 };
 
@@ -41,16 +46,24 @@ function fmtDate(v?: string): string {
  */
 export function ProducedReportsSection({
   customerId,
+  customerName,
+  defaultEmail,
   currentUser,
 }: {
   customerId: string | null | undefined;
+  customerName?: string;
+  defaultEmail?: string;
   currentUser: unknown;
 }) {
   const [docs, setDocs] = useState<ReportDoc[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [err, setErr] = useState('');
+  const [emailFor, setEmailFor] = useState<ReportDoc | null>(null);
+  const [editFor, setEditFor] = useState<ReportDoc | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
   const valid = !!customerId && customerId !== '__new__';
 
   const load = useCallback(async () => {
@@ -74,8 +87,8 @@ export function ProducedReportsSection({
     void load();
   }, [load]);
 
-  const onPick = async (file: File) => {
-    if (!valid || !file) return;
+  const onPick = async (file: File): Promise<ReportDoc | null> => {
+    if (!valid || !file) return null;
     setUploading(true);
     setErr('');
     try {
@@ -99,13 +112,71 @@ export function ProducedReportsSection({
           dataBase64: b64,
         }),
       });
-      if (r.ok) await load();
-      else setErr('העלאת הדוח נכשלה');
+      if (r.ok) {
+        const created = (await r.json().catch(() => null)) as ReportDoc | null;
+        await load();
+        return created;
+      }
+      setErr('העלאת הדוח נכשלה');
+      return null;
     } catch {
       setErr('העלאת הדוח נכשלה');
+      return null;
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const onPickMany = async (files: File[]) => {
+    for (const f of files) {
+      // sequential — onPick reloads the list after each upload
+      // eslint-disable-next-line no-await-in-loop
+      await onPick(f);
+    }
+  };
+
+  const resetDrag = () => {
+    dragDepth.current = 0;
+    setDragOver(false);
+  };
+
+  const onDragEnter = (e: DragEvent) => {
+    if (!valid || uploading) return;
+    if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    dragDepth.current += 1;
+    setDragOver(true);
+  };
+
+  const onDragOver = (e: DragEvent) => {
+    if (!valid || uploading) return;
+    if (!Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const onDragLeave = (e: DragEvent) => {
+    if (!valid || uploading) return;
+    e.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragOver(false);
+  };
+
+  const onDrop = (e: DragEvent) => {
+    if (!valid || uploading) return;
+    e.preventDefault();
+    resetDrag();
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+    // גרירת דוח בודד → מצרפים אותו ומיד פותחים את מודל שליחת המייל עבורו.
+    // גרירת כמה קבצים ביחד → רק מצרפים (בלי לפתוח ערימת מודלים).
+    if (files.length === 1) {
+      void onPick(files[0]).then((created) => {
+        if (created) setEmailFor(created);
+      });
+    } else {
+      void onPickMany(files);
     }
   };
 
@@ -152,9 +223,25 @@ export function ProducedReportsSection({
 
   return (
     <div
-      className="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50/40 p-4"
+      className={`relative rounded-2xl border p-4 transition ${
+        dragOver
+          ? 'border-indigo-500 border-dashed bg-indigo-100/70 ring-2 ring-indigo-300'
+          : 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-blue-50/40'
+      }`}
       dir="rtl"
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
     >
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-indigo-50/80">
+          <div className="flex items-center gap-2 rounded-xl border-2 border-dashed border-indigo-400 bg-white/90 px-4 py-3 text-sm font-bold text-indigo-700 shadow-sm">
+            <Upload className="h-5 w-5" />
+            שחרר כאן כדי לצרף ולשלוח את הדוח במייל
+          </div>
+        </div>
+      )}
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100">
@@ -162,7 +249,7 @@ export function ProducedReportsSection({
           </div>
           <div>
             <div className="text-sm font-bold text-slate-800">דוחות שהופקו</div>
-            <div className="text-[11px] text-slate-400">צרף דוחות שהופקו עבור הלקוח (PDF / Word / Excel / תמונה)</div>
+            <div className="text-[11px] text-slate-400">גרור דוח בודד כדי לצרף ולפתוח מיד שליחה במייל · או צרף ידנית (PDF / Word / Excel / תמונה)</div>
           </div>
         </div>
         <label
@@ -199,8 +286,9 @@ export function ProducedReportsSection({
             <Loader2 className="h-4 w-4 animate-spin" /> טוען…
           </div>
         ) : docs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-indigo-200 bg-white/60 px-3 py-4 text-center text-xs text-slate-400">
+          <div className="rounded-xl border border-dashed border-indigo-200 bg-white/60 px-3 py-6 text-center text-xs text-slate-400">
             עדיין לא צורפו דוחות שהופקו
+            <div className="mt-1 text-[11px] text-slate-300">גרור לכאן קובץ כדי לצרף</div>
           </div>
         ) : (
           <div className="space-y-2">
@@ -215,11 +303,38 @@ export function ProducedReportsSection({
                   className="flex min-w-0 flex-1 items-center gap-2 text-right"
                 >
                   <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
-                  <span className="truncate text-xs font-medium text-slate-700 hover:text-indigo-700">{d.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium text-slate-700 hover:text-indigo-700">
+                      {d.name}
+                    </span>
+                    {!!d.description && (
+                      <span className="block truncate text-[10px] text-slate-400">{d.description}</span>
+                    )}
+                  </span>
                   {!!d.sizeBytes && <span className="shrink-0 text-[10px] text-slate-400">{fmtSize(d.sizeBytes)}</span>}
-                  {!!d.createdAt && <span className="shrink-0 text-[10px] text-slate-300">{fmtDate(d.createdAt)}</span>}
+                  {!!(d.documentDate || d.createdAt) && (
+                    <span className="shrink-0 text-[10px] text-slate-300">
+                      {fmtDate(d.documentDate ?? d.createdAt)}
+                    </span>
+                  )}
                 </button>
                 <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditFor(d)}
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
+                    title="ערוך"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmailFor(d)}
+                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600"
+                    title="שלח במייל"
+                  >
+                    <Mail className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => view(d)}
@@ -252,6 +367,26 @@ export function ProducedReportsSection({
       )}
 
       {err && <div className="mt-2 text-xs text-red-500">{err}</div>}
+
+      <CustomerReportEmailModal
+        open={!!emailFor && valid}
+        onClose={() => setEmailFor(null)}
+        customerId={customerId as string}
+        customerName={customerName}
+        defaultEmail={defaultEmail}
+        report={emailFor ? { id: emailFor.id, name: emailFor.name } : null}
+        currentUser={currentUser as { id?: string; name?: string } & Record<string, unknown>}
+      />
+
+      {editFor && valid && (
+        <ReportEditModal
+          customerId={customerId as string}
+          doc={editFor}
+          currentUser={currentUser}
+          onClose={() => setEditFor(null)}
+          onSaved={load}
+        />
+      )}
     </div>
   );
 }

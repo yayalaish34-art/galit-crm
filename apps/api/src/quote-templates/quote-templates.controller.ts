@@ -122,6 +122,32 @@ export class QuoteTemplatesController {
       return res.status(404).json({ message: `DOCX template file missing: ${template.docxTemplatePath}` });
     }
 
+    // ── מספר הצעת המחיר תמיד מהמקור-אמת ב-DB ──
+    // המסמך מרנדר את המספר מ-{contractSurveyNumber} (fallback ל-{quoteNumber}). כשהמיזוג
+    // מתבצע בעוד ההצעה טיוטה, ה-frontend שולח ערך ריק/"חדש" — והמסמך יוצא בלי מספר.
+    // אם קיים quoteId, שולפים את המספר האמיתי מה-DB וממלאים בו את שני השדות. כך המספר
+    // מופיע תמיד, בכל התבניות, בלי תלות בעיתוי המיזוג.
+    const isEmptyNum = (v: unknown) => {
+      const s = String(v ?? '').trim();
+      return !s || s === 'חדש' || s === '—' || s === '-';
+    };
+    const quoteIdForNum = body.quoteId as string | undefined;
+    if (quoteIdForNum && (isEmptyNum(body.contractSurveyNumber) || isEmptyNum(body.quoteNumber))) {
+      try {
+        const q: any = await (this.prisma.quote.findUnique as any)({
+          where: { id: quoteIdForNum },
+          select: { quoteNumber: true, orderReferenceNumber: true },
+        });
+        const realNum = String(q?.quoteNumber ?? '').trim() || String(q?.orderReferenceNumber ?? '').trim();
+        if (realNum) {
+          if (isEmptyNum(body.contractSurveyNumber)) body.contractSurveyNumber = realNum;
+          if (isEmptyNum(body.quoteNumber)) body.quoteNumber = realNum;
+        }
+      } catch {
+        /* best-effort — אם השליפה נכשלה, ממשיכים עם מה שנשלח */
+      }
+    }
+
     const buffer = this.docxMergeService.mergeTemplate(template.docxTemplatePath, body);
 
     // ── Save merged file and link to Quote if quoteId provided ──
