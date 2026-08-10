@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { apiFetch, apiUrl } from './lib/api-base';
 import { autoFormatIsraeliPhone, blurFormatPhone, formatIsraeliPhoneDisplay } from './lib/phone-format';
+import { downloadContactVCard } from './lib/vcard';
 import { parseApiErrorResponse } from './lib/api-error';
 import { whatsAppLink } from './lib/whatsapp';
 import { SignedQuotesSection } from './signed-quotes-section';
@@ -2065,6 +2066,32 @@ export function CustomerLegacyCard({
     }
   };
 
+  /**
+   * הורדת איש קשר כקובץ vCard — פתיחתו במחשב מוסיפה אותו ל-Outlook / אנשי
+   * הקשר של Windows. פרטי הלקוח (חברה, כתובת, אתר) נכנסים לכרטיס כדי שיהיה
+   * שלם בפני עצמו; נלקחים מהטופס כדי לכלול גם עריכה שטרם נשמרה.
+   */
+  const onDownloadContact = (c: CustomerLegacyContact) => {
+    downloadContactVCard(
+      {
+        fullName: c.fullName,
+        roleTitle: c.roleTitle,
+        phone: formatIsraeliPhoneDisplay(c.phone),
+        mobile: formatIsraeliPhoneDisplay(c.mobile),
+        fax: formatIsraeliPhoneDisplay(c.fax),
+        email: c.email,
+        notes: c.notes,
+      },
+      {
+        name: customerForm.name || customer.name,
+        address: customerForm.address,
+        city: customerForm.city,
+        website: customerForm.website,
+      },
+    );
+    setLegacyMsg(`הקובץ ${c.fullName}.vcf ירד — פתח אותו כדי להוסיף את איש הקשר`);
+  };
+
   // Field component moved to module scope as CardField to prevent focus-loss bug
   const Field = CardField;
 
@@ -2965,6 +2992,14 @@ export function CustomerLegacyCard({
                               title="ערוך"
                             >
                               ✎
+                            </button>
+                            <button
+                              type="button"
+                              className="w-7 h-7 rounded-lg bg-[#EDF3F8] flex items-center justify-center text-[#5E7186] hover:bg-[#DCE7F2] transition-all text-xs"
+                              onClick={(e) => { e.stopPropagation(); onDownloadContact(c); }}
+                              title="הורד לאנשי הקשר במחשב (קובץ vCard ל-Outlook)"
+                            >
+                              ⭳
                             </button>
                             {isEdit && (
                               <button
