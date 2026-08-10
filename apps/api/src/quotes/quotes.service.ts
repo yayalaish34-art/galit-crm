@@ -219,16 +219,20 @@ export class QuotesService {
         },
         orderBy: [{ createdAt: 'desc' }],
         ...(limit ? { take: limit } : {}),
-        // digitalCertificateMeta מחזיק את ה-PDF החתום בבסיס64 (~48MB על פני כל ההצעות).
-        // בלעדיו תשובת הרשימה הייתה עשרות מגה-בייט, הטעינה בלקוח נכשלה/נתקעה — ואז
-        // חלון "חיפוש הצעות מחיר" חיפש ברשימה ריקה. הוא נקרא לפי הצעה בודדת בלבד.
+        // ── שני שדות כבדים שאסור שיחזרו ברשימה ──
+        // digitalCertificateMeta = ה-PDF החתום בבסיס64 (~48MB על פני כל ההצעות),
+        // ו-quoteDocuments.data = הקובץ המצורף עצמו (bytea, ~56MB לרשומה האחרונה לכל
+        // הצעה — ובתוך JSON כמערך בייטים זה מתנפח לכ-300MB). ביחד הם הפילו את
+        // JSON.stringify של express ב-"RangeError: Invalid string length", כלומר
+        // GET /quotes החזיר 500, רשימת ההצעות בלקוח נשארה ריקה — ולכן "חיפוש הצעות
+        // מחיר" לא מצא כלום. שני השדות נקראים ממילא לפי הצעה/מסמך בודד.
         omit: { digitalCertificateMeta: true, lastEmailBody: true },
         include: {
           customer: true,
           opportunity: true,
           project: true,
           quoteTemplate: true,
-          quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1 },
+          quoteDocuments: { orderBy: { createdAt: 'desc' }, take: 1, omit: { data: true } },
         },
       });
     } catch (e) {
