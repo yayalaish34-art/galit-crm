@@ -111,12 +111,66 @@ export class QuotesService {
     return Math.max(0, Math.round(discounted * 100) / 100);
   }
 
+  /**
+   * חיפוש טקסט חופשי בהצעות מחיר. כל מילה בשאילתה חייבת להימצא באחד השדות
+   * (AND בין מילים, OR בין שדות) — כך ש"נהורי בעמ" מוצא גם 'נ. נהורי ובניו בע"מ'.
+   * הניקוי (normalizeQuoteSearchToken) מסיר גרש/מרכאות/מקפים כדי שכתיב שונה של אותו
+   * שם ימצא בכל זאת; לכן החיפוש על שם הלקוח נעשה גם על הצורה הגולמית וגם על המנוקה.
+   */
+  private static buildQuoteSearchWhere(q: string): Prisma.QuoteWhereInput | null {
+    const tokens = String(q || '')
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    if (!tokens.length) return null;
+
+    const and: Prisma.QuoteWhereInput[] = tokens.map((token) => {
+      const like = { contains: token, mode: 'insensitive' as const };
+      const digits = token.replace(/[^0-9]/g, '');
+      const or: Prisma.QuoteWhereInput[] = [
+        { quoteNumber: like },
+        { orderReferenceNumber: like },
+        { importLegacyId: like },
+        { service: like },
+        { description: like },
+        { notes: like },
+        { customer: { is: { name: like } } },
+        { customer: { is: { companyname: like } } },
+        { customer: { is: { contactName: like } } },
+        { customer: { is: { city: like } } },
+        { customer: { is: { address: like } } },
+        { customer: { is: { email: like } } },
+        { customer: { is: { companyRegNumber: like } } },
+        { customer: { is: { contacts: { some: { fullName: like } } } } },
+        { customerContact: { is: { fullName: like } } },
+        { opportunity: { is: { projectOrServiceName: like } } },
+        { project: { is: { name: like } } },
+      ];
+      // מספרי טלפון נשמרים עם מקפים — משווים גם ספרות בלבד (4 ספרות ומעלה).
+      if (digits.length >= 4) {
+        or.push(
+          { customer: { is: { phone: { contains: digits } } } },
+          { customer: { is: { phone2: { contains: digits } } } },
+          { customer: { is: { phone: { contains: token } } } },
+          { customer: { is: { phone2: { contains: token } } } },
+          { customer: { is: { contacts: { some: { OR: [{ phone: { contains: digits } }, { mobile: { contains: digits } }] } } } } },
+        );
+      }
+      return { OR: or };
+    });
+
+    return { AND: and };
+  }
+
   async findAll({
     projectId,
     opportunityId,
     customerId,
     leadId,
     linkedEntityId,
+    q,
+    take,
     user,
   }: {
     projectId?: string;
@@ -124,6 +178,9 @@ export class QuotesService {
     customerId?: string;
     leadId?: string;
     linkedEntityId?: string;
+    /** חיפוש חופשי — מספר הצעה / סימוכין / שם לקוח / איש קשר / עיר / טלפון / שירות */
+    q?: string;
+    take?: number;
     user?: { id?: string; role?: string };
   } = {}) {
     const role = (user?.role || '').toUpperCase();
@@ -147,6 +204,9 @@ export class QuotesService {
       /* ignore */
     }
 
+    const searchWhere = q ? QuotesService.buildQuoteSearchWhere(q) : null;
+    const limit = Number.isFinite(take) && (take as number) > 0 ? Math.min(Number(take), 500) : undefined;
+
     try {
       return await this.prisma.quote.findMany({
         where: {
@@ -155,8 +215,14 @@ export class QuotesService {
           ...(customerId ? { customerId } : {}),
           ...(leadId ? { leadId } : {}),
           ...(linkedEntityId ? { linkedEntityId } : {}),
+          ...(searchWhere ? searchWhere : {}),
         },
         orderBy: [{ createdAt: 'desc' }],
+        ...(limit ? { take: limit } : {}),
+        // digitalCertificateMeta מחזיק את ה-PDF החתום בבסיס64 (~48MB על פני כל ההצעות).
+        // בלעדיו תשובת הרשימה הייתה עשרות מגה-בייט, הטעינה בלקוח נכשלה/נתקעה — ואז
+        // חלון "חיפוש הצעות מחיר" חיפש ברשימה ריקה. הוא נקרא לפי הצעה בודדת בלבד.
+        omit: { digitalCertificateMeta: true, lastEmailBody: true },
         include: {
           customer: true,
           opportunity: true,

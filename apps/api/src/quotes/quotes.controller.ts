@@ -39,8 +39,19 @@ export class QuotesController {
     @Query('customerId') customerId?: string,
     @Query('leadId') leadId?: string,
     @Query('linkedEntityId') linkedEntityId?: string,
+    @Query('q') q?: string,
+    @Query('take') take?: string,
   ) {
-    return this.quotesService.findAll({ projectId, opportunityId, customerId, leadId, linkedEntityId, user: req.user });
+    return this.quotesService.findAll({
+      projectId,
+      opportunityId,
+      customerId,
+      leadId,
+      linkedEntityId,
+      q,
+      take: take ? Number(take) : undefined,
+      user: req.user,
+    });
   }
 
   @Get('next-reference')

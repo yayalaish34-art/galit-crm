@@ -1658,20 +1658,40 @@ function CustomerSearchModal({
   );
 }
 
+/**
+ * נרמול טקסט לחיפוש עברי: הסרת גרש/מרכאות/מקפים/נקודות וכיווץ רווחים, כך
+ * ש"בעמ" ימצא גם 'בע"מ' ו"נהורי ובניו" ימצא גם 'נ. נהורי ובניו'.
+ */
+function normSearchText(v: unknown): string {
+  return String(v ?? '')
+    .toLowerCase()
+    .replace(/[״"'`׳]/g, '')
+    .replace(/[-־–—_/\\.,()[\]]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** שורת הצעה כפי שהיא מוצגת בחיפוש — כולל שדות הלקוח לתצוגה ולהתאמה. */
+type QuoteSearchRow = Quote & { _contactName?: string; _city?: string; _haystack?: string };
+
 function QuoteSearchModal({
   open,
   quotes,
   customers,
+  currentUser,
   onClose,
   onSelect,
 }: {
   open: boolean;
   quotes: Quote[];
   customers: Customer[];
+  currentUser: AppUser | null;
   onClose: () => void;
   onSelect: (quote: Quote) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [remoteRows, setRemoteRows] = useState<QuoteSearchRow[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /* Build lookup maps from customers so we can search contact-level fields on quotes */
@@ -1684,42 +1704,122 @@ function QuoteSearchModal({
   useEffect(() => {
     if (open) {
       setQuery('');
+      setRemoteRows(null);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open]);
 
+  /*
+   * חיפוש בשרת — הרשימה שבזיכרון עלולה להיות חלקית (או להיטען אחרי פתיחת החלון),
+   * ולכן חיפוש לפי שם לקוח נכשל בה. השרת מחפש על כל ההצעות בבסיס הנתונים.
+   */
+  useEffect(() => {
+    if (!open || !currentUser) return;
+    const term = query.trim();
+    if (term.length < 2) {
+      setRemoteRows(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await apiFetch(apiUrl(`/quotes?q=${encodeURIComponent(term)}&take=200`), {
+          authUser: currentUser,
+        });
+        if (!res.ok) throw new Error('search failed');
+        const data = await res.json();
+        if (cancelled) return;
+        setRemoteRows(
+          Array.isArray(data)
+            ? data.map((d: any): QuoteSearchRow => ({
+                id: d.id,
+                importLegacyId: d.importLegacyId ?? undefined,
+                quoteNumber: d.quoteNumber ?? d.orderReferenceNumber ?? null,
+                customerId: d.customerId ?? null,
+                customerName: d.customer?.name ?? undefined,
+                opportunityId: d.opportunityId ?? null,
+                opportunityName: d.opportunity?.projectOrServiceName ?? undefined,
+                projectId: d.projectId ?? null,
+                client: d.customer?.name ?? '',
+                service: d.service,
+                description: d.description ?? undefined,
+                amount: Number(d.amount ?? d.amountBeforeVat ?? 0),
+                amountBeforeVat: d.amountBeforeVat ?? d.amount ?? null,
+                totalAmount: d.totalAmount ?? null,
+                status: d.status,
+                validTo: d.validTo ? String(d.validTo).slice(0, 10) : '',
+                validityDate: d.validityDate ? String(d.validityDate).slice(0, 10) : null,
+                notes: d.notes ?? null,
+                createdAt: d.createdAt ?? undefined,
+                leadId: d.leadId ?? null,
+                _contactName: d.customer?.contactName ?? undefined,
+                _city: d.customer?.city ?? undefined,
+              }))
+            : [],
+        );
+      } catch {
+        if (!cancelled) setRemoteRows(null); // נשארים עם התוצאות המקומיות
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [open, query, currentUser]);
+
   if (!open) return null;
 
   const today = new Date().toISOString().slice(0, 10);
-  const q = query.trim().toLowerCase();
-  // Separator-agnostic phone matching (see CustomerSearchModal).
-  const qDigits = query.replace(/\D/g, '');
-  const phoneMatch = (v?: string | null) =>
-    qDigits.length >= 4 && (v || '').replace(/\D/g, '').includes(qDigits);
+  const raw = query.trim();
+  const tokens = normSearchText(raw).split(' ').filter(Boolean);
+  const qDigits = raw.replace(/\D/g, '');
 
-  const filtered = q
-    ? quotes.filter((qt) => {
-        const cust = qt.customerId ? customerMap[qt.customerId] : null;
-        return (
-          (qt.quoteNumber || '').toLowerCase().includes(q) ||
-          (qt.importLegacyId || '').toLowerCase().includes(q) ||
-          (qt.customerName || qt.client || '').toLowerCase().includes(q) ||
-          (qt.service || '').toLowerCase().includes(q) ||
-          (qt.description || '').toLowerCase().includes(q) ||
-          (qt.status || '').toLowerCase().includes(q) ||
-          (qt.notes || '').toLowerCase().includes(q) ||
-          (qt.opportunityName || '').toLowerCase().includes(q) ||
-          /* contact-level fields via customer lookup */
-          (cust ? (cust.contactName || '').toLowerCase().includes(q) : false) ||
-          (cust ? (cust.city || '').toLowerCase().includes(q) : false) ||
-          (cust ? phoneMatch(cust.phone) : false) ||
-          (cust ? phoneMatch(cust.phone2) : false) ||
-          (cust ? (cust.email || '').toLowerCase().includes(q) : false) ||
-          (cust ? (cust.address || '').toLowerCase().includes(q) : false) ||
-          (cust ? (cust.companyRegNumber || '').toLowerCase().includes(q) : false)
-        );
-      })
-    : quotes;
+  const localMatches = (qt: Quote): boolean => {
+    const cust = qt.customerId ? customerMap[qt.customerId] : null;
+    const haystack = normSearchText(
+      [
+        qt.quoteNumber,
+        qt.importLegacyId,
+        qt.customerName || qt.client || cust?.name,
+        qt.service,
+        qt.description,
+        qt.status,
+        qt.notes,
+        qt.opportunityName,
+        cust?.contactName,
+        cust?.city,
+        cust?.email,
+        cust?.address,
+        cust?.companyRegNumber,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+    // כל מילה חייבת להימצא (AND) — כך "רעש נהורי" מוצא את ההצעה הנכונה.
+    if (tokens.every((t) => haystack.includes(t))) return true;
+    if (qDigits.length >= 4) {
+      const digitsHay = [cust?.phone, cust?.phone2, qt.quoteNumber, qt.importLegacyId]
+        .map((v) => String(v ?? '').replace(/\D/g, ''))
+        .join(' ');
+      if (digitsHay.includes(qDigits)) return true;
+    }
+    return false;
+  };
+
+  const localFiltered: QuoteSearchRow[] = raw ? quotes.filter(localMatches) : quotes;
+
+  /* מיזוג: תוצאות מקומיות (מיידיות) + תוצאות השרת (מלאות), ללא כפילויות */
+  const merged: QuoteSearchRow[] = (() => {
+    if (!raw || !remoteRows) return localFiltered;
+    const seen = new Set(localFiltered.map((r) => r.id));
+    return [...localFiltered, ...remoteRows.filter((r) => !seen.has(r.id))];
+  })();
+
+  const filtered = merged;
   const results = filtered.slice(0, 80);
 
   const getValidity = (qt: Quote) => {
@@ -1765,7 +1865,11 @@ function QuoteSearchModal({
             )}
           </div>
           <div className="mt-2 text-xs text-slate-400">
-            {q ? `${results.length} תוצאות${filtered.length > 80 ? ` מתוך ${filtered.length}` : ''}` : `${quotes.length} הצעות`}
+            {searching
+              ? 'מחפש…'
+              : raw
+                ? `${results.length} תוצאות${filtered.length > 80 ? ` מתוך ${filtered.length}` : ''}`
+                : `${quotes.length} הצעות`}
           </div>
         </div>
 
@@ -1773,7 +1877,7 @@ function QuoteSearchModal({
         <div className="max-h-[50vh] overflow-y-auto">
           {results.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-slate-400">
-              {q ? 'לא נמצאו הצעות תואמות' : 'אין הצעות'}
+              {searching ? 'מחפש…' : raw ? 'לא נמצאו הצעות תואמות' : 'אין הצעות'}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -1793,8 +1897,8 @@ function QuoteSearchModal({
                 {results.map((qt) => {
                   const { label: validLabel, expired } = getValidity(qt);
                   const cust = qt.customerId ? customerMap[qt.customerId] : null;
-                  const city = cust?.city || '';
-                  const contact = cust?.contactName || '';
+                  const city = cust?.city || qt._city || '';
+                  const contact = cust?.contactName || qt._contactName || '';
                   return (
                     <tr
                       key={qt.id}
@@ -1805,7 +1909,7 @@ function QuoteSearchModal({
                       <td className="px-3 py-2 font-medium text-slate-800">{qt.quoteNumber || '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{qt.importLegacyId || '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{qt.createdAt ? qt.createdAt.slice(0, 10) : '—'}</td>
-                      <td className="px-3 py-2 text-slate-700">{qt.customerName || qt.client || '—'}</td>
+                      <td className="px-3 py-2 text-slate-700">{qt.customerName || qt.client || cust?.name || '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{contact || '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{city || '—'}</td>
                       <td className="px-3 py-2">
@@ -9733,6 +9837,8 @@ function QuotesPage({
   currentUser,
   onQuotesChange,
   initialCustomerId = null,
+  initialQuoteId = null,
+  onInitialQuoteConsumed,
 }: {
   quotes: Quote[];
   customers: Customer[];
@@ -9741,6 +9847,9 @@ function QuotesPage({
   onQuotesChange: (next: Quote[]) => void;
   /** When set (from customer card "חדש הצעה"), pre-fills the customer selector */
   initialCustomerId?: string | null;
+  /** When set (from "חפש → הצעה"), loads that quote into the editor on mount */
+  initialQuoteId?: string | null;
+  onInitialQuoteConsumed?: () => void;
 }) {
   type AIDraftLineItem = {
     name: string;
@@ -10096,6 +10205,14 @@ function QuotesPage({
       setError('טעינת הצעה נכשלה');
     }
   };
+
+  /* הצעה שנבחרה במסך "חפש → הצעה" — נטענת לעריכה מיד עם המעבר למסך ההצעות */
+  useEffect(() => {
+    if (!initialQuoteId) return;
+    void loadQuoteForEdit(initialQuoteId);
+    onInitialQuoteConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialQuoteId]);
 
   const normalizeQuoteFromApi = (data: any, currentForm: typeof form): Quote => ({
     id: data.id,
@@ -24248,6 +24365,8 @@ export default function GalitCRMPrototype() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [quoteSearchOpen, setQuoteSearchOpen] = useState(false);
+  /** הצעה שנבחרה בחיפוש — נטענת לעריכה במסך ההצעות */
+  const [openQuoteId, setOpenQuoteId] = useState<string | null>(null);
   /** true when we opened the customer card in "new customer" creation mode */
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
@@ -26243,9 +26362,12 @@ export default function GalitCRMPrototype() {
             open={quoteSearchOpen}
             quotes={quotes}
             customers={customers}
+            currentUser={currentUser}
             onClose={() => setQuoteSearchOpen(false)}
             onSelect={(quote) => {
               setQuoteSearchOpen(false);
+              // בחירה בתוצאה פותחת את ההצעה עצמה — קודם רק ניווט למסך ההצעות בלי לפתוח.
+              setOpenQuoteId(quote.id);
               setCurrent('quotes');
               if (typeof window !== 'undefined') {
                 window.history.pushState({}, '', `${window.location.pathname}?view=quotes`);
@@ -26713,6 +26835,8 @@ export default function GalitCRMPrototype() {
               currentUser={currentUser}
               onQuotesChange={setQuotes}
               initialCustomerId={newQuoteCustomerId}
+              initialQuoteId={openQuoteId}
+              onInitialQuoteConsumed={() => setOpenQuoteId(null)}
             />
           )}
           {current === 'opportunities' && ['admin', 'manager', 'sales'].includes(currentUser.role) && (
