@@ -34,9 +34,10 @@ import { RadonModule } from './radon/radon.module';
 import { AffiliateModule } from './affiliate/affiliate.module';
 import { OutlookModule } from './integrations/outlook/outlook.module';
 import { CaspitModule } from './caspit/caspit.module';
+import { BlogModule } from './blog/blog.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule],
   controllers: [AppController],
   providers: [AppService],
 })

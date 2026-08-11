@@ -72,6 +72,8 @@ export function SignedQuotesSection({
     amount: string; // כטקסט לעריכה
     quoteNumber: string;
     detected: boolean; // האם הסכום זוהה אוטומטית מה-PDF
+    /** מקור מספר ההצעה שמולא אוטומטית — לתצוגה בלבד; 'manual' = המשתמש ערך. */
+    numberSource: 'pdf' | 'customer' | 'next' | 'manual';
   } | null>(null);
 
   const load = useCallback(async () => {
@@ -95,7 +97,7 @@ export function SignedQuotesSection({
     void load();
   }, [load]);
 
-  // בחירת קובץ → חילוץ סכום מ-PDF → פתיחת מודל אישור.
+  // בחירת קובץ → חילוץ סכום + מספר הצעה → פתיחת מודל אישור.
   const onPick = async (file: File) => {
     if (!valid || !file) return;
     setParsing(true);
@@ -103,6 +105,8 @@ export function SignedQuotesSection({
     try {
       const b64 = await fileToBase64(file);
       let detectedAmount: number | null = null;
+      let detectedNumber = '';
+      let numberSource: 'pdf' | 'customer' | 'next' | 'manual' = 'manual';
       try {
         const r = await apiFetch(apiUrl(`/customers/${customerId}/signed-quote/parse`), {
           method: 'POST',
@@ -112,16 +116,37 @@ export function SignedQuotesSection({
         if (r.ok) {
           const j = await r.json();
           if (typeof j?.total === 'number') detectedAmount = j.total;
+          if (j?.quoteNumber) {
+            detectedNumber = String(j.quoteNumber);
+            numberSource = j.quoteNumberSource === 'pdf' ? 'pdf' : 'customer';
+          }
         }
       } catch {
         /* חילוץ נכשל — נמשיך עם קלט ידני */
+      }
+      // אין מספר במסמך ואין הצעה קודמת ללקוח — מקצים את המספר הרץ הבא, כדי שההצעה
+      // החתומה לא תישמר בלי מספר (הצעה בלי מספר מופיעה כ"—" ברשימות ובמסמכים).
+      if (!detectedNumber) {
+        try {
+          const r = await apiFetch(apiUrl('/quotes/next-reference'), { authUser: currentUser as never });
+          if (r.ok) {
+            const j = await r.json();
+            if (j?.reference) {
+              detectedNumber = String(j.reference);
+              numberSource = 'next';
+            }
+          }
+        } catch {
+          /* אין מספר רץ — המשתמש ימלא ידנית */
+        }
       }
       setPending({
         file,
         b64,
         amount: detectedAmount != null ? String(detectedAmount) : '',
-        quoteNumber: '',
+        quoteNumber: detectedNumber,
         detected: detectedAmount != null,
+        numberSource: detectedNumber ? numberSource : 'manual',
       });
     } catch {
       setErr('קריאת הקובץ נכשלה');
@@ -347,14 +372,28 @@ export function SignedQuotesSection({
               <div className="mb-3 text-[11px] text-slate-400">הזן את הסכום הכולל שנחתם.</div>
             )}
 
-            <label className="mb-1 block text-xs font-bold text-slate-600">מס׳ הצעה / הזמנה (רשות)</label>
+            <label className="mb-1 block text-xs font-bold text-slate-600">מס׳ הצעה / הזמנה</label>
             <input
               type="text"
               value={pending.quoteNumber}
-              onChange={(e) => setPending((p) => (p ? { ...p, quoteNumber: e.target.value } : p))}
+              onChange={(e) =>
+                setPending((p) => (p ? { ...p, quoteNumber: e.target.value, numberSource: 'manual' } : p))
+              }
               placeholder="—"
-              className="mb-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-green-400"
+              className="mb-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-green-400"
             />
+            {pending.numberSource !== 'manual' && !!pending.quoteNumber.trim() ? (
+              <div className="mb-4 flex items-center gap-1 text-[11px] text-green-600">
+                <CheckCircle2 className="h-3 w-3" />
+                {pending.numberSource === 'pdf'
+                  ? 'מולא אוטומטית — המספר שמופיע במסמך. ניתן לתקן.'
+                  : pending.numberSource === 'customer'
+                    ? 'מולא אוטומטית — מספר ההצעה האחרונה של הלקוח. ניתן לתקן.'
+                    : 'מולא אוטומטית — המספר הרץ הבא. ניתן לתקן.'}
+              </div>
+            ) : (
+              <div className="mb-4 text-[11px] text-slate-400">מספר ההצעה כפי שמופיע במסמך.</div>
+            )}
 
             {err && <div className="mb-2 text-xs text-red-500">{err}</div>}
 

@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatIsraeliPhone, formatPhoneFields } from '../common/phone.util';
 import { GraphMailService } from '../microsoft/graph-mail.service';
-import { extractTotalFromPdf } from './signed-quote-total.util';
+import { extractSignedQuoteInfo } from './signed-quote-total.util';
 import type {
   CreateCustomerDocumentDto,
   CreateManualIncomeDto,
@@ -1145,20 +1145,73 @@ export class CustomersService {
   // הצעת מחיר חתומה (העלאה ידנית) — מסמך + Quote SIGNED + קידום משימה
   // ─────────────────────────────────────────────────────────────
 
-  /** חילוץ הסכום הסופי המשוער מ-PDF (או null אם לא זוהה / זה תמונה). */
-  async parseSignedQuoteTotal(dto: ParseSignedQuoteDto): Promise<{ total: number | null }> {
+  /**
+   * חילוץ הסכום הסופי + מספר ההצעה מ-PDF, לפני האישור במודל הצירוף.
+   *
+   * מספר ההצעה נלקח לפי סדר עדיפות:
+   *   'pdf'      — המספר שכתוב במסמך עצמו (הסמכות: זו ההצעה שהלקוח חתם עליה).
+   *   'customer' — ההצעה האחרונה של הלקוח ב-CRM, כשה-PDF סרוק/ללא שכבת טקסט.
+   * אם שניהם ריקים מוחזר null, והמסך נופל ל-/quotes/next-reference (מספר רץ חדש).
+   */
+  async parseSignedQuoteTotal(
+    customerId: string,
+    dto: ParseSignedQuoteDto,
+  ): Promise<{ total: number | null; quoteNumber: string | null; quoteNumberSource: 'pdf' | 'customer' | null }> {
     const mime = (dto.mimeType || '').toLowerCase();
-    // רק PDF טקסטואלי ניתן לחילוץ; תמונה/סריקה → קלט ידני.
-    if (mime && !mime.includes('pdf')) return { total: null };
-    const b64 = dto.dataBase64.includes(',') ? dto.dataBase64.split(',')[1] : dto.dataBase64;
-    let buf: Buffer;
-    try {
-      buf = Buffer.from(b64, 'base64');
-    } catch {
-      return { total: null };
+    // רק PDF טקסטואלי ניתן לחילוץ; תמונה/סריקה → נופלים למספר ההצעה של הלקוח.
+    const isPdf = !mime || mime.includes('pdf');
+    let total: number | null = null;
+    let fromPdf: string | null = null;
+
+    if (isPdf) {
+      let buf: Buffer | null = null;
+      try {
+        const b64 = dto.dataBase64.includes(',') ? dto.dataBase64.split(',')[1] : dto.dataBase64;
+        buf = Buffer.from(b64, 'base64');
+      } catch {
+        buf = null;
+      }
+      if (buf) {
+        const info = await extractSignedQuoteInfo(buf);
+        total = info.total;
+        fromPdf = info.quoteNumber;
+      }
     }
-    const total = await extractTotalFromPdf(buf);
-    return { total };
+
+    if (fromPdf) return { total, quoteNumber: fromPdf, quoteNumberSource: 'pdf' };
+
+    const fromCustomer = await this.latestQuoteNumberOf(customerId).catch(() => null);
+    return {
+      total,
+      quoteNumber: fromCustomer,
+      quoteNumberSource: fromCustomer ? 'customer' : null,
+    };
+  }
+
+  /**
+   * מספר ההצעה של ההצעה האחרונה של הלקוח — ההצעה שנשלחה וחוזרת עכשיו חתומה.
+   * מדלגים על Quote-ים סינתטיים (הכנסה ידנית / צירוף חתום קודם) כדי לא להחזיר
+   * מספר שהומצא בצירוף קודם, ועל מספרים שאינם המספר הרץ (4–6 ספרות; 3–8 לסובלנות).
+   */
+  private async latestQuoteNumberOf(customerId: string): Promise<string | null> {
+    const rows = await this.prisma.quote.findMany({
+      where: { customerId },
+      select: {
+        quoteNumber: true,
+        orderReferenceNumber: true,
+        orderSource: true,
+        signedPdfPath: true,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+    });
+    for (const r of rows) {
+      if (r.orderSource === CustomersService.MANUAL_INCOME_MARKER) continue;
+      if (r.signedPdfPath === 'signed-quote:manual') continue;
+      const v = (r.quoteNumber || r.orderReferenceNumber || '').trim();
+      if (/^\d{3,8}$/.test(v)) return v;
+    }
+    return null;
   }
 
   /**
@@ -1210,7 +1263,10 @@ export class CustomersService {
           totalAmount: amount,
           amountBeforeVat: amount,
           vatPercent: 0,
+          // מספר ההצעה = הסימוכין (אותו מספר רץ, כמו ב-QuotesService.create) — שמירה
+          // בשדה אחד בלבד הותירה את עמודת "סימוכין" ריקה ברשימת ההצעות ובחיפוש.
           quoteNumber: dto.quoteNumber?.trim() || null,
+          orderReferenceNumber: dto.quoteNumber?.trim() || null,
           status: 'SIGNED',
           digitalSignatureStatus: 'SIGNED',
           signedAt: now,

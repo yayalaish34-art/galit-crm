@@ -190,10 +190,10 @@ export class CustomersController {
     });
   }
 
-  /** חילוץ הסכום הסופי מ-PDF של הצעה חתומה (לפני האישור). */
+  /** חילוץ הסכום הסופי + מספר ההצעה מ-PDF של הצעה חתומה (לפני האישור). */
   @Post(':id/signed-quote/parse')
-  parseSignedQuote(@Param('id') _id: string, @Body() body: ParseSignedQuoteDto) {
-    return this.customersService.parseSignedQuoteTotal(body);
+  parseSignedQuote(@Param('id') id: string, @Body() body: ParseSignedQuoteDto) {
+    return this.customersService.parseSignedQuoteTotal(id, body);
   }
 
   /** צירוף הצעה חתומה ידנית: מסמך SIGNED_QUOTE + Quote SIGNED + קידום משימה. */

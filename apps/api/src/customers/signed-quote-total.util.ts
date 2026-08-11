@@ -1,5 +1,5 @@
 /**
- * חילוץ הסכום הסופי (סך הכל / מחיר סופי) מתוך PDF של הצעת מחיר חתומה.
+ * חילוץ פרטים מתוך PDF של הצעת מחיר חתומה: הסכום הסופי ומספר ההצעה.
  *
  * נטען לפי דרישה (lazy require) על ה-legacy CJS build של pdfjs — תואם Node 20
  * בפרודקשן, בדיוק כמו ב-pdf-buttons.util.ts. עובד רק ל-PDF טקסטואלי; להצעות
@@ -10,7 +10,7 @@
 function toNumber(raw: string): number {
   const cleaned = String(raw)
     .replace(/[₪$€]/g, '')
-    .replace(/[\s ]/g, '')
+    .replace(/[\s ]/g, '')
     .replace(/,/g, '')
     .trim();
   if (!/^\d+(\.\d+)?$/.test(cleaned)) return NaN;
@@ -34,6 +34,22 @@ const TOTAL_LABELS = [
 // חלש יותר — נשתמש בו רק אם אף אחת מהחזקות לא נמצאה.
 const WEAK_LABELS = [/סה["'׳]?\s?כ/, /סך\s*הכל/, /סכום\s*כולל/, /\btotal\b/i];
 
+/**
+ * תוויות מספר ההצעה. המסמכים שלנו מרנדרים "מס' הצעת מחיר" מתוך {contractSurveyNumber}
+ * (כך ב-71 מהתבניות), ולצידו "סימוכין" — שניהם אותו מספר רץ. הצעות של צד-שלישי
+ * מגיעות בדרך כלל כ"הצעת מחיר מס' …" / "מספר הצעה".
+ */
+const QUOTE_NO_LABELS = [
+  /מס["'׳]?\s*הצעת\s*מחיר/,
+  /מספר\s*הצעת\s*מחיר/,
+  /הצעת\s*מחיר\s*מס["'׳]?/,
+  /מספר\s*הצעה/,
+  /מס["'׳]?\s*הצעה/,
+  /הצעה\s*מס["'׳]?/,
+  /סימוכין/,
+  /quote\s*(?:no|number|#)/i,
+];
+
 /** מוצא את המספר הגדול-ביותר שמופיע אחרי label באותה שורה. */
 function amountAfterLabel(line: string, labels: RegExp[]): number | null {
   for (const label of labels) {
@@ -50,11 +66,29 @@ function amountAfterLabel(line: string, labels: RegExp[]): number | null {
 }
 
 /**
- * מחזיר את הסכום הסופי המשוער (או null). לוקח את הופעת ה"סך הכל" האחרונה
- * במסמך — בהצעות מחיר שורת הסיכום כמעט תמיד בתחתית.
+ * מספר ההצעה הראשון שמופיע אחרי אחת מתוויות המספר באותה שורה.
+ * המספר הרץ שלנו הוא 4–6 ספרות; מקבלים 3–8 כדי לא לפספס מספרים חיצוניים.
+ * הביטוי דורש שהמספר לא ייגע ב-/ . - כדי שתאריך ("11/08/2026") לא ייקלט כמספר הצעה,
+ * וגם תומך בפורמט הישן "Q-202601-0012".
  */
-export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<number | null> {
-  let lines: string[];
+function quoteNumberAfterLabel(line: string): string | null {
+  for (const label of QUOTE_NO_LABELS) {
+    const m = label.exec(line);
+    if (!m) continue;
+    const after = line.slice(m.index + m[0].length);
+    const legacy = /\bQ-\d{6}-\d{3,5}\b/i.exec(after);
+    if (legacy) return legacy[0].toUpperCase();
+    const plain = /(?:^|[^\d/.\-])(\d{3,8})(?![\d/.\-])/.exec(after);
+    if (plain) return plain[1];
+  }
+  return null;
+}
+
+/**
+ * קורא את שכבת הטקסט של ה-PDF ומחזיר אותה כשורות (או null אם אין/נכשל).
+ * pdfjs מפרק טקסט ל-runs; מקבצים לפי y ומסדרים פר-שורה לפי x (RTL: ימני קודם).
+ */
+async function readPdfLines(pdf: Buffer | Uint8Array): Promise<string[] | null> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const pdfjs = require('pdfjs-dist/legacy/build/pdf.js');
@@ -67,7 +101,7 @@ export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<num
     const data = pdf instanceof Uint8Array ? pdf : new Uint8Array(pdf);
     const doc = await pdfjs.getDocument({ data, useSystemFonts: true, isEvalSupported: false }).promise;
     try {
-      lines = [];
+      const lines: string[] = [];
       for (let p = 1; p <= doc.numPages; p++) {
         const page = await doc.getPage(p);
         const tc = await page.getTextContent();
@@ -87,6 +121,7 @@ export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<num
           lines.push(parts.map((p2) => p2.s).join(' '));
         }
       }
+      return lines;
     } finally {
       try {
         await doc.destroy();
@@ -97,7 +132,13 @@ export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<num
   } catch {
     return null; // pdfjs נכשל / לא PDF תקין — נופלים לקלט ידני.
   }
+}
 
+/**
+ * הסכום הסופי המשוער מתוך השורות (או null). לוקח את הופעת ה"סך הכל" האחרונה
+ * במסמך — בהצעות מחיר שורת הסיכום כמעט תמיד בתחתית.
+ */
+function totalFromLines(lines: string[]): number | null {
   // מעבר על השורות; זוכרים את הסכום מהתווית החזקה האחרונה, ואם אין — מהחלשה.
   let strong: number | null = null;
   let weak: number | null = null;
@@ -111,4 +152,34 @@ export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<num
   }
   const total = strong ?? weak;
   return total != null && Number.isFinite(total) && total > 0 ? total : null;
+}
+
+/**
+ * מספר ההצעה מתוך השורות (או null). לוקח את ההופעה *הראשונה* — כותרת ההצעה
+ * נמצאת בעמוד הראשון, בעוד בתחתית עשויים להופיע מספרים אחרים (הזמנה/חשבונית).
+ */
+function quoteNumberFromLines(lines: string[]): string | null {
+  for (const line of lines) {
+    const n = quoteNumberAfterLabel(line);
+    if (n) return n;
+  }
+  return null;
+}
+
+/** מחזיר את הסכום הסופי המשוער (או null). */
+export async function extractTotalFromPdf(pdf: Buffer | Uint8Array): Promise<number | null> {
+  const lines = await readPdfLines(pdf);
+  return lines ? totalFromLines(lines) : null;
+}
+
+/**
+ * קריאה אחת של ה-PDF → גם הסכום הסופי וגם מספר ההצעה. עדיף על שתי קריאות נפרדות:
+ * פענוח PDF של הצעה סרוקה יקר, ואין סיבה לשלם עליו פעמיים.
+ */
+export async function extractSignedQuoteInfo(
+  pdf: Buffer | Uint8Array,
+): Promise<{ total: number | null; quoteNumber: string | null }> {
+  const lines = await readPdfLines(pdf);
+  if (!lines) return { total: null, quoteNumber: null };
+  return { total: totalFromLines(lines), quoteNumber: quoteNumberFromLines(lines) };
 }

@@ -31,7 +31,9 @@ import {
   Mic,
   Bell,
   Handshake,
+  Newspaper,
 } from 'lucide-react';
+import { isManagerRole } from './lib/roles';
 
 const GLOBAL_SEARCH_INPUT_ID = 'global-crm-search-input';
 
@@ -840,6 +842,20 @@ export function CrmLegacyTopNav({
                   title={!canAccess(role, 'affiliates') ? 'אין הרשאה' : 'שותפים — הפניות ועמלות'}
                   active={current === 'affiliates'}
                   onClick={() => go('affiliates')}
+                />
+                <Sep />
+                <NavBtn
+                  label="בלוגים"
+                  Icon={Newspaper}
+                  disabled={!isManagerRole(role)}
+                  title={
+                    !isManagerRole(role)
+                      ? 'אין הרשאה — בלוגים למנהלים בלבד'
+                      : 'בלוגים — כתיבה ופרסום לאתר galit.co.il'
+                  }
+                  onClick={() => {
+                    window.location.href = '/blogs';
+                  }}
                 />
                 <Sep />
                 <NavBtn
