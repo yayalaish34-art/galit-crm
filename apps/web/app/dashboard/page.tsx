@@ -25799,6 +25799,25 @@ export default function GalitCRMPrototype() {
     navigateSafely('settings');
   };
 
+  /**
+   * "מעקב" על הצעה עצמאית → פתיחת המשימה שקודמה/נוצרה, במקום להשאיר את המשתמש
+   * על מסך ההצעה בלי שום סימן שנפתחה משימה. reloadTasks נדרש כי משימה חדשה עדיין
+   * לא נמצאת ברשימה שבזיכרון, ו-TasksPage פותח לפי מזהה מתוך הרשימה.
+   */
+  const openFollowupTaskFromQuote = useCallback(
+    (taskId: string) => {
+      if (!taskId) return;
+      setWorkspaceQuoteOpen(false);
+      setWorkspaceQuoteId(null);
+      setWorkspaceTab('card');
+      void reloadTasks();
+      setPendingExpandTaskId(taskId);
+      setCurrent('tasks');
+      setView('tasks');
+    },
+    [reloadTasks],
+  );
+
   const focusGlobalSearch = () => {
     const el = document.getElementById(GLOBAL_SEARCH_INPUT_ID) as HTMLInputElement | null;
     el?.focus();
@@ -26731,6 +26750,7 @@ export default function GalitCRMPrototype() {
                     onQuoteSaved={() => {
                       setCustomerQuotesRefreshKey((k) => k + 1);
                     }}
+                    onFollowupTaskReady={openFollowupTaskFromQuote}
                     onQuoteSent={handleQuoteSent}
                   />
                 </div>
@@ -26770,6 +26790,7 @@ export default function GalitCRMPrototype() {
                   setCurrent(selectedCustomer ? 'customer-profile' : 'quotes');
                 }
               }}
+              onFollowupTaskReady={openFollowupTaskFromQuote}
               onQuoteSent={handleQuoteSent}
             />
           )}

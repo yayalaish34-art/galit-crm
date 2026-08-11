@@ -1078,6 +1078,7 @@ export function QuoteNewScreen({
   onExit,
   onQuoteSaved,
   onQuoteSent,
+  onFollowupTaskReady,
   onAttachmentSaved,
   existingAttachments,
   onDownloadAttachment,
@@ -1099,6 +1100,11 @@ export function QuoteNewScreen({
   onQuoteSaved?: (quoteId: string) => void;
   /** Called after a quote is successfully sent via email */
   onQuoteSent?: (quoteId: string) => void;
+  /**
+   * נקרא אחרי "מעקב" על הצעה עצמאית, עם מזהה המשימה שקודמה/נוצרה — ההורה פותח אותה.
+   * בלי handler (מסך /quotes/new העצמאי) עוברים לדשבורד עם ?taskid=.
+   */
+  onFollowupTaskReady?: (taskId: string) => void;
   /** Called after a merged DOCX is successfully saved as a task attachment */
   onAttachmentSaved?: () => void;
   /** DB-persisted task attachments to show in the files section (loaded from server) */
@@ -2786,6 +2792,20 @@ export function QuoteNewScreen({
    * לכן הפתרון כאן אינו מנעול נוסף אלא שינוי הפעולה עצמה: קודם *מאתרים* יעד, ורק
    * בהיעדר יעד יוצרים. השרת מכריע מיהו היעד — ראה findPromotableForCustomer.
    */
+  /**
+   * פתיחת משימת המעקב שנוצרה/קודמה. בתוך הדשבורד — דרך ה-handler של ההורה (בלי
+   * טעינה מחדש); במסך /quotes/new העצמאי — ניווט לדשבורד עם ה-deep-link `?taskid=`
+   * שכבר נתמך שם.
+   */
+  function openFollowupTask(followupTaskId: string): void {
+    if (onFollowupTaskReady) {
+      onFollowupTaskReady(followupTaskId);
+      return;
+    }
+    if (typeof window === 'undefined') return;
+    window.location.href = `/dashboard?view=tasks&taskid=${encodeURIComponent(followupTaskId)}`;
+  }
+
   async function promoteOrCreateFollowupTask(
     savedQuoteId: string,
     user: ReturnType<typeof getSessionUser>,
@@ -2796,13 +2816,13 @@ export function QuoteNewScreen({
      *  scheduleFollowupQuick קורא setFollow ומיד await doSave באותה סגירה, ולכן קריאה
      *  מה-state החזירה את הערך *הקודם* — לחיצה על "מחר" יצרה משימה ל-3 ימים. */
     followYmd: string,
-  ): Promise<void> {
-    if (!user || !customerId) return;
+  ): Promise<string | null> {
+    if (!user || !customerId) return null;
     let followIso: string | null = null;
     if (followYmd && followYmd.trim()) {
       try { const d = new Date(followYmd); followIso = isNaN(d.getTime()) ? null : d.toISOString(); } catch { followIso = null; }
     }
-    if (!followIso) return; // לא מולא תאריך מעקב תקין
+    if (!followIso) return null; // לא מולא תאריך מעקב תקין
 
     // ── 1. איתור המשימה שההצעה שייכת אליה ──
     // preferTaskId = הקישור הקיים של ההצעה. השרת מאמת שהמשימה עדיין קיימת (אין FK על
@@ -2836,13 +2856,13 @@ export function QuoteNewScreen({
       if (r.ok) {
         followupTaskCreatedForQuoteRef.current = savedQuoteId;
         await linkQuoteToTask(savedQuoteId, targetTaskId, user);
-        return;
+        return targetTaskId;
       }
       // PATCH נכשל (למשל המשימה נמחקה בין השליפה לעדכון) → ממשיכים ליצירה.
     }
 
     // ── 3. אין משימה לקדם → יצירה, פעם אחת בלבד ל-mount ──
-    if (followupTaskCreatedForQuoteRef.current === savedQuoteId) return;
+    if (followupTaskCreatedForQuoteRef.current === savedQuoteId) return null;
     const productName = (prefillServiceName || lineItems.find((li) => li.description.trim())?.description || '').trim();
     const title = [customer.trim(), productName].filter(Boolean).join(' — ') || 'מעקב הצעת מחיר';
     const quoteNoForDesc = (savedQuoteNumber || '').trim() || (quoteNo !== 'חדש' ? quoteNo : '');
@@ -2857,12 +2877,17 @@ export function QuoteNewScreen({
       productName: productName || null,
     };
     const r = await apiFetch(apiUrl('/tasks'), { method: 'POST', body: JSON.stringify(body), authUser: user });
-    if (!r.ok) return;
+    if (!r.ok) {
+      // עד כה הכישלון היה שקט לגמרי — המשתמש ראה "✓ נקבע מעקב" בלי שנוצרה משימה.
+      alert('שמירת ההצעה הצליחה, אך פתיחת משימת המעקב נכשלה. נסה שוב או פתח משימה ידנית.');
+      return null;
+    }
     followupTaskCreatedForQuoteRef.current = savedQuoteId;
 
     const created = await r.json().catch(() => null);
     const newTaskId = created?.id ? String(created.id) : '';
     if (newTaskId) await linkQuoteToTask(savedQuoteId, newTaskId, user);
+    return newTaskId || null;
   }
 
   /**
@@ -2986,12 +3011,15 @@ export function QuoteNewScreen({
       if (savedId && !taskId && followTouchedRef.current) {
         const savedNo = (saved as Record<string, unknown>)?.quoteNumber;
         try {
-          await promoteOrCreateFollowupTask(
+          const followupTaskId = await promoteOrCreateFollowupTask(
             savedId,
             user,
             savedNo != null ? String(savedNo) : null,
             followForSave,
           );
+          // ההצעה נפתחת עכשיו כמשימה בפועל. עד כה המשימה נוצרה/קודמה ברקע והמסך
+          // נשאר על ההצעה, ולכן זה נראה כאילו "מעקב" לא עשה כלום.
+          if (followupTaskId) openFollowupTask(followupTaskId);
         } catch { /* לא פוגע בשמירת ההצעה */ }
       }
       if (savedId && (opts?.advanceStage ?? true) && onQuoteSaved) onQuoteSaved(savedId);
