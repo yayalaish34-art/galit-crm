@@ -230,19 +230,25 @@ export class ReportMailService {
     // מנוע ראשי: Microsoft Graph (Word — עיצוב נאמן); גיבוי: CloudConvert. הקפאת תאריכים לעברית
     // מתבצעת בתוך docxToPdf. ממירים DOCX בלבד (כמו בהצעה); כל פורמט אחר (PDF/DOC ישן/תמונה) נשלח
     // כמות שהוא — כדי לא לפגוע בנאמנות (בדיוק ההתנהגות של שליחת ההצעה).
-    const isDocx = /\.docx$/i.test(fileName) || mime === DOCX_MIME;
-    const canConvert = (graphReady && !!opts.userId) || this.pdfConvert.enabled;
-    if (isDocx) {
+    // דרישת המשתמש: *כל* שליחת דוח יוצאת כ-PDF — מהמשימה ומכרטיס הלקוח כאחד. לכן
+    // ההמרה חלה על כל משפחת Word (‎.doc‎ הישן נפל כאן עד כה: הבדיקה בדקה ‎.docx‎ בלבד),
+    // וכישלון המרה כבר לא נבלע בשקט — עדיף להיכשל בגלוי מלשלוח ללקוח מסמך Word.
+    if (PdfConvertService.isConvertibleToPdf(fileName, mime)) {
+      const canConvert = (graphReady && !!opts.userId) || this.pdfConvert.enabled;
       if (!canConvert) {
-        this.logger.warn(`PDF conversion not configured (Outlook/CloudConvert) — sending "${fileName}" as DOCX`);
-      } else {
-        try {
-          fileBuf = await this.pdfConvert.docxToPdf(fileBuf, fileName, opts.userId);
-          fileName = fileName.replace(/\.docx$/i, '') + '.pdf';
-          mime = 'application/pdf';
-        } catch (e: any) {
-          this.logger.warn(`PDF conversion failed for "${fileName}" — sending DOCX: ${e?.message || e}`);
-        }
+        throw new BadRequestException(
+          'המרת הדוח ל-PDF אינה זמינה (אין חשבון OneDrive/CloudConvert מחובר) — הדוח לא נשלח.',
+        );
+      }
+      try {
+        fileBuf = await this.pdfConvert.anyWordToPdf(fileBuf, fileName, mime, opts.userId);
+        fileName = fileName.replace(/\.[a-z0-9]+$/i, '') + '.pdf';
+        mime = 'application/pdf';
+      } catch (e: any) {
+        this.logger.error(`PDF conversion failed for report "${fileName}": ${e?.message || e}`);
+        throw new BadRequestException(
+          `המרת הדוח ל-PDF נכשלה — הדוח לא נשלח. ${e?.message || ''}`.trim(),
+        );
       }
     }
 

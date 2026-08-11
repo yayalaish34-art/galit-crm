@@ -205,8 +205,61 @@ export class PdfConvertService {
     return pdf;
   }
 
-  /** המרת DOCX (כבר עם תאריכים מוקפאים) ל-PDF דרך CloudConvert. */
-  private async cloudConvertDocxToPdf(docx: Buffer, fileName: string): Promise<Buffer> {
+  /**
+   * פורמטים שמותר וכדאי להמיר ל-PDF לפני שליחה ללקוח: משפחת Word על כל הגרסאות.
+   * ‎.doc‎ (Word הישן) הוא המקרה שנפל עד כה — דוחות רבים נשמרים בפורמט הזה, והבדיקה
+   * הקודמת בדקה ‎.docx‎ בלבד ולכן שלחה אותם כמסמך Word.
+   */
+  private static readonly CONVERTIBLE_EXT = new Set(['doc', 'docx', 'docm', 'dot', 'dotx', 'rtf', 'odt']);
+  private static readonly CONVERTIBLE_MIME = new Set([
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-word.document.macroenabled.12',
+    'application/rtf',
+    'text/rtf',
+    'application/vnd.oasis.opendocument.text',
+  ]);
+
+  static extensionOf(fileName: string): string {
+    return (fileName.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  }
+
+  /** האם הקובץ הוא מסמך Word שיש להמיר ל-PDF (PDF/תמונה מוחזרים false). */
+  static isConvertibleToPdf(fileName: string, mime?: string | null): boolean {
+    const ext = PdfConvertService.extensionOf(fileName);
+    if (ext === 'pdf') return false;
+    if (ext && PdfConvertService.CONVERTIBLE_EXT.has(ext)) return true;
+    const m = (mime || '').toLowerCase().split(';')[0].trim();
+    return !!m && PdfConvertService.CONVERTIBLE_MIME.has(m);
+  }
+
+  /**
+   * המרה ל-PDF של כל מסמך Word — ‎.docx‎ עובר במסלול הוותיק (הקפאת תאריכים לעברית +
+   * CloudConvert כגיבוי), וכל פורמט אחר (‎.doc‎ הישן, ‎.rtf‎, ‎.odt‎) מומר דרך OneDrive/Word,
+   * עם CloudConvert כגיבוי לפי סיומת הקובץ.
+   */
+  async anyWordToPdf(file: Buffer, fileName: string, mime?: string | null, userId?: string): Promise<Buffer> {
+    const ext = PdfConvertService.extensionOf(fileName) || (mime === 'application/msword' ? 'doc' : 'docx');
+    if (ext === 'docx' || ext === 'docm') return this.docxToPdf(file, fileName, userId);
+
+    let graphErr: any = null;
+    if (this.graphPdf.configured) {
+      try {
+        const pdf = await this.graphPdf.fileToPdf(userId ?? '', file, fileName, mime || undefined);
+        this.logger.log(`Converted "${fileName}" (${ext}) to PDF via Microsoft Graph`);
+        return pdf;
+      } catch (e: any) {
+        graphErr = e;
+        if (String(e?.message || '').includes(MicrosoftAuthService.NO_ONEDRIVE_FOR_PDF)) throw e;
+        this.logger.warn(`Graph PDF conversion failed for "${fileName}" — falling back to CloudConvert: ${e?.message || e}`);
+      }
+    }
+    if (!this.apiKey) throw this.pdfUnavailableError(userId, graphErr);
+    return this.cloudConvertDocxToPdf(file, fileName, ext);
+  }
+
+  /** המרת מסמך Word (DOCX כבר עם תאריכים מוקפאים) ל-PDF דרך CloudConvert. */
+  private async cloudConvertDocxToPdf(docx: Buffer, fileName: string, inputFormat = 'docx'): Promise<Buffer> {
     const authHeaders = { Authorization: `Bearer ${this.apiKey}` };
 
     // 1) יצירת job: import(upload) → convert(docx→pdf) → export(url)
@@ -219,7 +272,7 @@ export class PdfConvertService {
           'convert-file': {
             operation: 'convert',
             input: 'import-file',
-            input_format: 'docx',
+            input_format: inputFormat,
             output_format: 'pdf',
           },
           'export-file': { operation: 'export/url', input: 'convert-file' },
