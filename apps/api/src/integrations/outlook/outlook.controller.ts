@@ -10,6 +10,27 @@ import { OutlookImportService } from './outlook-import.service';
 import { OutlookAuthService } from './outlook-auth.service';
 import type { OutlookImportMetadata } from './dto/import-email.dto';
 
+/**
+ * משחזר שם קובץ עברי מצרופה של multipart.
+ *
+ * busboy (מתחת ל-multer) מפרש את שם הקובץ ב-Content-Disposition כ-latin1, ולכן
+ * שם עברי שנשלח ב-UTF-8 הגיע ל-DB כג'יבריש ("××¦×¢×ª ××××¨.docx"). כאן מקודדים
+ * את התווים חזרה לבייטים ומפענחים כ-UTF-8.
+ *
+ * שם שכבר תקין לא נפגע: ASCII עובר זהותית, ובכל שם שמכיל תו מעל U+00FF (כלומר
+ * כבר פוענח נכון) או שהפענוח שלו מייצר תו-החלפה — מחזירים את המקור כמו שהוא.
+ */
+function decodeMultipartFilename(name: string | undefined): string {
+  const raw = String(name || '');
+  if (!raw || /[^\x00-\xFF]/.test(raw)) return raw; // כבר Unicode תקין
+  try {
+    const decoded = Buffer.from(raw, 'latin1').toString('utf8');
+    return decoded.includes('�') ? raw : decoded;
+  } catch {
+    return raw;
+  }
+}
+
 @Controller('integrations/outlook')
 export class OutlookController {
   private readonly logger = new Logger(OutlookController.name);
@@ -53,7 +74,10 @@ export class OutlookController {
     },
   ) {
     const emailFile = files?.emailFile?.[0];
-    const attachmentFiles = files?.attachments ?? [];
+    const attachmentFiles = (files?.attachments ?? []).map((f) => ({
+      ...f,
+      originalname: decodeMultipartFilename(f.originalname),
+    }));
     const userId = req.user?.id;
     if (!userId) throw new UnauthorizedException('משתמש לא מזוהה');
 

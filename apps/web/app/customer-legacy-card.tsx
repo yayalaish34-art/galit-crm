@@ -878,7 +878,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'contacts', label: 'אנשי קשר' },
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
-  { key: 'requests', label: 'בקשות' },
+  { key: 'requests', label: 'מיילים' },
   { key: 'documents', label: 'מסמכים' },
   { key: 'quotes', label: 'הצעות מחיר' },
   { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
@@ -3617,7 +3617,7 @@ export function CustomerLegacyCard({
             <div className="rounded-lg border-2 border-blue-700 bg-white p-3 shadow-sm">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <p className="rounded border border-blue-200 bg-blue-50/80 px-2 py-2 text-right text-[11px] text-slate-800">
-                  בקשות שהגיעו במייל ל-Outlook שלך ולא נכנסו כליד — צרף אותן לכרטיס הלקוח. הצירוף שולף את 20 המיילים האחרונים מהתיבה שלך.
+                  מיילים שהגיעו ל-Outlook שלך ולא נכנסו כליד — צרף אותם לכרטיס הלקוח. הצירוף שולף את 20 המיילים האחרונים מהתיבה שלך. צרופות של מייל מתויק נשמרות בטאב &quot;מסמכים&quot;.
                 </p>
                 <button
                   type="button"
@@ -3625,7 +3625,7 @@ export function CustomerLegacyCard({
                   disabled={isNewMode || !customer?.id}
                   className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
                 >
-                  ✉️ צרף בקשה מ-Outlook
+                  ✉️ צרף מייל מ-Outlook
                 </button>
               </div>
 
@@ -3635,7 +3635,7 @@ export function CustomerLegacyCard({
                 <div className="p-4 text-center text-sm text-slate-500">טוען…</div>
               ) : emailRequests.length === 0 ? (
                 <div className="rounded border-2 border-dashed border-slate-200 py-8 text-center text-sm text-slate-400">
-                  אין בקשות מצורפות — לחץ &quot;צרף בקשה מ-Outlook&quot; כדי לצרף מייל.
+                  אין מיילים מצורפים — לחץ &quot;צרף מייל מ-Outlook&quot; כדי לצרף מייל.
                 </div>
               ) : (
                 <div className="space-y-2">
