@@ -56,13 +56,17 @@ export class CustomerReminderService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.TIMEOUT_MS);
     try {
+      // Content-Type נשלח רק כשיש גוף בפועל: הבוט (Fastify) מנתח את הגוף לפי
+      // הכותרת הזו, וב-DELETE ללא גוף הוא נפל על "Unexpected end of JSON input"
+      // והחזיר 500 — כלומר כפתור "ביטול התזכורת" לא עבד.
+      const hasBody = init.body !== undefined;
       const res = await fetch(`${base}${path}`, {
         method: init.method,
         headers: {
-          'Content-Type': 'application/json',
+          ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
           'x-internal-secret': secret,
         },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
+        body: hasBody ? JSON.stringify(init.body) : undefined,
         signal: controller.signal,
       });
 
