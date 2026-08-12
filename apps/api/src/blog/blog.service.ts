@@ -11,6 +11,39 @@ const DEFAULT_SITE_URL = 'https://galit.co.il';
 /** הקטגוריה "בלוגים" שנוצרה באתר. עמוד /blog מסונן אליה, ולכן כל פוסט חייב להשתייך אליה. */
 const DEFAULT_CATEGORY_ID = 226;
 
+/**
+ * נושאי הבלוג — כל אחד ממופה לקטגוריית וורדפרס שסקשן "בלוג" של עמוד הקטגוריה
+ * הכללי באתר שולף ממנה.
+ *
+ * למה זה נדרש: הקטגוריה "בלוגים" (226) מזינה רק את עמוד /blog. סקשן הבלוג
+ * בעמודי השירות הכלליים (galit.co.il/ראדון וכו') הוא ווידג'ט Posts של Elementor
+ * שמסונן לקטגוריית "הכל על X" — ולכן פוסט ששויך ל-226 בלבד פשוט לא מופיע שם.
+ * המיפוי הופק מקריאת ה-`_elementor_data` של עמודי הקטגוריה (ראו
+ * scripts/wp-all-categories-probe.cjs, שמאפשר להפיק אותו מחדש אם משהו משתנה).
+ */
+export const BLOG_TOPICS: ReadonlyArray<{
+  /** מזהה קטגוריית וורדפרס ("הכל על X") שסקשן הבלוג שולף ממנה. */
+  categoryId: number;
+  /** התווית שמוצגת למנהל בעורך. */
+  label: string;
+  /** עמוד הקטגוריה באתר שבו הפוסט יופיע. */
+  pageId: number;
+  pageLabel: string;
+}> = [
+  { categoryId: 99, label: 'ראדון', pageId: 3731, pageLabel: 'ראדון' },
+  { categoryId: 85, label: 'קרינה', pageId: 3727, pageLabel: 'קרינה' },
+  { categoryId: 102, label: 'איכות מים', pageId: 3737, pageLabel: 'מים' },
+  { categoryId: 101, label: 'קרקעות מזוהמות', pageId: 3735, pageLabel: 'קרקע' },
+  { categoryId: 100, label: 'רעש ואקוסטיקה', pageId: 3733, pageLabel: 'רעש' },
+  { categoryId: 103, label: 'איכות אוויר', pageId: 3739, pageLabel: 'אויר' },
+  { categoryId: 97, label: 'ריח', pageId: 3725, pageLabel: 'ריח' },
+  { categoryId: 104, label: 'אסבסט', pageId: 3741, pageLabel: 'אסבסט' },
+  { categoryId: 98, label: 'הדברה', pageId: 3729, pageLabel: 'הדברה' },
+  { categoryId: 170, label: 'בנייה ירוקה', pageId: 3723, pageLabel: 'בנייה ירוקה' },
+];
+
+const TOPIC_CATEGORY_IDS = new Set(BLOG_TOPICS.map((t) => t.categoryId));
+
 export type WpCredentials = {
   siteUrl: string;
   username: string;
@@ -25,6 +58,11 @@ export type BlogPostInput = {
   excerpt?: string;
   status?: 'draft' | 'publish';
   featuredMediaId?: number | null;
+  /**
+   * נושאי הבלוג שנבחרו — מזהי קטגוריה מתוך BLOG_TOPICS. קובעים באילו עמודי
+   * שירות כלליים הפוסט יופיע בסקשן "בלוג". undefined = אל תיגע בשיוך הקיים.
+   */
+  topicCategoryIds?: number[];
 };
 
 /** פריט בתור האישורים — טיוטה שה-AI ניסח לבד וממתינה למנהל. */
@@ -353,6 +391,7 @@ export class BlogService {
     link: string;
     featuredMediaId: number;
     featuredMediaUrl: string | null;
+    topicCategoryIds: number[];
   }> {
     const creds = await this.requireCreds();
     const p: any = await this.wpFetch(
@@ -369,7 +408,26 @@ export class BlogService {
       link: String(p.link || ''),
       featuredMediaId: Number(p.featured_media || 0),
       featuredMediaUrl: media?.source_url ? String(media.source_url) : null,
+      topicCategoryIds: this.sanitizeTopics((p?.categories || []).map(Number)),
     };
+  }
+
+  /** רשימת הנושאים לבחירה בעורך — ומה כל אחד עושה. */
+  listTopics(): Array<{ categoryId: number; label: string; pageLabel: string }> {
+    return BLOG_TOPICS.map((t) => ({ categoryId: t.categoryId, label: t.label, pageLabel: t.pageLabel }));
+  }
+
+  /** מסנן קלט נושאים לרשימה הידועה — כדי שלא נשייך פוסט לקטגוריה שרירותית. */
+  private sanitizeTopics(ids?: number[]): number[] {
+    return [...new Set((ids || []).map(Number).filter((n) => TOPIC_CATEGORY_IDS.has(n)))];
+  }
+
+  /**
+   * שיוך הקטגוריות של פוסט: תמיד "בלוגים" (כדי שיופיע ב-/blog) ובנוסף
+   * קטגוריות הנושא שנבחרו (כדי שיופיע גם בסקשן הבלוג של עמוד השירות הכללי).
+   */
+  private categoriesFor(creds: WpCredentials, topicIds?: number[]): number[] {
+    return [creds.categoryId, ...this.sanitizeTopics(topicIds)];
   }
 
   /** יצירת בלוג חדש. תמיד משויך לקטגוריה "בלוגים" כדי שיופיע בעמוד /blog. */
@@ -383,7 +441,7 @@ export class BlogService {
       content: this.textToBlocks(input.body || ''),
       excerpt: (input.excerpt || '').trim(),
       status: input.status === 'publish' ? 'publish' : 'draft',
-      categories: [creds.categoryId],
+      categories: this.categoriesFor(creds, input.topicCategoryIds),
     };
     if (input.featuredMediaId) payload.featured_media = Number(input.featuredMediaId);
 
@@ -413,13 +471,29 @@ export class BlogService {
       payload.featured_media = input.featuredMediaId ? Number(input.featuredMediaId) : 0;
     }
     // שמירה על השיוך לקטגוריה גם בעריכה — אחרת הפוסט "ייעלם" מעמוד הבלוגים.
-    payload.categories = [creds.categoryId];
+    // כשלא נשלחו נושאים משמרים את אלה שכבר על הפוסט, כדי שעריכה חלקית (למשל
+    // רק שינוי סטטוס) לא תוריד אותו מסקשן הבלוג של עמוד השירות.
+    const topicIds =
+      input.topicCategoryIds !== undefined
+        ? input.topicCategoryIds
+        : await this.currentTopicIds(creds, id);
+    payload.categories = this.categoriesFor(creds, topicIds);
 
     const p: any = await this.wpFetch(creds, `/wp/v2/posts/${id}`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });
     return { id: Number(p.id), link: String(p.link || ''), status: String(p.status || '') };
+  }
+
+  /** הנושאים שכבר משויכים לפוסט. שגיאה בקריאה לא מפילה עריכה — נחשב "אין". */
+  private async currentTopicIds(creds: WpCredentials, id: number): Promise<number[]> {
+    try {
+      const p: any = await this.wpFetch(creds, `/wp/v2/posts/${id}?context=edit`);
+      return this.sanitizeTopics((p?.categories || []).map(Number));
+    } catch {
+      return [];
+    }
   }
 
   /** מחיקה — לפח האשפה של וורדפרס (הפיך), לא מחיקה סופית. */

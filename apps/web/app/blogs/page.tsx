@@ -37,7 +37,12 @@ type Draft = {
   featuredMediaUrl: string | null;
   link: string;
   status: string;
+  /** נושאי הבלוג — קובעים באילו עמודי שירות כלליים הוא יופיע בסקשן "בלוג". */
+  topicCategoryIds: number[];
 };
+
+/** נושא בלוג = קטגוריה באתר + עמוד השירות הכללי שסקשן הבלוג שלו שולף ממנה. */
+type Topic = { categoryId: number; label: string; pageLabel: string };
 
 const EMPTY_DRAFT: Draft = {
   id: null,
@@ -48,6 +53,7 @@ const EMPTY_DRAFT: Draft = {
   featuredMediaUrl: null,
   link: '',
   status: 'draft',
+  topicCategoryIds: [],
 };
 
 function readSession(): Session | null {
@@ -91,6 +97,7 @@ export default function BlogsPage() {
   const [testResult, setTestResult] = useState('');
 
   const [posts, setPosts] = useState<PostSummary[]>([]);
+  const [topics, setTopics] = useState<Topic[]>([]);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [dirty, setDirty] = useState(false);
 
@@ -177,10 +184,16 @@ export default function BlogsPage() {
     loadSettings();
   }, [allowed, loadSettings]);
 
+  const loadTopics = useCallback(async () => {
+    const rows = await call('/blog/topics');
+    if (Array.isArray(rows)) setTopics(rows);
+  }, [call]);
+
   useEffect(() => {
     if (!allowed || !settings?.configured) return;
     loadPosts();
-  }, [allowed, settings?.configured, loadPosts]);
+    loadTopics();
+  }, [allowed, settings?.configured, loadPosts, loadTopics]);
 
   /* ── פתיחה ישירה של בלוג מתוך הפופ-אפ "ממתין לאישורך" (/blogs?post=123) ──
      רץ פעם אחת בלבד: אחרי שהמנהל פתח, עריכה או ניווט לא אמורים לגרור אותו
@@ -245,8 +258,19 @@ export default function BlogsPage() {
       featuredMediaUrl: p.featuredMediaUrl || null,
       link: p.link || '',
       status: p.status || 'draft',
+      topicCategoryIds: Array.isArray(p.topicCategoryIds) ? p.topicCategoryIds : [],
     });
     setDirty(false);
+  };
+
+  const toggleTopic = (categoryId: number) => {
+    setDraft((d) => ({
+      ...d,
+      topicCategoryIds: d.topicCategoryIds.includes(categoryId)
+        ? d.topicCategoryIds.filter((x) => x !== categoryId)
+        : [...d.topicCategoryIds, categoryId],
+    }));
+    setDirty(true);
   };
 
   const save = async (status: 'draft' | 'publish') => {
@@ -263,6 +287,7 @@ export default function BlogsPage() {
       excerpt: draft.excerpt,
       status,
       featuredMediaId: draft.featuredMediaId,
+      topicCategoryIds: draft.topicCategoryIds,
     };
     const res = draft.id
       ? await call(`/blog/posts/${draft.id}`, { method: 'POST', body: JSON.stringify(payload) })
@@ -782,6 +807,45 @@ export default function BlogsPage() {
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
+
+                {/* נושאים — קובעים באיזה עמוד שירות כללי הבלוג יופיע */}
+                <div>
+                  <span className="mb-1 block text-xs font-medium text-slate-600">
+                    נושאים{' '}
+                    <span className="text-slate-400">
+                      (הבלוג יופיע בסקשן &quot;בלוג&quot; של עמוד השירות הכללי הנבחר)
+                    </span>
+                  </span>
+                  {topics.length === 0 ? (
+                    <div className="text-xs text-slate-400">טוען נושאים…</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {topics.map((t) => {
+                        const on = draft.topicCategoryIds.includes(t.categoryId);
+                        return (
+                          <button
+                            key={t.categoryId}
+                            type="button"
+                            onClick={() => toggleTopic(t.categoryId)}
+                            title={`עמוד ${t.pageLabel} באתר`}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+                              on
+                                ? 'border-teal-600 bg-teal-600 text-white'
+                                : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {t.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {draft.topicCategoryIds.length === 0 && topics.length > 0 && (
+                    <p className="mt-1.5 text-[11px] text-amber-700">
+                      בלי נושא הבלוג יופיע רק בעמוד הבלוגים הכללי, ולא בעמוד השירות שלו.
+                    </p>
+                  )}
+                </div>
 
                 {/* תמונה ראשית */}
                 <div>

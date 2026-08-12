@@ -43,6 +43,12 @@ export class BlogController {
 
   // ── פוסטים ────────────────────────────────────────────────────────────────
 
+  /** נושאי הבלוג — כל נושא ממופה לעמוד השירות הכללי שבו הפוסט יופיע. */
+  @Get('topics')
+  topics() {
+    return this.blog.listTopics();
+  }
+
   @Get('posts')
   list(@Query('status') status?: string, @Query('search') search?: string) {
     return this.blog.listPosts({ status, search });
