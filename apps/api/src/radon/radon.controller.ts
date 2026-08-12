@@ -186,7 +186,7 @@ export class RadonController {
     return this.reminders.listForTask(taskId);
   }
 
-  /** מתזמן תזכורת ללקוח (ברירת מחדל: 90 יום). */
+  /** מתזמן תזכורת ללקוח — בעוד X ימים (ברירת מחדל 90) או בתאריך ושעה מדויקים (`dueAt`). */
   @Post('reminder')
   scheduleReminder(@Body() body: any, @Req() req: any) {
     return this.reminders.schedule({
@@ -194,6 +194,7 @@ export class RadonController {
       sku: body?.sku,
       radonJobId: body?.radonJobId ?? null,
       delayDays: body?.delayDays,
+      dueAt: body?.dueAt ?? null,
       messageText: body?.messageText ?? null,
       phoneOverride: body?.phoneOverride ?? null,
       actorUserId: req?.user?.id ?? null,

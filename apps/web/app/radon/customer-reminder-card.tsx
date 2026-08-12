@@ -47,6 +47,23 @@ function formatDate(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('he-IL');
 }
 
+/** תאריך ושעה מלאים — למועד שנבחר ידנית, שבו גם השעה משמעותית. */
+function formatDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.toLocaleDateString('he-IL')} ${d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+/** ערך התחלתי ל-datetime-local: עוד N ימים, בשעה 10:00, בשעון המקומי. */
+function defaultLocalDateTime(daysAhead: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + (daysAhead > 0 ? daysAhead : 1));
+  d.setHours(10, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /**
  * קורא גוף תשובה כ-JSON בלי להתרסק על גוף ריק — אותה מלכודת שהפילה את
  * טעינת זרימת הראדון: Nest משדר null כגוף ריק עם 200, ו-`res.json()` על גוף
@@ -82,6 +99,9 @@ export function CustomerReminderCard({
   const [history, setHistory] = useState<Reminder[]>([]);
   const [defaultDays, setDefaultDays] = useState(90);
   const [days, setDays] = useState(90);
+  /** 'days' = בעוד X ימים (ברירת מחדל) | 'exact' = תאריך ושעה שנבחרו ידנית */
+  const [mode, setMode] = useState<'days' | 'exact'>('days');
+  const [exactAt, setExactAt] = useState<string>('');
   const [preview, setPreview] = useState<string>('');
   const [recipient, setRecipient] = useState<{ phone: string | null; name: string | null } | null>(null);
   const [phoneOverride, setPhoneOverride] = useState('');
@@ -115,6 +135,10 @@ export function CustomerReminderCard({
         const data = await readJson(previewRes);
         setPreview(data?.messageText ?? '');
         setRecipient(data?.recipient ?? null);
+        // הטלפון של הלקוח נכנס לשדה עצמו (ולא רק כ-placeholder) כדי שיהיה גלוי
+        // וניתן לעריכה — המשתמש ביקש שהמספר "ייכנס אוטומטית".
+        const phone = String(data?.recipient?.phone ?? '').trim();
+        if (phone) setPhoneOverride((prev) => (prev.trim() ? prev : phone));
       }
     } catch {
       setError('לא ניתן לטעון את מצב התזכורת');
@@ -129,6 +153,15 @@ export function CustomerReminderCard({
   if (!isKit) return null;
 
   const schedule = async () => {
+    // במצב "תאריך ושעה" שולחים ISO מוחלט; ה-datetime-local הוא זמן מקומי, ו-new Date
+    // עליו מפרש אותו כמקומי — בדיוק מה שהמשתמש רואה על המסך.
+    let dueAtIso: string | null = null;
+    if (mode === 'exact') {
+      const d = new Date(exactAt);
+      if (Number.isNaN(d.getTime())) { setError('תאריך/שעה לא תקינים'); return; }
+      if (d.getTime() <= Date.now()) { setError('יש לבחור מועד עתידי'); return; }
+      dueAtIso = d.toISOString();
+    }
     setBusy(true);
     setError(null);
     try {
@@ -139,7 +172,8 @@ export function CustomerReminderCard({
           taskId,
           sku,
           radonJobId: radonJobId ?? null,
-          delayDays: days,
+          delayDays: mode === 'days' ? days : undefined,
+          dueAt: dueAtIso,
           phoneOverride: phoneOverride.trim() || null,
         }),
       });
@@ -213,7 +247,7 @@ export function CustomerReminderCard({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-emerald-800">
                   <CheckCircle2 className="h-4 w-4" />
-                  תזכורת מתוזמנת ל-{formatDate(live.dueAt)}
+                  תזכורת מתוזמנת ל-{formatDateTime(live.dueAt)}
                 </div>
                 <button
                   onClick={cancel}
@@ -238,18 +272,54 @@ export function CustomerReminderCard({
                 </div>
               )}
 
+              {/* בחירת מועד: ספירת ימים (ברירת המחדל, 90 לערכה) או תאריך ושעה מדויקים. */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {([
+                  { key: 'days' as const, label: 'בעוד כמה ימים' },
+                  { key: 'exact' as const, label: 'תאריך ושעה מדויקים' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => {
+                      setMode(opt.key);
+                      if (opt.key === 'exact' && !exactAt) setExactAt(defaultLocalDateTime(days || defaultDays));
+                    }}
+                    className={`rounded-full px-3 py-1 text-[11.5px] font-bold transition ${
+                      mode === opt.key
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
               <div className="flex flex-wrap items-end gap-2">
-                <label className="block">
-                  <span className="mb-1 block text-[11.5px] font-semibold text-emerald-800">בעוד (ימים)</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={days}
-                    onChange={(e) => setDays(Number(e.target.value) || defaultDays)}
-                    className="w-24 rounded-lg border border-emerald-200 px-2.5 py-1.5 text-[12.5px] text-slate-700 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
-                  />
-                </label>
+                {mode === 'days' ? (
+                  <label className="block">
+                    <span className="mb-1 block text-[11.5px] font-semibold text-emerald-800">בעוד (ימים)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={days}
+                      onChange={(e) => setDays(Number(e.target.value) || defaultDays)}
+                      className="w-24 rounded-lg border border-emerald-200 px-2.5 py-1.5 text-[12.5px] text-slate-700 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </label>
+                ) : (
+                  <label className="block">
+                    <span className="mb-1 block text-[11.5px] font-semibold text-emerald-800">מועד השליחה</span>
+                    <input
+                      type="datetime-local"
+                      value={exactAt}
+                      onChange={(e) => setExactAt(e.target.value)}
+                      className="rounded-lg border border-emerald-200 px-2.5 py-1.5 text-[12.5px] text-slate-700 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </label>
+                )}
 
                 <label className="block flex-1 min-w-[10rem]">
                   <span className="mb-1 block text-[11.5px] font-semibold text-emerald-800">
@@ -271,6 +341,13 @@ export function CustomerReminderCard({
                   {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bell className="h-3.5 w-3.5" />}
                   תזכור לקוח
                 </button>
+              </div>
+
+              {/* השולח רץ בראש כל שעה (דקה 07), ולכן מועד מדויק נשלח בהרצה הקרובה אחריו. */}
+              <div className="text-[11px] text-emerald-700/80">
+                {mode === 'exact'
+                  ? 'ההודעה תישלח בהרצה הקרובה אחרי המועד שנבחר (בדיקה בראש כל שעה).'
+                  : `ברירת המחדל לערכה היא ${defaultDays} ימים — אפשר לשנות.`}
               </div>
             </div>
           )}

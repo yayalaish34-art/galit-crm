@@ -152,6 +152,8 @@ export class CustomerReminderService {
     sku: string;
     radonJobId?: string | null;
     delayDays?: number;
+    /** מועד שליחה מדויק (ISO) — גובר על delayDays כשהמשתמש בחר תאריך ושעה. */
+    dueAt?: string | null;
     messageText?: string | null;
     actorUserId?: string | null;
     /** דריסה ידנית של הנמען, כשהמשתמש מתקן את המספר בממשק. */
@@ -181,6 +183,7 @@ export class CustomerReminderService {
         sku: input.sku,
         siteAddress: recipient.siteAddress,
         delayDays: input.delayDays,
+        dueAt: input.dueAt ?? null,
         messageText: input.messageText ?? null,
         createdByUserId: input.actorUserId ?? null,
       },

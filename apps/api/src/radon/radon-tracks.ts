@@ -49,9 +49,18 @@ export function isRadonTestSku(sku: string | null | undefined): boolean {
  */
 export const RADON_KIT_SKUS: readonly string[] = [SKU_SHORT_KIT, SKU_LONG_KIT];
 
-/** האם מדובר בערכה שהלקוח מחזיק ואמור להחזיר — הבדיקה שמאחורי כפתור התזכורת. */
+/**
+ * האם מדובר בערכה שהלקוח מחזיק ואמור להחזיר — הבדיקה שמאחורי כפתור התזכורת.
+ *
+ * `Task.productName` הוא לרוב קוד ("61"/"10000"), אך חלק מהמשימות נשמרות עם *שם*
+ * השירות בעברית ("ראדון – ערכה לבדיקת גז ראדון ארוכת טווח"). בדיקת קוד בלבד
+ * החמיצה אותן, ולכן הכפתור לא הופיע כלל במשימות האלה — מזהים גם לפי השם.
+ */
 export function isRadonKitSku(sku: string | null | undefined): boolean {
-  return RADON_KIT_SKUS.includes(String(sku ?? '').trim());
+  const v = String(sku ?? '').trim();
+  if (!v) return false;
+  if (RADON_KIT_SKUS.includes(v)) return true;
+  return /ראדון/.test(v) && /ערכ/.test(v);
 }
 
 // ─────────────────────────────────────────────────────────────
