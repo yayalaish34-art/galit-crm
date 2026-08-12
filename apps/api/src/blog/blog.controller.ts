@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { BlogService, type BlogPostInput } from './blog.service';
+import { BlogAutoDraftService } from './blog-auto-draft.service';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 
@@ -11,7 +12,10 @@ import { RolesGuard } from '../auth/roles.guard';
 @UseGuards(RolesGuard)
 @Roles('ADMIN', 'MANAGER')
 export class BlogController {
-  constructor(private readonly blog: BlogService) {}
+  constructor(
+    private readonly blog: BlogService,
+    private readonly autoDraft: BlogAutoDraftService,
+  ) {}
 
   // ── הגדרות חיבור ──────────────────────────────────────────────────────────
 
@@ -70,6 +74,35 @@ export class BlogController {
   @Post('media')
   upload(@Body() body: { dataUrl?: string; filename?: string }) {
     return this.blog.uploadMedia(body?.dataUrl || '', body?.filename || 'blog-image');
+  }
+
+  // ── ניסוח יומי אוטומטי + תור אישורים ──────────────────────────────────────
+
+  /** הטיוטות האוטומטיות שממתינות לאישור — מזין את הפופ-אפ בדשבורד. */
+  @Get('pending')
+  pending() {
+    return this.blog.listPendingApprovals();
+  }
+
+  /** סגירת הפופ-אפ בלי לפרסם — הטיוטה נשארת ברשימת הבלוגים. */
+  @Post('pending/:id/dismiss')
+  dismissPending(@Param('id') id: string) {
+    return this.blog.dismissApproval(Number(id));
+  }
+
+  /** הרצה ידנית של הניסוח היומי (בדיקה / "תנסח לי אחד עכשיו"). */
+  @Post('auto-draft/run')
+  runAutoDraft() {
+    return this.autoDraft.generate();
+  }
+
+  @Post('posts/:id/rewrite')
+  rewrite(@Param('id') _id: string, @Body() body: { title?: string; body?: string; instruction?: string }) {
+    return this.blog.aiRewrite({
+      title: body?.title || '',
+      body: body?.body || '',
+      instruction: body?.instruction,
+    });
   }
 
   @Post('ai-draft')

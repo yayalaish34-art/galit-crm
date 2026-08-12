@@ -3,6 +3,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../common/crypto.util';
 
 const SETTINGS_KEY = 'wordpress';
+/** מצב הניסוח האוטומטי היומי — תור האישורים + מתי רצה הפעם האחרונה. */
+const AUTO_KEY = 'blog_auto_draft';
 
 /** ברירות מחדל לאתר גלית — נשמרות בהגדרות ברגע שמנהל שומר פרטי גישה. */
 const DEFAULT_SITE_URL = 'https://galit.co.il';
@@ -23,6 +25,33 @@ export type BlogPostInput = {
   excerpt?: string;
   status?: 'draft' | 'publish';
   featuredMediaId?: number | null;
+};
+
+/** פריט בתור האישורים — טיוטה שה-AI ניסח לבד וממתינה למנהל. */
+export type PendingApproval = {
+  postId: number;
+  title: string;
+  topic: string;
+  createdAt: string;
+  link: string;
+};
+
+/** מצב הניסוח האוטומטי, כפי שהוא נשמר ב-SystemSetting. */
+type AutoState = {
+  /** התאריך (שעון ישראל, yyyy-mm-dd) שבו כבר נוצרה טיוטה — מונע כפילות באותו יום. */
+  lastRunDate: string;
+  /** מצביע לרוטציית הנושאים, כדי לא לחזור על אותו נושא יום אחרי יום. */
+  topicIndex: number;
+  pending: PendingApproval[];
+  /** מזהי פוסטים שהמנהל סגר את ההתראה עליהם — לא קופצים שוב. */
+  dismissed: number[];
+};
+
+const EMPTY_AUTO_STATE: AutoState = {
+  lastRunDate: '',
+  topicIndex: 0,
+  pending: [],
+  dismissed: [],
 };
 
 export type BlogPostSummary = {
@@ -153,6 +182,74 @@ export class BlogService {
     } catch (e: any) {
       return { ok: false, message: e?.message || 'החיבור לוורדפרס נכשל' };
     }
+  }
+
+  // ── תור האישורים של הניסוח האוטומטי ────────────────────────────────────────
+
+  async getAutoState(): Promise<AutoState> {
+    const row: any = await this.prisma.systemSetting
+      .findUnique({ where: { key: AUTO_KEY } })
+      .catch(() => null);
+    const v = (row?.value as any) || {};
+    return {
+      lastRunDate: String(v.lastRunDate || ''),
+      topicIndex: Number(v.topicIndex) || 0,
+      pending: Array.isArray(v.pending) ? v.pending : [],
+      dismissed: Array.isArray(v.dismissed) ? v.dismissed.map(Number) : [],
+    };
+  }
+
+  async saveAutoState(state: AutoState): Promise<void> {
+    // גוזמים את ההיסטוריה של ה-dismissed כדי שהשורה לא תתפח בלי גבול.
+    const value = { ...state, dismissed: state.dismissed.slice(-200) };
+    await this.prisma.systemSetting.upsert({
+      where: { key: AUTO_KEY },
+      create: { key: AUTO_KEY, value },
+      update: { value },
+    });
+  }
+
+  /**
+   * הטיוטות האוטומטיות שעדיין ממתינות לאישור — זה מה שמקפיץ את הפופ-אפ.
+   *
+   * וורדפרס הוא מקור האמת: כל פריט נבדק מולו, ומי שכבר פורסם / נמחק / נערך
+   * לסטטוס אחר יורד מהתור מעצמו. כך "פרסמתי את הבלוג" מכבה את ההתראה בלי
+   * שנצטרך לסנכרן שני מקומות, וגם מחיקה ישירות מוורדפרס לא משאירה רוח רפאים.
+   */
+  async listPendingApprovals(): Promise<PendingApproval[]> {
+    const state = await this.getAutoState();
+    if (!state.pending.length) return [];
+    const creds = await this.getCredentials();
+    if (!creds) return [];
+
+    const alive: PendingApproval[] = [];
+    for (const item of state.pending) {
+      if (state.dismissed.includes(Number(item.postId))) continue;
+      try {
+        const p: any = await this.wpFetch(creds, `/wp/v2/posts/${item.postId}?context=edit`);
+        if (String(p?.status) !== 'draft') continue; // פורסם / נזרק לפח — כבר לא ממתין
+        alive.push({ ...item, title: this.stripTags(p?.title?.raw || item.title), link: String(p?.link || item.link) });
+      } catch {
+        continue; // 404 או שגיאה — לא מחזיקים פריט מת בתור
+      }
+    }
+
+    // כתיבה חזרה רק אם משהו באמת ירד מהתור — שמירה מיותרת בכל poll היא בזבוז.
+    if (alive.length !== state.pending.filter((p) => !state.dismissed.includes(Number(p.postId))).length) {
+      await this.saveAutoState({ ...state, pending: alive }).catch(() => undefined);
+    }
+    return alive;
+  }
+
+  /** המנהל סגר את ההתראה — הטיוטה נשארת בוורדפרס, רק מפסיקה לקפוץ. */
+  async dismissApproval(postId: number): Promise<{ ok: true }> {
+    const state = await this.getAutoState();
+    await this.saveAutoState({
+      ...state,
+      pending: state.pending.filter((p) => Number(p.postId) !== Number(postId)),
+      dismissed: [...state.dismissed, Number(postId)],
+    });
+    return { ok: true };
   }
 
   // ── קריאה לוורדפרס ─────────────────────────────────────────────────────────
@@ -578,5 +675,33 @@ export class BlogService {
       excerpt: String(parsed?.excerpt || '').trim(),
       body: String(parsed?.body || '').trim(),
     };
+  }
+
+  /**
+   * "נסח מחדש" — לוקח בלוג קיים ומחזיר גרסה משופרת, עם הנחיה חופשית של המנהל
+   * ("קצר יותר", "פחות שיווקי", "הוסף פסקה על תקן ישראלי"). זה המסלול שמאפשר
+   * לתקן טיוטה אוטומטית בלי להתחיל מאפס ובלי לאבד את מה שכבר טוב בה.
+   */
+  async aiRewrite(input: {
+    title: string;
+    body: string;
+    instruction?: string;
+  }): Promise<{ title: string; excerpt: string; body: string }> {
+    const title = (input.title || '').trim();
+    const body = (input.body || '').trim();
+    if (!title && !body) throw new BadRequestException('אין תוכן לנסח מחדש');
+
+    const instruction = (input.instruction || '').trim();
+    return this.aiDraft({
+      topic: title || 'שיפור הבלוג המצורף',
+      notes: [
+        'זהו ניסוח מחדש של בלוג קיים — שמור על הנושא ועל העובדות שבו.',
+        instruction ? `הנחיית העורך: ${instruction}` : 'שפר ניסוח, זרימה ובהירות.',
+        '',
+        'הבלוג הקיים:',
+        `כותרת: ${title}`,
+        body,
+      ].join('\n'),
+    });
   }
 }

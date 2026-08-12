@@ -109,6 +109,14 @@ export default function BlogsPage() {
     notes: '',
   });
 
+  /** "נסח מחדש" — משפר טיוטה קיימת במקום להתחיל מאפס. */
+  const [rewriteOpen, setRewriteOpen] = useState(false);
+  const [rewriteBusy, setRewriteBusy] = useState(false);
+  const [rewriteInstruction, setRewriteInstruction] = useState('');
+  /** האם הגענו לכאן מהפופ-אפ של אישור טיוטה אוטומטית — משנה את הכותרת בעורך. */
+  const [fromApproval, setFromApproval] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
+
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -173,6 +181,20 @@ export default function BlogsPage() {
     if (!allowed || !settings?.configured) return;
     loadPosts();
   }, [allowed, settings?.configured, loadPosts]);
+
+  /* ── פתיחה ישירה של בלוג מתוך הפופ-אפ "ממתין לאישורך" (/blogs?post=123) ──
+     רץ פעם אחת בלבד: אחרי שהמנהל פתח, עריכה או ניווט לא אמורים לגרור אותו
+     בחזרה לאותה טיוטה. */
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (!allowed || !settings?.configured || deepLinkedRef.current) return;
+    const id = Number(new URLSearchParams(window.location.search).get('post'));
+    if (!id) return;
+    deepLinkedRef.current = true;
+    setFromApproval(true);
+    void openPost(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allowed, settings?.configured]);
 
   // ── פעולות ────────────────────────────────────────────────────────────────
 
@@ -313,6 +335,62 @@ export default function BlogsPage() {
     setNotice('נוצרה טיוטה — עברו עליה, ערכו, ורק אז פרסמו');
   };
 
+  /**
+   * ניסוח מחדש של מה שכרגע בעורך. שולח את הטקסט הנוכחי (כולל עריכות שטרם
+   * נשמרו) כדי שהשיפור יתבסס על מה שהמנהל רואה מולו, לא על הגרסה בשרת.
+   */
+  const runRewrite = async () => {
+    if (!draft.title.trim() && !draft.body.trim()) {
+      setErr('אין תוכן לנסח מחדש');
+      return;
+    }
+    setErr('');
+    setRewriteBusy(true);
+    const r = await call(`/blog/posts/${draft.id || 0}/rewrite`, {
+      method: 'POST',
+      body: JSON.stringify({
+        title: draft.title,
+        body: draft.body,
+        instruction: rewriteInstruction,
+      }),
+    });
+    setRewriteBusy(false);
+    if (!r) return;
+    setDraft((d) => ({
+      ...d,
+      title: r.title || d.title,
+      excerpt: r.excerpt || d.excerpt,
+      body: r.body || d.body,
+    }));
+    setDirty(true);
+    setRewriteOpen(false);
+    setRewriteInstruction('');
+    setNotice('נוסח מחדש — עברו על התוצאה לפני פרסום');
+  };
+
+  /**
+   * "נסח לי בלוג עכשיו" — מריץ ידנית את אותו ניסוח שרץ כל בוקר ב-09:00,
+   * ופותח את התוצאה בעורך. שימושי גם לבדיקה וגם כשרוצים בלוג נוסף באותו יום.
+   */
+  const runAutoDraftNow = async () => {
+    setErr('');
+    setNotice('');
+    setAutoBusy(true);
+    const r = await call('/blog/auto-draft/run', { method: 'POST' });
+    setAutoBusy(false);
+    if (!r) return;
+    if (!r.ok) {
+      setErr(r.message || 'הניסוח נכשל');
+      return;
+    }
+    await loadPosts();
+    if (r.postId) {
+      setFromApproval(true);
+      await openPost(Number(r.postId));
+    }
+    setNotice('נוצרה טיוטה חדשה — עברו עליה ופרסמו כשהיא מוכנה');
+  };
+
   const blogPageUrl = useMemo(
     () => `${(settings?.siteUrl || 'https://galit.co.il').replace(/\/$/, '')}/blog/`,
     [settings?.siteUrl],
@@ -384,6 +462,14 @@ export default function BlogsPage() {
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium hover:bg-slate-50"
             >
               הגדרות חיבור
+            </button>
+            <button
+              onClick={runAutoDraftNow}
+              disabled={autoBusy}
+              title="מנסח עכשיו בלוג בנושא הבא בתור — נשמר כטיוטה לאישורך"
+              className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100 disabled:opacity-50"
+            >
+              {autoBusy ? 'מנסח…' : '🤖 נסח לי בלוג עכשיו'}
             </button>
             <button
               onClick={openNew}
@@ -539,13 +625,61 @@ export default function BlogsPage() {
                     </span>
                   )}
                 </div>
-                <button
-                  onClick={() => setAiOpen((v) => !v)}
-                  className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100"
-                >
-                  ✨ נסח לי טיוטה
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {draft.id ? (
+                    <button
+                      onClick={() => setRewriteOpen((v) => !v)}
+                      className="rounded-xl border border-violet-300 bg-white px-4 py-2 text-sm font-bold text-violet-700 hover:bg-violet-50"
+                    >
+                      🔁 נסח מחדש
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() => setAiOpen((v) => !v)}
+                    className="rounded-xl border border-violet-300 bg-violet-50 px-4 py-2 text-sm font-bold text-violet-700 hover:bg-violet-100"
+                  >
+                    ✨ נסח לי טיוטה
+                  </button>
+                </div>
               </div>
+
+              {/* הגעה מהפופ-אפ: מסבירה למה הבלוג הזה פתוח ומה מצופה עכשיו */}
+              {fromApproval && draft.id && draft.status === 'draft' ? (
+                <div className="mb-4 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900">
+                  <span className="font-bold">טיוטה שנוצרה אוטומטית וממתינה לאישורך.</span>{' '}
+                  ערכו ידנית או לחצו «נסח מחדש», ואז «פרסם» כדי להעלות אותה לאתר. כל עוד לא
+                  פרסמתם — היא לא מוצגת לאף אחד.
+                </div>
+              ) : null}
+
+              {/* פאנל ניסוח מחדש */}
+              {rewriteOpen && draft.id ? (
+                <div className="mb-5 rounded-xl border border-violet-200 bg-white p-4">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-slate-600">
+                      מה לשנות? <span className="text-slate-400">(אפשר להשאיר ריק לשיפור כללי)</span>
+                    </span>
+                    <input
+                      value={rewriteInstruction}
+                      onChange={(e) => setRewriteInstruction(e.target.value)}
+                      placeholder="קצר יותר / פחות שיווקי / הוסף פסקה על התקן הישראלי"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={runRewrite}
+                      disabled={rewriteBusy}
+                      className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
+                    >
+                      {rewriteBusy ? 'מנסח…' : 'נסח מחדש'}
+                    </button>
+                    <span className="text-xs text-slate-500">
+                      התוצאה נכנסת לעורך — עדיין צריך לשמור או לפרסם.
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               {/* פאנל AI */}
               {aiOpen && (

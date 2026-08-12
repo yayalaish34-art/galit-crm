@@ -84,6 +84,7 @@ import {
   PlayCircle,
   Copy,
   Lightbulb,
+  Newspaper,
   Sparkles,
   MessagesSquare,
   Upload,
@@ -115,7 +116,7 @@ import {
 import { DataImportWizard } from '../data-import-wizard';
 import { FollowupImportPanel } from '../followup-import-panel';
 import { ChangePasswordSection } from '../change-password-section';
-import { isAdminRole } from '../lib/roles';
+import { isAdminRole, isManagerRole } from '../lib/roles';
 import { playNotifyChime, primeNotifySound } from '../lib/notify-sound';
 import {
   CrmLegacyTopNav,
@@ -26020,6 +26021,46 @@ export default function GalitCRMPrototype() {
     playNotifyChime();
   }, [leadToasts]);
 
+  // ── התראה צידית: בלוג שנוסח אוטומטית וממתין לאישור המנהל (גלובלי, בכל עמוד) ──
+  // אותה חוויה כמו "ליד חדש נכנס": פופ-אפ משמאל למעלה, צליל, וכפתור שפותח את
+  // המסך הרלוונטי. הטיוטה יושבת בוורדפרס כ-draft ולא נראית באתר עד שיפורסם.
+  const [blogToasts, setBlogToasts] = useState<{ postId: number; title: string }[]>([]);
+  const chimedBlogIdsRef = useRef<Set<number>>(new Set());
+  const dismissBlogToast = (postId: number) => {
+    setBlogToasts((prev) => prev.filter((x) => x.postId !== postId));
+    apiFetch(apiUrl(`/blog/pending/${postId}/dismiss`), { method: 'POST', authUser: currentUser }).catch(() => {});
+  };
+  useEffect(() => {
+    // בלוגים הם למנהלים בלבד — לעובד אחר ההתראה לא רלוונטית (וגם תיחסם ב-403).
+    if (!currentUser || !isManagerRole(currentUser.role)) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/blog/pending'), { authUser: currentUser });
+        if (!r.ok) return;
+        const list = await r.json();
+        if (cancelled || !Array.isArray(list)) return;
+        setBlogToasts((prev) => {
+          const next = list.map((p: any) => ({ postId: Number(p.postId), title: String(p.title || '') }));
+          // אין שינוי → אותו array, כדי לא לגרום ל-re-render ולצליל מיותר.
+          const same =
+            prev.length === next.length && prev.every((x, i) => x.postId === next[i].postId);
+          return same ? prev : next;
+        });
+      } catch { /* ignore */ }
+    };
+    void check();
+    // קצב איטי — טיוטה יומית אחת, אין למה למהר (בניגוד ללידים שנתפסים בין עובדים).
+    const t = window.setInterval(check, 120_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [currentUser?.id, currentUser?.role]);
+  useEffect(() => {
+    const hasNew = blogToasts.some((x) => !chimedBlogIdsRef.current.has(x.postId));
+    if (!hasNew) return;
+    for (const x of blogToasts) chimedBlogIdsRef.current.add(x.postId);
+    playNotifyChime();
+  }, [blogToasts]);
+
   // ── ניטור גלובלי: כשעובד אחר "תופס"/מעביר ליד, המשימה "ליד חדש נכנס" צריכה להיעלם ──
   // רץ בכל טאב (לא רק בטאב "משימות"), כדי שהמשימה תיעלם מיד לכל העובדים ולא רק אצל מי
   // שנמצא כרגע ברשימת המשימות. כשליד שהיה NEW אצל העובד נעלם מ-/incoming-leads (עבר
@@ -26129,6 +26170,27 @@ export default function GalitCRMPrototype() {
                 <button onClick={() => { if (lt.taskId) setPendingExpandTaskId(lt.taskId); navigateSafely('tasks'); void reloadTasks(); dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey); }} className="mt-2 rounded-lg bg-blue-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-blue-700">פתח את הליד</button>
               </div>
               <button onClick={() => dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── התראות צידיות: בלוג אוטומטי שממתין לאישור המנהל (גלובלי, בכל עמוד) ── */}
+      {blogToasts.length > 0 && (
+        <div
+          className="fixed z-[9999] flex flex-col gap-2"
+          style={{ top: 72 + (dueTaskToasts.length + leadToasts.length) * 132, left: 16 }}
+          dir="rtl"
+        >
+          {blogToasts.map((bt) => (
+            <div key={bt.postId} className="flex items-start gap-3 rounded-xl border border-violet-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#ede9fe' }}><Newspaper className="h-5 w-5 text-violet-600" /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-violet-900">בלוג ממתין לאישורך</div>
+                <div className="text-[12px] text-slate-600 line-clamp-2">{bt.title}</div>
+                <button onClick={() => { window.location.href = `/blogs?post=${bt.postId}`; }} className="mt-2 rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-violet-700">ערוך ופרסם</button>
+              </div>
+              <button onClick={() => dismissBlogToast(bt.postId)} className="text-slate-400 hover:text-slate-600" title="לא עכשיו"><X className="h-4 w-4" /></button>
             </div>
           ))}
         </div>
