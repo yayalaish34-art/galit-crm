@@ -178,6 +178,14 @@ function str(v: unknown): string {
   return v != null ? String(v) : '';
 }
 
+/** גודל קובץ לתצוגה קצרה ליד שם הצרופה. */
+function fmtFileSize(n?: number | null): string {
+  if (!n || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function customerEmailLooksValid(email: string): boolean {
   const t = email.trim();
   if (!t) return false;
@@ -994,8 +1002,10 @@ export function CustomerLegacyCard({
   const [customerQuotesLoading, setCustomerQuotesLoading] = useState(false);
   const [customerQuotesError, setCustomerQuotesError] = useState('');
 
-  // ── "בקשות" — מיילים מ-Outlook שתויקו לכרטיס הלקוח ──
-  type EmailRequestRow = { id: string; requestNumber?: number | null; source?: string | null; serviceTypeGuess?: string | null; subject?: string | null; fromName?: string | null; fromEmail?: string | null; receivedAt?: string | null; bodyText?: string | null; attachedByName?: string | null; createdAt?: string | null };
+  // ── "מיילים" — מיילים מ-Outlook שתויקו לכרטיס הלקוח ──
+  /** קובץ מצורף של מייל מתויק. ללא תוכן — הוא נשלף בלחיצה (ראה openEmailAttachment). */
+  type EmailAttachment = { id: string; name: string; mimeType?: string | null; sizeBytes?: number | null };
+  type EmailRequestRow = { id: string; requestNumber?: number | null; source?: string | null; serviceTypeGuess?: string | null; subject?: string | null; fromName?: string | null; fromEmail?: string | null; receivedAt?: string | null; bodyText?: string | null; attachedByName?: string | null; createdAt?: string | null; attachments?: EmailAttachment[] };
   type InboxMsg = { id: string; subject: string; fromName: string; fromEmail: string; receivedDateTime: string; bodyPreview: string; bodyText: string };
   const [emailRequests, setEmailRequests] = useState<EmailRequestRow[]>([]);
   const [emailRequestsLoading, setEmailRequestsLoading] = useState(false);
@@ -1005,6 +1015,48 @@ export function CustomerLegacyCard({
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState('');
   const [attachingId, setAttachingId] = useState<string | null>(null);
+  const [attachmentBusyId, setAttachmentBusyId] = useState<string | null>(null);
+
+  /**
+   * פותח קובץ מצורף של מייל מתויק.
+   *
+   * החלון נפתח *סינכרונית* לפני ה-fetch — window.open אחרי await כבר לא נחשב
+   * פעולת משתמש וחוסם הפופ-אפים בולע אותו בשקט (אותו לקח כמו בצפייה במסמכים).
+   * אם גם זה נחסם — נופלים להורדה רגילה, כדי שהלחיצה תמיד תעשה משהו.
+   */
+  const openEmailAttachment = useCallback(async (att: EmailAttachment) => {
+    if (!customer?.id) return;
+    setEmailRequestsError('');
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(
+        '<!doctype html><meta charset="utf-8"><title>טוען…</title>' +
+        '<body style="font-family:system-ui,sans-serif;direction:rtl;padding:24px;color:#334155">טוען את הקובץ…</body>',
+      );
+    }
+    setAttachmentBusyId(att.id);
+    try {
+      const res = await apiFetch(apiUrl(`/customers/${customer.id}/documents/${att.id}`), { authUser: currentUser });
+      if (!res.ok) throw new Error();
+      const doc = await res.json();
+      if (!doc?.dataBase64) throw new Error();
+      const url = URL.createObjectURL(base64ToBlob(doc.dataBase64, doc.mimeType || att.mimeType || 'application/octet-stream'));
+      if (win) {
+        win.location.href = url;
+      } else if (!window.open(url, '_blank')) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = att.name || 'attachment';
+        a.click();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      try { win?.close(); } catch { /* ignore */ }
+      setEmailRequestsError('פתיחת הקובץ המצורף נכשלה');
+    } finally {
+      setAttachmentBusyId(null);
+    }
+  }, [customer?.id, currentUser]);
 
   const loadEmailRequests = useCallback(async () => {
     if (!customer?.id || isNewMode || customer.id === '__new__') { setEmailRequests([]); return; }
@@ -3673,6 +3725,29 @@ export function CustomerLegacyCard({
                       {r.bodyText && (
                         <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-white p-2 text-[12px] leading-relaxed text-slate-700">
                           {r.bodyText}
+                        </div>
+                      )}
+                      {/* קבצים מצורפים של המייל — לחיצה פותחת את הקובץ עצמו */}
+                      {Array.isArray(r.attachments) && r.attachments.length > 0 && (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-slate-500">
+                            📎 {r.attachments.length} {r.attachments.length === 1 ? 'קובץ מצורף' : 'קבצים מצורפים'}:
+                          </span>
+                          {r.attachments.map((a) => (
+                            <button
+                              key={a.id}
+                              type="button"
+                              onClick={() => void openEmailAttachment(a)}
+                              disabled={attachmentBusyId === a.id}
+                              title={`פתח את ${a.name}${a.sizeBytes ? ` (${fmtFileSize(a.sizeBytes)})` : ''}`}
+                              className="max-w-[260px] shrink-0 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] font-medium text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+                            >
+                              <span className="block truncate">
+                                {attachmentBusyId === a.id ? 'פותח…' : a.name}
+                                {a.sizeBytes ? <span className="text-blue-400"> · {fmtFileSize(a.sizeBytes)}</span> : null}
+                              </span>
+                            </button>
+                          ))}
                         </div>
                       )}
                       {r.attachedByName && <div className="mt-1 text-[10px] text-slate-400">צורף ע&quot;י {r.attachedByName}</div>}

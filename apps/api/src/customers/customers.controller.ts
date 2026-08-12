@@ -152,6 +152,12 @@ export class CustomersController {
     return this.customersService.listCustomerDocuments(id, type);
   }
 
+  /** מסמך בודד עם התוכן — לצפייה בקובץ מצורף בלי למשוך את כל מסמכי הלקוח. */
+  @Get(':id/documents/:documentId')
+  getDocument(@Param('id') id: string, @Param('documentId') documentId: string) {
+    return this.customersService.getCustomerDocument(id, documentId);
+  }
+
   @Post(':id/documents')
   createDocument(@Param('id') id: string, @Body() body: CreateCustomerDocumentDto, @Req() req: any) {
     return this.customersService.createCustomerDocument(id, body, req.user?.id);

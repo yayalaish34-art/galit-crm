@@ -112,12 +112,56 @@ export class CustomersService {
     return this.graphMail.listRecentInbox(userId, top);
   }
 
-  /** רשימת הבקשות (מיילים שתויקו) של לקוח, מהחדש לישן. */
+  /**
+   * רשימת המיילים שתויקו לכרטיס, מהחדש לישן, כשלכל מייל מצורפות הצרופות שלו.
+   *
+   * הצרופות נשמרות כ-Document רגיל של הלקוח (filePath = `outlook-attachment:<requestId>`),
+   * ולכן הן גם מופיעות בטאב "מסמכים" — אבל בלי הקישור הזה אי אפשר לדעת מאיזה מייל
+   * הן הגיעו, והמייל נראה כאילו נשמר בלי הקבצים.
+   *
+   * dataBase64 *לא* נכלל כאן בכוונה: רשימה של מיילים עם קבצים מוטמעים מגיעה בקלות
+   * לעשרות MB ומפילה את ה-endpoint ב-RangeError. התוכן נשלף פר-קובץ בלחיצה.
+   */
   async listEmailRequests(customerId: string) {
-    return (this.prisma as any).customerEmailRequest.findMany({
+    const requests = await (this.prisma as any).customerEmailRequest.findMany({
       where: { customerId },
       orderBy: [{ receivedAt: 'desc' }, { createdAt: 'desc' }],
     });
+    if (!requests.length) return requests;
+
+    const docs = await this.prisma.document.findMany({
+      where: { customerId, filePath: { startsWith: 'outlook-attachment:' } },
+      select: { id: true, name: true, mimeType: true, sizeBytes: true, filePath: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const byRequest = new Map<string, Array<Record<string, unknown>>>();
+    for (const d of docs) {
+      const requestId = String(d.filePath || '').slice('outlook-attachment:'.length);
+      if (!requestId) continue;
+      if (!byRequest.has(requestId)) byRequest.set(requestId, []);
+      byRequest.get(requestId)!.push({
+        id: d.id,
+        name: d.name,
+        mimeType: d.mimeType,
+        sizeBytes: d.sizeBytes,
+      });
+    }
+
+    return requests.map((r: any) => ({ ...r, attachments: byRequest.get(r.id) || [] }));
+  }
+
+  /**
+   * מסמך בודד *עם* התוכן — לצפייה בקובץ מצורף בלי למשוך את כל מסמכי הלקוח.
+   * (רשימת המסמכים מחזירה dataBase64 לכל שורה; בלקוח עם עשרות קבצים זו הורדה
+   * של עשרות MB רק כדי לפתוח קובץ אחד.)
+   */
+  async getCustomerDocument(customerId: string, documentId: string) {
+    const doc = await this.prisma.document.findFirst({
+      where: { id: documentId, customerId },
+    });
+    if (!doc) throw new NotFoundException('המסמך לא נמצא');
+    return doc;
   }
 
   /**
