@@ -533,6 +533,7 @@ function useServiceCatalog(): {
   serviceCategories: ServiceCategory[];
   allServices: ServiceItem[];
   serviceBySku: Map<string, PickedService>;
+  categoryIdBySku: Map<string, string>;
 } {
   const [catalogRows, setCatalogRows] = useState<CatalogRow[]>([]);
   useEffect(() => {
@@ -600,7 +601,29 @@ function useServiceCatalog(): {
     return m;
   }, [serviceCategories]);
 
-  return { serviceCategories, allServices, serviceBySku };
+  /**
+   * מק"ט → מזהה המחלקה שבה הוא יושב **בעץ הממוזג**, לבחירת תבניות המיזוג.
+   * חייב לרוץ על הממוזג ולא על `SERVICE_CATEGORIES`: פריט שהועבר מחלקה ב"פריטים"
+   * היה מקבל כאן את המחלקה הישנה, והמסנן היה מציג את התבניות של המחלקה הלא נכונה.
+   */
+  const categoryIdBySku = useMemo<Map<string, string>>(() => {
+    const m = new Map<string, string>();
+    const add = (key: string | undefined, catId: string) => {
+      const k = (key ?? '').trim();
+      if (k && !m.has(k)) m.set(k, catId);
+    };
+    for (const cat of serviceCategories) {
+      for (const svc of cat.services) {
+        for (const leaf of svc.subServices?.length ? svc.subServices : [svc]) {
+          add(leaf.sku, cat.id);
+          add(leaf.id, cat.id);
+        }
+      }
+    }
+    return m;
+  }, [serviceCategories]);
+
+  return { serviceCategories, allServices, serviceBySku, categoryIdBySku };
 }
 
 function ServiceTreePicker({
@@ -1116,7 +1139,7 @@ export function QuoteNewScreen({
 }) {
   // אותו קטלוג שהבורר מציג — כולל פריטים שקיימים רק במחירון ה-DB. בלי זה,
   // שורה שנבחרה בבורר לא הייתה נמצאת כאן בחיפוש המחיר/השם.
-  const { allServices, serviceBySku } = useServiceCatalog();
+  const { allServices, serviceBySku, categoryIdBySku } = useServiceCatalog();
   const [tab, setTab] = useState<'פרטי תשלום' | 'מלל' | 'הערות' | 'שונות' | 'תחזית' | 'מסמכים מקושרים'>('תחזית');
   const [quoteNo, setQuoteNo] = useState('חדש');
   const [customer, setCustomer] = useState('');
@@ -1998,6 +2021,11 @@ export function QuoteNewScreen({
           subject,
           messageBody: body,
           includeSignature: f.includeSignature,
+          // אישור קריאה/מסירה (Microsoft Graph) — חייב להישלח גם כאן ולא רק
+          // במסלול "עם חתימה": זהו כפתור השליחה שמסומן כברירת מחדל, ובלעדיו
+          // הסימון של המשתמש בטופס פשוט לא הגיע לשרת.
+          requestReadReceipt: f.requestReadReceipt,
+          requestDeliveryReceipt: f.requestDeliveryReceipt,
           signatureId: f.signatureId || undefined,
           // בלי signToken → ההצעה מצורפת כקובץ (PDF). הפרופיל+רישיונות מצורף תמיד ע"י השרת.
           attachmentIds: attIds.length ? attIds : undefined,
@@ -3289,7 +3317,9 @@ export function QuoteNewScreen({
       // אין הצגה של תבניות "כלליות"/ללא קטגוריה כברירת מחדל — כל תבנית חייבת
       // קטגוריה מזוהה, וההצעה הגנרית (general) מוצגת רק כשיש פריט מקטגוריה כללית.
       const lineItemCats = new Set(
-        lineItems.map((li) => getSkuCategory(li.sku)).filter((c): c is string => c !== null)
+        lineItems
+          .map((li) => categoryIdBySku.get((li.sku || '').trim()) ?? getSkuCategory(li.sku))
+          .filter((c): c is string => c !== null)
       );
       // אין פריט מקוטלג → לא להציג אף תבנית (אי אפשר לדעת קטגוריה)
       const filteredRows = lineItemCats.size === 0
@@ -3708,24 +3738,35 @@ export function QuoteNewScreen({
 
     try {
       const user = getSessionUser();
-      // עדכון בשרת רק לקובץ שמור (attId + taskId). קובץ בליטה ללא attId — מקומי בלבד.
-      if (attId && taskId) {
-        const res = await apiFetch(apiUrl(`/tasks/${taskId}/attachments/${attId}`), {
+      let persisted = false;
+      // המשימה לשמירה בשרת = selfAttachTaskId ולא taskId. ה-prop `taskId` מגיע *רק*
+      // מפאנל המשימה; במסך שנפתח מכרטיס הלקוח / מרחב העבודה / /quotes/new הוא undefined,
+      // ולכן שינוי השם לא נשלח לשרת בכלל — הוא חי רק ב-renamedByAttId וחזר לשם הישן
+      // ברענון. ההורדה והמחיקה כבר משתמשות ב-selfAttachTaskId; רק השינוי-שם נשאר מאחור.
+      if (attId && selfAttachTaskId) {
+        const res = await apiFetch(apiUrl(`/tasks/${selfAttachTaskId}/attachments/${attId}`), {
           method: 'PATCH',
           authUser: user,
           body: JSON.stringify({ fileName: newName }),
         });
         if (!res.ok) { setStatusMsg('שינוי שם הקובץ נכשל'); setTimeout(() => setStatusMsg(''), 4000); return; }
+        persisted = true;
+        // רענון הרשימה משני המקורות, כדי שהשם החדש יגיע גם מהשרת ולא רק מהעקיפה המקומית.
+        reloadSelfAttachments();
+        onAttachmentSaved?.();
       }
-      // סנכרון מיידי של השם *ב-OneDrive* — גם כשהמסך נפתח בלי משימה (יש רק quoteId).
-      // best-effort: אם אין קובץ פעיל ב-OneDrive / אין הצעה שמורה — פשוט לא קורה כלום.
+      // שמירת השם על ההצעה עצמה (+ סנכרון ל-OneDrive אם יש שם קובץ פעיל). זה מה שגורם
+      // לשם הידני לשרוד גם כשהקובץ אינו קובץ מצורף של משימה, ולקובץ הנשלח לשאת אותו.
       const qid = quoteIdRef.current;
       if (qid) {
-        void apiFetch(apiUrl(`/quotes/${qid}/onedrive-rename`), {
-          method: 'POST',
-          authUser: user,
-          body: JSON.stringify({ fileName: newName }),
-        }).catch(() => { /* שקט — סנכרון OneDrive best-effort */ });
+        try {
+          const res = await apiFetch(apiUrl(`/quotes/${qid}/onedrive-rename`), {
+            method: 'POST',
+            authUser: user,
+            body: JSON.stringify({ fileName: newName }),
+          });
+          if (res.ok) persisted = true;
+        } catch { /* best-effort — לא מפיל את שינוי השם המקומי */ }
       }
       // שיקוף מיידי בתצוגה: גם על קבצי הסשן (mergedFiles) וגם על קבצי השרת (renamedByAttId).
       setMergedFiles((prev) => prev.map((m) => {
@@ -3733,8 +3774,9 @@ export function QuoteNewScreen({
         return isMatch ? { ...m, name: newName } : m;
       }));
       if (attId) setRenamedByAttId((prev) => ({ ...prev, [attId]: newName }));
-      setStatusMsg('שם הקובץ עודכן');
-      setTimeout(() => setStatusMsg(''), 3000);
+      // לא מכריזים "נשמר" על שינוי שלא הגיע לשרת — קובץ שטרם נשמר חוזר לשם הישן ברענון.
+      setStatusMsg(persisted ? 'שם הקובץ עודכן' : 'שם הקובץ עודכן בתצוגה בלבד — הקובץ עדיין לא נשמר בשרת');
+      setTimeout(() => setStatusMsg(''), persisted ? 3000 : 5000);
     } catch (e) {
       console.error('Failed to rename generated file:', e);
       setStatusMsg('שינוי שם הקובץ נכשל');

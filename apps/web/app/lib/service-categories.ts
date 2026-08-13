@@ -453,34 +453,42 @@ export type CatalogRow = {
   isActive?: boolean;
 };
 
-/** כל ה-SKU-ים שכבר מופיעים בעץ הקבוע. */
-function knownSkus(cats: ServiceCategory[]): Set<string> {
-  const out = new Set<string>();
-  for (const cat of cats) {
-    for (const svc of cat.services) {
-      if (svc.sku) out.add(svc.sku);
-      out.add(svc.id);
-      for (const sub of svc.subServices ?? []) {
-        if (sub.sku) out.add(sub.sku);
-        out.add(sub.id);
-      }
-    }
-  }
-  return out;
+/**
+ * ברירת המחדל של `billingUnit` במחירון. הזריעה כותבת אותה לכל פריט שאין לו יחידה
+ * מיוחדת (`leaf.unit || 'יחידה'`), ולכן היא נחשבת "בלי יחידה" ואינה מוצגת ליד המחיר —
+ * אחרת כל שירות בבורר היה מקבל "יחידה" מיותר אחרי המחיר.
+ */
+const DEFAULT_BILLING_UNIT = 'יחידה';
+
+/** המק"ט של עלה בעץ (sku, ובנפילה id). */
+function leafCode(s: ServiceItem): string {
+  return String(s.sku ?? s.id ?? '').trim();
 }
 
 /**
  * ממזג את שורות המחירון מה-DB לתוך עץ הקטגוריות הקבוע.
  *
  * **הבאג שזה מתקן:** `SERVICE_CATEGORIES` הוא קובץ קבוע שנצרב ל-bundle, ואילו
- * מסך ההגדרות → מחירון כותב ל-`QuoteItemCatalog` ב-DB. שני המקורות מעולם לא
+ * מסך ההגדרות → פריטים כותב ל-`QuoteItemCatalog` ב-DB. שני המקורות מעולם לא
  * דיברו: פריט שנוסף דרך הממשק נשמר כראוי — ופשוט לא הופיע בבורר השירותים,
  * כי הבורר רינדר את הקובץ הקבוע. מקרה אמיתי: "טיפול וליווי בקבלת היתר הפעלה
  * לשנאי – המשרד להגנת הסביבה" (10171) נשמר תחת קרינה / ELF היתר ולא נראה.
  *
- * הכיוון: הקובץ הקבוע נשאר **מקור הסדר** (סדר הקטגוריות, הקיבוץ לתתי-קבוצות),
- * וכל שורה פעילה שקיימת ב-DB ואינה בעץ מתווספת למקום הנכון לפיה
- * `serviceCategory` / `serviceSubType`. קטגוריה או תת-קבוצה שאינן קיימות בעץ
+ * **וגם:** *עדכון* פריט קיים לא השפיע בכלל. הגרסה הקודמת דילגה על כל מק"ט
+ * שכבר הופיע בעץ הקבוע, ולכן שינוי שם/מחיר/יחידה ב"פריטים" נשמר ב-DB אך
+ * הבורר המשיך להציג את הערך הצרוב — וממילא גם שם הקובץ של ההצעה
+ * (`"{לקוח} - הצעת מחיר ל: {שם הפריט הראשון}"`) נשאר עם השם הישן.
+ *
+ * הכיוון: הקובץ הקבוע הוא **מקור הסדר** (סדר הקטגוריות, הקיבוץ לתתי-קבוצות),
+ * והמחירון ב-DB הוא **מקור התוכן** של כל מק"ט שיש לו שורה:
+ *   • שם / מחיר / יחידת חיוב — נלקחים מהשורה ודורסים את הקבוע.
+ *   • `isActive=false` — הפריט יורד מהבורר לגמרי.
+ *   • `serviceCategory` / `serviceSubType` ששונו — הפריט עובר למחלקה/תת-הקבוצה
+ *     החדשה. ערך ריק = "לא ידוע" ולא "רמה עליונה", ולכן משאיר את הפריט במקומו
+ *     (יש שורות ותיקות בלי תת-קטגוריה, ולולא זה כל שירותי המיגון היו נשפכים
+ *     מהקבוצות שלהם החוצה).
+ *   • מק"ט ללא שורה במחירון — נשאר בדיוק כפי שהוא בקובץ הקבוע.
+ * שורה פעילה שאינה בעץ מתווספת למקום הנכון; קטגוריה או תת-קבוצה שאינן קיימות
  * נוצרות — אחרת פריט בקטגוריה חדשה היה נעלם בדיוק כמו קודם.
  *
  * טהור: אינו משנה את `SERVICE_CATEGORIES` אלא מחזיר עץ חדש.
@@ -496,44 +504,115 @@ export function mergeCatalogIntoCategories(rows: CatalogRow[] | null | undefined
   }));
   if (!rows?.length) return merged;
 
-  const seen = knownSkus(merged);
+  // מק"ט → שורת מחירון. הראשון מנצח (itemCode הוא UNIQUE ב-DB, אז זה רק ביטוח).
+  const rowByCode = new Map<string, CatalogRow>();
+  for (const row of rows) {
+    const code = String(row?.itemCode ?? '').trim();
+    if (code && !rowByCode.has(code)) rowByCode.set(code, row);
+  }
+
+  /** מק"טים שכבר טופלו במעבר על העץ — כדי לא להוסיף אותם שוב כשורה "חדשה". */
+  const handled = new Set<string>();
+  /** פריטים שהמחירון העביר למחלקה/תת-קבוצה אחרת — מוכנסים אחרי הפינוי. */
+  const relocated: Array<{ catName: string; subName: string; leaf: ServiceItem }> = [];
+
+  /**
+   * מחיל שורת מחירון על עלה קיים בעץ.
+   * מחזיר את העלה המעודכן, או `null` אם הוא יורד מהמקום הנוכחי (לא פעיל / עבר מחלקה).
+   */
+  const applyRow = (leaf: ServiceItem, catName: string, groupName: string): ServiceItem | null => {
+    const code = leafCode(leaf);
+    const row = code ? rowByCode.get(code) : undefined;
+    if (!row) return leaf; // אין שורה במחירון → הקבוע נשאר כפי שהוא
+    handled.add(code);
+    if (row.isActive === false) return null;
+
+    const unit = String(row.billingUnit ?? '').trim();
+    const updated: ServiceItem = {
+      ...leaf,
+      name: String(row.name ?? '').trim() || leaf.name,
+      price: row.basePrice == null ? leaf.price : Number(row.basePrice) || 0,
+      unit: unit && unit !== DEFAULT_BILLING_UNIT ? unit : leaf.unit,
+    };
+
+    // מיקום: רק ערך שקיים בשורה יכול להזיז. ריק = חוסר מידע, לא "רמה עליונה".
+    const wantCat = String(row.serviceCategory ?? '').trim();
+    const wantSub = String(row.serviceSubType ?? '').trim();
+    const movedCat = !!wantCat && wantCat !== catName;
+    const movedSub = !!wantSub && wantSub !== groupName;
+    if (movedCat || movedSub) {
+      relocated.push({ catName: wantCat || catName, subName: movedCat ? wantSub : wantSub || groupName, leaf: updated });
+      return null;
+    }
+    return updated;
+  };
+
+  // ── מעבר 1: המחירון מוחל על העץ הקבוע ──
+  for (const cat of merged) {
+    const services: ServiceItem[] = [];
+    for (const svc of cat.services) {
+      if (svc.subServices) {
+        const subs: ServiceItem[] = [];
+        for (const sub of svc.subServices) {
+          const next = applyRow(sub, cat.name, svc.name);
+          if (next) subs.push(next);
+        }
+        svc.subServices = subs;
+        services.push(svc);
+      } else {
+        const next = applyRow(svc, cat.name, '');
+        if (next) services.push(next);
+      }
+    }
+    cat.services = services;
+  }
+
+  /** משתל עלה במחלקה/תת-קבוצה לפי שם, ויוצר אותן אם אינן קיימות. */
+  const placeLeaf = (catName: string, subName: string, leaf: ServiceItem) => {
+    let cat = merged.find((c) => c.name === catName);
+    if (!cat) {
+      cat = { id: `db_${leaf.id}_cat`, name: catName, services: [] };
+      merged.push(cat);
+    }
+    if (!subName) {
+      cat.services.push(leaf);
+      return;
+    }
+    let group = cat.services.find((s) => s.name === subName && s.subServices);
+    if (!group) {
+      group = { id: `db_${catName}_${subName}`, name: subName, subServices: [] };
+      cat.services.push(group);
+    }
+    group.subServices = [...(group.subServices ?? []), leaf];
+  };
+
+  // ── מעבר 2: פריטים שהוזזו + שורות שאינן בעץ כלל ──
+  for (const move of relocated) placeLeaf(move.catName, move.subName, move.leaf);
 
   for (const row of rows) {
     if (row?.isActive === false) continue;
     const sku = String(row?.itemCode ?? '').trim();
     const name = String(row?.name ?? '').trim();
-    if (!sku || !name || seen.has(sku)) continue;
+    if (!sku || !name || handled.has(sku)) continue;
 
     const catName = String(row.serviceCategory ?? '').trim();
     if (!catName) continue; // בלי מחלקה אין לאן לשייך — נשאר רק בטבלת המחירון
 
-    const leaf: ServiceItem = {
+    const unit = String(row.billingUnit ?? '').trim();
+    placeLeaf(catName, String(row.serviceSubType ?? '').trim(), {
       id: sku,
       sku,
       name,
       price: Number(row.basePrice ?? 0) || 0,
-      ...(row.billingUnit ? { unit: String(row.billingUnit) } : {}),
-    };
-
-    let cat = merged.find((c) => c.name === catName);
-    if (!cat) {
-      cat = { id: `db_${sku}_cat`, name: catName, services: [] };
-      merged.push(cat);
-    }
-
-    const subName = String(row.serviceSubType ?? '').trim();
-    if (subName) {
-      let group = cat.services.find((s) => s.name === subName && s.subServices);
-      if (!group) {
-        group = { id: `db_${catName}_${subName}`, name: subName, subServices: [] };
-        cat.services.push(group);
-      }
-      group.subServices = [...(group.subServices ?? []), leaf];
-    } else {
-      cat.services.push(leaf);
-    }
-    seen.add(sku);
+      ...(unit && unit !== DEFAULT_BILLING_UNIT ? { unit } : {}),
+    });
+    handled.add(sku);
   }
 
-  return merged;
+  // תת-קבוצה שהתרוקנה (כל פריטיה כובו או הועברו) לא צריכה להישאר כקלף ריק בבורר,
+  // וכך גם מחלקה שנותרה בלי שירותים.
+  for (const cat of merged) {
+    cat.services = cat.services.filter((s) => !s.subServices || s.subServices.length > 0);
+  }
+  return merged.filter((c) => c.services.length > 0);
 }

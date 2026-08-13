@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Bell, BellOff, CheckCircle2, Loader2, MessageCircle } from 'lucide-react';
 import { apiFetch, apiUrl, type ApiAuthUser } from '../lib/api-base';
 import { isRadonKitSku } from '../lib/radon-tracks';
@@ -112,14 +112,29 @@ export function CustomerReminderCard({
 
   const isKit = isRadonKitSku(sku);
 
+  /* ── יציבות הטעינה ──
+     ההורה יוצר את authUser כאובייקט חדש בכל רינדור ({ id, role }), ובדשבורד רצים
+     כמה פולינגים של 20 שניות. כשה-useCallback תלה ב-authUser עצמו, הזהות שלו
+     השתנתה בכל רינדור, load נוצר מחדש, וה-useEffect שתלוי בו ירה שוב — כלומר
+     הטופס נטען מחדש כל כמה שניות ומחק מה שהמשתמש הקליד.
+     לכן: התלות היא במפתח טקסטואלי, והאובייקט עצמו נקרא מ-ref תמיד מעודכן. */
+  const authRef = useRef(authUser);
+  authRef.current = authUser;
+  const authKey = `${authUser?.id ?? ''}|${authUser?.role ?? ''}`;
+  /** נטען כבר פעם אחת? ברירות מחדל מהשרת נקבעות רק בטעינה הראשונה, כדי שרענון
+   *  ברקע לא ידרוס מספר ימים שהמשתמש שינה ידנית. */
+  const didInitRef = useRef(false);
+
   const load = useCallback(async () => {
     if (!isKit) { setLoading(false); return; }
-    setLoading(true);
+    // רק הטעינה הראשונה מציגה מסך טעינה; רענון ברקע לא מהבהב ולא מפרק את הטופס.
+    if (!didInitRef.current) setLoading(true);
     setError(null);
     try {
+      const auth = authRef.current;
       const [stateRes, previewRes] = await Promise.all([
-        apiFetch(apiUrl(`/radon/reminder/task/${taskId}`), { authUser }),
-        apiFetch(apiUrl(`/radon/reminder/preview/${taskId}`), { authUser }),
+        apiFetch(apiUrl(`/radon/reminder/task/${taskId}`), { authUser: auth }),
+        apiFetch(apiUrl(`/radon/reminder/preview/${taskId}`), { authUser: auth }),
       ]);
 
       if (stateRes.ok) {
@@ -128,7 +143,7 @@ export function CustomerReminderCard({
         setHistory(Array.isArray(data?.history) ? data.history : []);
         if (typeof data?.defaultDelayDays === 'number') {
           setDefaultDays(data.defaultDelayDays);
-          setDays(data.defaultDelayDays);
+          if (!didInitRef.current) setDays(data.defaultDelayDays);
         }
       }
       if (previewRes.ok) {
@@ -144,8 +159,9 @@ export function CustomerReminderCard({
       setError('לא ניתן לטעון את מצב התזכורת');
     } finally {
       setLoading(false);
+      didInitRef.current = true;
     }
-  }, [taskId, isKit, authUser]);
+  }, [taskId, isKit, authKey]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -336,12 +352,31 @@ export function CustomerReminderCard({
                 <button
                   onClick={schedule}
                   disabled={busy || !effectivePhone}
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                  title={
+                    !effectivePhone
+                      ? 'אין מספר טלפון — הזינו מספר בשדה "טלפון הלקוח" כדי לשלוח תזכורת'
+                      : 'תזמון תזכורת בוואטסאפ ללקוח'
+                  }
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bell className="h-3.5 w-3.5" />}
                   תזכור לקוח
                 </button>
               </div>
+
+              {/* ── למה הכפתור מושבת ──
+                  בלי ההסבר הזה הכפתור פשוט אפור והלחיצה לא עושה כלום, בלי שום רמז
+                  שהסיבה היא טלפון חסר. זה נקרא למשתמש כ"הכפתור לא עובד". */}
+              {!effectivePhone && (
+                <div className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11.5px] text-amber-800">
+                  <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    אין ללקוח מספר טלפון במערכת, ולכן לא ניתן לשלוח תזכורת. הזינו מספר בשדה
+                    <strong> «טלפון הלקוח» </strong>
+                    שמעל — הכפתור ייפתח מיד.
+                  </span>
+                </div>
+              )}
 
               {/* השולח רץ בראש כל שעה (דקה 07), ולכן מועד מדויק נשלח בהרצה הקרובה אחריו. */}
               <div className="text-[11px] text-emerald-700/80">
