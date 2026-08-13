@@ -129,14 +129,21 @@ export class QuoteMailService {
     // את השם *בפועל* של הקובץ ב-OneDrive — כדי שה-PDF הנשלח יישא את השם הידני, לא הישן.
     let baseDocName = buildQuoteDocName(quote);
     if (!signMode && quote.onedriveNameLocked) {
+      let manual = '';
       const ref = await this.getOnedriveRefSafe(quoteId);
       if (ref) {
         try {
           const item = await this.graphFiles.getItem(ref.ownerId, ref.itemId);
-          const nm = (item?.name || '').replace(/\.docx$/i, '').trim();
-          if (nm) baseDocName = nm;
-        } catch { /* נשאר עם השם הקנוני */ }
+          manual = (item?.name || '').replace(/\.docx$/i, '').trim();
+        } catch { /* נופלים לשם השמור */ }
       }
+      // אין קובץ ב-OneDrive (ההצעה מעולם לא נפתחה ב-Word) — השם הידני שמור על מסמך
+      // ההצעה עצמו (persistManualDocName). בלי הנפילה הזו המייל היה יוצא עם השם הקנוני
+      // הישן אף שהמשתמש שינה את שם הקובץ.
+      if (!manual) {
+        manual = String(quote.quoteDocuments?.[0]?.fileName || '').replace(/\.(docx|pdf)$/i, '').trim();
+      }
+      if (manual) baseDocName = manual;
     }
 
     // מצב חתימה: מצרפים את ה-PDF (עם כפתור החתימה מוטמע בפנים) — נשלף ישירות משירות החתימה.

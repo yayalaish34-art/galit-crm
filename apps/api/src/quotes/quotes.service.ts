@@ -630,11 +630,17 @@ export class QuotesService {
    * @returns true אם הקובץ שונה בפועל ב-OneDrive.
    */
   async renameOnedriveForQuote(quoteId: string, fileName: string): Promise<boolean> {
-    const desired = (fileName || '').replace(/\.docx$/i, '').trim();
+    const desired = (fileName || '').replace(/\.(docx|pdf)$/i, '').trim();
     if (!quoteId || !desired) return false;
 
+    // השם הידני נשמר תמיד על מסמך ההצעה עצמו — גם כשאין קובץ ב-OneDrive.
+    // עד כאן השם הידני חי *רק בתוך OneDrive*, ולכן הצעה שמעולם לא נפתחה ב-Word
+    // חזרה לשם הקנוני בכל פתיחה/מייל: המשתמש שינה שם, ראה "שם הקובץ עודכן",
+    // והקובץ שנשלח בפועל נשא את השם הישן.
+    await this.persistManualDocName(quoteId, desired);
+
     const ref = await this.getOnedriveRef(quoteId);
-    // אין קובץ פעיל ב-OneDrive (ההצעה מעולם לא נפתחה ב-Word) — אין מה לשנות שם.
+    // אין קובץ פעיל ב-OneDrive — השם כבר נשמר למעלה, אין מה לשנות שם *שם*.
     if (!ref) return false;
 
     try {
@@ -651,6 +657,58 @@ export class QuotesService {
     } catch (e: any) {
       this.logger.warn?.(`renameOnedriveForQuote failed (quote=${quoteId}): ${e?.message || e}`);
       return false;
+    }
+  }
+
+  /**
+   * שומר שם קובץ שנקבע ידנית על המסמך האחרון של ההצעה, ונועל את השם (`onedriveNameLocked`)
+   * כדי שהסנכרון הקנוני לא ידרוס אותו. `desiredBase` — ללא סיומת; הסיומת נשמרת מהמסמך.
+   * best-effort לגמרי: הצעה בלי מסמכים (טרם מוזגה) רק נועלת את השם.
+   */
+  private async persistManualDocName(quoteId: string, desiredBase: string): Promise<void> {
+    try {
+      const latest: any = await (this.prisma.quoteDocument as any).findFirst({
+        where: { quoteId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true, fileName: true, mimeType: true },
+      });
+      if (latest?.id) {
+        const isPdf = /\.pdf$/i.test(latest.fileName || '') || latest.mimeType === 'application/pdf';
+        await (this.prisma.quoteDocument as any).update({
+          where: { id: latest.id },
+          data: { fileName: `${desiredBase}${isPdf ? '.pdf' : '.docx'}` },
+        });
+      }
+    } catch (e: any) {
+      this.logger.warn?.(`persistManualDocName: doc rename failed (quote=${quoteId}): ${e?.message || e}`);
+    }
+    try {
+      await (this.prisma.quote.update as any)({
+        where: { id: quoteId },
+        data: { onedriveNameLocked: true },
+      });
+    } catch {
+      // עמודת onedriveNameLocked עדיין לא הוגרה — מיושר עם שאר הטיפול בעמודות OneDrive.
+    }
+  }
+
+  /**
+   * שם הבסיס (ללא סיומת) לקובץ ההצעה: השם הידני אם המשתמש נעל אותו, אחרת השם הקנוני.
+   * השם הידני נשמר על ה-QuoteDocument האחרון (ראה persistManualDocName).
+   */
+  private async resolveQuoteDocBaseName(quote: any): Promise<string> {
+    const canonical = buildQuoteDocName(quote);
+    if (!quote?.onedriveNameLocked || !quote?.id) return canonical;
+    try {
+      const latest: any = await (this.prisma.quoteDocument as any).findFirst({
+        where: { quoteId: quote.id },
+        orderBy: { createdAt: 'desc' },
+        select: { fileName: true },
+      });
+      const manual = String(latest?.fileName || '').replace(/\.(docx|pdf)$/i, '').trim();
+      return manual || canonical;
+    } catch {
+      return canonical;
     }
   }
 
@@ -746,6 +804,121 @@ export class QuotesService {
     return updated;
   }
 
+  /* ══════════════════════════════════════════════════════════════
+   *  עריכת טקסט בקבצים ממוזגים (טאב מנהל)
+   * ══════════════════════════════════════════════════════════════ */
+
+  /**
+   * רשימת הקבצים הממוזגים לעריכה. **בלי עמודת `data`** — היא bytea של מסמך שלם,
+   * ורשימה שכוללת אותה מפילה את ה-endpoint ב-500 (RangeError: Invalid string length).
+   * מחזיר DOCX בלבד: PDF אינו ניתן לעריכת טקסט בשיטה הזו.
+   */
+  async listMergedDocs(opts: { q?: string; take?: number } = {}) {
+    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const take = Math.min(Math.max(Number(opts.take) || 100, 1), 300);
+    const term = (opts.q || '').trim();
+
+    const rows: any[] = await (this.prisma.quoteDocument as any).findMany({
+      where: {
+        OR: [{ mimeType: DOCX_MIME }, { fileName: { endsWith: '.docx', mode: 'insensitive' } }],
+        ...(term
+          ? {
+              quote: {
+                OR: [
+                  { customerName: { contains: term, mode: 'insensitive' } },
+                  { customer: { name: { contains: term, mode: 'insensitive' } } },
+                  { quoteNumber: { contains: term, mode: 'insensitive' } },
+                ],
+              },
+            }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        quoteId: true,
+        fileName: true,
+        documentDescription: true,
+        createdAt: true,
+        quote: {
+          select: {
+            quoteNumber: true,
+            customerName: true,
+            customer: { select: { name: true } },
+          },
+        },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      quoteId: r.quoteId,
+      fileName: r.fileName || 'הצעת מחיר.docx',
+      description: r.documentDescription || null,
+      createdAt: r.createdAt,
+      quoteNumber: r.quote?.quoteNumber ?? null,
+      customerName: r.quote?.customerName || r.quote?.customer?.name || null,
+    }));
+  }
+
+  /** מסמך ממוזג בודד כולל הבייטים — לעריכה/הורדה. */
+  async getMergedDocById(docId: string) {
+    const doc: any = await (this.prisma.quoteDocument as any).findUnique({
+      where: { id: docId },
+      select: { id: true, quoteId: true, fileName: true, mimeType: true, data: true, filePath: true },
+    });
+    if (!doc) throw new NotFoundException('המסמך לא נמצא');
+    let bytes: Buffer | null = doc.data ? Buffer.from(doc.data) : null;
+    if (!bytes && doc.filePath) {
+      // רשומות ישנות שנשמרו לדיסק בלבד (לפני שהתוכן נשמר ב-DB).
+      const abs = path.resolve(process.cwd(), doc.filePath);
+      if (fs.existsSync(abs)) bytes = fs.readFileSync(abs);
+    }
+    if (!bytes) throw new BadRequestException('אין תוכן שמור למסמך הזה');
+    return { ...doc, bytes };
+  }
+
+  /**
+   * שומר גרסה ערוכה של מסמך ממוזג כ-**רשומה חדשה**, ולא דורס את המקור.
+   * זו הרשת ביטחון של הפיצ'ר: אם עריכה יצאה לא כמצופה, הגרסה הקודמת עדיין שם.
+   * הרשומה החדשה הופכת למסמך האחרון של ההצעה — ולכן היא זו שתישלח במייל.
+   */
+  async saveEditedMergedDoc(sourceDocId: string, bytes: Buffer, userId?: string) {
+    const source: any = await (this.prisma.quoteDocument as any).findUnique({
+      where: { id: sourceDocId },
+      select: { quoteId: true, fileName: true, mimeType: true, documentType: true },
+    });
+    if (!source) throw new NotFoundException('המסמך לא נמצא');
+
+    const created: any = await (this.prisma.quoteDocument as any).create({
+      data: {
+        quoteId: source.quoteId,
+        // שם הקובץ נשמר — כולל שם ידני שנקבע ב"קבצים שנוצרו".
+        fileName: source.fileName,
+        mimeType: source.mimeType,
+        documentType: source.documentType || 'MERGED_DOCX',
+        documentDescription: 'מסמך ממוזג (נערך ידנית)',
+        data: Uint8Array.from(bytes),
+        uploadedBy: userId || null,
+      },
+      select: { id: true, quoteId: true, fileName: true, createdAt: true },
+    });
+
+    // הגרסה הערוכה היא הקנונית מעכשיו → מנתקים קובץ OneDrive ישן, כדי ש"ערוך ב-Word"
+    // הבא יעלה את התוכן הערוך ולא גרסה שקדמה לעריכה. את נעילת השם *לא* משחררים —
+    // שם הקובץ לא השתנה כאן, רק התוכן.
+    try {
+      await (this.prisma.quote.update as any)({
+        where: { id: source.quoteId },
+        data: { onedriveItemId: null, onedriveWebUrl: null, onedriveOwnerId: null, onedriveAttachmentId: null },
+      });
+    } catch {
+      /* עמודות OneDrive עדיין לא הוגרו */
+    }
+    return created;
+  }
+
   /** Latest merged document for a quote (prefers DB-stored bytes). */
   async getLatestMergedDocument(
     quoteId: string,
@@ -798,10 +971,12 @@ export class QuotesService {
 
     // מיזוג DOCX חדש מחליף את הגרסה הקנונית → מבטלים הפניית OneDrive ישנה כך ש"ערוך ב-Word"
     // הבא יעלה את התוכן הממוזג העדכני (guarded — אם העמודות עדיין לא הוגרו, נתעלם).
+    // גם נעילת השם הידני משתחררת: השם הידני חל על הקובץ הקודם, והמסמך החדש נולד עם
+    // השם הקנוני — בדיוק כמו שקרה גם קודם, כשהשם הידני חי רק בתוך הקובץ ב-OneDrive.
     try {
       await (this.prisma.quote.update as any)({
         where: { id },
-        data: { onedriveItemId: null, onedriveWebUrl: null, onedriveOwnerId: null },
+        data: { onedriveItemId: null, onedriveWebUrl: null, onedriveOwnerId: null, onedriveNameLocked: false },
       });
     } catch {
       /* עמודות OneDrive עדיין לא קיימות ב-DB */
@@ -1035,7 +1210,9 @@ export class QuotesService {
       if (!bytes) {
         throw new BadRequestException('אין מסמך ממוזג להצעה זו — יש לבצע מיזוג קודם');
       }
-      fileName = this.buildQuoteFileName(quote);
+      // שם ידני שנקבע ב"קבצים שנוצרו" מנצח את השם הקנוני — אחרת ההעלאה הראשונה ל-OneDrive
+      // הייתה מחזירה את הקובץ לשם הקנוני מיד אחרי ששונה השם.
+      fileName = await this.resolveQuoteDocBaseName(quote);
     }
 
     let uploaded: { itemId: string; webUrl: string; webDavUrl: string; name: string };
