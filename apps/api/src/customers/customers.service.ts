@@ -3,6 +3,7 @@ import { DocumentType, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatIsraeliPhone, formatPhoneFields } from '../common/phone.util';
+import { ensurePrimaryContact } from '../common/primary-contact.util';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { extractSignedQuoteInfo } from './signed-quote-total.util';
 import type {
@@ -775,7 +776,18 @@ export class CustomersService {
     await this.assertClassificationCode(data?.type);
     // כל מסלולי היצירה האוטומטית (שלבי הצינור, בוט הוואטסאפ, המרת ליד, resolve)
     // מגיעים לכאן — לכן זו הנקודה שמבטיחה שטלפון נשמר עם מקף.
-    return this.prisma.customer.create({ data: formatPhoneFields({ ...(data || {}) }) });
+    const customer = await this.prisma.customer.create({ data: formatPhoneFields({ ...(data || {}) }) });
+    // ...ומאותה סיבה זו גם הנקודה שמבטיחה שלכל לקוח חדש יש איש קשר, ולא רק
+    // שדה contactName שטוח שאף מסך אחר לא יודע לקרוא.
+    await ensurePrimaryContact(this.prisma, customer.id, {
+      contactName: customer.contactName,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      city: customer.city,
+      address: customer.address,
+    });
+    return customer;
   }
 
   /**

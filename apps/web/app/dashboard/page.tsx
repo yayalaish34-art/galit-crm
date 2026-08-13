@@ -20,12 +20,13 @@ import {
   type QuoteTemplateLineItem,
 } from '../lib/quote-template-merge';
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
-import { SERVICE_CATEGORIES, flattenAllServices, getSubgroupIdForSku, getCategoryForSku, getCategoryName, getSubgroupNameForSku, mergeCatalogIntoCategories, type CatalogRow } from '../lib/service-categories';
+import { SERVICE_CATEGORIES, getSubgroupIdForSku, getCategoryForSku, getCategoryName, getSubgroupNameForSku, mergeCatalogIntoCategories, type CatalogRow } from '../lib/service-categories';
 import { isRadonTestSku, isRadonKitSku } from '../lib/radon-tracks';
 import { CustomerReminderCard } from '../radon/customer-reminder-card';
 import { formatIsraeliPhoneDisplay } from '../lib/phone-format';
 import { RadonFlowPanel } from '../radon/radon-flow-panel';
 import { CollectionPaymentTermsModal } from '../collection-payment-terms-modal';
+import { MergedDocsEditor } from '../settings/merged-docs-editor';
 import {
   Users,
   FileText,
@@ -13582,6 +13583,7 @@ function SettingsPage({
     | 'templates'
     | 'system'
     | 'catalog'
+    | 'mergedDocs'
     | 'import'
     | 'followupImport';
 
@@ -13602,6 +13604,8 @@ function SettingsPage({
     { key: 'statuses', label: 'סטטוסים', enabled: true },
     { key: 'targets', label: 'יעדים', enabled: true },
     { key: 'catalog', label: 'פריטים', enabled: true },
+    // עריכת טקסט בקבצי ההצעות הממוזגים — מנהל/אדמין בלבד (ה-API דורש MANAGER).
+    { key: 'mergedDocs', label: 'קבצים ממוזגים', enabled: canManageQuoteTemplates },
     { key: 'system', label: 'מערכת', enabled: true },
   ];
 
@@ -15524,6 +15528,8 @@ function SettingsPage({
         </Card>
       )}
 
+      {tab === 'mergedDocs' && <MergedDocsEditor currentUser={currentUser as never} />}
+
       {/* ניהול תבניות Word הוסתר ממסך הפריטים (לבקשת המנהל — "בלי קבצי Word").
           מנגנון התבניות והמיזוג עצמו נשאר פעיל במערכת; רק ה-UI כאן מוסתר. */}
       {false && tab === 'catalog' && (
@@ -17007,6 +17013,14 @@ function TasksPage({
   /* ערכת ראדון: אין זרימה ואין שאלון — הערכה נשלחת ללקוח והדבר היחיד שצריך
    * לעשות בביצוע הוא לתזמן לו תזכורת להחזיר אותה. זה המסמך היחיד שנפתח כאן. */
   const [radonReminderTask, setRadonReminderTask] = useState<{ taskId: string; sku: string } | null>(null);
+  /* authUser יציב לרכיבי הראדון.
+     קודם הוא נוצר inline ({ id, role }) בכל רינדור, ולכן קיבל זהות חדשה בכל פעם.
+     בדשבורד רצים כמה פולינגים של 20 שניות, וכל אחד מהם גרם לרכיבים לטעון את
+     עצמם מחדש — הטופס "נטען מחדש ללא סיבה" ומחק קלט שהוקלד. */
+  const radonAuthUser = useMemo(
+    () => (currentUser ? { id: currentUser.id, role: currentUser.role } : null),
+    [currentUser?.id, currentUser?.role],
+  );
 
   /* שלב הביצוע: מזהה המשימה שעבורה פתוח מודל "שלחתי כבר דוח" (בלי שליחת מייל) */
   const [alreadySentTaskId, setAlreadySentTaskId] = useState<string | null>(null);
@@ -17612,8 +17626,10 @@ function TasksPage({
       )?.id ?? null;
       if (!catId) continue;
       coachInitializedRef.current.add(t.id);
-      const allSvcs = flattenAllServices();
-      const svc = allSvcs.find((s: any) => s.sku === t.productName || s.id === t.productName);
+      // מהעץ הממוזג ולא מ-flattenAllServices הקבוע — אחרת שם שעודכן ב"פריטים"
+      // לא היה מגיע לכאן והמאמן היה מדבר על שם השירות הישן.
+      const allSvcs = serviceCategories.flatMap((c) => c.services.flatMap((s) => s.subServices ?? [s]));
+      const svc = allSvcs.find((s) => s.sku === t.productName || s.id === t.productName);
       const svcName: string = svc?.name || t.productName;
       const custName = t.leadName || t.customerName || 'הלקוח';
       const fixedServiceInfo = getServiceInfo(t.productName, catId);
@@ -18095,7 +18111,12 @@ function TasksPage({
     }
     // משימות שהושלמו/בוטלו לא מוצגות באף תצוגה — חוץ מהפילטר המפורש "הושלמו".
     // מסתיר גם status=DONE/CANCELLED וגם type=DONE (רשומות ישנות מהמסד).
-    if (quickFilter !== 'done') {
+    //
+    // חריג: "10 לקוחות אחרונים". התצוגה הזו עונה על השאלה "עם מי עבדתי עכשיו",
+    // ולכן היא חייבת להציג גם משימות שהושלמו. בלי החריג, ברגע שמסיימים תהליך
+    // המשימה הופכת ל-DONE, נעלמת מהרשימה, ואיתה נעלם הלקוח — למרות שהוא הלקוח
+    // האחרון שנגעת בו. זה אילץ להיכנס שוב לזרימה רק כדי שהלקוח יופיע.
+    if (quickFilter !== 'done' && quickFilter !== 'recentCustomers') {
       list = list.filter((t) => {
         const s = (t.status || '').toUpperCase();
         const tp = (t.type || '').toUpperCase();
@@ -18145,8 +18166,20 @@ function TasksPage({
       if (an === 0) return arrivedAt(b) - arrivedAt(a); // בתוכם: מה שהגיע אחרון — ראשון
       return 0;                            // שאר הסדר נשמר (מיון יציב)
     });
+    // ── "10 לקוחות אחרונים": מיון לפי סדר הכניסה ללקוח ולא לפי תאריך יעד ──
+    // הסדר של recentViewIds הוא מהחדש לישן, ולכן הלקוח שסיימת איתו עכשיו יופיע ראשון.
+    // בלי זה משימה שהושלמה נשארת ממוינת לפי dueDate ועלולה להיקבר באמצע הרשימה.
+    if (quickFilter === 'recentCustomers' && recentViewIds && recentViewIds.length > 0) {
+      const rank = new Map(recentViewIds.map((id, i) => [id, i]));
+      list.sort((a, b) => {
+        const ra = rank.get(a.customerId || '') ?? Number.MAX_SAFE_INTEGER;
+        const rb = rank.get(b.customerId || '') ?? Number.MAX_SAFE_INTEGER;
+        if (ra !== rb) return ra - rb;              // לקוח אחרון → ראשון
+        return arrivedAt(b) - arrivedAt(a);          // בתוך אותו לקוח: החדש ראשון
+      });
+    }
     return list;
-  }, [effectiveTasks, searchQ, onlyMine, filterWorkerId, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds]);
+  }, [effectiveTasks, searchQ, onlyMine, filterWorkerId, quickFilter, currentUser.id, todayStr, weekEndStr, recentCustomerIds, recentViewIds]);
 
   /* ── מאמן המכירות: "מידע על השירות" — תוכן קבוע (hard-coded) לפי קטגוריית השירות, ──
      לא נשלף מ-AI כדי להבטיח דיוק עובדתי ועקביות. רק "התנגדויות" ו"משפטי סגירה" נשלפים מה-AI. */
@@ -23022,46 +23055,6 @@ function TasksPage({
                               );
                             })()}
 
-                            {/* פאנל זרימת הראדון — z גבוה מפאנל המשימה המורחב (z-[9999]) */}
-                            {radonPanelTask?.taskId === t.id && (
-                              <RadonFlowPanel
-                                taskId={radonPanelTask.taskId}
-                                sku={radonPanelTask.sku}
-                                customerId={radonPanelTask.customerId}
-                                authUser={currentUser ? { id: currentUser.id, role: currentUser.role } : null}
-                                onClose={() => setRadonPanelTask(null)}
-                              />
-                            )}
-
-                            {/* ── ערכת ראדון: תזכורת החזרה ללקוח (הטופס היחיד בזרימת הערכה) ──
-                                z-[10050]: הפאנל המורחב הוא z-[9999]. */}
-                            {radonReminderTask?.taskId === t.id && (
-                              <div
-                                className="fixed inset-0 z-[10050] flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm"
-                                dir="rtl"
-                                onMouseDown={(e) => { if (e.target === e.currentTarget) setRadonReminderTask(null); }}
-                              >
-                                <div className="my-12 w-full max-w-lg rounded-2xl bg-white p-4 shadow-2xl">
-                                  <div className="mb-3 flex items-center justify-between">
-                                    <div className="text-[15px] font-bold text-slate-800">תזכורת החזרת ערכת ראדון</div>
-                                    <button
-                                      type="button"
-                                      onClick={() => setRadonReminderTask(null)}
-                                      className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                                      aria-label="סגור"
-                                    >
-                                      <X className="h-5 w-5" />
-                                    </button>
-                                  </div>
-                                  <CustomerReminderCard
-                                    taskId={radonReminderTask.taskId}
-                                    sku={radonReminderTask.sku}
-                                    authUser={currentUser ? { id: currentUser.id, role: currentUser.role } : null}
-                                  />
-                                </div>
-                              </div>
-                            )}
-
                             {alreadySentTaskId === t.id && (
                               <MarkReportSentModal
                                 open
@@ -23268,6 +23261,50 @@ function TasksPage({
 
                           </div>{/* end 3-col panel */}
 
+                          {/* ── מודאלי הראדון ──
+                              חייבים לשבת כאן, מחוץ לשרשרת התנאים של currentStep.
+                              הכפתורים שפותחים אותם ("תזכורת החזרת ערכה", "זרימת ראדון")
+                              מרונדרים בשלב 4 (תיאום), בעוד שהמודאלים ישבו קודם בתוך ענף
+                              שלב 5 (ביצוע) — ולכן לחיצה על הכפתור עדכנה את ה-state אבל
+                              שום דבר לא נפתח, כי המודאל כלל לא היה מורכב באותו שלב.
+                              שניהם overlay עם position:fixed, ולכן מיקומם ב-DOM לא משנה. */}
+                          {radonPanelTask?.taskId === t.id && (
+                            <RadonFlowPanel
+                              taskId={radonPanelTask.taskId}
+                              sku={radonPanelTask.sku}
+                              customerId={radonPanelTask.customerId}
+                              authUser={radonAuthUser}
+                              onClose={() => setRadonPanelTask(null)}
+                            />
+                          )}
+
+                          {/* z-[10050]: הפאנל המורחב הוא z-[9999]. */}
+                          {radonReminderTask?.taskId === t.id && (
+                            <div
+                              className="fixed inset-0 z-[10050] flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm"
+                              dir="rtl"
+                              onMouseDown={(e) => { if (e.target === e.currentTarget) setRadonReminderTask(null); }}
+                            >
+                              <div className="my-12 w-full max-w-lg rounded-2xl bg-white p-4 shadow-2xl">
+                                <div className="mb-3 flex items-center justify-between">
+                                  <div className="text-[15px] font-bold text-slate-800">תזכורת החזרת ערכת ראדון</div>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRadonReminderTask(null)}
+                                    className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                                    aria-label="סגור"
+                                  >
+                                    <X className="h-5 w-5" />
+                                  </button>
+                                </div>
+                                <CustomerReminderCard
+                                  taskId={radonReminderTask.taskId}
+                                  sku={radonReminderTask.sku}
+                                  authUser={radonAuthUser}
+                                />
+                              </div>
+                            </div>
+                          )}
 
                         </div>
                       </td>

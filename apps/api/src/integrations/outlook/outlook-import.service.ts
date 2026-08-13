@@ -167,6 +167,20 @@ export class OutlookImportService {
     const conversationId = (meta.conversationId || '').toString().trim() || null;
     const mailboxEmail = (meta.mailboxEmail || '').toString().trim().toLowerCase() || null;
 
+    // ── תיוק ידני: העובד בחר לקוח בחלון הצד — מאמתים שהוא קיים לפני הכל ──
+    const explicitCustomerId = (meta.customerId || '').toString().trim() || null;
+    let explicitCustomer: { id: string; name: string } | null = null;
+    if (explicitCustomerId) {
+      explicitCustomer = await this.prisma.customer.findUnique({
+        where: { id: explicitCustomerId },
+        select: { id: true, name: true },
+      });
+      if (!explicitCustomer) {
+        await this.audit({ userId, outlookItemId, internetMessageId, mailboxEmail, result: 'FAILED', errorCode: 'TARGET_CUSTOMER_NOT_FOUND' });
+        throw new BadRequestException('הלקוח שנבחר לא נמצא במערכת');
+      }
+    }
+
     if (!senderEmail && !subject) {
       await this.audit({ userId, outlookItemId, internetMessageId, mailboxEmail, result: 'FAILED', errorCode: 'NO_SENDER_OR_SUBJECT' });
       throw new BadRequestException('אין די פרטים מהמייל (חסר שולח ונושא)');
@@ -182,29 +196,40 @@ export class OutlookImportService {
         orderBy: { createdAt: 'asc' },
       });
       if (existing) {
+        // תיוק ידני של מייל שכבר תויק לכרטיס אחר (למשל ללקוח-המאגר) — מעבירים
+        // את הבקשה והמסמכים שלה לכרטיס הנבחר במקום להשאיר אותה במקום הלא-נכון.
+        if (explicitCustomer && existing.customerId !== explicitCustomer.id) {
+          const moved = await this.moveRequestToCustomer(existing, explicitCustomer.id);
+          await this.audit({ userId, requestId: existing.id, customerId: explicitCustomer.id, outlookItemId, internetMessageId, mailboxEmail, result: 'MOVED' });
+          return this.result(moved, false, `המייל כבר היה מתויק — הועבר לכרטיס "${explicitCustomer.name}"`, explicitCustomer.name, true);
+        }
         await this.audit({ userId, requestId: existing.id, customerId: existing.customerId, outlookItemId, internetMessageId, mailboxEmail, result: 'DUPLICATE' });
-        return this.result(existing, true, 'המייל כבר מתויק בבקשה זו');
+        return this.result(existing, true, 'המייל כבר מתויק בבקשה זו', explicitCustomer?.name);
       }
     }
 
     // ── שיוך לקוח ──
+    // תיוק ידני → הכרטיס שנבחר, בלי שיוך אוטומטי.
     // נכנס → לפי השולח. יוצא → לפי הנמענים (השולח הוא אנחנו).
     // בשני המקרים, אם לא נמצא — לקוח-מאגר.
     const isOutgoing = String(meta.direction || '').toUpperCase() === 'OUTGOING';
-    let customerId = isOutgoing
-      ? await this.findCustomerByRecipients(meta.to as any, meta.cc as any, mailboxEmail)
-      : senderEmail
-        ? await this.findCustomerBySenderEmail(senderEmail)
-        : null;
-    // נפילה-חזרה הפוכה: מייל יוצא ללא התאמה בנמענים עדיין עשוי להיות תשובה
-    // בשרשור שבו הלקוח הוא השולח המקורי, ולהפך.
-    if (!customerId && isOutgoing && senderEmail) {
-      customerId = await this.findCustomerBySenderEmail(senderEmail);
+    let customerId: string | null = explicitCustomer?.id ?? null;
+    if (!customerId) {
+      customerId = isOutgoing
+        ? await this.findCustomerByRecipients(meta.to as any, meta.cc as any, mailboxEmail)
+        : senderEmail
+          ? await this.findCustomerBySenderEmail(senderEmail)
+          : null;
+      // נפילה-חזרה הפוכה: מייל יוצא ללא התאמה בנמענים עדיין עשוי להיות תשובה
+      // בשרשור שבו הלקוח הוא השולח המקורי, ולהפך.
+      if (!customerId && isOutgoing && senderEmail) {
+        customerId = await this.findCustomerBySenderEmail(senderEmail);
+      }
+      if (!customerId && !isOutgoing) {
+        customerId = await this.findCustomerByRecipients(meta.to as any, meta.cc as any, mailboxEmail);
+      }
+      if (!customerId) customerId = await this.getCatchAllCustomerId();
     }
-    if (!customerId && !isOutgoing) {
-      customerId = await this.findCustomerByRecipients(meta.to as any, meta.cc as any, mailboxEmail);
-    }
-    if (!customerId) customerId = await this.getCatchAllCustomerId();
 
     // ── גוף המייל: HTML מנוקה + טקסט ──
     const bodyHtml = this.sanitizeHtml((meta.bodyHtml || '').toString());
@@ -329,16 +354,45 @@ export class OutlookImportService {
     }
 
     await this.audit({ userId, requestId: request.id, customerId, outlookItemId, internetMessageId, mailboxEmail, result: 'CREATED' });
-    return this.result(request, false, 'המייל נוסף בהצלחה לבקשות');
+    return this.result(
+      request,
+      false,
+      explicitCustomer ? `המייל תויק לכרטיס "${explicitCustomer.name}"` : 'המייל נוסף בהצלחה לבקשות',
+      explicitCustomer?.name,
+    );
   }
 
-  private result(r: any, duplicate: boolean, message: string): OutlookImportResult {
+  /**
+   * מעביר בקשה קיימת לכרטיס לקוח אחר, כולל המסמכים שנוצרו ממנה (ה-EML
+   * והצרופות מזוהים לפי filePath של הבקשה). כשל בהעברת המסמכים לא מפיל —
+   * הבקשה עצמה כבר בכרטיס הנכון.
+   */
+  private async moveRequestToCustomer(request: any, customerId: string): Promise<any> {
+    const updated = await (this.prisma as any).customerEmailRequest.update({
+      where: { id: request.id },
+      data: { customerId },
+    });
+    try {
+      await this.prisma.document.updateMany({
+        where: { filePath: { in: [`outlook-eml:${request.id}`, `outlook-attachment:${request.id}`] } },
+        data: { customerId },
+      });
+    } catch (e: any) {
+      this.logger.warn(`move documents failed for ${request.id}: ${e?.message || e}`);
+    }
+    return updated;
+  }
+
+  private result(r: any, duplicate: boolean, message: string, customerName?: string, moved?: boolean): OutlookImportResult {
     return {
       success: true,
       duplicate,
+      moved: !!moved,
       requestId: r.id,
       requestNumber: `REQ-${r.requestNumber}`,
       requestUrl: this.requestUrl(r.customerId),
+      customerId: r.customerId,
+      customerName: customerName || undefined,
       message,
     };
   }

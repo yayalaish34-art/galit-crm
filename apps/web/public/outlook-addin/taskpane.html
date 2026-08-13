@@ -30,6 +30,15 @@
     .field input { width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; font-size: 14px; direction: ltr; text-align: left; }
     .err { color: #dc2626; font-size: 12px; margin-top: 6px; }
     .logout { background: none; border: 0; color: #94a3b8; font-size: 11px; text-decoration: underline; cursor: pointer; padding: 0; width: auto; margin-top: 10px; }
+    /* חיפוש לקוח לתיוק ידני */
+    #custSearch { direction: rtl; text-align: right; }
+    .results { max-height: 240px; overflow-y: auto; }
+    .result-row { padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; cursor: pointer; background: #fff; }
+    .result-row:hover { border-color: #0d5c63; }
+    .result-row.selected { border-color: #0d5c63; background: #e6f7f8; }
+    .result-name { font-size: 14px; font-weight: 700; }
+    .result-sub { font-size: 12px; color: #64748b; word-break: break-word; }
+    .results-empty { font-size: 12px; color: #94a3b8; text-align: center; padding: 8px 0; }
   </style>
 </head>
 <body>
@@ -61,6 +70,17 @@
     </div>
 
     <button id="addBtn" class="primary hidden">הוספה ל-CRM</button>
+
+    <!-- תיוק ידני: חיפוש לקוח ותיוק המייל (כולל צרופות) לכרטיס שנבחר -->
+    <div id="searchCard" class="card hidden">
+      <div class="label" style="margin-bottom:6px;">או תיוק לכרטיס לקוח מסוים</div>
+      <div class="field" style="margin-bottom:6px;">
+        <input id="custSearch" type="search" placeholder="חיפוש לפי שם / טלפון / מייל / ח.פ…" autocomplete="off" />
+      </div>
+      <div id="custResults" class="results"></div>
+      <button id="fileToBtn" class="primary hidden" style="margin-top:6px;"></button>
+    </div>
+
     <div id="result" class="msg"></div>
     <button id="logoutBtn" class="logout hidden">התנתקות</button>
   </div>

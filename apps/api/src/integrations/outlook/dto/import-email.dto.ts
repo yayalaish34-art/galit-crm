@@ -15,6 +15,12 @@ export interface OutlookImportMetadata {
    * הכיוון קובע לפי מי משויכת הבקשה לכרטיס לקוח.
    */
   direction?: 'INCOMING' | 'OUTGOING';
+  /**
+   * תיוק ידני: מזהה לקוח שהעובד בחר בחלון הצד (חיפוש לפי שם/טלפון/מייל).
+   * כשקיים — עוקף את השיוך האוטומטי; אם המייל כבר תויק לכרטיס אחר, הבקשה
+   * (והמסמכים שלה) מועברת לכרטיס הנבחר במקום להחזיר כפילות.
+   */
+  customerId?: string | null;
   subject?: string;
   senderName?: string | null;
   senderEmail?: string | null;
@@ -36,9 +42,14 @@ export interface OutlookImportMetadata {
 export interface OutlookImportResult {
   success: boolean;
   duplicate?: boolean;
+  /** true כשבקשה קיימת הועברה לכרטיס אחר בעקבות תיוק ידני. */
+  moved?: boolean;
   requestId?: string;
   requestNumber?: string;
   requestUrl?: string;
+  customerId?: string;
+  /** שם הלקוח שאליו תויקה הבקשה (נשלח רק בתיוק ידני — לתצוגה בתוסף). */
+  customerName?: string;
   message?: string;
   errorCode?: string;
 }

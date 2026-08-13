@@ -33,9 +33,9 @@ describe('OutlookImportService', () => {
 
   beforeEach(async () => {
     prisma = {
-      customer: { findFirst: jest.fn(), create: jest.fn() },
+      customer: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn() },
       customerContact: { findFirst: jest.fn() },
-      document: { create: jest.fn().mockResolvedValue({ id: 'doc-1' }) },
+      document: { create: jest.fn().mockResolvedValue({ id: 'doc-1' }), updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       user: { findUnique: jest.fn() },
       customerEmailRequest: {
         findFirst: jest.fn(),
@@ -132,5 +132,48 @@ describe('OutlookImportService', () => {
   it('rejects an email with neither sender nor subject', async () => {
     const meta = { ...baseMeta(), senderEmail: '', subject: '' };
     await expect(service.importEmail('user-1', 'עובד', meta, null)).rejects.toThrow();
+  });
+
+  it('files to the explicitly chosen customer, skipping auto-matching', async () => {
+    prisma.customer.findUnique.mockResolvedValue({ id: 'chosen-1', name: 'חברת הבדיקות' });
+    prisma.customerEmailRequest.findFirst.mockResolvedValue(null);
+    prisma.customerEmailRequest.create.mockResolvedValue({ id: 'req-5', requestNumber: 104, customerId: 'chosen-1' });
+
+    const meta = { ...baseMeta(), customerId: 'chosen-1' };
+    const res = await service.importEmail('user-1', 'עובד', meta, null);
+
+    expect(res.success).toBe(true);
+    expect(res.customerId).toBe('chosen-1');
+    expect(res.customerName).toBe('חברת הבדיקות');
+    expect(prisma.customerEmailRequest.create.mock.calls[0][0].data.customerId).toBe('chosen-1');
+    // auto-matching (customer.findFirst by sender email) skipped entirely
+    expect(prisma.customer.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('moves an already-filed request (and its documents) to the explicitly chosen customer', async () => {
+    prisma.customer.findUnique.mockResolvedValue({ id: 'chosen-1', name: 'חברת הבדיקות' });
+    prisma.customerEmailRequest.findFirst.mockResolvedValue({ id: 'req-existing', requestNumber: 5, customerId: 'catch-all-1' });
+    prisma.customerEmailRequest.update.mockResolvedValue({ id: 'req-existing', requestNumber: 5, customerId: 'chosen-1' });
+
+    const meta = { ...baseMeta(), customerId: 'chosen-1' };
+    const res = await service.importEmail('user-1', 'עובד', meta, null);
+
+    expect(res.success).toBe(true);
+    expect(res.moved).toBe(true);
+    expect(res.customerId).toBe('chosen-1');
+    expect(prisma.customerEmailRequest.create).not.toHaveBeenCalled();
+    expect(prisma.customerEmailRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'req-existing' }, data: { customerId: 'chosen-1' } }),
+    );
+    expect(prisma.document.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { customerId: 'chosen-1' } }),
+    );
+  });
+
+  it('rejects when the explicitly chosen customer does not exist', async () => {
+    prisma.customer.findUnique.mockResolvedValue(null);
+    const meta = { ...baseMeta(), customerId: 'missing-1' };
+    await expect(service.importEmail('user-1', 'עובד', meta, null)).rejects.toThrow('הלקוח שנבחר לא נמצא במערכת');
+    expect(prisma.customerEmailRequest.create).not.toHaveBeenCalled();
   });
 });

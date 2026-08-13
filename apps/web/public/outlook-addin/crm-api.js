@@ -63,6 +63,29 @@
   };
 
   /**
+   * חיפוש לקוחות לתיוק ידני — שם / טלפון (גם עם מקפים) / מייל / ח.פ / עיר.
+   * עטיפה של GET /customers/search (אותו חיפוש כמו במערכת). מחזיר מערך לקוחות,
+   * כל אחד עם matchedContacts של אנשי הקשר שתאמו.
+   */
+  window.MYCRM.searchCustomers = async function searchCustomers(q, limit) {
+    var token = await window.MYCRM.ensureCrmToken();
+    var url = apiUrl('/customers/search') + '?q=' + encodeURIComponent(q || '') + '&limit=' + (limit || 8);
+
+    var res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (res.status === 401) {
+      // הטוקן פג — מנקים ומנסים פעם אחת נוספת.
+      clearStoredToken();
+      token = await window.MYCRM.ensureCrmToken();
+      res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    }
+    if (!res.ok) throw new Error('SERVER_UNAVAILABLE');
+
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    return (data && data.customers) || [];
+  };
+
+  /**
    * שולח את המייל ל-CRM (multipart). מחזיר את גוף התשובה.
    * attachments — [{name, blob}]; כל אחת נשמרת כמסמך נפרד בכרטיס הלקוח.
    */

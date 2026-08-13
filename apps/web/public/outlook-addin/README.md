@@ -40,9 +40,16 @@ apps/api/src/integrations/outlook/
    - רושם `OutlookImportAudit`.
 4. מוצגת הודעה: **"המייל נוסף לבקשה REQ-1234"** + קישור לפתיחתה.
 
+## תיוק ידני — חיפוש לקוח
+בחלון הצד ("פתיחת My CRM") יש, מתחת לכפתור ההוספה האוטומטית, חיפוש לקוח:
+- חיפוש לפי **שם / טלפון (גם עם מקפים) / מייל / ח.פ / עיר / איש קשר** — אותו חיפוש כמו במערכת (`GET /customers/search`).
+- בחירת לקוח מהתוצאות → כפתור **"תייק את המייל לכרטיס: ..."** מתייק את המייל, ה-EML וכל הצרופות ישירות לכרטיס שנבחר (עוקף את השיוך האוטומטי).
+- אם המייל כבר תויק קודם לכרטיס אחר (למשל ללקוח-המאגר), הבקשה **מועברת** לכרטיס שנבחר — כולל המסמכים — במקום להחזיר "כפילות".
+
 ## דרישות (Add-in only manifest)
-- Host: Mailbox · Permission: ReadItem · DefaultLocale: he-IL (RTL) · Message Read בלבד.
-- שני כפתורים ב-`MessageReadCommandSurface`: "הוספה ל-CRM" (ExecuteFunction) + "פתיחת My CRM" (Taskpane).
+- Host: Mailbox · Permission: ReadWriteItem (נדרש ל-saveAsync בתיוק בזמן כתיבה) · DefaultLocale: he-IL (RTL).
+- שני כפתורים ב-`MessageReadCommandSurface`: "הוספה ל-CRM" (ExecuteFunction) + "פתיחת My CRM" (Taskpane),
+  וכפתור "תייק לכרטיס לקוח" ב-`MessageComposeCommandSurface` (תיוק מייל יוצא לפי הנמענים).
 - אימות מניפסט: `npx office-addin-manifest validate manifest.xml` → **The manifest is valid.**
 
 ## Sideload (התקנה ידנית ב-Outlook)

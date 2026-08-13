@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { LeadStage, LeadStatus, Prisma, ProjectStatus, QuoteStatus, UserRole, UserStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { formatIsraeliPhone } from '../common/phone.util';
+import { ensurePrimaryContact } from '../common/primary-contact.util';
 
 @Injectable()
 export class LeadsService {
@@ -116,6 +117,15 @@ export class LeadsService {
         services: lead.serviceType ? [lead.serviceType] : [],
         notes: lead.notes || null,
       },
+    });
+    // הליד נושא את שם איש הקשר (fullName) בנפרד משם החברה — בהמרה הוא חייב
+    // להיכתב גם כאיש קשר של הלקוח, אחרת הוא נשאר רק כשדה contactName שטוח.
+    await ensurePrimaryContact(this.prisma, customer.id, {
+      contactName: lead.fullName || name,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      city: customer.city,
     });
     await this.prisma.lead.update({ where: { id }, data: { customerId: customer.id } });
     await this.logActivity(id, 'CONVERT_TO_CUSTOMER', `נוצר לקוח: ${customer.name}`, user?.id);
