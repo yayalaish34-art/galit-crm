@@ -123,6 +123,14 @@ export class PdfConvertService {
    * אם Graph לא זמין/נכשל — נופלים ל-CloudConvert. אם גם הוא לא מוגדר — זורקים.
    */
   async docxToPdf(docx: Buffer, fileName = 'document.docx', userId?: string): Promise<Buffer> {
+    // מסמך Word *ישן* (OLE2) שהגיע לכאן בגלל שם קובץ מטעה (".doc.docx") אינו DOCX: PizZip ייפול
+    // עליו, Graph יחזיר 415 ו-CloudConvert עם input_format=docx ייכשל אחריו. מנתבים אותו למסלול
+    // ה-‎.doc‎ לפי תוכנו האמיתי במקום להיכשל.
+    if (PdfConvertService.sniffFormat(docx) === 'doc') {
+      this.logger.warn(`"${fileName}" נקרא כ-docx אך תוכנו doc ישן — ההמרה מתבצעת במסלול ה-doc.`);
+      return this.anyWordToPdf(docx, fileName, 'application/msword', userId);
+    }
+
     // הקפאת שדות התאריך לעברית פעם אחת, לפני שני המנועים (טקסט תאריך זהה למה שמוצג היום).
     const frozen = await this.freezeDocxDates(docx);
 
@@ -224,6 +232,25 @@ export class PdfConvertService {
     return (fileName.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
   }
 
+  /**
+   * הפורמט *האמיתי* של הקובץ לפי חתימת הבתים (magic bytes) — לא לפי שם הקובץ.
+   * למה זה קיים: שם הקובץ משקר. דוחות שהועלו כ-‎.doc‎ ישן נשמרו לעיתים בשם עם סיומת כפולה
+   * ("…‎.doc.docx‎"), והניתוב לפי הסיומת שלח מסמך OLE2 ישן במסלול ה-DOCX — Graph החזיר
+   * 415 (Unsupported Media Type) ו-CloudConvert (input_format=docx) נכשל אחריו, כך שכל
+   * ההמרה נפלה ב"המרת ה-PDF לא הושלמה". חתימת הבתים חד-משמעית ולכן היא הקובעת.
+   *   d0cf11e0a1b11ae1 = OLE2  → Word 97-2003 (‎.doc‎)
+   *   504b0304         = ZIP   → OOXML (‎.docx‎/‎.docm‎)
+   *   25504446         = %PDF  → כבר PDF
+   */
+  static sniffFormat(file: Buffer): 'doc' | 'docx' | 'pdf' | null {
+    if (!file || file.length < 8) return null;
+    const head = file.subarray(0, 8).toString('hex').toLowerCase();
+    if (head.startsWith('d0cf11e0a1b11ae1')) return 'doc';
+    if (head.startsWith('504b0304')) return 'docx';
+    if (head.startsWith('25504446')) return 'pdf';
+    return null;
+  }
+
   /** האם הקובץ הוא מסמך Word שיש להמיר ל-PDF (PDF/תמונה מוחזרים false). */
   static isConvertibleToPdf(fileName: string, mime?: string | null): boolean {
     const ext = PdfConvertService.extensionOf(fileName);
@@ -239,13 +266,32 @@ export class PdfConvertService {
    * עם CloudConvert כגיבוי לפי סיומת הקובץ.
    */
   async anyWordToPdf(file: Buffer, fileName: string, mime?: string | null, userId?: string): Promise<Buffer> {
-    const ext = PdfConvertService.extensionOf(fileName) || (mime === 'application/msword' ? 'doc' : 'docx');
+    // הפורמט נקבע קודם כל לפי חתימת הבתים ורק אחר-כך לפי הסיומת/ה-mime: שם הקובץ עלול
+    // לשקר (סיומת כפולה כמו "…‎.doc.docx‎" על מסמך Word ישן) ואז הניתוב לפי הסיומת מפיל את
+    // ההמרה כולה (Graph 415 → CloudConvert עם input_format שגוי → "המרת ה-PDF לא הושלמה").
+    const sniffed = PdfConvertService.sniffFormat(file);
+    if (sniffed === 'pdf') return file; // כבר PDF — אין מה להמיר
+    const named = PdfConvertService.extensionOf(fileName) || (mime === 'application/msword' ? 'doc' : 'docx');
+    const ext = sniffed ?? named;
+    if (sniffed && sniffed !== named) {
+      this.logger.warn(
+        `"${fileName}" נקרא כ-${named} אך תוכנו ${sniffed} — ההמרה מתבצעת לפי התוכן (${sniffed}).`,
+      );
+    }
     if (ext === 'docx' || ext === 'docm') return this.docxToPdf(file, fileName, userId);
+
+    // שם הקובץ שנשלח ל-OneDrive/Word חייב לשאת את הסיומת האמיתית, אחרת Office מזהה את סוג
+    // הקובץ לפי השם ומסרב לרנדר אותו (415). שם התצוגה/הקובץ שנשמר במערכת אינו משתנה.
+    // מסירים את *כל* שרשרת הסיומות המטעה (".doc.docx" → בסיס נקי) ומצמידים את הסיומת האמיתית,
+    // כדי שלא ייווצר "….doc.doc".
+    const uploadName =
+      ext === named ? fileName : `${fileName.replace(/(?:\.[a-z0-9]{1,5})+$/i, '')}.${ext}`;
+    const uploadMime = ext === 'doc' ? 'application/msword' : mime || undefined;
 
     let graphErr: any = null;
     if (this.graphPdf.configured) {
       try {
-        const pdf = await this.graphPdf.fileToPdf(userId ?? '', file, fileName, mime || undefined);
+        const pdf = await this.graphPdf.fileToPdf(userId ?? '', file, uploadName, uploadMime);
         this.logger.log(`Converted "${fileName}" (${ext}) to PDF via Microsoft Graph`);
         return pdf;
       } catch (e: any) {
@@ -255,7 +301,7 @@ export class PdfConvertService {
       }
     }
     if (!this.apiKey) throw this.pdfUnavailableError(userId, graphErr);
-    return this.cloudConvertDocxToPdf(file, fileName, ext);
+    return this.cloudConvertDocxToPdf(file, uploadName, ext);
   }
 
   /** המרת מסמך Word (DOCX כבר עם תאריכים מוקפאים) ל-PDF דרך CloudConvert. */
