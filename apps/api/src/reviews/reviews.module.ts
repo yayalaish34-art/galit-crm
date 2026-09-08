@@ -5,7 +5,9 @@ import { ReviewSchedulerService } from './review-scheduler.service';
 import { ReviewsController } from './reviews.controller';
 
 /**
- * שירות בקשות דירוג (5 פרצופים) שנשלחות ללקוח אוטומטית אחרי שליחת דוח.
+ * שירות בקשות דירוג (5 פרצופים) שנשלחות ללקוח אוטומטית עם סיום משימה (מעבר ל-DONE).
+ * הטריגר: ReviewRequestService.enqueueForCompletedTask — נקרא מ-TasksService.update
+ * ומ-ReportMailService.sendReportEmail (שגם הוא מסמן DONE). בקשה אחת לכל משימה.
  * PrismaService גלובלי (PrismaModule הוא @Global). מייבא Microsoft לשליחה דרך Outlook.
  * ה-endpoints הציבוריים (קליטת לחיצה + דפי תודה/משוב) יושבים ב-PublicController.
  */

@@ -3,6 +3,8 @@ import { NotFoundException } from '@nestjs/common';
 import { TasksService } from './tasks.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
+import { AffiliateService } from '../affiliate/affiliate.service';
+import { ReviewRequestService } from '../reviews/review-request.service';
 
 describe('TasksService.findOne (GET /tasks/:id)', () => {
   let service: TasksService;
@@ -15,6 +17,8 @@ describe('TasksService.findOne (GET /tasks/:id)', () => {
         TasksService,
         { provide: PrismaService, useValue: { task: { findUnique } } },
         { provide: QuotesService, useValue: {} },
+        { provide: AffiliateService, useValue: {} },
+        { provide: ReviewRequestService, useValue: { enqueueForCompletedTask: jest.fn().mockResolvedValue({ scheduled: false }) } },
       ],
     }).compile();
     service = module.get<TasksService>(TasksService);

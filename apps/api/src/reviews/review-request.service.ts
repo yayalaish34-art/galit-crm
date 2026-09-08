@@ -213,6 +213,84 @@ export class ReviewRequestService {
   }
 
   /**
+   * הטריגר האוטומטי של בקשת הדירוג: **סיום משימה** (מעבר הסטטוס ל-DONE), מכל מקום —
+   * "סמן הושלם" בדשבורד, סגירה דרך הבוט, או סימון DONE שמתלווה לשליחת דוח.
+   * נקרא מ-TasksService.update ומ-ReportMailService.sendReportEmail.
+   *
+   * חוקים:
+   * - בקשה אחת לכל משימה: אם כבר נשלחה בקשה למשימה הזו (רשומת ReviewRequest) או
+   *   שכבר יש עבודה בתור — לא מתזמנים שוב (גם אם המשימה נפתחה ונסגרה מחדש).
+   * - הנמען: toEmail שנמסר במפורש (למשל נמען הדוח), אחרת מייל הלקוח בכרטיס,
+   *   אחרת מייל איש הקשר הראשי. בלי מייל תקין — לא נשלח כלום.
+   * - השולח: מי שסגר את המשימה (actorUserId), אחרת בעל המשימה. המייל יוצא מה-Outlook שלו.
+   * - לקוח שסימן allowEmail=false לא מקבל בקשת דירוג.
+   * best-effort: לא זורק, כדי לא להפיל את עדכון המשימה.
+   */
+  async enqueueForCompletedTask(
+    taskId: string,
+    ctx: { actorUserId?: string | null; requestHost?: string | null; toEmail?: string | null } = {},
+  ): Promise<{ scheduled: boolean; dueAt?: string; reason?: string }> {
+    try {
+      const already = await this.prisma.reviewRequest.findFirst({ where: { taskId }, select: { id: true } });
+      if (already) return { scheduled: false, reason: 'already-sent' };
+
+      const task = await this.prisma.task.findUnique({
+        where: { id: taskId },
+        select: {
+          id: true,
+          ownerId: true,
+          customerId: true,
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              contactName: true,
+              email: true,
+              allowEmail: true,
+              contacts: {
+                where: { email: { not: '' } },
+                orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+                take: 1,
+                select: { email: true, fullName: true },
+              },
+            },
+          },
+        },
+      });
+      if (!task) return { scheduled: false, reason: 'task-not-found' };
+      if (task.customer?.allowEmail === false) return { scheduled: false, reason: 'customer-opted-out' };
+
+      const primaryContact = task.customer?.contacts?.[0];
+      const toEmail = [ctx.toEmail, task.customer?.email, primaryContact?.email]
+        .map((e) => (e || '').trim())
+        .find((e) => e.includes('@'));
+      if (!toEmail) {
+        this.logger.log(`review request for completed task ${taskId} skipped — no customer email`);
+        return { scheduled: false, reason: 'no-email' };
+      }
+
+      const userId = ctx.actorUserId || task.ownerId;
+      const customerName =
+        (task.customer?.contactName || '').trim() ||
+        (task.customer?.name || '').trim() ||
+        (primaryContact?.fullName || '').trim() ||
+        undefined;
+
+      return await this.enqueueReviewRequest({
+        toEmail,
+        customerName,
+        customerId: task.customerId || task.customer?.id || undefined,
+        taskId,
+        userId,
+        requestHost: ctx.requestHost,
+      });
+    } catch (e: any) {
+      this.logger.error(`enqueueForCompletedTask failed for task ${taskId}: ${e?.message || e}`);
+      return { scheduled: false, reason: 'error' };
+    }
+  }
+
+  /**
    * מתזמן בקשת דירוג ל-09:00 למחרת (במקום שליחה מיידית). דדופ לפי taskId — אם
    * כבר יש עבודה מתוזמנת לאותה משימה, לא מוסיפים כפילות. לא זורק.
    */

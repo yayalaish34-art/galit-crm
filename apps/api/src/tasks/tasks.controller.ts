@@ -45,7 +45,7 @@ export class TasksController {
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-    return this.tasksService.update(id, body, req.user);
+    return this.tasksService.update(id, body, req.user, { requestHost: req?.headers?.host });
   }
 
   @Delete(':id')

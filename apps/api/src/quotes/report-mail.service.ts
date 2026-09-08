@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { PrismaService } from '../prisma/prisma.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { ReviewRequestService } from '../reviews/review-request.service';
 
@@ -75,6 +76,7 @@ export class ReportMailService {
     private readonly graphMail: GraphMailService,
     private readonly pdfConvert: PdfConvertService,
     private readonly reviewRequest: ReviewRequestService,
+    private readonly graphFiles: GraphFilesService,
   ) {}
 
   async sendReportEmail(
@@ -137,18 +139,16 @@ export class ReportMailService {
       this.logger.warn(`mark task ${taskId} DONE failed: ${e?.message || e}`);
     }
 
-    // ── תזמון מייל "בקשת דירוג" (5 פרצופים) ל-09:00 למחרת (best-effort) ──
-    // לא נשלח מיד — נכנס לתור ונשלח למחרת בבוקר ע"י ה-cron dispatcher, מתיבת
-    // ה-Outlook של שולח הדוח. נמען ראשי בלבד. כישלון כאן לא מפיל את שליחת הדוח.
+    // ── בקשת דירוג: הטריגר הוא סיום המשימה (ה-DONE שסומן למעלה), דרך אותו הוק
+    // כמו "סמן הושלם" (ReviewRequestService.enqueueForCompletedTask). כאן מוסרים
+    // גם את נמען הדוח כדי שהבקשה תגיע למי שקיבל את הדוח בפועל. בקשה אחת למשימה,
+    // נשלחת ב-09:00 למחרת מה-Outlook של שולח הדוח. כישלון לא מפיל את שליחת הדוח.
     if (opts.sendReviewRequest !== false) {
       try {
-        await this.reviewRequest.enqueueReviewRequest({
-          toEmail: sent.sentTo,
-          customerName: (opts.customerName || '').trim() || undefined,
-          taskId,
-          customerId: task.customerId || undefined,
-          userId: opts.userId,
+        await this.reviewRequest.enqueueForCompletedTask(taskId, {
+          actorUserId: opts.userId,
           requestHost: opts.requestHost,
+          toEmail: sent.sentTo,
         });
       } catch (e: any) {
         this.logger.warn(`schedule review request failed for task ${taskId}: ${e?.message || e}`);
@@ -176,6 +176,31 @@ export class ReportMailService {
     const doc: any = await this.prisma.document.findUnique({ where: { id: opts.documentId } });
     if (!doc || !doc.dataBase64) throw new BadRequestException('הדוח לא נמצא או ריק');
 
+    // ── OneDrive: אם הדוח נערך ידנית ב-Word, שולחים את הגרסה החיה ולא את המקור ──
+    // רשת ביטחון זהה לזו שבשליחת הצעת מחיר (quote-mail.service): הסנכרון האוטומטי
+    // בחזרה מ-Word עלול לפספס (החלון נסגר, הרשת נפלה), ואז ה-dataBase64 ב-DB עדיין
+    // מחזיק את המסמך שלפני העריכה. משיכה כאן מבטיחה שמה שנשלח ללקוח הוא מה שהמשתמש
+    // רואה ב-Word. best-effort: כישלון נופל בחזרה לעותק השמור ולא מונע את השליחה.
+    let fileBuf: Buffer = Buffer.from(doc.dataBase64, 'base64');
+    let fileName = doc.name || 'דוח.pdf';
+    if (doc.onedriveItemId && doc.onedriveOwnerId) {
+      try {
+        const fresh = await this.graphFiles.downloadContent(doc.onedriveOwnerId, doc.onedriveItemId);
+        if (fresh?.length) {
+          fileBuf = fresh;
+          // השם ב-OneDrive מנצח — אם המשתמש שינה אותו שם, זה השם שהוא מצפה שיישלח.
+          try {
+            const item = await this.graphFiles.getItem(doc.onedriveOwnerId, doc.onedriveItemId);
+            if (item?.name) fileName = item.name;
+          } catch { /* נשארים עם השם השמור */ }
+        }
+      } catch (e: any) {
+        this.logger.warn(
+          `OneDrive pull failed for document ${opts.documentId} — falling back to stored copy: ${e?.message || e}`,
+        );
+      }
+    }
+
     const sent = await this.deliverReport({
       userId: opts.userId,
       to,
@@ -190,8 +215,8 @@ export class ReportMailService {
       requestReadReceipt: opts.requestReadReceipt,
       requestDeliveryReceipt: opts.requestDeliveryReceipt,
       graphReady,
-      fileBuf: Buffer.from(doc.dataBase64, 'base64'),
-      fileName: doc.name || 'דוח.pdf',
+      fileBuf,
+      fileName,
       mime: doc.mimeType || DOCX_MIME,
     });
 

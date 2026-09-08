@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
 import { AffiliateService } from '../affiliate/affiliate.service';
+import { ReviewRequestService } from '../reviews/review-request.service';
 import { getPreVisitGuideline } from './pre-visit-guidelines';
 
 /**
@@ -17,8 +18,15 @@ import { getPreVisitGuideline } from './pre-visit-guidelines';
  */
 /** חלון "לחיצה כפולה" — יצירה זהה לחלוטין (כולל type) בטווח הזה = אותה יצירה. */
 const DUP_EXACT_WINDOW_MS = 5 * 60_000;
-/** חלון למשימות "פתיחת תהליך" — הן משנות type תוך כדי הזרימה, לכן משווים בלי type. */
-const DUP_OPENER_WINDOW_MS = 24 * 60 * 60_000;
+/**
+ * חלון למשימות "פתיחת תהליך" — הן משנות type תוך כדי הזרימה, לכן משווים בלי type.
+ *
+ * היה 24 שעות, וזו הייתה שגיאה: הוא לא הבחין בין לחיצה כפולה לבין פנייה שנייה
+ * *אמיתית* לאותו לקוח באותו יום. לקוח שחזר בערב עם בקשה נוספת החזיר את המשימה
+ * של הבוקר במקום לפתוח חדשה, והמסך קפץ למשימה קיימת. שתי דקות מכסות לחיצה
+ * כפולה / retry / טאב שני — שזו כל מטרת הכלל — בלי לחסום עבודה לגיטימית.
+ */
+const DUP_OPENER_WINDOW_MS = 2 * 60_000;
 /** קידומות של משימות "פתיחת תהליך" שנוצרות בלחיצה אחת מכרטיס הלקוח / הסרגל. */
 const OPENER_TITLE_PREFIXES = ['פנייה - ', 'כרטיס לקוח'];
 /** קידומת משימת "תזכורת שליחת דוח חוזר" — תזכורת פתוחה אחת ללקוח, ללא הגבלת זמן. */
@@ -47,6 +55,7 @@ export class TasksService {
     private readonly prisma: PrismaService,
     private readonly quotesService: QuotesService,
     private readonly affiliate: AffiliateService,
+    private readonly reviewRequest: ReviewRequestService,
   ) {}
 
   async findAll({
@@ -119,6 +128,10 @@ export class TasksService {
         customerId: true,
         productName: true,
         createdAt: true,
+        // חובה: הממשק עושה read-modify-write על ההערות ("סמן כשולם" מוסיף הערה
+        // ומחזיר את המערך המלא). כשהשדה לא הוחזר כאן, הלקוח בנה את המערך מאפס
+        // ומחק *את כל* הערות התהליך של המשימה בכל סימון. אין להסיר.
+        processNotes: true,
       },
     });
     if (!task) throw new NotFoundException('משימה לא נמצאה');
@@ -204,16 +217,65 @@ export class TasksService {
       data = { ...data, title: await this.buildTaskTitle(data) };
     }
 
+    /**
+     * `forceNew` = המשתמש ביקש משימה נוספת *במפורש* ("התחל תהליך" בכרטיס לקוח
+     * שכבר יש בו משימה פתוחה). זו לא לחיצה כפולה ואסור לאחד אותה עם הקיימת —
+     * המסך אפילו מציע במקביל "המשך תהליך" למי שרצה את הישנה. לכן מדלגים על
+     * הדדופ ומבדילים את המשימה בכותרת, כדי ששתיהן יהיו קריאות ברשימה.
+     * השדה לא קיים ב-Prisma ולכן חייב לרדת מה-payload לפני היצירה.
+     */
+    const { forceNew, ...rest } = data as any;
+    const taskData: any = rest;
+
+    if (forceNew) {
+      const title = await this.nextAvailableTitle(taskData);
+      this.logger.log(
+        `Explicit new task for customer ${taskData.customerId ?? '—'}: "${title}"`,
+      );
+      return this.prisma.task.create({ data: { ...taskData, title } });
+    }
+
     // אידמפוטנטיות: אם זו יצירה חוזרת של משימה שכבר קיימת — מחזירים את הקיימת.
-    const duplicate = await this.findDuplicateOf(data);
+    const duplicate = await this.findDuplicateOf(taskData);
     if (duplicate) {
       this.logger.warn(
-        `Duplicate task create suppressed: "${String(data.title).trim()}" (owner ${data.ownerId}) → returning ${duplicate.id}`,
+        `Duplicate task create suppressed: "${String(taskData.title).trim()}" (owner ${taskData.ownerId}) → returning ${duplicate.id}`,
       );
       return duplicate;
     }
 
-    return this.prisma.task.create({ data });
+    return this.prisma.task.create({ data: taskData });
+  }
+
+  /**
+   * כותרת פנויה כשפותחים משימה נוספת על אותו לקוח: "פנייה - אורי תורגמן",
+   * ואז "פנייה - אורי תורגמן (2)", "(3)"… בלי מספור שתי המשימות נראות זהות
+   * ברשימת המשימות ואי אפשר לדעת באיזו מהן מטפלים.
+   *
+   * סופרים גם משימות סגורות: אם "(2)" כבר הייתה ונסגרה, השלישית תהיה "(3)"
+   * ולא תמחזר מספר שכבר הופיע בהיסטוריה של הלקוח.
+   */
+  private async nextAvailableTitle(data: any): Promise<string> {
+    const raw = String(data?.title ?? '').trim();
+    const customerId = data?.customerId ?? data?.customer?.connect?.id ?? null;
+    if (!raw || !customerId) return raw;
+
+    // אם המשתמש כבר שלח כותרת ממוספרת, המספר שלו לא קובע — סופרים מהבסיס.
+    const base = raw.replace(/\s*\(\d+\)\s*$/, '');
+
+    const siblings = await this.prisma.task.findMany({
+      where: { customerId, title: { startsWith: base } },
+      select: { title: true },
+    });
+
+    let max = 0;
+    for (const s of siblings) {
+      const t = String(s.title || '').trim();
+      if (t === base) { max = Math.max(max, 1); continue; }
+      const m = t.match(/^(.*?)\s*\((\d+)\)$/);
+      if (m && m[1] === base) max = Math.max(max, Number(m[2]));
+    }
+    return max === 0 ? base : `${base} (${max + 1})`;
   }
 
   /**
@@ -297,11 +359,38 @@ export class TasksService {
     return [who, product].filter(Boolean).join(' — ') || 'משימה חדשה';
   }
 
-  async update(id: string, data: any, user?: { id?: string; role?: string }) {
+  async update(
+    id: string,
+    data: any,
+    user?: { id?: string; role?: string },
+    ctx?: { requestHost?: string | null },
+  ) {
     const role = (user?.role || '').toUpperCase();
     if (!role) throw new UnauthorizedException('Missing role');
-    const existing = await this.prisma.task.findUnique({ where: { id }, select: { ownerId: true } });
-    if (role === 'SALES' || role === 'TECHNICIAN') {
+    const existing = await this.prisma.task.findUnique({ where: { id }, select: { ownerId: true, status: true } });
+
+    /* ── "סמן כשולם" — אחראי/ת כספים שאינו מנהל ────────────────────────────────
+     * סקשן "דוחות ותשלומים" בדשבורד נטען עם scope=all, כלומר דוחות של כל העובדים.
+     * הסימון עצמו הוא הוספת הערת תהליך בלבד (processNotes) — הוא לא נוגע בבעלות,
+     * בסטטוס, בסכומים או בכל שדה אחר. לפני התיקון הזה כל לחיצה של אחראית הכספים
+     * נפלה ב-403, כי הכלל למטה מרשה עדכון משימה של אחר רק ל-ADMIN/MANAGER.
+     *
+     * הפתרון הוא הדגל הקיים canEditFinance ("יכול לערוך כספים" במסך ההרשאות) ולא
+     * העלאה לתפקיד מנהל — כדי לא לפתוח יחד איתו פרסום בלוגים, פרטי כספית, עמלות
+     * שותפים ותבניות הצעות. ההיתר מוגבל לעדכון שנוגע אך ורק ל-processNotes. */
+    const patchKeys = Object.keys(data ?? {});
+    const isProcessNotesOnly = patchKeys.length > 0 && patchKeys.every((k) => k === 'processNotes');
+    let financeAllowed = false;
+    if (isProcessNotesOnly && role !== 'ADMIN' && role !== 'MANAGER' && user?.id) {
+      const me = await this.prisma.user
+        .findUnique({ where: { id: user.id }, select: { canEditFinance: true } })
+        .catch(() => null);
+      financeAllowed = !!me?.canEditFinance;
+    }
+
+    if (financeAllowed) {
+      // מורשה — מדלגים על בדיקת התפקיד וממשיכים לעדכון.
+    } else if (role === 'SALES' || role === 'TECHNICIAN') {
       if (!user?.id) throw new UnauthorizedException('Missing user id');
       if (!existing || existing.ownerId !== user.id) throw new ForbiddenException();
     } else if (role !== 'ADMIN' && role !== 'MANAGER') {
@@ -324,6 +413,14 @@ export class TasksService {
       this.maybeRecordAffiliateCommission(id, data.processNotes).catch((e) =>
         this.logger.warn(`affiliate commission hook failed for task ${id}: ${e?.message || e}`),
       );
+    }
+    // ── הוק בקשת דירוג: סיום משימה (מעבר ל-DONE) מתזמן ללקוח מייל "5 פרצופים"
+    //    ל-09:00 למחרת, מה-Outlook של מי שסגר. בקשה אחת למשימה; best-effort. ──
+    const becameDone = String(data?.status || '') === 'DONE' && existing?.status !== 'DONE';
+    if (becameDone) {
+      this.reviewRequest
+        .enqueueForCompletedTask(id, { actorUserId: user?.id, requestHost: ctx?.requestHost })
+        .catch((e) => this.logger.warn(`review request hook failed for task ${id}: ${e?.message || e}`));
     }
     return updated;
   }
