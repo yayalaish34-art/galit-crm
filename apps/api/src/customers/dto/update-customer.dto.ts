@@ -60,6 +60,10 @@ export class UpdateCustomerDto {
   @IsOptional() @IsBoolean() allowSms?: boolean | null;
   @IsOptional() @IsString() mailingNote?: string | null;
 
+  /// רשימת דיוור שיווקי — נפרד מהעדפות הדיוור התפעוליות שמעל.
+  @IsOptional() @IsBoolean() marketingConsent?: boolean | null;
+  @IsOptional() @IsBoolean() marketingOptOut?: boolean | null;
+
   @IsOptional() @IsString() registrationDate?: string | null;
   @IsOptional() @IsString() registrationNote?: string | null;
   @IsOptional() @IsString() lastUpdateDate?: string | null;
@@ -209,6 +213,14 @@ export class CreateCustomerDocumentDto {
   @IsOptional() @IsString() importLegacyId?: string | null;
   /** תוכן הקובץ כ-base64 (ללא תחילית data:) — לאחסון בקובץ ב-DB */
   @IsOptional() @IsString() dataBase64?: string | null;
+  /**
+   * למי הדוח מוען — נשלח ממערכת הפקת הדוחות.
+   *
+   * חלון השליחה בכרטיס הלקוח נפתח על הכתובת הזו. בלעדיה הוא נפל על כתובת הלקוח
+   * הכללית, שאצל חברה היא לא בהכרח האדם שהדוח נכתב עבורו.
+   */
+  @IsOptional() @IsString() recipientName?: string | null;
+  @IsOptional() @IsString() recipientEmail?: string | null;
 }
 
 export class UpdateCustomerDocumentDto {
@@ -243,6 +255,17 @@ export class SendCustomerDocumentEmailDto {
   @IsOptional() @IsString() customerName?: string;
   @IsOptional() @IsBoolean() requestReadReceipt?: boolean;
   @IsOptional() @IsBoolean() requestDeliveryReceipt?: boolean;
+}
+
+/**
+ * תזמון שליחה — אותו מייל בדיוק, עם מועד.
+ *
+ * `sendAt` הוא ISO ב-UTC. הדפדפן בוחר שעה מקומית וממיר, כדי שהתור לא יהיה תלוי
+ * באזור-הזמן של השרת (שרץ ב-UTC) ולא ישלח שלוש שעות מוקדם מדי.
+ */
+export class ScheduleCustomerDocumentEmailDto extends SendCustomerDocumentEmailDto {
+  @IsString() sendAt!: string;
+  @IsOptional() @IsString() documentName?: string;
 }
 
 /** חילוץ בלבד — שולחים base64 של PDF ומקבלים סכום מוצע (או null). */

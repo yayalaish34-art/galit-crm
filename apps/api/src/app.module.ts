@@ -19,6 +19,7 @@ import { QuoteItemCatalogModule } from './quote-item-catalog/quote-item-catalog.
 import { QuoteTemplatesModule } from './quote-templates/quote-templates.module';
 import { CustomerClassificationsModule } from './customer-classifications/customer-classifications.module';
 import { LeadSourcesModule } from './lead-sources/lead-sources.module';
+import { CitiesModule } from './cities/cities.module';
 import { FollowupImportModule } from './followup-import/followup-import.module';
 import { AuthModule } from './auth/auth.module';
 import { PaymentTermsModule } from './payment-terms/payment-terms.module';
@@ -35,9 +36,10 @@ import { AffiliateModule } from './affiliate/affiliate.module';
 import { OutlookModule } from './integrations/outlook/outlook.module';
 import { CaspitModule } from './caspit/caspit.module';
 import { BlogModule } from './blog/blog.module';
+import { MailingModule } from './mailing/mailing.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, CitiesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule, MailingModule],
   controllers: [AppController],
   providers: [AppService],
 })

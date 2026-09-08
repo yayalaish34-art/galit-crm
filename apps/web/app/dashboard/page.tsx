@@ -22,10 +22,11 @@ import {
 import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
 import { SERVICE_CATEGORIES, getSubgroupIdForSku, getCategoryForSku, getCategoryName, getSubgroupNameForSku, mergeCatalogIntoCategories, type CatalogRow } from '../lib/service-categories';
 import { isRadonTestSku, isRadonKitSku } from '../lib/radon-tracks';
-import { CustomerReminderCard } from '../radon/customer-reminder-card';
 import { formatIsraeliPhoneDisplay } from '../lib/phone-format';
 import { RadonFlowPanel } from '../radon/radon-flow-panel';
+import { RadonKitTracker } from '../radon/radon-kit-tracker';
 import { CollectionPaymentTermsModal } from '../collection-payment-terms-modal';
+import { CaspitDocumentEditorModal, type CaspitDocument } from '../caspit-document-editor-modal';
 import { MergedDocsEditor } from '../settings/merged-docs-editor';
 import {
   Users,
@@ -1413,7 +1414,7 @@ function CustomerSearchModal({
   currentUser?: AppUser | null;
   onClose: () => void;
   onSelect: (customer: Customer) => void;
-  onNewCustomer?: (prefillName: string) => void;
+  onNewCustomer?: (prefillName: string, kind?: 'PRIVATE' | 'COMPANY') => void;
   /** נקרא אחרי מחיקת לקוח, כדי שהמסך שמאחור ירענן את רשימתו. */
   onDeleted?: (customerId: string) => void;
 }) {
@@ -1575,15 +1576,27 @@ function CustomerSearchModal({
               <div className="text-sm text-slate-400">
                 {q ? 'לא נמצאו לקוחות תואמים' : 'אין לקוחות'}
               </div>
+              {/* שני מסלולי יצירה: בלקוח פרטי הטקסט שהוקלד הוא *שם הלקוח* עצמו,
+                  ובחברה הוא *שם החברה* (ואיש הקשר נשאר ריק למילוי בהמשך). */}
               {q && onNewCustomer && (
-                <button
-                  type="button"
-                  onClick={() => onNewCustomer(query.trim())}
-                  className="mt-4 inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
-                >
-                  <Plus className="h-4 w-4" />
-                  צור לקוח חדש — &ldquo;{query.trim()}&rdquo;
-                </button>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onNewCustomer(query.trim(), 'PRIVATE')}
+                    className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-green-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    צור לקוח פרטי חדש — &ldquo;{query.trim()}&rdquo;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNewCustomer(query.trim(), 'COMPANY')}
+                    className="inline-flex items-center gap-2 rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-slate-800 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    צור לקוח חברה חדש — &ldquo;{query.trim()}&rdquo;
+                  </button>
+                </div>
               )}
             </div>
           ) : (
@@ -4132,6 +4145,280 @@ type RealIncomePayload = {
  * וחשבונית מס קבלה. שונה במהותו מ"הכנסה חודשית" בקוביות למעלה, שנגזרת מהצעות
  * שאושרו ולא מכסף שנכנס.
  */
+/** שורה ברשימת הדיוור, כפי ש-/mailing/list מחזיר. */
+type MailingRow = {
+  id: string;
+  name: string;
+  contactName: string;
+  email: string;
+  phone: string;
+  city: string;
+  leadSource: string | null;
+  consent: boolean | null;
+  consentAt: string | null;
+  consentSource: string | null;
+  inferred: boolean;
+  optOut: boolean;
+  optOutAt: string | null;
+};
+
+type MailingListPayload = {
+  counts: { subscribed: number; optedOut: number; unknown: number; consentedNoEmail: number };
+  subscribed: MailingRow[];
+  optedOut: MailingRow[];
+  unknown: MailingRow[];
+};
+
+/**
+ * ── רשימת דיוור ─────────────────────────────────────────────────────────────
+ * סקשן בדשבורד המנהל: כל הלקוחות שאישרו קבלת דיוור בטופס באתר galit.co.il
+ * (תיבת הסימון marketing_consent שקיימת בכל 9 טפסי הלידים), פחות מי שסומן
+ * ידנית בכרטיס הלקוח כ"אינו מעוניין להופיע ברשימת הדיוור".
+ *
+ * הכרטיס סגור כברירת מחדל ונפתח בלחיצה — הרשימה ארוכה ולא צריכה לתפוס את
+ * הדשבורד. הייצוא מוריד CSV מוכן להזנה למערכת דיוור.
+ */
+function MailingListSection({
+  currentUser,
+  onOpenCustomerById,
+}: {
+  currentUser: AppUser;
+  onOpenCustomerById: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState<MailingListPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'subscribed' | 'optedOut' | 'unknown'>('subscribed');
+  const [exporting, setExporting] = useState(false);
+
+  const load = useCallback(async (q: string) => {
+    setLoading(true);
+    setError('');
+    try {
+      const r = await apiFetch(
+        apiUrl(`/mailing/list?includeUnknown=1${q ? `&search=${encodeURIComponent(q)}` : ''}`),
+        { authUser: currentUser },
+      );
+      if (!r.ok) throw new Error('טעינת רשימת הדיוור נכשלה');
+      setData((await r.json()) as MailingListPayload);
+    } catch (e: any) {
+      setError(e?.message || 'טעינת רשימת הדיוור נכשלה');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser]);
+
+  // נטען רק כשפותחים את הסקשן — לא מעמיס את הדשבורד בכניסה.
+  useEffect(() => {
+    if (!open) return;
+    void load(search.trim());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // חיפוש עם השהיה קצרה, כדי לא לירות בקשה בכל תו.
+  useEffect(() => {
+    if (!open) return;
+    const t = window.setTimeout(() => void load(search.trim()), 350);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const r = await apiFetch(apiUrl('/mailing/export'), { authUser: currentUser });
+      if (!r.ok) throw new Error('הייצוא נכשל');
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `רשימת-דיוור-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setError(e?.message || 'הייצוא נכשל');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  /** הסרה/החזרה של לקוח מהרשימה, ישירות מהטבלה. */
+  const toggleOptOut = async (row: MailingRow, optOut: boolean) => {
+    try {
+      const r = await apiFetch(apiUrl(`/mailing/customers/${row.id}/opt-out`), {
+        method: 'POST',
+        authUser: currentUser,
+        body: JSON.stringify({ optOut }),
+      });
+      if (!r.ok) throw new Error('העדכון נכשל');
+      await load(search.trim());
+    } catch (e: any) {
+      setError(e?.message || 'העדכון נכשל');
+    }
+  };
+
+  const rows = data ? (tab === 'subscribed' ? data.subscribed : tab === 'optedOut' ? data.optedOut : data.unknown) : [];
+  const tabs: { v: typeof tab; label: string; count: number }[] = [
+    { v: 'subscribed', label: 'אישרו דיוור', count: data?.counts.subscribed ?? 0 },
+    { v: 'unknown', label: 'לא ידוע', count: data?.counts.unknown ?? 0 },
+    { v: 'optedOut', label: 'הוסרו', count: data?.counts.optedOut ?? 0 },
+  ];
+
+  return (
+    <Card className="rounded-xl border-0 bg-white shadow-[0_10px_26px_rgba(15,23,42,0.08)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-xl font-bold text-slate-900">
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-2 text-right transition hover:text-blue-700"
+          >
+            <Mail className="h-5 w-5 text-blue-600" /> רשימת דיוור
+            {data && (
+              <span className="rounded-full bg-blue-100 px-3 py-1 text-sm font-extrabold text-blue-700">
+                {data.counts.subscribed}
+              </span>
+            )}
+            <span className="text-sm font-semibold text-slate-400">{open ? '▲' : '▼'}</span>
+          </button>
+          {open && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="חיפוש לקוח…"
+                  className="w-48 rounded-xl border border-slate-200 bg-white py-1.5 pr-8 pl-3 text-sm font-medium outline-none focus:border-blue-400"
+                />
+              </div>
+              <Button
+                variant="outline"
+                className="rounded-xl text-sm"
+                onClick={() => void exportCsv()}
+                disabled={exporting || !data?.counts.subscribed}
+              >
+                {exporting ? <Loader2 className="ml-1.5 h-4 w-4 animate-spin" /> : <Download className="ml-1.5 h-4 w-4" />}
+                ייצוא CSV
+              </Button>
+            </div>
+          )}
+        </CardTitle>
+        {open && (
+          <p className="mt-1 text-[12px] font-medium text-slate-500">
+            לקוחות שסימנו &quot;אני מאשר/ת קבלת עדכונים&quot; בטופס באתר. לקוח שסומן בכרטיס שלו כלא מעוניין לא יופיע כאן.
+          </p>
+        )}
+      </CardHeader>
+      {open && (
+        <CardContent className="p-0">
+          <div className="flex flex-wrap items-center gap-1 px-4 pb-2">
+            {tabs.map((t) => (
+              <button
+                key={t.v}
+                type="button"
+                onClick={() => setTab(t.v)}
+                className={cn(
+                  'rounded-xl px-3 py-1.5 text-sm font-semibold transition',
+                  tab === t.v ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200',
+                )}
+              >
+                {t.label} ({t.count})
+              </button>
+            ))}
+          </div>
+
+          {error && <div className="mx-4 mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</div>}
+
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm font-semibold text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" /> טוען…
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">
+              {tab === 'subscribed'
+                ? 'אין עדיין לקוחות שאישרו דיוור. האישור נקלט מטופס הלידים באתר.'
+                : tab === 'optedOut'
+                  ? 'אף לקוח לא סומן כלא מעוניין בדיוור.'
+                  : 'אין לקוחות ללא סטטוס דיוור.'}
+            </div>
+          ) : (
+            <div className="max-h-[28rem] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-slate-50">
+                    <TableHead>לקוח</TableHead>
+                    <TableHead>אימייל</TableHead>
+                    <TableHead>טלפון</TableHead>
+                    <TableHead>עיר</TableHead>
+                    <TableHead>מקור האישור</TableHead>
+                    <TableHead>פעולה</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => (
+                    <TableRow key={r.id} className="hover:bg-blue-50/40">
+                      <TableCell>
+                        <button
+                          type="button"
+                          onClick={() => onOpenCustomerById(r.id)}
+                          className="text-right font-bold text-slate-800 transition hover:text-blue-700 hover:underline"
+                        >
+                          {r.name || r.contactName || '—'}
+                        </button>
+                        {r.inferred && (
+                          <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700" title="האישור נקרא מגוף הליד ועדיין לא נשמר בכרטיס">
+                            מהליד
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-slate-600"><span dir="ltr">{r.email || '—'}</span></TableCell>
+                      <TableCell className="text-slate-600"><span dir="ltr">{r.phone || '—'}</span></TableCell>
+                      <TableCell className="text-slate-600">{r.city || '—'}</TableCell>
+                      <TableCell className="max-w-[16rem] truncate text-[12px] text-slate-500" title={r.consentSource || ''}>
+                        {r.consentSource || (r.consent === true ? 'אישור דיוור' : '—')}
+                        {r.consentAt && (
+                          <span className="mr-1 text-slate-400">
+                            · {new Date(r.consentAt).toLocaleDateString('he-IL')}
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {r.optOut ? (
+                          <button
+                            type="button"
+                            onClick={() => void toggleOptOut(r, false)}
+                            className="rounded-lg border border-slate-200 px-2.5 py-1 text-[12px] font-bold text-slate-600 transition hover:bg-slate-50"
+                          >
+                            החזר לרשימה
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void toggleOptOut(r, true)}
+                            className="rounded-lg border border-rose-200 px-2.5 py-1 text-[12px] font-bold text-rose-600 transition hover:bg-rose-50"
+                          >
+                            הסר מהרשימה
+                          </button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 function RealIncomeSection({ currentUser }: { currentUser: AppUser }) {
   const [period, setPeriod] = useState<'month' | 'quarter' | 'year'>('month');
   const [data, setData] = useState<RealIncomePayload | null>(null);
@@ -4361,6 +4648,8 @@ function ReportsPaymentsSection({
   const [rows, setRows] = useState<ReportPayRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** שגיאת הסימון האחרונה — מוצגת למשתמש במקום להיבלע. */
+  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('unpaid');
   const [rangeDays, setRangeDays] = useState<7 | 30 | 90 | 0>(30); // 0 = כל התאריכים
   const [q, setQ] = useState('');
@@ -4421,25 +4710,57 @@ function ReportsPaymentsSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id]);
 
+  /**
+   * סימון "שולם" = הוספת הערת תהליך. שלושה דברים כאן נלמדו בדם:
+   *
+   * 1. **חייבים לקרוא את ההערות הקיימות לפני הכתיבה.** הכתיבה שולחת את המערך
+   *    *המלא*, ולכן מערך חלקי מוחק את השאר. כש-GET /tasks/:id לא החזיר את השדה
+   *    (באג שתוקן בשרת), הסימון מחק בשקט את כל הערות התהליך של המשימה — כולל
+   *    את הערת "דוח נשלח" שבזכותה השורה בכלל מופיעה כאן.
+   * 2. **אם אי אפשר לקרוא — לא כותבים.** עדיף להיכשל בקול מאשר למחוק היסטוריה.
+   * 3. **כשל חייב להיראות.** קודם כל שגיאה נבלעה בשקט, והכפתור פשוט חזר למצבו —
+   *    כך ש-403 (עובד שאינו מנהל) נראה בדיוק כמו "לא קרה כלום".
+   */
   const markPaid = async (taskId: string) => {
     setBusyId(taskId);
+    setError(null);
     try {
-      // משיכת ההערות העדכניות כדי לא לדרוס הערות אחרות
       const res = await apiFetch(apiUrl(`/tasks/${taskId}`), { authUser: currentUser });
-      const t = res.ok ? await res.json() : null;
-      const existing = parsePN(t?.processNotes);
+      if (!res.ok) {
+        setError(
+          res.status === 403
+            ? 'אין הרשאה לעדכן את המשימה הזו. אם ההרשאות שלך שונו לאחרונה — יש להתנתק ולהתחבר מחדש.'
+            : `לא ניתן לטעון את המשימה (שגיאה ${res.status}).`,
+        );
+        return;
+      }
+      const t = await res.json().catch(() => null);
+      if (!t || !('processNotes' in t)) {
+        // שרת ישן שלא מחזיר את השדה. כתיבה כאן הייתה מוחקת הערות.
+        setError('גרסת השרת אינה מחזירה את הערות התהליך — הסימון בוטל כדי לא למחוק היסטוריה.');
+        return;
+      }
+
+      const existing = parsePN(t.processNotes);
       const nowIso = new Date().toISOString();
       const next = [{ text: '💰 סומן כשולם', at: nowIso }, ...existing];
+
       const patch = await apiFetch(apiUrl(`/tasks/${taskId}`), {
         method: 'PATCH',
         authUser: currentUser,
         body: JSON.stringify({ processNotes: JSON.stringify(next) }),
       });
-      if (patch.ok) {
-        setRows((prev) => prev.map((r) => (r.taskId === taskId ? { ...r, paid: true, paidAt: nowIso } : r)));
+      if (!patch.ok) {
+        setError(
+          patch.status === 403
+            ? 'אין לך הרשאה לסמן תשלום. הפעולה מותרת למנהלים בלבד — ואם ההרשאות שלך שונו לאחרונה, יש להתנתק ולהתחבר מחדש.'
+            : `הסימון נכשל (שגיאה ${patch.status}). נסו שוב.`,
+        );
+        return;
       }
+      setRows((prev) => prev.map((r) => (r.taskId === taskId ? { ...r, paid: true, paidAt: nowIso } : r)));
     } catch {
-      /* ignore — נשאר לא-שולם */
+      setError('שגיאת רשת — הסימון לא נשמר. נסו שוב.');
     } finally {
       setBusyId(null);
     }
@@ -4502,6 +4823,20 @@ function ReportsPaymentsSection({
             />
           </div>
         </div>
+
+        {error && (
+          <div className="mb-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button
+              type="button"
+              onClick={() => setError(null)}
+              className="shrink-0 rounded-lg px-2 py-0.5 text-xs font-bold text-rose-600 transition hover:bg-rose-100"
+            >
+              סגור
+            </button>
+          </div>
+        )}
 
         {loading ? (
           <div className="py-6 text-center text-sm text-slate-400">טוען דוחות…</div>
@@ -5090,6 +5425,10 @@ function ManagerDashboard({
         {(currentUser.role || '').toUpperCase() === 'ADMIN' && (
           <RealIncomeSection currentUser={currentUser} />
         )}
+
+        {/* ── רשימת דיוור — לקוחות שאישרו דיוור בטופס באתר (מנהלים בלבד) ── */}
+        <MailingListSection currentUser={currentUser} onOpenCustomerById={onOpenCustomerById} />
+
 
         {/* ── דוחות שנשלחו + סטטוס תשלום (מחליף את סקשן "המשוב") ── */}
         <ReportsPaymentsSection currentUser={currentUser} onOpenCustomerById={onOpenCustomerById} />
@@ -8699,18 +9038,70 @@ const ISRAEL_CITIES_SORTED = [
   'תל אביב-יפו',
 ].sort((a, b) => a.localeCompare(b, 'he'));
 
+/**
+ * רשימת הערים המשותפת (טבלת City בשרת) + הוספת עיר חדשה אליה.
+ *
+ * **הבאג שזה מתקן:** הרשימה הייתה מוקשחת בקוד בשלושה מקומות, ולכן "הוסף עיר"
+ * מילא את השדה אבל לא שמר כלום — בפעם הבאה שהרשימה נפתחה העיר החדשה לא הייתה
+ * שם והמסך הציע להוסיף אותה שוב, כאילו ההוספה מעולם לא קרתה.
+ *
+ * הוק ולא הקשר (context): שני המסכים שמציגים שדה עיר כבר מקבלים `currentUser`,
+ * וזה כל מה שנדרש. נפילה-חזרה לרשימה שבקוד — שדה העיר לעולם לא יופיע ריק.
+ */
+function useCityList(currentUser: any) {
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
+  const reloadCities = useCallback(async () => {
+    try {
+      const res = await apiFetch(apiUrl('/cities'), { authUser: currentUser });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setCityOptions(data.map((x: any) => String(x.name)).filter(Boolean));
+    } catch { /* נשארים עם הרשימה שבקוד */ }
+  }, [currentUser]);
+  useEffect(() => { void reloadCities(); }, [reloadCities]);
+
+  const addCity = useCallback(async (name: string): Promise<boolean> => {
+    const value = (name || '').trim();
+    if (!value) return false;
+    // הצגה מיידית — משתמש שהוסיף עיר ופתח מיד את הרשימה שוב חייב לראות אותה,
+    // אחרת זה נראה בדיוק כמו הבאג שתיקנּו.
+    setCityOptions((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    try {
+      const res = await apiFetch(apiUrl('/cities'), {
+        method: 'POST', authUser: currentUser, body: JSON.stringify({ name: value }),
+      });
+      if (!res.ok) return false;
+      await reloadCities();
+      return true;
+    } catch { return false; }
+  }, [currentUser, reloadCities]);
+
+  const cityList = useMemo(
+    () => (cityOptions.length ? [...cityOptions].sort((a, b) => a.localeCompare(b, 'he')) : ISRAEL_CITIES_SORTED),
+    [cityOptions],
+  );
+  return { cityList, addCity };
+}
+
 function CitySearchInput({
   value,
   onChange,
   inputClassName,
   cities,
   icon,
+  onAddCity,
 }: {
   value: string;
   onChange: (v: string) => void;
   inputClassName?: string;
   cities?: string[];
   icon?: React.ReactNode;
+  /**
+   * שמירת עיר חדשה ברשימה המשותפת. בלי זה "הוסף עיר" רק ממלא את השדה, והעיר
+   * נעלמת מהרשימה ברגע שסוגרים את הטופס — מה שנראה למשתמש כאילו ההוספה לא
+   * עבדה. אופציונלי: מסך שלא מעביר אותו מתנהג כמו קודם.
+   */
+  onAddCity?: (name: string) => void | Promise<unknown>;
 }) {
   const [open, setOpen] = useState(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -8768,6 +9159,9 @@ function CitySearchInput({
                   cancelBlur();
                   onChange(trimmed);
                   setOpen(false);
+                  // השמירה ברשימה היא best-effort ולא חוסמת: גם אם היא נכשלת,
+                  // העיר כבר בשדה והפנייה תישמר איתה.
+                  void onAddCity?.(trimmed);
                 }}
               >
                 <Plus className="h-4 w-4 shrink-0" />
@@ -9013,6 +9407,8 @@ function CustomersPage({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [createError, setCreateError] = useState('');
+  // רשימת הערים המשותפת — אותה רשימה שרואים בשלב "פתיחת פנייה".
+  const { cityList, addCity } = useCityList(currentUser);
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: '',
@@ -9777,6 +10173,8 @@ function CustomersPage({
                   value={form.city}
                   onChange={(v) => setForm({ ...form, city: v })}
                   inputClassName={customerFormControlClass}
+                  cities={cityList}
+                  onAddCity={addCity}
                 />
               </FormField>
               <FormField label="מקור הגעה" labelClassName="text-base font-semibold text-slate-800">
@@ -13604,8 +14002,8 @@ function SettingsPage({
     { key: 'statuses', label: 'סטטוסים', enabled: true },
     { key: 'targets', label: 'יעדים', enabled: true },
     { key: 'catalog', label: 'פריטים', enabled: true },
-    // עריכת טקסט בקבצי ההצעות הממוזגים — מנהל/אדמין בלבד (ה-API דורש MANAGER).
-    { key: 'mergedDocs', label: 'קבצים ממוזגים', enabled: canManageQuoteTemplates },
+    // עריכת התבניות שמהן נוצרות ההצעות — מנהל/אדמין בלבד (ה-API דורש MANAGER).
+    { key: 'mergedDocs', label: 'תבניות הצעות', enabled: canManageQuoteTemplates },
     { key: 'system', label: 'מערכת', enabled: true },
   ];
 
@@ -16698,6 +17096,7 @@ function TasksPage({
   onReloadLeads,
   pendingExpandTaskId,
   pendingPrefillName,
+  pendingPrefillKind,
   pendingPrefillContact,
   onExpandHandled,
   customerClassifications: extCustomerClassifications,
@@ -16727,6 +17126,7 @@ function TasksPage({
   onReloadLeads?: () => void | Promise<void>;
   pendingExpandTaskId?: string | null;
   pendingPrefillName?: string | null;
+  pendingPrefillKind?: 'PRIVATE' | 'COMPANY' | null;
   pendingPrefillContact?: ProcessContact | null;
   onExpandHandled?: () => void;
   customerClassifications?: CustomerClassificationDto[];
@@ -16807,6 +17207,9 @@ function TasksPage({
       return true;
     } catch { return false; }
   }, [currentUser, reloadLeadSources]);
+
+  /* ── ערים — אותה מכניקה בדיוק כמו מקורות הגעה, ראו useCityList ── */
+  const { cityList, addCity } = useCityList(currentUser);
   /* ── expandedTaskId: parent is the single source of truth ──
    * Local state is ONLY used as fallback when parent props are not provided.
    * When parent IS provided, we read/write directly to parent — no local copy. */
@@ -16866,6 +17269,8 @@ function TasksPage({
 
   /* שלב הגבייה: הנפקת חשבונית בכספית מתוך זרימת המשימה. */
   const [collectionInvoiceBusy, setCollectionInvoiceBusy] = useState<string | null>(null);
+  /* מסמך טיוטה שנפתח לעריכה ידנית לפני ההנפקה (כספית נועלת מסמך שהונפק). */
+  const [editingDoc, setEditingDoc] = useState<{ documentId: string; taskId: string; kind: string; label: string } | null>(null);
   const [collectionInvoiceMsg, setCollectionInvoiceMsg] = useState<{ taskId: string; text: string; ok: boolean } | null>(null);
   // אמצעי התשלום עבר לדיאלוג ההנפקה (PAYMENT_METHODS ב-collection-payment-terms-modal),
   // כדי שכל מה שנדרש להנפקה ייבחר במקום אחד ובזמן ההנפקה.
@@ -16944,9 +17349,15 @@ function TasksPage({
   const issueCollectionInvoice = async (
     taskId: string,
     kind = 'invoice',
-    choice?: { paymentTerms: string | null; contactId: string | null; paymentTypeId?: number },
+    choice?: {
+      paymentTerms: string | null;
+      contactId: string | null;
+      paymentTypeId?: number;
+      draft?: boolean;
+    },
   ) => {
     const spec = COLLECTION_DOC_KINDS.find((k) => k.kind === kind);
+    const asDraft = choice?.draft === true;
     setCollectionInvoiceBusy(taskId);
     setCollectionInvoiceMsg(null);
     try {
@@ -16960,10 +17371,22 @@ function TasksPage({
           ...(choice?.contactId ? { contactId: choice.contactId } : {}),
           ...(spec?.paid ? { paymentTypeId: choice?.paymentTypeId ?? 1 } : {}),
           ...(choice?.paymentTerms !== undefined ? { paymentTerms: choice.paymentTerms } : {}),
+          // טיוטה: המסמך נוצר בכספית אך לא נסגר, ונפתח כאן לעריכה ידנית.
+          ...(asDraft ? { draft: true } : {}),
         }),
       });
       if (res.ok) {
         const d = await res.json();
+        if (asDraft) {
+          // אין הודעת "הונפקה" ואין פתיחת PDF — המסמך עדיין טיוטה.
+          setEditingDoc({
+            documentId: d.documentId,
+            taskId,
+            kind,
+            label: spec?.label || 'מסמך',
+          });
+          return;
+        }
         // customerLinked=false → המסמך נוצר בכספית עם שם הלקוח בלבד, בלי כרטיס לקוח
         // ובלי עדכון יתרה. לא כישלון, אבל חייב להיראות — אי אפשר לתקן חשבונית בדיעבד.
         // finalized=false → המסמך נשאר טיוטה בכספית: לא נכנס לספרים ולא מעדכן יתרה,
@@ -17010,9 +17433,8 @@ function TasksPage({
 
   /* זרימת ראדון: המשימה שעבורה פתוח פאנל הראדון (רק לקודי בדיקות ראדון) */
   const [radonPanelTask, setRadonPanelTask] = useState<{ taskId: string; sku: string; customerId: string | null } | null>(null);
-  /* ערכת ראדון: אין זרימה ואין שאלון — הערכה נשלחת ללקוח והדבר היחיד שצריך
-   * לעשות בביצוע הוא לתזמן לו תזכורת להחזיר אותה. זה המסמך היחיד שנפתח כאן. */
-  const [radonReminderTask, setRadonReminderTask] = useState<{ taskId: string; sku: string } | null>(null);
+  /* ערכת ראדון: אין state כאן — כל מחזור החיים (שליחה, אישור הלקוח, ספירה
+   * לאחור, סיום) חי ב-<RadonKitTracker /> בסרגל הימני, והמצב מגיע מהשרת. */
   /* authUser יציב לרכיבי הראדון.
      קודם הוא נוצר inline ({ id, role }) בכל רינדור, ולכן קיבל זהות חדשה בכל פעם.
      בדשבורד רצים כמה פולינגים של 20 שניות, וכל אחד מהם גרם לרכיבים לטעון את
@@ -17714,8 +18136,15 @@ function TasksPage({
 
   const getCallForm = (taskId: string, linkedLead: any, task: any, linkedCustomer?: any, leadPrefill?: { fullName?: string; phone?: string; email?: string; serviceType?: string; message?: string } | null) => {
     if (callFormData[taskId]) return callFormData[taskId];
-    // Initialize from existing data — prefer parsed lead email, then lead/customer
-    const rawName = leadPrefill?.fullName || task.leadName || task.customerName || linkedLead?.fullName || linkedCustomer?.contactName || linkedCustomer?.name || '';
+    // Initialize from existing data — prefer parsed lead email, then lead/customer.
+    // אצל לקוח שאינו פרטי `task.customerName` הוא *שם החברה*, ואילו השדה הזה
+    // מוצג כ"שם איש קשר" — לכן לחברה קודם `contactName` (האדם), ורק אחר כך שם
+    // הלקוח. בלי זה שם החברה נכנס לשדה איש הקשר, ומשם גם לאיש הקשר האוטומטי.
+    const linkedContactPerson =
+      linkedCustomer && linkedCustomer.type && linkedCustomer.type !== 'PRIVATE'
+        ? (linkedCustomer.contactName || '').trim()
+        : '';
+    const rawName = leadPrefill?.fullName || task.leadName || linkedContactPerson || task.customerName || linkedLead?.fullName || linkedCustomer?.contactName || linkedCustomer?.name || '';
     const nameParts = rawName.split(' ');
     return {
       fullName: rawName,
@@ -17816,15 +18245,21 @@ function TasksPage({
         const trimmed = pendingPrefillName.trim();
         const nameParts = trimmed.split(' ');
         const task = tasks.find((t) => t.id === pendingExpandTaskId);
-        setCallFormData((prev) => ({
-          ...prev,
-          [pendingExpandTaskId]: {
-            ...getCallForm(pendingExpandTaskId, null, task || {}, undefined),
-            fullName: trimmed,
-            firstName: nameParts[0] || '',
-            lastName: nameParts.slice(1).join(' ') || '',
-          },
-        }));
+        const base = getCallForm(pendingExpandTaskId, null, task || {}, undefined);
+        /* השם שהוקלד בחיפוש נכנס לשדה אחר לפי סוג הלקוח שנבחר:
+           חברה → שם החברה (איש הקשר יתמלא בהמשך), פרטי → שם איש הקשר. */
+        const seeded =
+          pendingPrefillKind === 'COMPANY'
+            ? { ...base, company: trimmed, customerType: 'COMPANY', fullName: '', firstName: '', lastName: '', contactName: '' }
+            : {
+                ...base,
+                fullName: trimmed,
+                firstName: nameParts[0] || '',
+                lastName: nameParts.slice(1).join(' ') || '',
+                contactName: trimmed,
+                ...(pendingPrefillKind === 'PRIVATE' ? { customerType: 'PRIVATE' } : {}),
+              };
+        setCallFormData((prev) => ({ ...prev, [pendingExpandTaskId]: seeded }));
       } else if (pendingPrefillContact) {
         // איש הקשר שנבחר ב"התחל תהליך" (לקוח עם כמה אנשי קשר) — זריעה לטופס הפנייה.
         const c = pendingPrefillContact;
@@ -18992,16 +19427,21 @@ function TasksPage({
     if (local.length === 0) return;
     const norm = (s: string | null | undefined) => (s || '').toString().trim().toLowerCase().replace(/[\s-]/g, '');
     const key = (name: string | null | undefined, phone: string | null | undefined) => `${norm(name)}|${norm(phone)}`;
-    let existing: Array<{ fullName?: string; phone?: string; mobile?: string }> = [];
+    let existing: Array<{ fullName?: string; phone?: string; mobile?: string; isPrimary?: boolean }> = [];
     try {
       const res = await apiFetch(apiUrl(`/customers/${customerId}/contacts`), { authUser: currentUser });
       if (res.ok) existing = await res.json();
     } catch { /* treat as empty */ }
     const seen = new Set(existing.map((c) => key(c.fullName, c.phone || c.mobile)));
+    // "ראשי" הוא תפקיד יחיד: אם ללקוח כבר יש איש קשר ראשי, מי שנוסף כאן מצטרף
+    // כרגיל. בלי זה כל שמירה חוזרת בכרטיס הייתה מייצרת עוד "ראשי" ללקוח.
+    let primaryTaken = existing.some((c) => c.isPrimary);
     for (const c of local) {
       const k = key(c.fullName, c.phone);
       if (seen.has(k)) continue; // כבר קיים — לא מכפילים
       seen.add(k);
+      const asPrimary = !!c.isPrimary && !primaryTaken;
+      if (asPrimary) primaryTaken = true;
       await apiFetch(apiUrl(`/customers/${customerId}/contacts`), {
         method: 'POST',
         authUser: currentUser,
@@ -19010,7 +19450,7 @@ function TasksPage({
           phone: c.phone,
           email: c.email,
           roleTitle: c.roleTitle,
-          isPrimary: c.isPrimary,
+          isPrimary: asPrimary,
         }),
       }).catch(() => {});
     }
@@ -19974,8 +20414,11 @@ function TasksPage({
                     const derivedFullNameGate = [fdGate.firstName, fdGate.lastName].filter(Boolean).join(' ').trim() || fdGate.fullName || '';
                     const isPrivateGate = (fdGate.customerType || '') === 'PRIVATE' || (fdGate.customerType || '') === 'לקוח פרטי';
                     const ccContactsGate = taskContactsMap[t.id] || [];
-                    const hasValidContactGate = ccContactsGate.some((c) => c.fullName?.trim() || c.phone?.trim() || c.email?.trim());
-                    const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && fdGate.city?.trim() && fdGate.address?.trim() && (isPrivateGate || hasValidContactGate));
+                    /* איש הקשר נבנה אוטומטית מ"שם איש קשר"+טלפון שבטופס — לכל סיווג, לא רק
+                       "פרטי" — ולכן אין יותר תנאי נפרד על רשימת אנשי הקשר: שם וטלפון מלאים
+                       מבטיחים שיש איש קשר. קודם חברה/קבלן/מוסד נחסמו כאן עד שהוזן איש קשר
+                       ידנית, אף שהאדם שמסר את הפרטים כבר רשום למעלה. */
+                    const canLeaveCustomerCard = !!(derivedFullNameGate.trim() && fdGate.phone?.trim() && fdGate.city?.trim() && fdGate.address?.trim());
                     return (
                     <tr ref={(el) => { expandedRowRefs.current[t.id] = el; }}>
                       <td colSpan={9} className="p-0">
@@ -20166,6 +20609,18 @@ function TasksPage({
                                   </div>
                                 );
                               })()}
+
+                              {/* ── מעקב ערכת ראדון (61 / 10000) ──
+                                  יושב כאן, ולא בשלב "תיאום", כי בערכה עצמית אין תיאום: הגלאים
+                                  יוצאים בדואר והלקוח מתקין לבד, ואז 90 יום שבהם אף אחד לא נוגע
+                                  במשימה. כפתור בתוך שלב בודד היה נעלם מהעין בדיוק בתקופה שבה
+                                  צריך לראות איפה התהליך עומד. הרכיב מחזיר null לכל SKU אחר. */}
+                              <RadonKitTracker
+                                taskId={t.id}
+                                sku={String(t.productName ?? '').trim()}
+                                customerId={t.customerId ?? null}
+                                authUser={radonAuthUser}
+                              />
 
                               {/* ── הערות על התהליך/הלקוח — הרכיב הימני מציג *רק* הערות (פרטי הלקוח הוסרו לבקשת המשתמש) ── */}
                               {(() => {
@@ -20416,14 +20871,25 @@ function TasksPage({
                             // נעשית בלחיצה עצמה כדי שנוכל להציג הודעת שגיאה מפורשת.
                             const canSaveCard = !!(derivedFullName.trim() && fd.phone?.trim() && fd.city?.trim() && fd.address?.trim());
                             const saveCustomerCard = async (nextStep?: number) => {
-                              if (!isPrivate0 && !hasValidContact0) {
-                                setCcCardError((p) => ({ ...p, [t.id]: 'חובה להוסיף לפחות איש קשר אחד עבור חברה / קבלן / מוסד. הוסיפו איש קשר ומלאו שם או טלפון.' }));
+                              const saveFullName = derivedFullName;
+                              /* ── איש קשר אוטומטי — לכל סיווג, לא רק "פרטי" ──
+                               * קודם חברה/קבלן/מוסד נחסמו כאן בשגיאה שדרשה להוסיף איש קשר
+                               * ידנית, בעוד שללקוח פרטי הוא נוצר מעצמו. אבל גם בפנייה של
+                               * חברה יש אדם שמסר את הפרטים — הוא פשוט לא שם הלקוח (שם
+                               * הלקוח הוא החברה). לכן אותו איש קשר נבנה כאן מפרטי הפונה
+                               * בשני המקרים, וההבדל היחיד הוא מה נרשם כשם הלקוח.
+                               *
+                               * החסימה נשארת רק למקרה שבו באמת אין ממה לבנות איש קשר. */
+                              const canAutoContact = !!(saveFullName.trim() || fd.phone?.trim() || fd.email?.trim());
+                              if (!hasValidContact0 && !canAutoContact) {
+                                setCcCardError((p) => ({ ...p, [t.id]: 'חסרים פרטי איש קשר — מלאו שם או טלפון, או הוסיפו איש קשר בטאב "אנשי קשר".' }));
                                 return;
                               }
                               setCcCardError((p) => ({ ...p, [t.id]: '' }));
-                              const saveFullName = derivedFullName;
-                              // Auto-add self-contact for PRIVATE with no explicit contacts
-                              if (isPrivate0 && ccContacts0.length === 0) {
+                              /* הצבה אופטימית בלבד — כדי ששאר שלבי הצינור (תיאום/פולואפ) יראו
+                               * את איש הקשר מיד באותו session. הכתיבה למסד עצמה נעשית בהמשך
+                               * ב-persistTaskContactsToCustomer, שכולל דדופ. */
+                              if (!hasValidContact0 && canAutoContact) {
                                 setTaskContactsMap((p) => ({ ...p, [t.id]: [{ id: '__auto_private__', fullName: saveFullName, phone: fd.phone || '', email: fd.email || '', roleTitle: '', isPrimary: true }] }));
                               }
                               if (t.leadId) {
@@ -20494,16 +20960,11 @@ function TasksPage({
                                     // לקוח קיים מוחזר כמו שהוא במקום להיווצר מחדש.
                                     const resolved = await customerRes.json();
                                     const createdCustomer = resolved?.customer ?? resolved;
-                                    if (!isPrivate0) {
-                                      for (const c of ccContacts0) {
-                                        if (!c.fullName?.trim() && !c.phone?.trim() && !c.email?.trim()) continue;
-                                        await apiFetch(apiUrl(`/customers/${createdCustomer.id}/contacts`), {
-                                          method: 'POST',
-                                          authUser: currentUser,
-                                          body: JSON.stringify({ fullName: c.fullName, phone: c.phone, email: c.email, roleTitle: c.roleTitle, isPrimary: c.isPrimary }),
-                                        }).catch(() => {});
-                                      }
-                                    }
+                                    /* איש הקשר מהטופס + כל איש קשר נוסף שהוזן, לכל סיווג.
+                                     * persistTaskContactsToCustomer כולל דדופ מול מה שכבר במסד,
+                                     * ולכן הוא לא מכפיל את איש הקשר ש-ensurePrimaryContact יצר
+                                     * בשרת ברגע יצירת הלקוח. */
+                                    await persistTaskContactsToCustomer(t.id, createdCustomer.id);
                                     if (t.leadId) {
                                       await apiFetch(apiUrl(`/leads/${t.leadId}`), {
                                         method: 'PATCH',
@@ -20561,6 +21022,12 @@ function TasksPage({
                                   // רענון מיידי של הלקוח במערך המקומי (customers) כדי ש-quotePrefillCust
                                   // ישלוף את הנתונים החדשים — reloadTasks לבדו לא מרענן את customers.
                                   try { const updated = await res.json(); if (updated?.id) onCustomerCreated?.(updated); } catch { /* לא קריטי — המסד עודכן */ }
+                                  /* ── איש הקשר גם ללקוח *קיים* ──
+                                   * המסלול הזה עשה PATCH בלבד ולא כתב אף איש קשר, ולכן חברה שכבר
+                                   * הייתה במסד נשארה עם טאב "אנשי קשר" ריק גם אחרי שהוזן שם איש
+                                   * קשר בכרטיס. ensurePrimaryContact רץ רק ביצירת לקוח, אז הוא לא
+                                   * מכסה את המקרה הזה. הדדופ שבפונקציה מונע כפילות. */
+                                  await persistTaskContactsToCustomer(t.id, t.customerId);
                                 } catch {
                                   setCcCardError((p) => ({ ...p, [t.id]: 'עדכון פרטי הלקוח נכשל (בעיית תקשורת) — הנתונים לא נשמרו. נסו שוב.' }));
                                   return;
@@ -20587,7 +21054,6 @@ function TasksPage({
                             })();
                             // רשימת מקורות ההגעה מגיעה מה-DB (עם נפילה לברירות מחדל), ו"אחר" תמיד אחרון לצורך הוספה.
                             const CC_LEAD_SOURCES = [...(leadSources.length ? leadSources : LEAD_SOURCE_DEFAULTS), 'אחר'];
-                            const CC_ISRAEL_CITIES = ['אום אל-פחם','אופקים','אור יהודה','אור עקיבא','אילת','אלעד','אריאל','אשדוד','אשקלון','באר שבע','בית שאן','בית שמש','בני ברק','בת ים','גבעת שמואל','גבעתיים','גדרה','גני תקווה','דימונה','הוד השרון','הרצליה','זכרון יעקב','חדרה','חולון','חיפה','טבריה','טירה','טירת כרמל','יבנה','יהוד-מונוסון','יקנעם','ירושלים','כוכב יאיר','כפר יונה','כפר סבא','כפר קרע','כרמיאל','להבים','לוד','מגדל העמק','מודיעין עילית','מודיעין-מכבים-רעות','מזכרת בתיה','מיתר','מעלה אדומים','מעלות-תרשיחא','נהריה','נוף הגליל','נס ציונה','נצרת','נשר','נתיבות','נתניה','עכו','עומר','עפולה','ערד','פרדס חנה-כרכור','פתח תקווה','צפת','קלנסוה','קריית אונו','קריית אתא','קריית ביאליק','קריית גת','קריית ים','קריית מוצקין','קריית מלאכי','קריית שמונה','קצרין','ראש העין','ראשון לציון','רחובות','רמלה','רמת גן','רמת השרון','רעננה','שגב-שלום','שדרות','שהם','שפרעם','תל אביב-יפו'].sort((a,b)=>a.localeCompare(b,'he'));
                             const ccInp = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
                             const ccInpIcon = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 pr-12 text-[15px] text-right text-black placeholder-[#999] outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100';
                             const ccSel = 'h-[50px] w-full rounded-xl border border-[#E2E8F0] bg-white px-4 text-[15px] text-right text-black outline-none transition-all focus:border-blue-400 focus:ring-[3px] focus:ring-blue-100 appearance-none cursor-pointer';
@@ -20595,7 +21061,6 @@ function TasksPage({
                             const ccLbl = 'block text-[13px] font-semibold text-black mb-1.5';
                             // contacts state helpers (use early-computed values for consistency)
                             const ccContacts = ccContacts0;
-                            const isPrivate = isPrivate0;
                             const addContact = () => {
                               setCcCardError((p) => ({ ...p, [t.id]: '' }));
                               taskContactsCounter.current[t.id] = (taskContactsCounter.current[t.id] || 0) + 1;
@@ -20607,19 +21072,23 @@ function TasksPage({
                               setCcCardError((p) => ({ ...p, [t.id]: '' }));
                               setTaskContactsMap((p) => ({ ...p, [t.id]: (p[t.id] || []).map((c) => c.id === cid ? { ...c, [field]: val } : c) }));
                             };
-                            // Auto-show contact row for non-private when none exist yet — prefill from the linked customer's contact details if available
-                            if (!isPrivate && ccContacts.length === 0 && !taskContactsCounter.current[t.id]) {
-                              taskContactsCounter.current[t.id] = 1;
-                              const prefillContact = {
-                                id: `pending-${t.id}-1`,
-                                fullName: linkedCustomerForCard?.contactName || '',
-                                phone: formatIsraeliPhoneDisplay(linkedCustomerForCard?.phone),
-                                email: linkedCustomerForCard?.email || '',
-                                roleTitle: '',
-                                isPrimary: true,
-                              };
-                              setTaskContactsMap((p) => (!p[t.id] || p[t.id].length === 0) ? { ...p, [t.id]: [prefillContact] } : p);
-                            }
+                            /* ── איש הקשר האוטומטי ──
+                             * "שם איש קשר" / "נייד" / "אימייל" שבטופס למעלה הם האדם שמסר את
+                             * הפרטים — גם כשהלקוח הוא חברה (שם החברה יושב בשדה נפרד). לכן הוא
+                             * מוצג כאן כאיש קשר 1 לכל סיווג. קודם זה הוצג ל"פרטי" בלבד, וחברה
+                             * קיבלה במקומו שורה ריקה שהעובד היה צריך למלא שוב ביד. */
+                            const ccNorm = (v?: string | null) => (v || '').toString().trim().toLowerCase().replace(/[\s-]/g, '');
+                            const autoContactName = derivedFullName.trim();
+                            const autoContactPhone = (fd.phone || '').trim();
+                            const showAutoContact = !!(autoContactName || autoContactPhone || fd.email?.trim());
+                            const autoContactKey = `${ccNorm(autoContactName)}|${ccNorm(autoContactPhone)}`;
+                            // אנשי קשר *נוספים* בלבד — אותו אדם לא מוצג פעמיים (כרטיס ירוק + שורה).
+                            const ccExtraContacts = showAutoContact
+                              ? ccContacts.filter((c) => `${ccNorm(c.fullName)}|${ccNorm(c.phone)}` !== autoContactKey)
+                              : ccContacts;
+                            // לקוח קיים: טוענים את אנשי הקשר שכבר יש לו במסד, כדי שיוצגו כאן
+                            // (ולא רק בשלב התיאום) ולא ייווצרו שוב.
+                            if (t.customerId && ccContacts.length === 0) void hydrateTaskContacts(t.id, t.customerId);
                             return (
                               <div className="px-8 pb-4" style={{ direction: 'rtl', background: '#F8FAFC' }}>
                                 {/* ── ליד נכנס מהמייל: פרטי הליד + טופס "התחל / העבר" ── */}
@@ -21001,7 +21470,8 @@ function TasksPage({
                                           value={fd.city}
                                           onChange={(v) => setF('city', v)}
                                           inputClassName={ccInpIcon}
-                                          cities={CC_ISRAEL_CITIES}
+                                          cities={cityList}
+                                          onAddCity={addCity}
                                           icon={<MapPin className="absolute left-4 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-slate-300 pointer-events-none" />}
                                         />
                                       </div>
@@ -21023,8 +21493,8 @@ function TasksPage({
                                       <div className="mb-3">
                                         <span className="text-[14px] font-bold text-black">אנשי קשר</span>
                                       </div>
-                                      {/* Auto-contact for PRIVATE — מוצג ומולא אוטומטית מהפרטים שהוזנו למעלה */}
-                                      {isPrivate && (
+                                      {/* איש קשר אוטומטי — לכל סיווג, מולא מהפרטים שהוזנו למעלה */}
+                                      {showAutoContact && (
                                         <div className="rounded-xl border border-green-200 bg-green-50 p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
                                           <div className="flex items-center justify-between mb-3">
                                             <span className="text-[13px] font-semibold text-green-700 flex items-center gap-2">
@@ -21049,12 +21519,12 @@ function TasksPage({
                                           </div>
                                         </div>
                                       )}
-                                      {ccContacts.map((pc, idx) => (
+                                      {ccExtraContacts.map((pc, idx) => (
                                         <div key={pc.id} className="rounded-xl border border-[#E2E8F0] bg-white p-4 mb-3" style={{ boxShadow: '0 1px 4px rgba(135,160,190,0.08)' }}>
                                           <div className="flex items-center justify-between mb-3">
                                             <span className="text-[13px] font-semibold text-black">
-                                              איש קשר {idx + 1}
-                                              {pc.isPrimary && <span className="mr-2 text-[11px] font-medium text-green-600">(ראשי)</span>}
+                                              איש קשר {idx + (showAutoContact ? 2 : 1)}
+                                              {pc.isPrimary && !showAutoContact && <span className="mr-2 text-[11px] font-medium text-green-600">(ראשי)</span>}
                                             </span>
                                             <button type="button" onClick={() => removeContact(pc.id)} className="w-7 h-7 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 transition-all">
                                               <X className="h-4 w-4" />
@@ -22716,28 +23186,11 @@ function TasksPage({
                                     )}
                                   </div>
 
-                                  {/* ── ערכת ראדון (61 / 10000) — הערכה אצל הלקוח, ואין מה לנהל
-                                      בזרימה. הפעולה היחידה: לתזמן לו תזכורת להחזיר אותה. ── */}
-                                  {isRadonKitSku(t.productName) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setRadonReminderTask({
-                                        taskId: t.id,
-                                        sku: String(t.productName ?? '').trim(),
-                                      })}
-                                      className="flex w-full items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-right transition hover:border-emerald-300 hover:bg-emerald-100/70"
-                                    >
-                                      <MessageCircle className="h-4 w-4 shrink-0 text-emerald-700" />
-                                      <span className="min-w-0">
-                                        <span className="block text-[13px] font-bold text-emerald-800">
-                                          תזכורת החזרת ערכה ללקוח
-                                        </span>
-                                        <span className="mt-0.5 block text-[11px] font-semibold text-emerald-700">
-                                          אישור מספר הטלפון, מועד התזכורת ונוסח ההודעה
-                                        </span>
-                                      </span>
-                                    </button>
-                                  )}
+                                  {/* ── ערכת ראדון (61 / 10000) ──
+                                      הכפתור שישב כאן ("תזכורת החזרת ערכה") עבר לקומפוננטת
+                                      "מעקב ערכת ראדון" בסרגל הימני הקבוע: הערכה נשלחת בדואר
+                                      ואין לה שלב תיאום, אבל יש לה 90 יום שצריך לראות לאורכם.
+                                      ראה <RadonKitTracker /> בסרגל הימני. ── */}
 
                                   {/* ── זרימת ראדון — רק לבדיקות ראדון שאינן ערכה (10044 / 10017) ── */}
                                   {isRadonTestSku(t.productName) && !isRadonKitSku(t.productName) && (
@@ -23154,6 +23607,7 @@ function TasksPage({
                                 taskId={pendingCollectionDoc.taskId}
                                 kindLabel={pendingCollectionDoc.label}
                                 paid={pendingCollectionDoc.paid}
+                                canEdit={pendingCollectionDoc.kind !== 'receipt'}
                                 currentUser={currentUser}
                                 onCancel={() => setPendingCollectionDoc(null)}
                                 onConfirm={(v) => {
@@ -23176,6 +23630,36 @@ function TasksPage({
                             </div>
                             {collectionInvoiceMsg && collectionInvoiceMsg.taskId === t.id && (
                               <div className={`mt-3 text-sm font-semibold ${collectionInvoiceMsg.ok ? 'text-emerald-600' : 'text-red-600'}`}>{collectionInvoiceMsg.text}</div>
+                            )}
+
+                            {/* ── עריכה ידנית של הטיוטה, לפני שהיא נסגרת בכספית ── */}
+                            {editingDoc && editingDoc.taskId === t.id && (
+                              <CaspitDocumentEditorModal
+                                documentId={editingDoc.documentId}
+                                currentUser={currentUser}
+                                onClose={() => setEditingDoc(null)}
+                                onIssued={(d: CaspitDocument) => {
+                                  const doc = editingDoc;
+                                  setEditingDoc(null);
+                                  if (!doc) return;
+                                  setCollectionInvoiceMsg({
+                                    taskId: doc.taskId,
+                                    ok: true,
+                                    text: `${doc.label} ${d.number || ''} הונפקה בהצלחה`,
+                                  });
+                                  if (d.linkToPdf) window.open(d.linkToPdf, '_blank', 'noopener,noreferrer');
+                                  // אותה הצעת שליחה במייל כמו במסלול ההנפקה הישיר.
+                                  setEmailPrompt({
+                                    taskId: doc.taskId,
+                                    kind: doc.kind === 'receipt' ? 'receipt' : 'invoice',
+                                    docLabel: doc.label,
+                                    number: d.number || '',
+                                    to: d.customerEmail || '',
+                                    closeTaskAfter: false,
+                                  });
+                                  setEmailPromptMsg('');
+                                }}
+                              />
                             )}
 
                             {/* ── אישור שליחה ללקוח — נפתח אחרי ההנפקה. בלי אישור כאן לא נשלח מייל.
@@ -23278,33 +23762,9 @@ function TasksPage({
                             />
                           )}
 
-                          {/* z-[10050]: הפאנל המורחב הוא z-[9999]. */}
-                          {radonReminderTask?.taskId === t.id && (
-                            <div
-                              className="fixed inset-0 z-[10050] flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 backdrop-blur-sm"
-                              dir="rtl"
-                              onMouseDown={(e) => { if (e.target === e.currentTarget) setRadonReminderTask(null); }}
-                            >
-                              <div className="my-12 w-full max-w-lg rounded-2xl bg-white p-4 shadow-2xl">
-                                <div className="mb-3 flex items-center justify-between">
-                                  <div className="text-[15px] font-bold text-slate-800">תזכורת החזרת ערכת ראדון</div>
-                                  <button
-                                    type="button"
-                                    onClick={() => setRadonReminderTask(null)}
-                                    className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-                                    aria-label="סגור"
-                                  >
-                                    <X className="h-5 w-5" />
-                                  </button>
-                                </div>
-                                <CustomerReminderCard
-                                  taskId={radonReminderTask.taskId}
-                                  sku={radonReminderTask.sku}
-                                  authUser={radonAuthUser}
-                                />
-                              </div>
-                            </div>
-                          )}
+                          {/* המודאל של "תזכורת החזרת ערכה" הוסר יחד עם הכפתור שפתח אותו:
+                              תזכורת ההחזרה כבר לא נדרכת ידנית אלא נקבעת אוטומטית ל-90 יום
+                              מתאריך ההתקנה שהלקוח מאשר, ונוסחה מוצג ב-<RadonKitTracker />. */}
 
                         </div>
                       </td>
@@ -24321,6 +24781,18 @@ export default function GalitCRMPrototype() {
   const [authBootstrapped, setAuthBootstrapped] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [users, setUsers] = useState<AppUser[]>([]);
+  /**
+   * ── עובדים פעילים בלבד — זו הרשימה שכל דרופדאון של שיוך/העברה מקבל ─────────
+   * `users` הוא הרשימה המלאה מהשרת וכולל גם עובדים שהושבתו (status = 'לא פעיל').
+   * זה נכון למסך ניהול העובדים, שחייב להציג אותם כדי להפעיל אותם מחדש — אבל בכל
+   * שאר המסכים זה באג: עובד שכבר לא עובד בחברה המשיך להופיע ב"העברה למומחה",
+   * ב"העבר ל…" של הליד, בשדה "אחראי" ובכל בורר נציג, ואפשר היה להעביר אליו
+   * משימות שאיש לא יראה. כך "חיים" (haim@galit.co.il), שהושבת, נשאר ברשימות.
+   *
+   * שני מקומות בקוד כבר סיננו `status === 'פעיל'` בעצמם (פופאפ "העברה למומחה"
+   * ורצועת הפולואפ) — מה שמראה שזו הכוונה בכל מקום; כאן זה נאכף במקום אחד.
+   */
+  const activeUsers = useMemo(() => users.filter((u) => u.status !== 'לא פעיל'), [users]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   /** מזהי הלקוחות שהמשתמש נכנס אליהם לאחרונה, מהחדש לישן — ל"10 לקוחות אחרונים".
    *  נטען מהשרת (CustomerView) ומתעדכן מיידית בכל כניסה ללקוח. */
@@ -24409,6 +24881,8 @@ export default function GalitCRMPrototype() {
   const [isNewCustomerMode, setIsNewCustomerMode] = useState(false);
   const [pendingExpandTaskId, setPendingExpandTaskId] = useState<string | null>(null);
   const [pendingPrefillName, setPendingPrefillName] = useState<string | null>(null);
+  /** מאיזה כפתור נוצר הלקוח — פרטי או חברה. קובע לאיזה שדה נכנס השם שהוקלד. */
+  const [pendingPrefillKind, setPendingPrefillKind] = useState<'PRIVATE' | 'COMPANY' | null>(null);
   // איש הקשר שנבחר ב"התחל תהליך" (כשללקוח כמה) — נזרע לטופס הפנייה של המשימה ב-TasksPage.
   const [pendingPrefillContact, setPendingPrefillContact] = useState<ProcessContact | null>(null);
   // מודל בחירת איש קשר ל"התחל תהליך" — נפתח כשללקוח יש 2+ אנשי קשר.
@@ -25237,8 +25711,8 @@ export default function GalitCRMPrototype() {
   };
 
   /** חדש → לקוח: פותח משימה חדשה בשלב כרטיס לקוח (שלב 0) */
-  const handleNewCustomer = async (prefillName?: string) =>
-    withTaskCreateLock(`new-customer:${prefillName || ''}`, async () => {
+  const handleNewCustomer = async (prefillName?: string, kind?: 'PRIVATE' | 'COMPANY') =>
+    withTaskCreateLock(`new-customer:${prefillName || ''}:${kind || ''}`, async () => {
     try {
       const res = await apiFetch(apiUrl('/tasks'), {
         method: 'POST',
@@ -25255,6 +25729,7 @@ export default function GalitCRMPrototype() {
       const newTask = await res.json();
       setParentManualStepOverride((prev) => ({ ...prev, [newTask.id]: 0 }));
       if (prefillName?.trim()) setPendingPrefillName(prefillName.trim());
+      setPendingPrefillKind(kind ?? null);
       setPendingExpandTaskId(newTask.id);
       navigateSafely('tasks');
       void reloadTasks();
@@ -25263,8 +25738,9 @@ export default function GalitCRMPrototype() {
       const emptyCustomer: Customer = {
         id: '__new__',
         name: prefillName || '',
-        type: '',
-        contactName: '',
+        type: kind || '',
+        // בלקוח פרטי שם הלקוח הוא גם שם איש הקשר; בחברה איש הקשר נשאר ריק.
+        contactName: kind === 'PRIVATE' ? (prefillName || '') : '',
         phone: '',
         email: '',
         city: '',
@@ -25762,12 +26238,31 @@ export default function GalitCRMPrototype() {
     }
   };
 
-  /* פתיחת תהליך טיפול חדש מתוך כרטיס לקוח קיים — יוצר משימת "פנייה", עובר למסך משימות ופותח אותה במרכז המסך */
+  /**
+ * כותרת משימת "פנייה". כשנבחר איש קשר ספציפי — שמו נכנס לכותרת.
+ *
+ * לחברה עם כמה אנשי קשר (לקידר מבנים יש ארבעה) כל המשימות נקראו "פנייה - קידר
+ * מבנים בע״מ", ואי אפשר היה לדעת ברשימה איזו פנייה שייכת למי. שם איש הקשר הוא
+ * ההבדל המשמעותי היחיד ביניהן, ולכן הוא שייך לכותרת.
+ *
+ * דילוג כשהשמות זהים: ברשומות רבות איש הקשר נושא את שם החברה עצמה, ואז
+ * "פנייה - קידר מבנים בע״מ — קידר מבנים בע״מ" רק מכער את הרשימה.
+ */
+const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
+  const base = `פנייה - ${cust.name}`;
+  const who = (contact?.fullName || '').trim();
+  return who && who !== (cust.name || '').trim() ? `${base} — ${who}` : base;
+};
+
+/* פתיחת תהליך טיפול חדש מתוך כרטיס לקוח קיים — יוצר משימת "פנייה", עובר למסך משימות ופותח אותה במרכז המסך */
   // יצירת משימת התהליך בפועל. contact = איש הקשר שנבחר (כשיש כמה); אם undefined —
   // המשימה תשתמש ב-contactName של הלקוח. איש הקשר הנבחר מועבר ל-TasksPage דרך
   // pendingPrefillContact, ושם נזרע לטופס הפנייה (callFormData) בעת פתיחת המשימה.
   const createProcessTask = async (cust: Customer, contact?: ProcessContact) => {
     if (!currentUser) return;
+    // "התחל תהליך" הוא בקשה מפורשת למשימה נוספת — גם כשכבר יש משימה פתוחה על
+    // הלקוח (למי שרצה את הקיימת יש כפתור "המשך תהליך" לידו). בלי הדגל הזה השרת
+    // מאחד את היצירה עם המשימה הקיימת והמסך קופץ אליה במקום לפתוח חדשה.
     const dbUser = users.find((u: any) =>
       u.id === currentUser.id ||
       (u.email && u.email === currentUser.email) ||
@@ -25780,12 +26275,13 @@ export default function GalitCRMPrototype() {
         method: 'POST',
         authUser: currentUser,
         body: JSON.stringify({
-          title: `פנייה - ${cust.name}`,
+          title: processTaskTitle(cust, contact),
           ownerId,
           customerId: cust.id,
           priority: 'HIGH',
           status: 'OPEN',
           type: 'GENERAL',
+          forceNew: true,
         }),
       });
       if (!res.ok) {
@@ -25794,7 +26290,8 @@ export default function GalitCRMPrototype() {
         return;
       }
       const task = await res.json();
-      // השרת עשוי להחזיר משימה קיימת (מניעת כפילות) — מוסיפים רק אם היא באמת חדשה.
+      // עם forceNew השרת תמיד יוצר משימה חדשה. בדיקת הכפילות נשארת כרשת ביטחון
+      // מול מרוץ בין שתי לחיצות מקבילות (המנעול חוסם רק בתוך אותו טאב).
       setTasks((prev) => (prev.some((t) => t.id === task.id) ? prev : [...prev, task]));
       // מעבירים את איש הקשר הנבחר ל-TasksPage כדי שיזרע אותו לטופס הפנייה של המשימה.
       setPendingPrefillContact(contact || null);
@@ -26558,7 +27055,7 @@ export default function GalitCRMPrototype() {
               leads={effectiveLeads}
               setLeads={setLeads}
               customers={customers}
-              users={users}
+              users={activeUsers}
               onOpenLead={openLeadPage}
               onOpenCustomer={openCustomerPage}
               onConvertedToCustomer={openCustomerInTaskWorkspace}
@@ -26586,7 +27083,7 @@ export default function GalitCRMPrototype() {
               projects={projects}
               tasks={tasks}
               opportunities={opportunities}
-              users={users}
+              users={activeUsers}
               onOpenCustomer={(c) => { setCustomerCardInitialLowerTab('quotes'); openCustomerPage(c); }}
               onCreateCustomer={(c) => setCustomers((prev) => [...prev, c])}
               onUpdateCustomer={(updated) =>
@@ -26919,7 +27416,7 @@ export default function GalitCRMPrototype() {
                 customer={linkedCustomerForSelectedLead}
                 customers={customers}
                 leads={effectiveLeads}
-                users={users}
+                users={activeUsers}
                 opportunities={opportunities}
                 currentUser={currentUser}
                 setLeads={setLeads}
@@ -26964,19 +27461,19 @@ export default function GalitCRMPrototype() {
               opportunities={opportunities}
               setOpportunities={setOpportunities}
               customers={customers}
-              users={users}
+              users={activeUsers}
               currentUser={currentUser}
             />
           )}
           {current === 'projects' && canAccess(currentUser.role, 'projects') && <ProjectsPage projects={projects} onOpenProject={openProjectDetails} />}
           {current === 'reports' && canAccess(currentUser.role, 'reports') && (
-            <ReportsPage projects={projects} customers={customers} users={users} currentUser={currentUser} />
+            <ReportsPage projects={projects} customers={customers} users={activeUsers} currentUser={currentUser} />
           )}
           {current === 'documents' && canAccess(currentUser.role, 'documents') && (
-            <DocumentsPage projects={projects} customers={customers} reports={[]} users={users} currentUser={currentUser} />
+            <DocumentsPage projects={projects} customers={customers} reports={[]} users={activeUsers} currentUser={currentUser} />
           )}
           {current === 'lab' && canAccess(currentUser.role, 'lab') && (
-            <LabSamplesPage projects={projects} customers={customers} users={users} currentUser={currentUser} />
+            <LabSamplesPage projects={projects} customers={customers} users={activeUsers} currentUser={currentUser} />
           )}
           {current === 'settings' && canAccess(currentUser.role, 'settings') && (
             <SettingsPage
@@ -26985,7 +27482,7 @@ export default function GalitCRMPrototype() {
               leads={effectiveLeads}
               projects={projects}
               quotes={quotes}
-              users={users}
+              users={activeUsers}
               onReloadCustomers={reloadCustomers}
               onReloadLeads={reloadLeads}
               onReloadProjects={reloadProjects}
@@ -27020,7 +27517,7 @@ export default function GalitCRMPrototype() {
               customers={customers}
               onCustomerCreated={(c) => setCustomers((prev) => prev.some((x) => x.id === c.id) ? prev.map((x) => x.id === c.id ? { ...x, ...c } : x) : [...prev, c])}
               leads={effectiveLeads}
-              users={users}
+              users={activeUsers}
               quotes={quotes}
               onOpenLead={(lead) => {
                 setSelectedLead(lead);
@@ -27059,8 +27556,9 @@ export default function GalitCRMPrototype() {
               onReloadLeads={reloadLeads}
               pendingExpandTaskId={pendingExpandTaskId}
               pendingPrefillName={pendingPrefillName}
+              pendingPrefillKind={pendingPrefillKind}
               pendingPrefillContact={pendingPrefillContact}
-              onExpandHandled={() => { setPendingExpandTaskId(null); setPendingPrefillName(null); setPendingPrefillContact(null); }}
+              onExpandHandled={() => { setPendingExpandTaskId(null); setPendingPrefillName(null); setPendingPrefillKind(null); setPendingPrefillContact(null); }}
               customerClassifications={customerClassifications}
               onNavigate={navigateSafely}
               onNewCustomer={handleNewCustomer}

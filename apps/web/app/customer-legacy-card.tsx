@@ -448,6 +448,12 @@ export type CustomerMailingTabExtras = {
   prefEmail: boolean;
   prefSms: boolean;
   mailingNote: string;
+  /**
+   * "לא לכלול ברשימת הדיוור" — סימון ידני שמוציא את הלקוח מרשימת הדיוור השיווקי
+   * בדשבורד, גם אם אישר דיוור בטופס באתר. נפרד מארבע העדפות הדיוור שמעליו, שהן
+   * העדפות דיוור *תפעולי* מהכרטיס הישן (משלוח דוחות/חשבוניות).
+   */
+  marketingOptOut: boolean;
 };
 
 function emptyMailingExtras(): CustomerMailingTabExtras {
@@ -459,6 +465,7 @@ function emptyMailingExtras(): CustomerMailingTabExtras {
     prefEmail: false,
     prefSms: false,
     mailingNote: '',
+    marketingOptOut: false,
   };
 }
 
@@ -477,6 +484,9 @@ function buildMailingExtrasFromCustomer(c: CustomerCardCustomer): CustomerMailin
       prefEmail: Boolean(m.prefEmail),
       prefSms: Boolean(m.prefSms),
       mailingNote: m.mailingNote != null ? String(m.mailingNote) : base.mailingNote,
+      // ההסרה נשמרת תמיד בשדה של הלקוח עצמו, לא ב-mailingTab — כדי שהשאילתה של
+      // רשימת הדיוור תוכל לסנן עליה במסד ולא בזיכרון.
+      marketingOptOut: Boolean(x.marketingOptOut),
     };
   }
   return {
@@ -493,6 +503,7 @@ function buildMailingExtrasFromCustomer(c: CustomerCardCustomer): CustomerMailin
     prefEmail: x.allowEmail != null ? Boolean(x.allowEmail) : Boolean(x.prefEmail),
     prefSms: x.allowSms != null ? Boolean(x.allowSms) : Boolean(x.prefSms),
     mailingNote: x.mailingNote != null ? String(x.mailingNote) : '',
+    marketingOptOut: Boolean(x.marketingOptOut),
   };
 }
 
@@ -1129,6 +1140,22 @@ export function CustomerLegacyCard({
   useEffect(() => {
     if (activeLowerTab === 'requests') void loadEmailRequests();
   }, [activeLowerTab, loadEmailRequests]);
+
+  /**
+   * ‎?sendReport=<documentId>‎ — קישור ממערכת הפקת הדוחות.
+   *
+   * הסקשן "דוחות שהופקו" מרונדר רק כשהטאב שלו נבחר, והוא זה שפותח את טופס
+   * המייל לפי הפרמטר. לכן הבחירה בטאב חייבת לקרות כאן, לפני שהסקשן בכלל עולה —
+   * אחרת הקישור מביא את הבודק לכרטיס הנכון ולא קורה כלום.
+   *
+   * הפרמטר עצמו מוסר בסקשן, אחרי שהטופס נפתח.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined' || !customer?.id) return;
+    if (new URLSearchParams(window.location.search).has('sendReport')) {
+      setActiveLowerTab('producedReports');
+    }
+  }, [customer?.id]);
   const lowerTabsVisible = useMemo(() => {
     if (showCustomerQuotesTab) return LOWER_TABS;
     return LOWER_TABS.filter((t) => t.key !== 'quotes' && t.key !== 'signedQuotes');
@@ -1194,12 +1221,26 @@ export function CustomerLegacyCard({
 
   const AUTO_CONTACT_ID = '__auto_private__';
 
-  // Auto-add/update a pending contact when type is PRIVATE in new customer mode
+  /* Auto-add/update a pending contact in new-customer mode — for EVERY
+     classification, not only PRIVATE.
+
+     The person differs by classification, which is why this used to be
+     private-only: for a private customer the customer IS the person, so the
+     contact takes `name`. For a company the customer is the company, and the
+     person is whoever is named in `contactName` — so a company opened with a
+     contact name got no contact at all, and the "אנשי קשר" tab stayed empty. */
   useEffect(() => {
     if (!isNewMode) return;
     const isPrivateType = customerForm.type === 'PRIVATE';
+    const personName = (
+      isPrivateType ? customerForm.name : (customerForm.contactName || '')
+    ).trim();
     const hasOtherContacts = pendingContacts.some(c => c.id !== AUTO_CONTACT_ID);
-    if (isPrivateType && !hasOtherContacts) {
+    // Something to build a contact from: a person's name, or at least a way to
+    // reach them. Without either there is no contact, only an empty row.
+    const canAuto = !!(personName || (customerForm.phone || '').trim() || (customerForm.email || '').trim());
+
+    if (canAuto && !hasOtherContacts) {
       setPendingContacts(prev => {
         const existing = prev.find(c => c.id === AUTO_CONTACT_ID);
         // Merge — prefer the customer-form value, but never wipe a value the user
@@ -1207,7 +1248,7 @@ export function CustomerLegacyCard({
         const autoContact: CustomerLegacyContact = {
           ...(existing ?? {}),
           id: AUTO_CONTACT_ID,
-          fullName: (customerForm.name || '').trim() || existing?.fullName || '',
+          fullName: personName || existing?.fullName || '',
           phone: (customerForm.phone || '').trim() || existing?.phone || undefined,
           mobile: (customerForm.phone2 || '').trim() || existing?.mobile || undefined,
           email: (customerForm.email || '').trim() || existing?.email || undefined,
@@ -1217,11 +1258,11 @@ export function CustomerLegacyCard({
         };
         return [...prev.filter(c => c.id !== AUTO_CONTACT_ID), autoContact];
       });
-    } else if (!isPrivateType && pendingContacts.some(c => c.id === AUTO_CONTACT_ID)) {
+    } else if (!canAuto && pendingContacts.some(c => c.id === AUTO_CONTACT_ID)) {
       setPendingContacts(prev => prev.filter(c => c.id !== AUTO_CONTACT_ID));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, isNewMode]);
+  }, [customerForm.type, customerForm.name, customerForm.contactName, customerForm.phone, customerForm.phone2, customerForm.email, isNewMode]);
 
   const prevCustomerIdRef = useRef(customer?.id);
   const prevCustomerNameRef = useRef(customer?.name);
@@ -1786,6 +1827,7 @@ export function CustomerLegacyCard({
         allowEmail: mailingExtras.prefEmail,
         allowSms: mailingExtras.prefSms,
         mailingNote: (mailingExtras.mailingNote || '').trim() || null,
+        marketingOptOut: mailingExtras.marketingOptOut,
         registrationDate: isoNoon(notesTabExtras.registrationDate),
         lastUpdateDate: isoNoon(notesTabExtras.lastUpdateDate),
         lastUpdatedBy: (notesTabExtras.lastUser || '').trim() || null,
@@ -2155,11 +2197,39 @@ export function CustomerLegacyCard({
   const [cityOpen, setCityOpen] = useState(false);
   const [cityFilter, setCityFilter] = useState('');
   const cityRef = useRef<HTMLDivElement>(null);
+  /* רשימת הערים המשותפת (טבלת City). עד 2026-08-26 הרשימה הייתה מוקשחת כאן,
+     וכפתור "+ הוסף כעיר חדשה" רק סגר את התפריט — העיר לא נשמרה בשום מקום ולא
+     הופיעה בפעם הבאה. נפילה-חזרה ל-ISRAEL_CITIES כדי שהתפריט לא ייצא ריק. */
+  const [cityOptions, setCityOptions] = useState<string[]>([]);
+  const reloadCities = useCallback(async () => {
+    try {
+      const res = await apiFetch(apiUrl('/cities'), { authUser: currentUser });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data)) setCityOptions(data.map((x: { name?: unknown }) => String(x?.name ?? '')).filter(Boolean));
+    } catch { /* נשארים עם הרשימה שבקוד */ }
+  }, [currentUser]);
+  useEffect(() => { void reloadCities(); }, [reloadCities]);
+  const addCityToList = useCallback(async (name: string) => {
+    const value = (name || '').trim();
+    if (!value) return;
+    setCityOptions((prev) => (prev.includes(value) ? prev : [...prev, value]));
+    try {
+      const res = await apiFetch(apiUrl('/cities'), {
+        method: 'POST', authUser: currentUser, body: JSON.stringify({ name: value }),
+      });
+      if (res.ok) await reloadCities();
+    } catch { /* העיר כבר בשדה; השמירה ברשימה היא best-effort */ }
+  }, [currentUser, reloadCities]);
+  const allCities = useMemo(
+    () => (cityOptions.length ? [...cityOptions].sort((a, b) => a.localeCompare(b, 'he')) : ISRAEL_CITIES),
+    [cityOptions],
+  );
   const filteredCities = useMemo(() => {
     const q = (cityFilter || customerForm.city || '').trim();
-    if (!q) return ISRAEL_CITIES;
-    return ISRAEL_CITIES.filter((c) => c.includes(q));
-  }, [cityFilter, customerForm.city]);
+    if (!q) return allCities;
+    return allCities.filter((c) => c.includes(q));
+  }, [cityFilter, customerForm.city, allCities]);
 
   // close city dropdown on outside click
   useEffect(() => {
@@ -2171,18 +2241,25 @@ export function CustomerLegacyCard({
     return () => document.removeEventListener('mousedown', handler);
   }, [cityOpen]);
 
-  /* When the customer type is/becomes PRIVATE and has no contacts yet, auto-populate
-     a first contact from the top fields — covers both an existing PRIVATE customer
-     with no saved contacts (on load) and switching an existing customer to PRIVATE.
-     New-customer mode is handled separately by the AUTO_CONTACT_ID effect above. */
+  /* When the classification is set/changed and the customer still has no contacts,
+     pre-fill a first contact from the top fields. Covers an existing customer
+     loaded with no saved contacts, and switching classification.
+     New-customer mode is handled separately by the AUTO_CONTACT_ID effect above.
+
+     Applies to companies as well as private customers — the only difference is
+     whose name it is: the customer's own for private, the named contact person
+     for a company. */
   const prevTypeRef = useRef<string | null>(null);
   useEffect(() => {
     if (isNewMode) return;
-    const wasPrivate = prevTypeRef.current === 'PRIVATE';
-    if (customerForm.type === 'PRIVATE' && !wasPrivate && allContacts.length === 0) {
+    const type = customerForm.type;
+    const isPrivateType = type === 'PRIVATE';
+    const personName = (isPrivateType ? customerForm.name : (customerForm.contactName || '')).trim();
+    const typeChanged = prevTypeRef.current !== type;
+    if (type && typeChanged && personName && allContacts.length === 0) {
       setContactEdit({
         id: '',
-        fullName: customerForm.name || '',
+        fullName: personName,
         department: '',
         roleTitle: '',
         mobile: (customerForm.phone2 || '').trim() || '',
@@ -2196,7 +2273,7 @@ export function CustomerLegacyCard({
       setActiveLowerTab('contacts');
     }
     prevTypeRef.current = customerForm.type;
-  }, [isNewMode, customerForm.type, customerForm.name, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
+  }, [isNewMode, customerForm.type, customerForm.name, customerForm.contactName, customerForm.phone, customerForm.phone2, customerForm.email, allContacts.length]);
 
   /* ══════════════════════════════════════════════════
      NEW-CUSTOMER MODAL — pixel-perfect match to screenshots
@@ -2390,7 +2467,7 @@ export function CustomerLegacyCard({
                         <button
                           type="button"
                           className="w-full px-3 py-2 text-right text-sm text-[#2E7D32] hover:bg-[#F0F7EF] rounded-lg transition-colors"
-                          onClick={() => { setCityOpen(false); }}
+                          onClick={() => { void addCityToList(customerForm.city.trim()); setCityOpen(false); }}
                         >
                           + הוסף &quot;{customerForm.city.trim()}&quot; כעיר חדשה
                         </button>
@@ -2807,7 +2884,7 @@ export function CustomerLegacyCard({
                           <button
                             type="button"
                             className="w-full px-3 py-2 text-right text-sm text-[#2E7D32] hover:bg-[#F0F7EF] rounded-lg transition-colors"
-                            onClick={() => { setCityOpen(false); }}
+                            onClick={() => { void addCityToList(customerForm.city.trim()); setCityOpen(false); }}
                           >
                             + הוסף &quot;{customerForm.city.trim()}&quot; כעיר חדשה
                           </button>
@@ -3412,6 +3489,32 @@ export function CustomerLegacyCard({
                     </label>
                   ))}
                 </div>
+              </div>
+
+              {/* ── רשימת דיוור שיווקי ─────────────────────────────────────────
+                  נפרד מהעדפות הדיוור התפעוליות שמעל. הלקוח מאשר דיוור בטופס
+                  באתר; הסימון כאן מוציא אותו מהרשימה בדשבורד וגובר על האישור. */}
+              <div className="mt-4 space-y-2 border-t border-amber-200 pt-4">
+                <label className="flex cursor-pointer items-start gap-2 text-right">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-400 accent-amber-600"
+                    disabled={!isEdit}
+                    checked={mailingExtras.marketingOptOut}
+                    onChange={(e) => setMailingExtras((p) => ({ ...p, marketingOptOut: e.target.checked }))}
+                  />
+                  <span className="flex flex-col">
+                    <span className="text-sm font-bold text-amber-800">אינו מעוניין להופיע ברשימת הדיוור</span>
+                    <span className="text-[11px] font-medium text-slate-500">
+                      לקוח שסומן כאן לא יופיע ברשימת הדיוור שבדשבורד, גם אם אישר דיוור בטופס באתר.
+                    </span>
+                  </span>
+                </label>
+                {mailingExtras.marketingOptOut && (
+                  <div className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
+                    הלקוח מוסר מרשימת הדיוור.
+                  </div>
+                )}
               </div>
 
               {/* חסום ל: — ערוצי תקשורת חסומים (do-not-contact). נפרד מהעדפות הדיוור שמעל. */}

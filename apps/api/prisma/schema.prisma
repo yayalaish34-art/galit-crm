@@ -305,6 +305,19 @@ model LeadSource {
   createdAt DateTime @default(now())
 }
 
+/// ערים — רשימה משותפת הניתנת-לעריכה, בדיוק כמו LeadSource.
+/// עד 2026-08-26 רשימת הערים הייתה מוקשחת בקוד הלקוח בשלושה מקומות, ולכן עיר
+/// שעובד הוסיף בשדה "עיר" נכנסה ללקוח אבל לא נשמרה בשום מקום — בפעם הבאה היא
+/// לא הופיעה ברשימה, והמסך הציע שוב "הוסף עיר".
+model City {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  /// true = מהרשימה המקורית שהוזרעה; false = עיר שעובד הוסיף מהמסך.
+  isPreset  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
 model Customer {
   id          String         @id @default(uuid())
   /// מזהה מהמערכת המיובאת (לקישור בין לידים/דוחות/פרויקטים)
@@ -362,6 +375,24 @@ model Customer {
   allowEmail          Boolean?
   allowSms            Boolean?
   mailingNote         String? @db.Text
+
+  /// ── רשימת הדיוור השיווקי ──────────────────────────────────────────────────
+  /// נפרד לגמרי מ-allowMail/allowEmail שמעל: אלה העדפות דיוור *תפעולי* מהכרטיס
+  /// הישן (משלוח דוחות, חשבוניות). כאן מדובר בהסכמה שיווקית לפי חוק הספאם.
+  ///
+  /// marketingConsent — מה הלקוח אישר בטופס באתר galit.co.il (שדה
+  /// `marketing_consent` בכל 9 טפסי אלמנטור). true = סימן, false = לא סימן,
+  /// null = לא ידוע (לקוח שנוצר ידנית או לפני שהשדה נוסף לטפסים).
+  marketingConsent    Boolean?
+  /// מתי התקבלה ההסכמה, ומאיזה עמוד/טופס — נדרש כהוכחה אם הלקוח מתלונן.
+  marketingConsentAt     DateTime?
+  marketingConsentSource String?
+  /// marketingOptOut — סימון ידני של העובד בכרטיס: "לא רוצה להופיע ברשימת דיוור".
+  /// גובר על marketingConsent תמיד; לקוח שסומן כך לא יופיע ברשימה בשום מצב.
+  marketingOptOut     Boolean  @default(false)
+  marketingOptOutAt   DateTime?
+  /// מי סימן את ההסרה (User.id) — לתיעוד בלבד, בלי FK כדי לא לחסום מחיקת עובד.
+  marketingOptOutById String?
 
   /// Legacy card — notes tab metadata
   registrationDate DateTime?
@@ -455,6 +486,9 @@ model Customer {
   @@index([importLegacyId])
   @@index([name])
   @@index([phone])
+  /// רשימת הדיוור נשלפת בשאילתה אחת על שני השדות האלה — ראה MailingListService.
+  @@index([marketingOptOut])
+  @@index([marketingConsent])
 }
 
 /// "לקוחות אחרונים" per-user — נרשם/מתעדכן ברגע שעובד נכנס לכרטיס לקוח (או למשימה
@@ -818,9 +852,43 @@ model QuoteTemplate {
   updatedAt       DateTime @updatedAt
 
   quotes Quote[]
+  /// גרסה ערוכה של קובץ ה-DOCX, אם מנהל ערך את התבנית דרך הממשק.
+  docxOverride QuoteTemplateDocx?
 
   @@index([serviceType])
   @@index([isActive])
+}
+
+/**
+ * קובץ תבנית DOCX **ערוך** — מחליף את הקובץ המקורי שבתיקיית templates/.
+ *
+ * למה בבסיס הנתונים ולא כקובץ על הדיסק: תיקיית `templates/` נצרבת לתוך אימג'
+ * ה-Docker בזמן ה-build, ולכן כל כתיבה אליה בזמן ריצה נעלמת בדיפלוי הבא (וגם
+ * לא משותפת בין replicas). שמירה כאן שורדת דיפלוי, וניתן תמיד לחזור למקור
+ * פשוט על ידי מחיקת השורה.
+ */
+model QuoteTemplateDocx {
+  id            String        @id @default(uuid())
+  templateId    String        @unique
+  template      QuoteTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  /// תוכן ה-DOCX כ-base64
+  dataBase64    String        @db.Text
+  sizeBytes     Int
+  /// מי ערך לאחרונה — לתצוגה בממשק הניהול
+  updatedById   String?
+  updatedByName String?
+
+  /// ── עריכה ב-Word דרך OneDrive ──
+  /// הקובץ מועלה ל-OneDrive של העורך ונפתח ב-Word; Word שומר חזרה ל-OneDrive,
+  /// והמערכת מושכת משם את הגרסה העדכנית חזרה ל-dataBase64.
+  onedriveItemId   String?
+  /// בעל התיבה שאליה הועלה הקובץ — נדרש כדי למשוך אותו בחזרה באותו חשבון.
+  onedriveOwnerId  String?
+  onedriveWebUrl   String?
+  onedriveSyncedAt DateTime?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 }
 
 model Quote {
@@ -962,6 +1030,8 @@ model Quote {
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]
   quoteDocuments  QuoteDocument[]
+  /// כל סודות החתימה שהונפקו להצעה — ראה QuoteSignatureToken.
+  signatureTokens QuoteSignatureToken[]
 
   @@index([importLegacyId])
   @@index([salesRepresentativeId])
@@ -1159,6 +1229,18 @@ model Document {
   uploadedById  String?
   uploadedBy    User?        @relation("DocumentUploader", fields: [uploadedById], references: [id])
 
+  /// למי הדוח מוען, כפי שהוזן במערכת הפקת הדוחות. בלי זה חלון השליחה נפל על
+  /// כתובת הלקוח הכללית — שהיא לא בהכרח האדם שהדוח נכתב עבורו.
+  recipientName  String?
+  recipientEmail String?
+
+  /// עריכה ידנית ב-Word דרך OneDrive (אותו דפוס כמו Quote):
+  /// onedriveItemId: מזהה הפריט ב-OneDrive; onedriveWebUrl: כתובת פתיחה ב-Word;
+  /// onedriveOwnerId: המשתמש שב-OneDrive שלו הקובץ מאוחסן (נדרש למשיכת הגרסה בזמן שליחה).
+  onedriveItemId  String?
+  onedriveWebUrl  String?
+  onedriveOwnerId String?
+
   @@index([importLegacyId])
 }
 
@@ -1270,6 +1352,38 @@ model QuoteDocument {
 
   @@index([quoteId])
   @@index([importLegacyId])
+}
+
+/// כל סוד חתימה שהונפק אי-פעם להצעה — טבלת append-only.
+///
+/// למה היא קיימת: תוקף קישור החתימה נשען עד עכשיו על שדה JSON יחיד ומשתנה
+/// (`Quote.digitalCertificateMeta.secret`). כל כתיבה שהחליפה את ה-blob בלי
+/// לגרור את הסוד הישן קדימה הרגה *בשקט* כל קישור שכבר היה בידי לקוחות — וזה
+/// התגלה רק כשלקוח התלונן. זו נכונות-לפי-מוסכמה: מספיק נתיב אחד ששוכח.
+///
+/// כאן התוקף עובר למקום שרק *מוסיפים* לו. סוד שהונפק נרשם בשורה משלו ולעולם
+/// לא נכתב מחדש, ולכן דריסה של ה-blob כבר לא יכולה לשבור קישור.
+///
+/// ביטול מפורש נעשה ב-`revokedAt` — פעולה מכוונת, להבדיל מאובדן בשוגג.
+model QuoteSignatureToken {
+  id         String    @id @default(uuid())
+
+  quoteId    String
+  quote      Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  /// הסוד עצמו. ייחודי גלובלית — סוד הוא capability, ואסור שיצביע לשתי הצעות.
+  secret     String    @unique
+
+  issuedAt   DateTime  @default(now())
+  /// "User"."id" של מי שהנפיק, כשידוע.
+  issuedById String?
+  /// מאיזה נתיב הונפק (request_signature / send_pdf / backfill) — לאבחון.
+  source     String?
+
+  /// ביטול מכוון. null = הקישור עדיין תקף.
+  revokedAt  DateTime?
+
+  @@index([quoteId])
 }
 
 enum ReportType {
@@ -1502,6 +1616,44 @@ model RadonJob {
   returnTracking    String?
   /// תאריך ההצבה כפי שדווח ע״י הלקוח (להבדיל מ-placedAt שנרשם על ידינו)
   clientReportedAt  DateTime?
+
+  // ── מעקב ערכת ראדון (61 / 10000) ──
+  //
+  // הערכה יוצאת מידינו והלקוח הוא שמתקין, ולכן אנחנו עיוורים לחלוטין לגבי מה
+  // קורה אצלו — בדיוק מה שהשדות האלה פותרים. כל שדה הוא חותמת של אירוע אחד
+  // בשרשרת: שלחנו → ביקשנו אישור → הלקוח אישר בוואטסאפ → נגמרו 90 הימים.
+  // הם נפרדים מ-placedAt/collectedAt במכוון: אלה מתארים מה *אנחנו* עשינו
+  // בשטח, ואילו כאן הלקוח הוא מקור האמת.
+
+  /// מתי העובד לחץ "הערכה נשלחה ללקוח". null = הערכה טרם יצאה.
+  kitSentAt              DateTime?
+  /// מי לחץ — "User"."id". לתיעוד בלבד (אין FK, כמו כל שאר המודול).
+  kitSentByUserId        String?
+  /// איך יצאה ההודעה: 'manual' = עובד לחץ, 'auto' = 48 שעות עברו ואיש לא לחץ.
+  /// מוצג בכרטיס — מי שקורא אותו חייב לדעת שהתהליך התחיל בלי החלטת אדם.
+  kitSentVia             String?
+  /// נוסח הודעת ההוראות שנשלחה בפועל ללקוח, כפי שנשלחה.
+  /// נשמר ולא מחושב מחדש: שינוי עתידי בתבנית לא ישכתב מה שהלקוח כבר קיבל.
+  kitInstructionsText    String?   @db.Text
+  /// מתי הודעת ההוראות יצאה מהבוט בפועל (להבדיל מ-kitSentAt = לחיצת העובד).
+  kitInstructionsSentAt  DateTime?
+
+  /// מתי הגיע אלינו אישור ההתקנה מהלקוח (מועד קבלת האות, לא מועד ההתקנה).
+  /// תאריך ההתקנה עצמו יושב ב-clientReportedAt, ומשם נספרים 90 הימים.
+  installConfirmedAt     DateTime?
+  /// דרך הגעת האישור: 'whatsapp' = הלקוח אישר בבוט, 'manual' = עובד הזין ידנית.
+  installConfirmedVia    String?
+  /// המשפט שהלקוח כתב בוואטסאפ — כדי שהעובד יראה על מה בדיוק נסמך התאריך.
+  installConfirmedNote   String?
+
+  /// אורך תקופת הבדיקה בימים. ברירת מחדל 90, ניתן לעריכה לפני שליחת הערכה.
+  testDurationDays       Int       @default(90)
+
+  /// מזהה ה-CustomerReminder בבוט שיבקש מהלקוח להחזיר את הערכה בתום התקופה.
+  /// נשמר כדי שנוכל לבטל/להציג אותו בלי לחפש לפי taskId.
+  returnReminderId       String?
+  /// נוסח הודעת ההחזרה שתישלח בתום התקופה — מוצג לעובד מראש.
+  returnReminderText     String?   @db.Text
 
   detectorCount Int?
   siteAddress   String?

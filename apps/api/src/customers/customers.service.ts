@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { formatIsraeliPhone, formatPhoneFields } from '../common/phone.util';
 import { ensurePrimaryContact } from '../common/primary-contact.util';
 import { GraphMailService } from '../microsoft/graph-mail.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
 import { extractSignedQuoteInfo } from './signed-quote-total.util';
 import type {
   CreateCustomerDocumentDto,
@@ -20,6 +21,16 @@ import type {
   UpdateCustomerDocumentDto,
   UpdateCustomerDto,
 } from './dto/update-customer.dto';
+
+/**
+ * שם המסמך נושא סיומת (".docx"), ומי שמקליד שם חדש בלעדיה לא התכוון לוותר עליה —
+ * קובץ בלי סיומת שנשלח במייל לא נפתח בלחיצה אצל הלקוח.
+ */
+function withSameExtension(nextName: string, currentName: string): string {
+  const ext = currentName.match(/\.[A-Za-z0-9]{1,5}$/)?.[0] ?? '';
+  if (!ext) return nextName;
+  return nextName.toLowerCase().endsWith(ext.toLowerCase()) ? nextName : `${nextName}${ext}`;
+}
 
 function parseOptionalDate(v: unknown): Date | null | undefined {
   if (v === undefined) return undefined;
@@ -101,6 +112,7 @@ export class CustomersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly graphMail: GraphMailService,
+    private readonly graphFiles: GraphFilesService,
   ) {}
 
   private static readonly PRESET_CLASSIFICATION_CODES = new Set(['POTENTIAL', 'COMPANY', 'PUBLIC', 'PRIVATE']);
@@ -298,6 +310,13 @@ export class CustomersService {
     if (dto.allowEmail !== undefined) out.allowEmail = dto.allowEmail;
     if (dto.allowSms !== undefined) out.allowSms = dto.allowSms;
     if (dto.mailingNote !== undefined) out.mailingNote = dto.mailingNote;
+
+    // רשימת דיוור שיווקי. ההסרה הידנית חותמת גם זמן, כדי שיהיה תיעוד מתי הלקוח ביקש.
+    if (dto.marketingConsent !== undefined) out.marketingConsent = dto.marketingConsent;
+    if (dto.marketingOptOut !== undefined) {
+      out.marketingOptOut = !!dto.marketingOptOut;
+      out.marketingOptOutAt = dto.marketingOptOut ? new Date() : null;
+    }
 
     if (dto.registrationDate !== undefined) out.registrationDate = parseOptionalDate(dto.registrationDate);
     if (dto.registrationNote !== undefined) out.registrationNote = dto.registrationNote;
@@ -713,6 +732,32 @@ export class CustomersService {
   async createContact(customerId: string, data: any) {
     const customer = await this.prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
     if (!customer) throw new BadRequestException('לקוח לא נמצא');
+
+    /* ── דדופ מול אנשי קשר קיימים ──
+     * לאותו לקוח נכתבים אנשי קשר משני מקורות שלא מכירים זה את זה: השרת יוצר
+     * איש קשר ראשי ביצירת הלקוח (ensurePrimaryContact מ-contactName), והממשק
+     * שולח לכאן את אנשי הקשר שהוקלדו בכרטיס. כשזה אותו אדם נוצרו שתי שורות
+     * זהות — 12 לקוחות "חברה" ו-3 "מוסד" הגיעו כך לכרטיס עם איש קשר כפול.
+     *
+     * ההשוואה היא על שם+טלפון מנורמלים, בדיוק כמו ב-ensurePrimaryContact, כדי
+     * ששני הצדדים יסכימו מה נחשב "אותו אדם". שורה קיימת מוחזרת כמו שהיא, כך
+     * שהקורא לא צריך לדעת אם היא נוצרה עכשיו או קודם. */
+    const norm = (v: unknown) => (v ?? '').toString().trim().toLowerCase().replace(/[\s-]/g, '');
+    const wantedName = norm(data?.fullName);
+    const wantedPhone = norm(formatIsraeliPhone(data?.phone) || formatIsraeliPhone(data?.mobile));
+    if (wantedName || wantedPhone) {
+      const existing = await this.prisma.customerContact.findMany({
+        where: { customerId },
+        select: { id: true, fullName: true, phone: true, mobile: true },
+      });
+      const match = existing.find(
+        (c) => norm(c.fullName) === wantedName && norm(c.phone || c.mobile) === wantedPhone,
+      );
+      if (match) {
+        return this.prisma.customerContact.findUnique({ where: { id: match.id } });
+      }
+    }
+
     const legacy = (data?.importLegacyId || data?.legacyContactCode || '').toString().trim();
     const importLegacyId = legacy || `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     return this.prisma.customerContact.create({
@@ -1051,6 +1096,159 @@ export class CustomersService {
     if (!c) throw new NotFoundException('לקוח לא נמצא');
   }
 
+
+  // ── עריכת דוח שהופק ב-Word דרך OneDrive ──────────────────────────────────
+  //
+  // אותו דפוס שכבר עובד בהצעות מחיר (quotes.service): מעלים את ה-DOCX ל-OneDrive,
+  // פותחים ב-Word, ומושכים את הגרסה הערוכה בחזרה. עד עכשיו דוח שהופק היה קפוא —
+  // ה-dataBase64 שנשמר בהפקה היה הגרסה היחידה, וכל עריכה ידנית לא הגיעה לשום מקום
+  // (המייל המשיך לשלוח את המקור). שלוש עמודות onedrive* על Document מחזיקות את הקישור.
+  //
+  // הערה על ownerId: טוקן ה-Graph הוא per-user, ולכן חייבים לזכור באיזו תיבה הקובץ
+  // יושב — בלעדיו אי אפשר למשוך את הגרסה הערוכה בשליחה שמבצע משתמש אחר.
+
+  /** קורא את הפניית ה-OneDrive של מסמך (guarded — null אם העמודות עדיין לא הוגרו). */
+  private async getDocumentOnedriveRef(
+    documentId: string,
+  ): Promise<{ itemId: string; ownerId: string; webUrl: string | null } | null> {
+    try {
+      const ref: any = await (this.prisma.document.findUnique as any)({
+        where: { id: documentId },
+        select: { onedriveItemId: true, onedriveOwnerId: true, onedriveWebUrl: true },
+      });
+      if (ref?.onedriveItemId && ref?.onedriveOwnerId) {
+        return { itemId: ref.onedriveItemId, ownerId: ref.onedriveOwnerId, webUrl: ref.onedriveWebUrl ?? null };
+      }
+    } catch {
+      // העמודות עדיין לא קיימות ב-DB (לפני הרצת המיגרציה) — מתנהגים כאילו אין קישור.
+    }
+    return null;
+  }
+
+  /**
+   * מעלה את הדוח ל-OneDrive לעריכה ב-Word ומחזיר כתובת פתיחה.
+   *
+   * קריאה שנייה על דוח שכבר הועלה *לא* מעלה מחדש אלא מחזירה את הקישור הקיים — אחרת
+   * פתיחה חוזרת הייתה דורסת את מה שהמשתמש כתב ב-Word בגרסה שנשמרה ב-DB.
+   */
+  async openDocumentInWord(
+    documentId: string,
+    userId?: string,
+  ): Promise<{ webUrl: string; webDavUrl: string; itemId: string; reused: boolean }> {
+    if (!userId) throw new BadRequestException('פתיחת הדוח ב-Word דורשת משתמש מחובר');
+    const doc: any = await this.prisma.document.findUnique({ where: { id: documentId } });
+    if (!doc) throw new NotFoundException('הדוח לא נמצא');
+
+    // כבר קיים קובץ פעיל ב-OneDrive — מחזירים אותו כמות שהוא (לא דורסים עריכות).
+    const existing = await this.getDocumentOnedriveRef(documentId);
+    if (existing) {
+      try {
+        const item = await this.graphFiles.getItem(existing.ownerId, existing.itemId);
+        if (item) {
+          return { webUrl: item.webUrl, webDavUrl: item.webDavUrl, itemId: item.itemId, reused: true };
+        }
+      } catch {
+        // הפריט נמחק/לא נגיש — נעלה מחדש למטה.
+      }
+    }
+
+    if (!doc.dataBase64) throw new BadRequestException('לדוח אין קובץ שמור להעלאה');
+    const bytes = Buffer.from(doc.dataBase64, 'base64');
+    /*
+     * שם הקובץ ב-OneDrive נגזר משם המסמך, והנתיב הוא המפתח — כלומר שני דוחות באותו שם
+     * נכתבים לאותו פריט. זה לא תיאורטי: דוחות נקראים לפי הלקוח והסוג ("דוח קרינה — X"),
+     * ושמות חוזרים על עצמם בין לקוחות ובין הפקות, כך שדוח אחד דרס את משנהו.
+     *
+     * מזהה המסמך נוסף לשם, בדיוק כפי שכבר נעשה בתבניות ההצעות. שישה תווים מספיקים
+     * להפרדה ולא הופכים את השם למשהו שאי אפשר לזהות בתיקייה.
+     *
+     * השם נחתך כאן לפני הוספת המזהה, ולא רק ב-GraphFilesService: קיצור אחרי ההוספה היה
+     * חותך דווקא את המזהה — החלק היחיד שמבטיח ייחודיות — ומחזיר את הדריסה שהוא נועד למנוע.
+     * שמות הדוחות מגיעים ל-110 תווים ויותר, ו-SharePoint דוחה אותם ב-423.
+     */
+    const rawName = String(doc.name || 'דוח').replace(/\.(docx|pdf)$/i, '');
+    const baseName = `${rawName.slice(0, 80).trim()} ${String(documentId).slice(0, 6)}`;
+
+    let uploaded: { itemId: string; webUrl: string; webDavUrl: string; name: string };
+    try {
+      uploaded = await this.graphFiles.uploadEditable(userId, baseName, bytes);
+    } catch (e: any) {
+      this.logger.error(`OneDrive upload failed for document ${documentId}: ${e?.message || e}`);
+      const raw = String(e?.message || '');
+      /*
+       * "ייתכן שצריך לחבר מחדש את Outlook" נוסף כאן כניחוש, והוא נכון רק לכישלון הרשאה.
+       * על קובץ נעול (423) הוא שולח את המשתמש לנתק ולחבר מחדש את החשבון — פעולה שלא
+       * קשורה לנעילה, לא פותרת אותה, ומסתירה את הדבר היחיד שכן עוזר: לסגור את Word.
+       * לכן הסיומת נוספת רק כשזו באמת שאלה של גישה.
+       */
+      const isLock = /נעול|resourceLocked|\b423\b/.test(raw);
+      const isAuth = /\b40[13]\b|invalid_grant|token|unauthor/i.test(raw);
+      const hint = isLock ? '' : isAuth ? ' — ייתכן שצריך לחבר מחדש את Outlook (הרשאת קבצים)' : '';
+      throw new BadRequestException(
+        `העלאת הדוח ל-OneDrive נכשלה: ${raw || 'שגיאה לא ידועה'}${hint}`,
+      );
+    }
+
+    try {
+      await (this.prisma.document.update as any)({
+        where: { id: documentId },
+        data: {
+          onedriveItemId: uploaded.itemId,
+          onedriveWebUrl: uploaded.webUrl,
+          onedriveOwnerId: userId,
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(`Saving OneDrive ref failed for document ${documentId}: ${e?.message || e}`);
+    }
+
+    return { webUrl: uploaded.webUrl, webDavUrl: uploaded.webDavUrl, itemId: uploaded.itemId, reused: false };
+  }
+
+  /**
+   * מושך את הגרסה הערוכה מ-OneDrive ושומר אותה כ-dataBase64 של הדוח.
+   *
+   * הקישור נשאר על כנו כדי שאפשר יהיה להמשיך לערוך. השם לא נדרס בכוונה: אם המשתמש
+   * שינה את שם הקובץ ב-OneDrive, השם הידני הוא מה שהוא מזהה — ולכן הוא מנצח.
+   * best-effort: כישלון מחזיר { synced: false } ולא מפיל את הקורא.
+   */
+  async syncDocumentFromOneDrive(documentId: string): Promise<{ synced: boolean; at?: string }> {
+    const ref = await this.getDocumentOnedriveRef(documentId);
+    if (!ref) return { synced: false };
+
+    let buffer: Buffer;
+    try {
+      buffer = await this.graphFiles.downloadContent(ref.ownerId, ref.itemId);
+    } catch (e: any) {
+      this.logger.warn(`OneDrive sync download failed for document ${documentId}: ${e?.message || e}`);
+      return { synced: false };
+    }
+    if (!buffer?.length) return { synced: false };
+
+    try {
+      // השם ב-OneDrive מנצח: אם המשתמש שינה אותו שם, זה השם שהוא מצפה לראות ולשלוח.
+      let name: string | undefined;
+      try {
+        const item = await this.graphFiles.getItem(ref.ownerId, ref.itemId);
+        if (item?.name) name = item.name;
+      } catch { /* נשארים עם השם הקיים */ }
+
+      await (this.prisma.document.update as any)({
+        where: { id: documentId },
+        data: {
+          dataBase64: buffer.toString('base64'),
+          sizeBytes: buffer.length,
+          ...(name ? { name } : {}),
+        },
+      });
+    } catch (e: any) {
+      this.logger.warn(`Saving synced document ${documentId} failed: ${e?.message || e}`);
+      return { synced: false };
+    }
+
+    return { synced: true, at: new Date().toISOString() };
+  }
+
   async createCustomerDocument(customerId: string, dto: CreateCustomerDocumentDto, uploadedById?: string | null) {
     await this.ensureCustomer(customerId);
     const filePath = (dto.filePath && dto.filePath.trim()) || 'legacy:metadata-only';
@@ -1067,6 +1265,8 @@ export class CustomersService {
         sizeBytes: dto.sizeBytes ?? null,
         dataBase64: dto.dataBase64?.trim() || null,
         importLegacyId: dto.importLegacyId?.trim() || null,
+        recipientName: dto.recipientName?.trim() || null,
+        recipientEmail: dto.recipientEmail?.trim() || null,
         uploadedById: uploadedById || null,
       },
       include: {
@@ -1096,6 +1296,9 @@ export class CustomersService {
         // otherwise the edit form opens blank and saving would wipe them.
         description: true,
         documentDate: true,
+        // מי שהדוח מוען אליו — חלון השליחה נפתח על הכתובת הזו.
+        recipientName: true,
+        recipientEmail: true,
         createdAt: true,
         updatedAt: true,
         uploadedBy: { select: { id: true, name: true } },
@@ -1152,10 +1355,30 @@ export class CustomersService {
   async updateCustomerDocument(customerId: string, documentId: string, dto: UpdateCustomerDocumentDto) {
     const doc = await this.prisma.document.findFirst({
       where: { id: documentId, customerId },
-      select: { id: true },
+      select: { id: true, name: true },
     });
     if (!doc) throw new NotFoundException('מסמך לא נמצא');
-    const nextName = dto.name !== undefined ? dto.name?.trim() : undefined;
+    let nextName = dto.name !== undefined ? dto.name?.trim() : undefined;
+    if (nextName) nextName = withSameExtension(nextName, doc.name || '');
+
+    // ── שינוי שם מתפשט גם ל-OneDrive ──
+    // השם הזה הוא גם שם הקובץ שמצורף למייל ללקוח, והשליחה מעדיפה את השם
+    // שב-OneDrive כשיש קישור (ראה sendDocumentEmail). אם נשנה רק ב-DB, הלקוח יקבל
+    // קובץ עם השם הישן — ולכן שני המקומות חייבים להסכים.
+    // best-effort: כישלון מול Graph לא מונע את שינוי השם במערכת, אבל מתועד — סנכרון
+    // עתידי מ-Word מושך את השם מ-OneDrive ועלול להחזיר את הישן.
+    if (nextName && nextName !== doc.name) {
+      const ref = await this.getDocumentOnedriveRef(documentId);
+      if (ref) {
+        try {
+          await this.graphFiles.renameItem(ref.ownerId, ref.itemId, nextName);
+        } catch (e: any) {
+          this.logger.warn(
+            `OneDrive rename failed for document ${documentId} (השם במערכת עודכן בכל זאת): ${e?.message || e}`,
+          );
+        }
+      }
+    }
 
     // החלפת הקובץ עצמו: מקבלים base64 נטו (בלי קידומת "data:...;base64,")
     // ובלי רווחים/שורות. מחרוזת ריקה נחשבת "לא נשלח קובץ" ואינה מוחקת את
