@@ -898,6 +898,11 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
   { key: 'requests', label: 'מיילים' },
+  // "פרטי דיוור" הוחזר לרשימה 2026-09-08. המסך שלו קיים בקוד מאז ומעולם
+  // (activeLowerTab === 'mailing'), אבל הוא נשמט מרשימת הטאבים בעיצוב מחדש של
+  // הכרטיס — כלומר לא היה שום כפתור שפותח אותו. בלעדיו אין דרך להגיע לסימון
+  // "אינו מעוניין להופיע ברשימת הדיוור", שהוא כל מה שמוציא לקוח מרשימת הדיוור.
+  { key: 'mailing', label: 'פרטי דיוור' },
   { key: 'documents', label: 'מסמכים' },
   { key: 'quotes', label: 'הצעות מחיר' },
   { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
