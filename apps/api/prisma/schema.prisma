@@ -7,48 +7,52 @@ datasource db {
 }
 
 model User {
-  id           String      @id @default(uuid())
-  name         String
-  email    String   @unique
+  id                 String      @id @default(uuid())
+  name               String
+  email              String      @unique
   /// Bcrypt hash; DB column remains "passwordHash" for existing migrations.
-  password String   @map("passwordHash")
-  role     UserRole @default(SALES)
-  status       UserStatus  @default(ACTIVE)
-  phone        String?
+  password           String      @map("passwordHash")
+  role               UserRole    @default(SALES)
+  status             UserStatus  @default(ACTIVE)
+  phone              String?
+  /// שלוחת המרכזייה של העובד. dial1 ב-Click2Call: המרכזייה מצלצלת קודם לשלוחה
+  /// הזו, וכשהעובד מרים היא מחייגת ללקוח ומחברת. בלעדיה כפתור "התקשר" של העובד
+  /// לא יכול לחייג דרך המרכזייה (ייפול חזרה ל-tel:).
+  pbxExtension       String?
   /// מספרי וואטסאפ נוספים לאותו משתמש (מכשירים נוספים) — ראה model UserPhone.
-  extraPhones  UserPhone[]
-  department   String?
+  extraPhones        UserPhone[]
+  department         String?
   // Multi-select service ownership (used for lead routing)
-  serviceDepartments String[] @default([])
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  serviceDepartments String[]    @default([])
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
 
   // Basic per-user permissions overrides (stage 1 of permissions system)
-  canViewFinance         Boolean @default(false)
-  canEditFinance         Boolean @default(false)
-  canDeleteCustomers     Boolean @default(false)
-  canDeleteLeads         Boolean @default(false)
-  canManageUsers         Boolean @default(false)
-  canManagePermissions   Boolean @default(false)
-  canViewAllRecords      Boolean @default(false)
+  canViewFinance       Boolean @default(false)
+  canEditFinance       Boolean @default(false)
+  canDeleteCustomers   Boolean @default(false)
+  canDeleteLeads       Boolean @default(false)
+  canManageUsers       Boolean @default(false)
+  canManagePermissions Boolean @default(false)
+  canViewAllRecords    Boolean @default(false)
 
-  ownedLeads       Lead[]    @relation("LeadAssignedUser")
-  tasks            Task[]    @relation("TaskOwner")
-  reports          Report[]  @relation("ReportCreator")
-  reviewedReports  Report[]  @relation("ReportReviewer")
-  uploadedDocuments Document[] @relation("DocumentUploader")
-  collectedSamples LabSample[] @relation("LabSampleCollector")
-  assignedProjects Project[] @relation("ProjectTechnician")
-  writtenReports   Project[] @relation("ProjectReportWriter")
-  opportunities    Opportunity[]
-  workStatus       WorkStatus  @default(OFFLINE)
+  ownedLeads        Lead[]        @relation("LeadAssignedUser")
+  tasks             Task[]        @relation("TaskOwner")
+  reports           Report[]      @relation("ReportCreator")
+  reviewedReports   Report[]      @relation("ReportReviewer")
+  uploadedDocuments Document[]    @relation("DocumentUploader")
+  collectedSamples  LabSample[]   @relation("LabSampleCollector")
+  assignedProjects  Project[]     @relation("ProjectTechnician")
+  writtenReports    Project[]     @relation("ProjectReportWriter")
+  opportunities     Opportunity[]
+  workStatus        WorkStatus    @default(OFFLINE)
 
   // Presence (simple heartbeat-based tracking)
-  isOnline         Boolean     @default(false)
+  isOnline         Boolean   @default(false)
   lastSeenAt       DateTime?
   currentWorkMode  WorkMode?
   currentProjectId String?
-  currentProject   Project?    @relation("UserCurrentProject", fields: [currentProjectId], references: [id])
+  currentProject   Project?  @relation("UserCurrentProject", fields: [currentProjectId], references: [id])
 
   leadActivitiesCreated LeadActivity[]
   /// "לקוחות אחרונים" — לקוחות שהעובד נכנס אליהם לאחרונה (ראה model CustomerView)
@@ -57,46 +61,46 @@ model User {
   employeeNumber        String?
 
   // ── הגדרות SMTP אישיות לשליחת מייל ──
-  mailDisplayName       String?
-  smtpHost              String?
-  smtpPort              Int?
-  smtpUser              String?
+  mailDisplayName String?
+  smtpHost        String?
+  smtpPort        Int?
+  smtpUser        String?
   /// מוצפן ב-AES-256 — לא מוחזר ל-frontend
-  smtpPassword          String?
-  smtpFrom              String?
-  smtpSecure            Boolean   @default(false)
+  smtpPassword    String?
+  smtpFrom        String?
+  smtpSecure      Boolean @default(false)
 
   // ── Microsoft Graph (Outlook) — שליחת מייל בשם המשתמש ──
   /// כתובת המייל של תיבת ה-Outlook המחוברת (לתצוגה)
-  msEmail               String?
+  msEmail                String?
   /// refresh token מוצפן ב-AES-256 — לא מוחזר ל-frontend
-  msRefreshToken        String?
+  msRefreshToken         String?
   /// מתי המשתמש חיבר את חשבון ה-Outlook
-  msConnectedAt         DateTime?
+  msConnectedAt          DateTime?
   // ── OneDrive נפרד — חשבון Microsoft שונה מ-Outlook, לאחסון קבצים בלבד (CRM-Quotes) ──
   /// כתובת המייל של חשבון ה-OneDrive הנפרד (לתצוגה). null = משתמשים בחשבון ה-Outlook הרגיל.
-  odEmail               String?
+  odEmail                String?
   /// refresh token מוצפן ב-AES-256 של חשבון ה-OneDrive הנפרד — לא מוחזר ל-frontend
-  odRefreshToken        String?
+  odRefreshToken         String?
   /// מתי המשתמש חיבר את חשבון ה-OneDrive הנפרד
-  odConnectedAt         DateTime?
+  odConnectedAt          DateTime?
   /// חתימת מייל אישית — מתווספת אוטומטית לגוף הצעות מחיר שנשלחות
-  mailSignature         String?
+  mailSignature          String?
   /// תמונת חתימה (לוגו/חתימה סרוקה) — מוטמעת בגוף המייל מתחת לטקסט
   /// LEGACY: חתימה בודדת. נשמר לתאימות לאחור; חתימות מרובות נשמרות ב-UserSignature
-  mailSignatureImage    Bytes?
+  mailSignatureImage     Bytes?
   mailSignatureImageType String?
   /// חתימות מרובות (תמונה + כותרת) — העובד בוחר את המתאימה בעת שליחת הצעה
-  signatures            UserSignature[] @relation("UserSignatures")
+  signatures             UserSignature[]   @relation("UserSignatures")
   /// לידים נכנסים מהמייל שמשויכים למשתמש (owner)
-  incomingLeads         IncomingLead[]  @relation("IncomingLeadOwner")
-  salesRepQuotes        Quote[] @relation("QuoteSalesRep")
-  performerQuotes       Quote[] @relation("QuotePerformer")
-  followUpQuotes        Quote[] @relation("QuoteFollowUpResponsible")
+  incomingLeads          IncomingLead[]    @relation("IncomingLeadOwner")
+  salesRepQuotes         Quote[]           @relation("QuoteSalesRep")
+  performerQuotes        Quote[]           @relation("QuotePerformer")
+  followUpQuotes         Quote[]           @relation("QuoteFollowUpResponsible")
   /// בקשות אישור מנהל שהעובד הזה שלח
-  approvalRequests      ApprovalRequest[] @relation("ApprovalRequester")
+  approvalRequests       ApprovalRequest[] @relation("ApprovalRequester")
   /// בקשות אישור מנהל שהמשתמש הזה אישר/דחה
-  approvalDecisions     ApprovalRequest[] @relation("ApprovalDecider")
+  approvalDecisions      ApprovalRequest[] @relation("ApprovalDecider")
 }
 
 /// בקשת אישור מנהל — נוצרת כשעובד מבקש להמשיך בשלב שחסום לו.
@@ -108,31 +112,31 @@ model User {
 /// ייחודיות: אין יותר מבקשה PENDING אחת לאותו (taskId, kind) — נאכף באינדקס
 /// חלקי במיגרציה, כדי שלחיצות חוזרות לא ייצרו ערימת בקשות כפולות.
 model ApprovalRequest {
-  id           String                @id @default(uuid())
+  id           String         @id @default(uuid())
   kind         ApprovalKind
-  status       ApprovalStatus        @default(PENDING)
+  status       ApprovalStatus @default(PENDING)
   /// המשימה שעליה מבוקש האישור
   taskId       String
-  task         Task                  @relation("TaskApprovalRequests", fields: [taskId], references: [id], onDelete: Cascade)
+  task         Task           @relation("TaskApprovalRequests", fields: [taskId], references: [id], onDelete: Cascade)
   /// הלקוח (לתצוגה למנהל — שם/סוג); nullable כי משימה יכולה להיות בלי לקוח משויך
   customerId   String?
   /// snapshot לתצוגה, כדי שמסך המנהל לא יצטרך לטעון משימות/לקוחות
   customerName String?
   taskTitle    String?
   /// סיבת הבקשה כפי שהוצגה לעובד (למשל "לקוח פרטי שטרם שילם")
-  reason       String?               @db.Text
+  reason       String?        @db.Text
   requesterId  String
-  requester    User                  @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  requester    User           @relation("ApprovalRequester", fields: [requesterId], references: [id])
   /// מי הכריע (אישר/דחה)
   deciderId    String?
-  decider      User?                 @relation("ApprovalDecider", fields: [deciderId], references: [id])
+  decider      User?          @relation("ApprovalDecider", fields: [deciderId], references: [id])
   decidedAt    DateTime?
   /// הערת המנהל בדחייה (מוצגת לעובד)
-  decisionNote String?               @db.Text
+  decisionNote String?        @db.Text
   /// מתי הוקפצה התראה למנהל (כדי לא להקפיץ שוב)
   notifiedAt   DateTime?
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   @@index([status])
   @@index([taskId])
@@ -199,31 +203,31 @@ model UserSignature {
 /// ליד נכנס שזוהה אוטומטית ממייל ב-Outlook (נושא המכיל "ליד").
 /// משמש כמקור-אמת לפרטי הליד; ה-Task שנוצר ממנו מופיע ראשון ברשימת המשימות.
 model IncomingLead {
-  id              String             @id @default(uuid())
+  id                String             @id @default(uuid())
   /// מזהה ההודעה ב-Graph (פר-תיבה) — ייחודי, מונע יצירה כפולה לאותו משתמש
-  messageId       String             @unique
+  messageId         String             @unique
   /// Message-ID מ-RFC 5322 — זהה בכל תיבות הנמענים; משמש לקיבוץ אותו מייל בין עובדים.
   /// @unique = "ליד אחד משותף": אותו מייל שהגיע ל-5 תיבות ייכנס כשורה אחת. duplicateOfExistingLead
   /// לבדו הוא check-then-act ולכן לא עמד בסריקות מקבילות (נוצרו עד 6 עותקים לאותו מייל).
   internetMessageId String?            @unique
-  subject         String
+  subject           String
   /// גוף המייל = פרטי הליד שהוזנו
-  body            String?
-  fromName        String?
-  fromEmail       String?
-  receivedAt      DateTime
-  status          IncomingLeadStatus @default(NEW)
+  body              String?
+  fromName          String?
+  fromEmail         String?
+  receivedAt        DateTime
+  status            IncomingLeadStatus @default(NEW)
   /// בעל הטיפול הנוכחי (מי שקיבל את המייל, או מי שהועבר אליו)
-  ownerId         String
-  owner           User               @relation("IncomingLeadOwner", fields: [ownerId], references: [id])
+  ownerId           String
+  owner             User               @relation("IncomingLeadOwner", fields: [ownerId], references: [id])
   /// אם הועבר — מזהה העובד שאליו הועבר (לתיעוד)
-  transferredToId String?
+  transferredToId   String?
   /// ה-Task שנוצר עבור הליד
-  taskId          String?
+  taskId            String?
   /// מתי הוצגה התראה צידית (כדי לא להקפיץ שוב)
-  notifiedAt      DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  notifiedAt        DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   @@index([ownerId])
   @@index([status])
@@ -231,58 +235,58 @@ model IncomingLead {
 }
 
 enum IncomingLeadStatus {
-  NEW          // הגיע, ממתין — מוצג טופס "התחל טיפול / העבר"
-  ACTIVE       // התחיל טיפול או הועבר — מוצג ישירות עם פרטי הליד
-  DISMISSED    // נדחה
+  NEW // הגיע, ממתין — מוצג טופס "התחל טיפול / העבר"
+  ACTIVE // התחיל טיפול או הועבר — מוצג ישירות עם פרטי הליד
+  DISMISSED // נדחה
 }
 
 model Project {
-  id                    String         @id @default(uuid())
+  id                String        @id @default(uuid())
   /// מזהה ייחודי מהמערכת המיובאת (לקישור בין ישויות בייבוא)
-  importLegacyId        String?
-  projectNumber         String?
-  name                  String
-  client                String
-  status                ProjectStatus  @default(NEW)
-  progress              Int            @default(0)
-  dueDate               DateTime?
-  siteVisitDate         DateTime?
-  siteVisitTime         String?
-  city                  String?
-  address               String?
-  service               String?
-  serviceCategory       String?
-  serviceSubType        String?
-  contactName           String?
-  contactPhone          String?
-  urgency               String?
-  fieldContactName      String?
-  fieldContactPhone     String?
-  requiresReport        Boolean        @default(true)
-  requiresSampling      Boolean        @default(false)
-  notes                 String?
-  createdAt             DateTime       @default(now())
-  updatedAt             DateTime       @updatedAt
+  importLegacyId    String?
+  projectNumber     String?
+  name              String
+  client            String
+  status            ProjectStatus @default(NEW)
+  progress          Int           @default(0)
+  dueDate           DateTime?
+  siteVisitDate     DateTime?
+  siteVisitTime     String?
+  city              String?
+  address           String?
+  service           String?
+  serviceCategory   String?
+  serviceSubType    String?
+  contactName       String?
+  contactPhone      String?
+  urgency           String?
+  fieldContactName  String?
+  fieldContactPhone String?
+  requiresReport    Boolean       @default(true)
+  requiresSampling  Boolean       @default(false)
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  customerId            String?
-  customer              Customer?      @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  assignedTechnicianId  String?
-  assignedTechnician    User?          @relation("ProjectTechnician", fields: [assignedTechnicianId], references: [id])
+  assignedTechnicianId String?
+  assignedTechnician   User?   @relation("ProjectTechnician", fields: [assignedTechnicianId], references: [id])
 
   assignedReportWriterId String?
-  assignedReportWriter   User?         @relation("ProjectReportWriter", fields: [assignedReportWriterId], references: [id])
+  assignedReportWriter   User?   @relation("ProjectReportWriter", fields: [assignedReportWriterId], references: [id])
 
-  tasks                 Task[]
-  quotes                Quote[]
-  reports               Report[]
-  documents             Document[]
-  labSamples            LabSample[]
+  tasks      Task[]
+  quotes     Quote[]
+  reports    Report[]
+  documents  Document[]
+  labSamples LabSample[]
 
   // Presence: which users selected this as current project
-  activeUsers           User[]         @relation("UserCurrentProject")
+  activeUsers User[] @relation("UserCurrentProject")
 
-  leads                 Lead[]
+  leads Lead[]
 
   @@index([importLegacyId])
 }
@@ -319,41 +323,41 @@ model City {
 }
 
 model Customer {
-  id          String         @id @default(uuid())
+  id               String    @id @default(uuid())
   /// מזהה מהמערכת המיובאת (לקישור בין לידים/דוחות/פרויקטים)
-  importLegacyId String?
+  importLegacyId   String?
   /// ה-ContactId של הלקוח בכספית. נפתר פעם אחת (התאמה ללקוח קיים או יצירה) ונשמר,
   /// כדי שהנפקות הבאות לא ייצרו כרטיס כפול ולא יסרקו שוב את כל אנשי הקשר.
-  caspitContactId String?
-  name        String
+  caspitContactId  String?
+  name             String
   /// שם חברה / מוסד — חובה כשסיווג לקוח אינו PRIVATE
-  companyname String?
+  companyname      String?
   /// סיווג לקוח: קוד מתוך CustomerClassification (למשל COMPANY / C_...)
-  type        String
-  contactName String
-  phone       String
-  email       String
-  city        String
-  address     String?
-  status      String         @default("ACTIVE")
-  services    String[]
-  notes       String?
+  type             String
+  contactName      String
+  phone            String
+  email            String
+  city             String
+  address          String?
+  status           String    @default("ACTIVE")
+  services         String[]
+  notes            String?
   /// מקור הגעה של הלקוח (נשמר מטופס "פתיחת פנייה" / כרטיס הלקוח)
-  leadSource  String?
+  leadSource       String?
   /// שדות מיובאים Followup / מערכת ישנה
   phone2           String?
   phone3           String?
   fax              String?
   website          String?
   companyRegNumber String?
-  internalNotes    String?    @db.Text
-  balanceLegacy    Decimal?   @db.Decimal(18, 2)
+  internalNotes    String?   @db.Text
+  balanceLegacy    Decimal?  @db.Decimal(18, 2)
   birthdayLegacy   DateTime?
   cityCodeLegacy   String?
   zipLegacy        String?
   legacyUpdatedAt  DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   /// Legacy customer card — general / account
   legacyAccountNumber         String?
@@ -374,7 +378,7 @@ model Customer {
   allowFax            Boolean?
   allowEmail          Boolean?
   allowSms            Boolean?
-  mailingNote         String? @db.Text
+  mailingNote         String?  @db.Text
 
   /// ── רשימת הדיוור השיווקי ──────────────────────────────────────────────────
   /// נפרד לגמרי מ-allowMail/allowEmail שמעל: אלה העדפות דיוור *תפעולי* מהכרטיס
@@ -383,16 +387,16 @@ model Customer {
   /// marketingConsent — מה הלקוח אישר בטופס באתר galit.co.il (שדה
   /// `marketing_consent` בכל 9 טפסי אלמנטור). true = סימן, false = לא סימן,
   /// null = לא ידוע (לקוח שנוצר ידנית או לפני שהשדה נוסף לטפסים).
-  marketingConsent    Boolean?
+  marketingConsent       Boolean?
   /// מתי התקבלה ההסכמה, ומאיזה עמוד/טופס — נדרש כהוכחה אם הלקוח מתלונן.
   marketingConsentAt     DateTime?
   marketingConsentSource String?
   /// marketingOptOut — סימון ידני של העובד בכרטיס: "לא רוצה להופיע ברשימת דיוור".
   /// גובר על marketingConsent תמיד; לקוח שסומן כך לא יופיע ברשימה בשום מצב.
-  marketingOptOut     Boolean  @default(false)
-  marketingOptOutAt   DateTime?
+  marketingOptOut        Boolean   @default(false)
+  marketingOptOutAt      DateTime?
   /// מי סימן את ההסרה (User.id) — לתיעוד בלבד, בלי FK כדי לא לחסום מחיקת עובד.
-  marketingOptOutById String?
+  marketingOptOutById    String?
 
   /// Legacy card — notes tab metadata
   registrationDate DateTime?
@@ -417,9 +421,9 @@ model Customer {
   financeUnnamed2         String?
   financeUnnamed3         String?
   financeUnnamed4         String?
-  totalPurchases          Decimal? @db.Decimal(18, 2)
-  totalSales              Decimal? @db.Decimal(18, 2)
-  percentageValue         Decimal? @db.Decimal(18, 4)
+  totalPurchases          Decimal?  @db.Decimal(18, 2)
+  totalSales              Decimal?  @db.Decimal(18, 2)
+  percentageValue         Decimal?  @db.Decimal(18, 4)
   paymentTerms            String?
   creditDays              String?
   creditEnabled           Boolean?
@@ -428,11 +432,11 @@ model Customer {
 
   /// אוטומציית משוב ופולואו-אפ (לכל לקוח) — נשלט מסקשן "משוב"
   /// משוב: חותמת זמן של בקשת המשוב האחרונה שנשלחה (למניעת כפילויות)
-  feedbackRequestedAt DateTime?
+  feedbackRequestedAt  DateTime?
   /// משוב: החרגת הלקוח משליחה אוטומטית של בקשת משוב
-  feedbackOptOut      Boolean?
+  feedbackOptOut       Boolean?
   /// פולואו-אפ: הפעלת פולואו-אפ אוטומטי ללקוח הספציפי הזה
-  autoFollowupEnabled Boolean?
+  autoFollowupEnabled  Boolean?
   /// פולואו-אפ: מרווח ימים מותאם אישית (דורס את הגלובלי)
   followupIntervalDays Int?
   /// פולואו-אפ: ערוץ ('email' | 'sms') — אם ריק, ברירת המחדל הגלובלית
@@ -443,11 +447,11 @@ model Customer {
 
   /// סיווג "לא רלוונטי" — נקבע כשעובד מסמן משימה כלא רלוונטית
   /// קטגוריית הסיבה (יקר מדי / אי-התאמה בשירות / לא מעוניין / זמן לא טוב / לא ניתן ליצור קשר / אחר)
-  notRelevantReason   String?
+  notRelevantReason String?
   /// פירוט חופשי (בעיקר עבור "אחר")
-  notRelevantNote     String?
+  notRelevantNote   String?
   /// מתי סווג כלא רלוונטי
-  notRelevantAt       DateTime?
+  notRelevantAt     DateTime?
 
   /// Legacy card — פרטים נוספים
   microwaveModel   String?
@@ -463,17 +467,17 @@ model Customer {
   detailDate2      DateTime?
   detailDate4      DateTime?
 
-  leads       Lead[]
-  quotes      Quote[]
-  tasks       Task[]
-  reports     Report[]
-  projects    Project[]
-  opportunities Opportunity[]
-  documents   Document[]
-  labSamples  LabSample[]
-  contacts         CustomerContact[]
-  salesOrders      SalesOrder[]
-  interactions     CustomerInteraction[]
+  leads                  Lead[]
+  quotes                 Quote[]
+  tasks                  Task[]
+  reports                Report[]
+  projects               Project[]
+  opportunities          Opportunity[]
+  documents              Document[]
+  labSamples             LabSample[]
+  contacts               CustomerContact[]
+  salesOrders            SalesOrder[]
+  interactions           CustomerInteraction[]
   referralSources        CustomerReferralSource[]
   customerQuestionnaires CustomerQuestionnaire[]
   customerRelations      CustomerRelation[]
@@ -482,6 +486,7 @@ model Customer {
   blocks                 CustomerBlock[]
   views                  CustomerView[]
   emailRequests          CustomerEmailRequest[]
+  callRecordings         CallRecording[]
 
   @@index([importLegacyId])
   @@index([name])
@@ -508,10 +513,10 @@ model CustomerView {
 
 /// ערוצי תקשורת שניתן לחסום ("חסום ל:") — נפרד מהעדפות הדיוור (allow*).
 enum BlockChannel {
-  MAILING  // דיוור
+  MAILING // דיוור
   WHATSAPP // ווצאפ
-  EMAIL    // דוא"ל
-  SMS      // SMS
+  EMAIL // דוא"ל
+  SMS // SMS
 }
 
 /// חסימת ערוץ תקשורת ללקוח — שורה אחת לכל ערוץ חסום. מוצג בכרטיס הלקוח.
@@ -649,24 +654,24 @@ model CustomerContact {
 
 /// הזמנה (Followup: ORDERS) — נפרד מ-Quote
 model SalesOrder {
-  id                  String   @id @default(uuid())
-  importLegacyId      String?  @unique
-  orderNumber         String?
-  customerId          String
-  customer            Customer @relation(fields: [customerId], references: [id])
-  customerContactId   String?
-  contact             CustomerContact? @relation(fields: [customerContactId], references: [id])
-  quoteId             String?
-  quote               Quote?   @relation(fields: [quoteId], references: [id])
-  status              String   @default("IMPORTED")
-  orderDate           DateTime?
-  total               Float    @default(0)
-  notes               String?  @db.Text
-  internalNotes       String?  @db.Text
-  deliverySummary     String?  @db.Text
-  paymentTerms        String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String           @id @default(uuid())
+  importLegacyId    String?          @unique
+  orderNumber       String?
+  customerId        String
+  customer          Customer         @relation(fields: [customerId], references: [id])
+  customerContactId String?
+  contact           CustomerContact? @relation(fields: [customerContactId], references: [id])
+  quoteId           String?
+  quote             Quote?           @relation(fields: [quoteId], references: [id])
+  status            String           @default("IMPORTED")
+  orderDate         DateTime?
+  total             Float            @default(0)
+  notes             String?          @db.Text
+  internalNotes     String?          @db.Text
+  deliverySummary   String?          @db.Text
+  paymentTerms      String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   @@index([customerId])
   @@index([importLegacyId])
@@ -674,23 +679,23 @@ model SalesOrder {
 
 /// פעילות / התקשרות (Followup: HITKASHRUT)
 model CustomerInteraction {
-  id                  String   @id @default(uuid())
-  importLegacyId      String?  @unique
-  customerId          String
-  customer            Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  customerContactId   String?
-  contact             CustomerContact? @relation(fields: [customerContactId], references: [id])
-  activityType        String?
-  status              String?
-  subject             String?
-  notes               String?  @db.Text
-  dueDate             DateTime?
-  completedDate       DateTime?
-  activityDate        DateTime?
-  legacyOwnerName     String?
-  location            String?
-  priority            String?
-  createdAt           DateTime @default(now())
+  id                String           @id @default(uuid())
+  importLegacyId    String?          @unique
+  customerId        String
+  customer          Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customerContactId String?
+  contact           CustomerContact? @relation(fields: [customerContactId], references: [id])
+  activityType      String?
+  status            String?
+  subject           String?
+  notes             String?          @db.Text
+  dueDate           DateTime?
+  completedDate     DateTime?
+  activityDate      DateTime?
+  legacyOwnerName   String?
+  location          String?
+  priority          String?
+  createdAt         DateTime         @default(now())
 
   @@index([customerId])
   @@index([importLegacyId])
@@ -735,7 +740,7 @@ model ImportJobError {
 }
 
 model Lead {
-  id             String      @id @default(uuid())
+  id             String    @id @default(uuid())
   importLegacyId String?
   // Legacy fields (kept for backwards compatibility with existing UI/API)
   firstName      String
@@ -745,46 +750,46 @@ model Lead {
   service        String?
   source         String?
   site           String?
-  status         String      @default("NEW")
-  stage          LeadStage   @default(NEW)
+  status         String    @default("NEW")
+  stage          LeadStage @default(NEW)
   assignee       String?
   notes          String?
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @default(now()) @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
 
   // Spec-aligned fields
-  fullName       String?
-  email          String?
-  city           String?
-  address        String?
-  utm_source     String?
-  utm_medium     String?
-  utm_campaign   String?
-  utm_content    String?
-  utm_term       String?
-  serviceType    String?
-  followUp1Date  DateTime?
-  followUp2Date  DateTime?
+  fullName         String?
+  email            String?
+  city             String?
+  address          String?
+  utm_source       String?
+  utm_medium       String?
+  utm_campaign     String?
+  utm_content      String?
+  utm_term         String?
+  serviceType      String?
+  followUp1Date    DateTime?
+  followUp2Date    DateTime?
   nextFollowUpDate DateTime?
-  leadStatus     LeadStatus  @default(NEW)
+  leadStatus       LeadStatus @default(NEW)
 
   /// אם הלקוח הגיע דרך חברת צד-שלישי / מפנה (הדס, גינדי וכו') — שם החברה
   referralCompany String?
 
-  customerId     String?
-  customer       Customer?   @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
   assignedUserId String?
-  assignedUser   User?       @relation("LeadAssignedUser", fields: [assignedUserId], references: [id])
+  assignedUser   User?   @relation("LeadAssignedUser", fields: [assignedUserId], references: [id])
 
-  opportunities  Opportunity[]
-  quotes         Quote[]
-  tasks          Task[]
+  opportunities Opportunity[]
+  quotes        Quote[]
+  tasks         Task[]
 
-  projectId      String?
-  project        Project?    @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
 
-  activities     LeadActivity[]
+  activities LeadActivity[]
 
   @@index([importLegacyId])
 }
@@ -813,45 +818,45 @@ enum WorkMode {
 }
 
 model Opportunity {
-  id                   String     @id @default(uuid())
+  id                   String           @id @default(uuid())
   customerId           String?
-  customer             Customer?  @relation(fields: [customerId], references: [id])
+  customer             Customer?        @relation(fields: [customerId], references: [id])
   leadId               String?
-  lead                 Lead?      @relation(fields: [leadId], references: [id])
+  lead                 Lead?            @relation(fields: [leadId], references: [id])
   projectOrServiceName String
-  estimatedValue       Float      @default(0)
+  estimatedValue       Float            @default(0)
   pipelineStage        OpportunityStage @default(NEW)
   targetCloseDate      DateTime?
   assignedUserId       String?
-  assignedUser         User?      @relation(fields: [assignedUserId], references: [id])
+  assignedUser         User?            @relation(fields: [assignedUserId], references: [id])
   notes                String?
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
-  quotes               Quote[]
+  quotes Quote[]
 }
 
 /// תבנית HTML להצעות מחיר לפי סוג שירות (מנגנון מודרני — ללא Word)
 model QuoteTemplate {
-  id              String   @id @default(uuid())
-  name            String
+  id               String   @id @default(uuid())
+  name             String
   /// התאמה לשדה Quote.service / בחירת שירות בטופס (מחרוזת זהה)
-  serviceType     String
-  isActive        Boolean  @default(true)
-  introHtml       String?  @db.Text
-  bodyHtml        String?  @db.Text
-  closingHtml     String?  @db.Text
-  termsHtml       String?  @db.Text
+  serviceType      String
+  isActive         Boolean  @default(true)
+  introHtml        String?  @db.Text
+  bodyHtml         String?  @db.Text
+  closingHtml      String?  @db.Text
+  termsHtml        String?  @db.Text
   /// טקסט עזר למנהלים: רשימת משתני {{...}} (אופציונלי)
-  variablesHelp   String?  @db.Text
+  variablesHelp    String?  @db.Text
   /// מערך: { name, quantity, unitPrice }[]
   defaultLineItems Json?
   /// נתיב יחסי לקובץ תבנית DOCX (אם קיים — מסלול מיזוג DOCX במקום HTML)
   docxTemplatePath String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  quotes Quote[]
+  quotes       Quote[]
   /// גרסה ערוכה של קובץ ה-DOCX, אם מנהל ערך את התבנית דרך הממשק.
   docxOverride QuoteTemplateDocx?
 
@@ -861,7 +866,6 @@ model QuoteTemplate {
 
 /**
  * קובץ תבנית DOCX **ערוך** — מחליף את הקובץ המקורי שבתיקיית templates/.
- *
  * למה בבסיס הנתונים ולא כקובץ על הדיסק: תיקיית `templates/` נצרבת לתוך אימג'
  * ה-Docker בזמן ה-build, ולכן כל כתיבה אליה בזמן ריצה נעלמת בדיפלוי הבא (וגם
  * לא משותפת בין replicas). שמירה כאן שורדת דיפלוי, וניתן תמיד לחזור למקור
@@ -887,65 +891,65 @@ model QuoteTemplateDocx {
   onedriveWebUrl   String?
   onedriveSyncedAt DateTime?
 
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Quote {
-  id          String       @id @default(uuid())
+  id             String      @id @default(uuid())
   importLegacyId String?
-  quoteNumber String?
-  service     String
-  description String?
+  quoteNumber    String?
+  service        String
+  description    String?
   // Legacy amount (kept); spec uses amountBeforeVat + vatPercent + discount
-  amount      Float
-  status      QuoteStatus  @default(DRAFT)
-  validTo     DateTime
-  pdfPath     String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  amount         Float
+  status         QuoteStatus @default(DRAFT)
+  validTo        DateTime
+  pdfPath        String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  customerId  String
-  customer    Customer     @relation(fields: [customerId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
 
   customerContactId String?
   customerContact   CustomerContact? @relation(fields: [customerContactId], references: [id])
 
-  leadId      String?
-  lead        Lead?        @relation(fields: [leadId], references: [id])
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id])
 
-  projectId   String?
-  project     Project?     @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
 
-  opportunityId           String?
-  opportunity             Opportunity? @relation(fields: [opportunityId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
   // Spec-aligned quote fields
-  validityDate            DateTime?
-  amountBeforeVat         Float?     @default(0)
-  vatPercent              Float?     @default(17)
-  discountType            DiscountType @default(NONE)
-  discountValue           Float?     @default(0)
-  totalAmount             Float?     @default(0)
-  paymentTerms            String?
-  notes                   String?
-  digitalSignatureStatus  DigitalSignatureStatus @default(NOT_REQUESTED)
+  validityDate           DateTime?
+  amountBeforeVat        Float?                 @default(0)
+  vatPercent             Float?                 @default(17)
+  discountType           DiscountType           @default(NONE)
+  discountValue          Float?                 @default(0)
+  totalAmount            Float?                 @default(0)
+  paymentTerms           String?
+  notes                  String?
+  digitalSignatureStatus DigitalSignatureStatus @default(NOT_REQUESTED)
 
   // Automation helpers
-  sentAt                  DateTime?
-  reminderNextAt          DateTime?
-  reminderCount           Int?       @default(0)
+  sentAt         DateTime?
+  reminderNextAt DateTime?
+  reminderCount  Int?      @default(0)
 
   // Origami preparation (no integration yet)
-  signedPdfPath           String?
-  digitalCertificateMeta  Json?
-  signatureRequestedAt    DateTime?
-  signedAt                DateTime?
+  signedPdfPath          String?
+  digitalCertificateMeta Json?
+  signatureRequestedAt   DateTime?
+  signedAt               DateTime?
 
   quoteTemplateId String?
   quoteTemplate   QuoteTemplate? @relation(fields: [quoteTemplateId], references: [id], onDelete: SetNull)
   /// גוף HTML ממוזג לתצוגה מקדימה / PDF עתידי
-  contentHtml     String? @db.Text
+  contentHtml     String?        @db.Text
   /// פריטי שורה שנשמרו מהתבנית/עריכה
   lineItemsJson   Json?
 
@@ -997,35 +1001,35 @@ model Quote {
   forecastUpdatedTime     String?
 
   // ── User FK relations for sales rep + performer (20260328190000) ─────────
-  salesRepresentativeId   String?
-  salesRepresentative     User?   @relation("QuoteSalesRep", fields: [salesRepresentativeId], references: [id], onDelete: SetNull)
-  performerUserId         String?
-  performerUser           User?   @relation("QuotePerformer", fields: [performerUserId], references: [id], onDelete: SetNull)
-  performerName           String?
+  salesRepresentativeId String?
+  salesRepresentative   User?   @relation("QuoteSalesRep", fields: [salesRepresentativeId], references: [id], onDelete: SetNull)
+  performerUserId       String?
+  performerUser         User?   @relation("QuotePerformer", fields: [performerUserId], references: [id], onDelete: SetNull)
+  performerName         String?
 
   followUpResponsibleUserId String?
   followUpResponsibleUser   User?   @relation("QuoteFollowUpResponsible", fields: [followUpResponsibleUserId], references: [id], onDelete: SetNull)
 
   /// נתיב למסמך הממוזג האחרון שהופק להצעה זו
-  lastMergedDocPath         String?
+  lastMergedDocPath String?
   /// מעקב שליחת מייל אחרונה
-  lastEmailedAt             DateTime?
-  lastEmailedTo             String?
+  lastEmailedAt     DateTime?
+  lastEmailedTo     String?
   /// תוכן מייל הצעת המחיר האחרון שנשלח — נשמר כדי לנסח ממנו את מייל הדוח בשלב 7
-  lastEmailSubject          String?
-  lastEmailBody             String?   @db.Text
+  lastEmailSubject  String?
+  lastEmailBody     String?   @db.Text
 
   /// OneDrive — מסמך DOCX ניתן-לעריכה ב-Word עם שמירה-חזרה אוטומטית.
   /// onedriveItemId: מזהה הפריט ב-OneDrive; onedriveWebUrl: כתובת פתיחה ב-Word;
   /// onedriveOwnerId: המשתמש שב-OneDrive שלו הקובץ מאוחסן (נדרש למשיכת הגרסה בזמן שליחה).
-  onedriveItemId            String?
-  onedriveWebUrl            String?
-  onedriveOwnerId           String?
+  onedriveItemId       String?
+  onedriveWebUrl       String?
+  onedriveOwnerId      String?
   /// ה-TaskAttachment שנפתח לעריכה ב-Word (עריכה פר-קובץ) — הסנכרון-חזרה מעדכן אותו, לא את החדש ביותר.
-  onedriveAttachmentId      String?
+  onedriveAttachmentId String?
   /// המשתמש ערך ידנית את שם הקובץ → השם הידני מנצח. הסנכרון האוטומטי (renameOnedriveToMatch)
   /// לא ידרוס שם ידני ב-OneDrive כל עוד הדגל דלוק.
-  onedriveNameLocked        Boolean  @default(false)
+  onedriveNameLocked   Boolean @default(false)
 
   salesOrders     SalesOrder[]
   quoteItems      CustomerQuoteItem[]
@@ -1041,96 +1045,97 @@ model Quote {
 }
 
 model Task {
-  id          String        @id @default(uuid())
+  id          String       @id @default(uuid())
   title       String
   description String?
   dueDate     DateTime?
-  priority    TaskPriority  @default(MEDIUM)
-  status      TaskStatus    @default(OPEN)
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(OPEN)
   /// שלב בצינור הזרימה: step1..step7 (פתיחת פנייה → דוח). מסונכרן עם currentStage.
-  type        String        @default("step1")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  type        String       @default("step1")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 
-  ownerId     String
-  owner       User          @relation("TaskOwner", fields: [ownerId], references: [id])
+  ownerId String
+  owner   User   @relation("TaskOwner", fields: [ownerId], references: [id])
 
-  customerId  String?
-  customer    Customer?     @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  leadId      String?
-  lead        Lead?         @relation(fields: [leadId], references: [id])
+  leadId String?
+  lead   Lead?   @relation(fields: [leadId], references: [id])
 
-  projectId   String?
-  project     Project?      @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
 
-  productName          String?
-  currentStage         Int?
+  productName           String?
+  currentStage          Int?
   currentStageChangedAt DateTime?
 
   /// אם מקורו של ה-task בליד נכנס מהמייל — מזהה ה-IncomingLead (לסידור-ראשון ולטופס המיוחד).
   /// @unique = בלם DB נגד כפילות: לליד נכנס יש משימת-תהליך אחת בדיוק. ב-Postgres ערכי NULL
   /// אינם מתנגשים זה בזה, כך שכל המשימות שאינן מליד נכנס אינן מושפעות.
-  incomingLeadId       String?  @unique
+  incomingLeadId String? @unique
 
   /// מתי המשימה הועברה לבעלים הנוכחי ("העבר לעובד"/העברת ליד). נדרש כדי שמשימת
   /// "ליד חדש נכנס" שהועברה תופיע בראש הרשימה של מי שקיבל אותה, גם אחרי שנפתח כרטיס לקוח.
-  transferredAt        DateTime?
+  transferredAt DateTime?
 
   /// הערות כלליות על התהליך/הלקוח לאורך הזרימה — מערך JSON של { text, at } (הכי חדש בראש)
-  processNotes         String?
+  processNotes String?
 
-  attachments TaskAttachment[]
-  taskField   TaskField?
+  attachments      TaskAttachment[]
+  taskField        TaskField?
   /// בקשות אישור מנהל שנפתחו על המשימה (לקוח פרטי שטרם שילם)
   approvalRequests ApprovalRequest[] @relation("TaskApprovalRequests")
   /// הצעות המחיר שמקושרות למשימה (Quote.linkedEntityId). לא unique בכוונה — למשימה
   /// אחת יכולות להיות כמה הצעות (גרסאות/סבבים); מה שאסור הוא ההפך, שתי משימות להצעה.
-  linkedQuotes Quote[] @relation("QuoteLinkedTask")
+  linkedQuotes     Quote[]           @relation("QuoteLinkedTask")
+  callRecordings   CallRecording[]
 
   @@index([incomingLeadId])
 }
 
 /// נתוני שדה לפגישה — מוזן בשלב תיאום פגישה בעת לחיצה על "צור פגישה ב-Outlook"
 model TaskField {
-  id                   String    @id @default(uuid())
-  taskId               String    @unique
-  task                 Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  taskId String @unique
+  task   Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  inspectionTypeId     String?
-  family               String?
+  inspectionTypeId String?
+  family           String?
 
-  appointmentTitle     String?
-  scheduledStartAt     DateTime?
-  scheduledEndAt       DateTime?
-  durationMinutes      Int?
+  appointmentTitle String?
+  scheduledStartAt DateTime?
+  scheduledEndAt   DateTime?
+  durationMinutes  Int?
 
-  workerNotifiedAt     DateTime?
+  workerNotifiedAt DateTime?
 
-  siteAddress          String?
-  siteCity             String?
-  fieldContactName     String?
-  fieldContactPhone    String?
-  navigationUrl        String?
-  specialInstructions  String?   @db.Text
+  siteAddress         String?
+  siteCity            String?
+  fieldContactName    String?
+  fieldContactPhone   String?
+  navigationUrl       String?
+  specialInstructions String? @db.Text
 
-  fieldStatus          String    @default("ASSIGNED")
-  assignedAt           DateTime  @default(now())
-  confirmedAt          DateTime?
-  declinedAt           DateTime?
-  declinedReason       String?
-  departedAt           DateTime?
-  arrivedAt            DateTime?
-  finishedAt           DateTime?
+  fieldStatus    String    @default("ASSIGNED")
+  assignedAt     DateTime  @default(now())
+  confirmedAt    DateTime?
+  declinedAt     DateTime?
+  declinedReason String?
+  departedAt     DateTime?
+  arrivedAt      DateTime?
+  finishedAt     DateTime?
 
-  fieldNotes           String?   @db.Text
-  problemType          String?
-  problemNote          String?   @db.Text
-  hasOpenProblem       Boolean   @default(false)
+  fieldNotes     String? @db.Text
+  problemType    String?
+  problemNote    String? @db.Text
+  hasOpenProblem Boolean @default(false)
 
-  missingReportInfo    Boolean   @default(false)
-  missingReportInfoNote String?  @db.Text
-  managerNotifiedAt    DateTime?
+  missingReportInfo     Boolean   @default(false)
+  missingReportInfoNote String?   @db.Text
+  managerNotifiedAt     DateTime?
 
   /// אוטומציית "הנחיות לפני הבדיקה" — רלוונטית רק לבדיקות איכות אוויר (קודים 72 / 69).
   /// preVisitEmailDueAt = 09:00 ביום שלפני מועד הבדיקה; ה-cron שולח כשהגיע המועד
@@ -1141,10 +1146,10 @@ model TaskField {
   preVisitEmailSentAt  DateTime?
   preVisitEmailError   String?   @db.Text
 
-  updatedByUserId      String?
+  updatedByUserId String?
 
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([taskId])
   /// לסריקת ה-cron של "הנחיות לפני הבדיקה" — שליפת מיילים שהגיע מועדם וטרם נשלחו.
@@ -1164,70 +1169,69 @@ model TaskAttachment {
   @@index([taskId])
 }
 
-
 model Report {
-  id          String      @id @default(uuid())
+  id             String   @id @default(uuid())
   importLegacyId String?
   projectId      String?
-  project        Project?    @relation(fields: [projectId], references: [id])
+  project        Project? @relation(fields: [projectId], references: [id])
 
-  customerId     String?
-  customer       Customer?   @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  title          String
+  title       String
   // Legacy fields kept for backwards compatibility (older seed/UI)
-  type           String?
-  filtersJson    String?     @default("{}")
+  type        String?
+  filtersJson String? @default("{}")
 
-  reportType     ReportType   @default(OTHER)
-  status         ReportStatus @default(WAITING_DATA)
+  reportType ReportType   @default(OTHER)
+  status     ReportStatus @default(WAITING_DATA)
 
-  createdById    String
-  createdBy      User        @relation("ReportCreator", fields: [createdById], references: [id])
+  createdById String
+  createdBy   User   @relation("ReportCreator", fields: [createdById], references: [id])
 
-  reviewedById   String?
-  reviewedBy     User?       @relation("ReportReviewer", fields: [reviewedById], references: [id])
+  reviewedById String?
+  reviewedBy   User?   @relation("ReportReviewer", fields: [reviewedById], references: [id])
 
-  reportDate     DateTime?
-  sentAt         DateTime?
-  pdfPath        String?
-  version        Int         @default(1)
-  internalNotes  String?
-  clientNotes    String?
+  reportDate    DateTime?
+  sentAt        DateTime?
+  pdfPath       String?
+  version       Int       @default(1)
+  internalNotes String?
+  clientNotes   String?
 
-  documents      Document[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  documents Document[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 
   @@index([importLegacyId])
 }
 
 model Document {
-  id            String       @id @default(uuid())
+  id             String       @id @default(uuid())
   importLegacyId String?
-  name          String
-  documentType  DocumentType @default(OTHER)
-  filePath      String
-  description   String?
-  mimeType      String?
-  sizeBytes     Int?
+  name           String
+  documentType   DocumentType @default(OTHER)
+  filePath       String
+  description    String?
+  mimeType       String?
+  sizeBytes      Int?
   /// תוכן הקובץ כ-base64 (להצעות מחיר חתומות וקבצים שמאוחסנים ב-DB — אין object storage)
-  dataBase64    String?      @db.Text
-  documentDate  DateTime?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  dataBase64     String?      @db.Text
+  documentDate   DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
-  projectId     String?
-  project       Project?     @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
 
-  customerId    String?
-  customer      Customer?    @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  reportId      String?
-  report        Report?      @relation(fields: [reportId], references: [id])
+  reportId String?
+  report   Report? @relation(fields: [reportId], references: [id])
 
-  uploadedById  String?
-  uploadedBy    User?        @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  uploadedById String?
+  uploadedBy   User?   @relation("DocumentUploader", fields: [uploadedById], references: [id])
 
   /// למי הדוח מוען, כפי שהוזן במערכת הפקת הדוחות. בלי זה חלון השליחה נפל על
   /// כתובת הלקוח הכללית — שהיא לא בהכרח האדם שהדוח נכתב עבורו.
@@ -1245,10 +1249,10 @@ model Document {
 }
 
 model LabSample {
-  id                  String           @id @default(uuid())
+  id                  String          @id @default(uuid())
   sampleNumber        String
-  sampleType          LabSampleType    @default(OTHER)
-  sampleStatus        LabSampleStatus  @default(COLLECTED)
+  sampleType          LabSampleType   @default(OTHER)
+  sampleStatus        LabSampleStatus @default(COLLECTED)
   collectedAt         DateTime?
   receivedAt          DateTime?
   analyzedAt          DateTime?
@@ -1257,48 +1261,48 @@ model LabSample {
   method              String?
   resultValue         String?
   resultUnit          String?
-  resultStatus        LabResultStatus  @default(PENDING)
+  resultStatus        LabResultStatus @default(PENDING)
   resultFilePath      String?
   notes               String?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
-  projectId           String?
-  project             Project?         @relation(fields: [projectId], references: [id])
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id])
 
-  customerId          String?
-  customer            Customer?        @relation(fields: [customerId], references: [id])
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
 
-  collectedById       String?
-  collectedBy         User?            @relation("LabSampleCollector", fields: [collectedById], references: [id])
+  collectedById String?
+  collectedBy   User?   @relation("LabSampleCollector", fields: [collectedById], references: [id])
 }
 
 model SystemSetting {
-  key        String   @id
-  value      Json
-  updatedAt  DateTime @updatedAt
-  createdAt  DateTime @default(now())
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 }
 
 model QuoteItemCatalog {
-  id               String   @id @default(uuid())
-  itemCode         String   @unique
-  name             String
-  description      String?
-  serviceCategory  String?
-  serviceSubType   String?
-  costPrice        Float    @default(0)
-  basePrice        Float    @default(0)
-  profitPercent    Float?
-  billingUnit      String
-  vatPercent       Float    @default(17)
-  isActive         Boolean  @default(true)
-  requiresQuantity Boolean  @default(true)
-  requiresSiteVisit Boolean @default(false)
-  requiresReport   Boolean  @default(false)
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default(uuid())
+  itemCode          String   @unique
+  name              String
+  description       String?
+  serviceCategory   String?
+  serviceSubType    String?
+  costPrice         Float    @default(0)
+  basePrice         Float    @default(0)
+  profitPercent     Float?
+  billingUnit       String
+  vatPercent        Float    @default(17)
+  isActive          Boolean  @default(true)
+  requiresQuantity  Boolean  @default(true)
+  requiresSiteVisit Boolean  @default(false)
+  requiresReport    Boolean  @default(false)
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 /// תנאי תשלום (20260328120000_payment_terms)
@@ -1366,22 +1370,22 @@ model QuoteDocument {
 ///
 /// ביטול מפורש נעשה ב-`revokedAt` — פעולה מכוונת, להבדיל מאובדן בשוגג.
 model QuoteSignatureToken {
-  id         String    @id @default(uuid())
+  id String @id @default(uuid())
 
-  quoteId    String
-  quote      Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
 
   /// הסוד עצמו. ייחודי גלובלית — סוד הוא capability, ואסור שיצביע לשתי הצעות.
-  secret     String    @unique
+  secret String @unique
 
-  issuedAt   DateTime  @default(now())
+  issuedAt   DateTime @default(now())
   /// "User"."id" של מי שהנפיק, כשידוע.
   issuedById String?
   /// מאיזה נתיב הונפק (request_signature / send_pdf / backfill) — לאבחון.
   source     String?
 
   /// ביטול מכוון. null = הקישור עדיין תקף.
-  revokedAt  DateTime?
+  revokedAt DateTime?
 
   @@index([quoteId])
 }
@@ -1543,26 +1547,26 @@ enum ProjectStatus {
 /// לחיצה על פרצוף נקלטת ב-/public/rate/:token ומעדכנת את הרשומה:
 /// דירוג 4-5 → הפניה לדף הביקורות בגוגל ; דירוג 1-3 → דף משוב/התנצלות פנימי.
 model ReviewRequest {
-  id            String    @id @default(uuid())
+  id    String @id @default(uuid())
   /// טוקן לא-ניחוש שמשובץ בקישורי המייל (משמש כהרשאה בנתיב הציבורי)
-  token         String    @unique @default(uuid())
+  token String @unique @default(uuid())
 
   /// הקשר — למי נשלח (best-effort; לא חובה שכולם יהיו קיימים)
-  customerId    String?
-  taskId        String?
-  toEmail       String
-  customerName  String?
+  customerId   String?
+  taskId       String?
+  toEmail      String
+  customerName String?
 
   /// הדירוג שנבחר (1..5). null עד שהלקוח לוחץ.
-  rating        Int?
-  ratedAt       DateTime?
+  rating     Int?
+  ratedAt    DateTime?
   /// משוב חופשי שהלקוח כתב בדף המשוב (רק בדירוג נמוך)
-  feedback      String?   @db.Text
-  feedbackAt    DateTime?
+  feedback   String?   @db.Text
+  feedbackAt DateTime?
 
-  sentAt        DateTime  @default(now())
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  sentAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([customerId])
   @@index([taskId])
@@ -1583,27 +1587,27 @@ model ReviewRequest {
 /// עבודת ראדון — נפתחת כשנבחר אחד מקודי בדיקות הראדון (RADON_TEST_SKUS).
 /// מחזיקה את תשובות השאלון, את המסלול שנקבע, ואת שלבי הביצוע הייחודיים לראדון.
 model RadonJob {
-  id            String   @id @default(uuid())
+  id String @id @default(uuid())
 
   /// הקשר ל-CRM — רופף בכוונה (ללא FK), כדי שהמודול יישאר עצמאי.
-  taskId        String?
-  customerId    String?
-  leadId        String?
+  taskId     String?
+  customerId String?
+  leadId     String?
 
   /// קוד השירות שפתח את הזרימה (10044 / 10017 / 61 / 10000)
-  sku           String
+  sku String
 
   /// תשובות שאלון הפתיחה (8 השאלות). מבנה: RadonAnswers ב-radon-tracks.ts
-  answers       Json     @default("{}")
+  answers Json @default("{}")
 
   /// המסלול שנקבע מהתשובות: track1..track4. null = השאלון טרם הושלם.
   track         String?
   /// אזהרות התאמה שהוצגו למשתמש בזמן הקביעה (מערך מחרוזות)
-  trackWarnings Json     @default("[]")
+  trackWarnings Json    @default("[]")
 
   /// השלב הנוכחי בתוך המסלול — אינדקס במערך stages של המסלול.
-  stageIndex    Int      @default(0)
-  status        RadonJobStatus @default(OPEN)
+  stageIndex Int            @default(0)
+  status     RadonJobStatus @default(OPEN)
 
   /// תאריכי תקופת הבדיקה — קריטי במיוחד למסלולים 3 ו-4 (בדיקה ארוכה).
   placedAt      DateTime?
@@ -1611,11 +1615,11 @@ model RadonJob {
   collectedAt   DateTime?
 
   /// בדיקה עצמית במשלוח (מסלול 4)
-  shippingAddress   String?
-  outboundTracking  String?
-  returnTracking    String?
+  shippingAddress  String?
+  outboundTracking String?
+  returnTracking   String?
   /// תאריך ההצבה כפי שדווח ע״י הלקוח (להבדיל מ-placedAt שנרשם על ידינו)
-  clientReportedAt  DateTime?
+  clientReportedAt DateTime?
 
   // ── מעקב ערכת ראדון (61 / 10000) ──
   //
@@ -1626,46 +1630,46 @@ model RadonJob {
   // בשטח, ואילו כאן הלקוח הוא מקור האמת.
 
   /// מתי העובד לחץ "הערכה נשלחה ללקוח". null = הערכה טרם יצאה.
-  kitSentAt              DateTime?
+  kitSentAt             DateTime?
   /// מי לחץ — "User"."id". לתיעוד בלבד (אין FK, כמו כל שאר המודול).
-  kitSentByUserId        String?
+  kitSentByUserId       String?
   /// איך יצאה ההודעה: 'manual' = עובד לחץ, 'auto' = 48 שעות עברו ואיש לא לחץ.
   /// מוצג בכרטיס — מי שקורא אותו חייב לדעת שהתהליך התחיל בלי החלטת אדם.
-  kitSentVia             String?
+  kitSentVia            String?
   /// נוסח הודעת ההוראות שנשלחה בפועל ללקוח, כפי שנשלחה.
   /// נשמר ולא מחושב מחדש: שינוי עתידי בתבנית לא ישכתב מה שהלקוח כבר קיבל.
-  kitInstructionsText    String?   @db.Text
+  kitInstructionsText   String?   @db.Text
   /// מתי הודעת ההוראות יצאה מהבוט בפועל (להבדיל מ-kitSentAt = לחיצת העובד).
-  kitInstructionsSentAt  DateTime?
+  kitInstructionsSentAt DateTime?
 
   /// מתי הגיע אלינו אישור ההתקנה מהלקוח (מועד קבלת האות, לא מועד ההתקנה).
   /// תאריך ההתקנה עצמו יושב ב-clientReportedAt, ומשם נספרים 90 הימים.
-  installConfirmedAt     DateTime?
+  installConfirmedAt   DateTime?
   /// דרך הגעת האישור: 'whatsapp' = הלקוח אישר בבוט, 'manual' = עובד הזין ידנית.
-  installConfirmedVia    String?
+  installConfirmedVia  String?
   /// המשפט שהלקוח כתב בוואטסאפ — כדי שהעובד יראה על מה בדיוק נסמך התאריך.
-  installConfirmedNote   String?
+  installConfirmedNote String?
 
   /// אורך תקופת הבדיקה בימים. ברירת מחדל 90, ניתן לעריכה לפני שליחת הערכה.
-  testDurationDays       Int       @default(90)
+  testDurationDays Int @default(90)
 
   /// מזהה ה-CustomerReminder בבוט שיבקש מהלקוח להחזיר את הערכה בתום התקופה.
   /// נשמר כדי שנוכל לבטל/להציג אותו בלי לחפש לפי taskId.
-  returnReminderId       String?
+  returnReminderId   String?
   /// נוסח הודעת ההחזרה שתישלח בתום התקופה — מוצג לעובד מראש.
-  returnReminderText     String?   @db.Text
+  returnReminderText String? @db.Text
 
   detectorCount Int?
   siteAddress   String?
   contactName   String?
   contactPhone  String?
-  notes         String?  @db.Text
+  notes         String? @db.Text
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  detectors     RadonDetectorAssignment[]
-  alerts        RadonAlert[]
+  detectors RadonDetectorAssignment[]
+  alerts    RadonAlert[]
 
   @@index([taskId])
   @@index([customerId])
@@ -1683,26 +1687,26 @@ enum RadonJobStatus {
 
 /// גלאי ראדון פיזי. מנוהל כמלאי — לכל גלאי מספר סידורי ייחודי וסטטוס משלו.
 model RadonDetector {
-  id             String              @id @default(uuid())
+  id           String              @id @default(uuid())
   /// המספר הסידורי המוטבע על הגלאי — המזהה שהבודק מתעד בשטח.
-  serialNumber   String              @unique
-  model          String?
-  status         RadonDetectorStatus @default(IN_STOCK)
+  serialNumber String              @unique
+  model        String?
+  status       RadonDetectorStatus @default(IN_STOCK)
 
   /// אצל מי הגלאי כרגע (רלוונטי לסטטוסים WITH_EMPLOYEE / WITH_CLIENT)
-  heldByUserId   String?
-  heldByNote     String?
+  heldByUserId String?
+  heldByNote   String?
 
   /// כיול — ראה SKU 70 / 10069 בקטלוג השירותים.
   calibratedAt   DateTime?
   calibrationDue DateTime?
 
-  notes          String?
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  assignments    RadonDetectorAssignment[]
-  events         RadonDetectorEvent[]
+  assignments RadonDetectorAssignment[]
+  events      RadonDetectorEvent[]
 
   @@index([status])
   @@index([calibrationDue])
@@ -1710,44 +1714,44 @@ model RadonDetector {
 
 /// 13 הסטטוסים מסעיף 7 במסמך האפיון.
 enum RadonDetectorStatus {
-  IN_STOCK          // במלאי
-  RESERVED          // שמור לעבודה
-  WITH_EMPLOYEE     // אצל עובד
+  IN_STOCK // במלאי
+  RESERVED // שמור לעבודה
+  WITH_EMPLOYEE // אצל עובד
   SHIPPED_TO_CLIENT // נשלח ללקוח
-  WITH_CLIENT       // אצל לקוח
-  DEPLOYED          // הוצב בשטח
-  COLLECTED         // נאסף
-  RETURNED          // חזר למשרד
-  SENT_TO_LAB       // נשלח לאנליזה
-  RESULT_RECEIVED   // תוצאה התקבלה
-  CLOSED            // סגור
-  LOST              // אבד
-  DISQUALIFIED      // נפסל
+  WITH_CLIENT // אצל לקוח
+  DEPLOYED // הוצב בשטח
+  COLLECTED // נאסף
+  RETURNED // חזר למשרד
+  SENT_TO_LAB // נשלח לאנליזה
+  RESULT_RECEIVED // תוצאה התקבלה
+  CLOSED // סגור
+  LOST // אבד
+  DISQUALIFIED // נפסל
 }
 
 /// שיוך גלאי לעבודה. האילוץ המרכזי מסעיף 7: אותו גלאי לא יכול להיות משויך
 /// לשתי עבודות במקביל — נאכף ע״י אינדקס ייחודי חלקי על שיוך פעיל (ראה המיגרציה).
 model RadonDetectorAssignment {
-  id           String        @id @default(uuid())
+  id String @id @default(uuid())
 
-  detectorId   String
-  detector     RadonDetector @relation(fields: [detectorId], references: [id], onDelete: Cascade)
+  detectorId String
+  detector   RadonDetector @relation(fields: [detectorId], references: [id], onDelete: Cascade)
 
-  jobId        String
-  job          RadonJob      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId String
+  job   RadonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   /// שיוך פעיל = releasedAt הוא null. האינדקס הייחודי מונע כפילות.
-  assignedAt   DateTime      @default(now())
-  releasedAt   DateTime?
+  assignedAt DateTime  @default(now())
+  releasedAt DateTime?
 
   /// מיקום ההצבה בפועל — נדרש לתיעוד לפי חוקי טופס 4.
   placementNote String?
   placedAt      DateTime?
   /// תמונת הגלאי במקום ההצבה (base64, בהתאם לדפוס Document במערכת)
-  photoBase64   String?       @db.Text
+  photoBase64   String?   @db.Text
 
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([jobId])
   @@index([detectorId])
@@ -1755,17 +1759,17 @@ model RadonDetectorAssignment {
 
 /// יומן תנועות הגלאי — כל שינוי סטטוס נרשם, כדי שתמיד יהיה ידוע איפה הגלאי היה.
 model RadonDetectorEvent {
-  id          String              @id @default(uuid())
+  id String @id @default(uuid())
 
-  detectorId  String
-  detector    RadonDetector       @relation(fields: [detectorId], references: [id], onDelete: Cascade)
+  detectorId String
+  detector   RadonDetector @relation(fields: [detectorId], references: [id], onDelete: Cascade)
 
-  jobId       String?
-  fromStatus  RadonDetectorStatus?
-  toStatus    RadonDetectorStatus
-  note        String?
-  byUserId    String?
-  createdAt   DateTime            @default(now())
+  jobId      String?
+  fromStatus RadonDetectorStatus?
+  toStatus   RadonDetectorStatus
+  note       String?
+  byUserId   String?
+  createdAt  DateTime             @default(now())
 
   @@index([detectorId, createdAt])
 }
@@ -1773,28 +1777,29 @@ model RadonDetectorEvent {
 /// התראה על עבודת ראדון (11 ההתראות מסעיף 9). נפתחת ע״י ה-cron ונסגרת
 /// כשהתנאי חדל להתקיים או כשמשתמש סוגר אותה ידנית.
 model RadonAlert {
-  id           String   @id @default(uuid())
+  id String @id @default(uuid())
 
-  jobId        String
-  job          RadonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  jobId String
+  job   RadonJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   /// מזהה סוג ההתראה — ראה RADON_ALERT_RULES ב-radon-alerts.ts
-  kind         String
-  message      String
-  severity     String   @default("warning")
+  kind     String
+  message  String
+  severity String @default("warning")
 
   /// null = פתוחה
-  resolvedAt   DateTime?
-  dismissedAt  DateTime?
-  dismissedBy  String?
+  resolvedAt  DateTime?
+  dismissedAt DateTime?
+  dismissedBy String?
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   /// התראה אחת פתוחה מכל סוג לכל עבודה — מונע הצפה בכל סבב cron.
   @@unique([jobId, kind])
   @@index([resolvedAt])
 }
+
 // ═══════════════════════════════════════════════════════════════════════════
 // AFFILIATE PORTAL — חברות צד-שלישי ששולחות לנו לקוחות ומקבלות עמלה.
 // מודול עצמאי: זהות נפרדת מ-User (טבלת Affiliate משלה), auth נפרד (AffiliateGuard).
@@ -1803,67 +1808,67 @@ model RadonAlert {
 
 /// חברת שותפה (צד שלישי). נכנסת לפורטל ב-/affiliate עם username+password.
 model Affiliate {
-  id             String   @id @default(uuid())
+  id            String   @id @default(uuid())
   /// שם החברה לתצוגה.
-  name           String
+  name          String
   /// שם משתמש לכניסה (ייחודי, case-insensitive נאכף באפליקציה).
-  username       String   @unique
+  username      String   @unique
   /// bcrypt hash של הסיסמה — הסיסמה הגולמית לעולם לא נשמרת.
-  passwordHash   String
+  passwordHash  String
   /// אחוז העמלה שאנחנו חייבים לשותף מכל תשלום של לקוח שהוא הפנה (למשל 10 = 10%).
-  commissionPct  Float    @default(10)
+  commissionPct Float    @default(10)
   /// פרטי קשר (אופציונליים) — לתשלום/תיאום.
-  contactName    String?
-  email          String?
-  phone          String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  contactName   String?
+  email         String?
+  phone         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  referrals      AffiliateReferral[]
+  referrals AffiliateReferral[]
 
   @@index([isActive])
 }
 
 /// סטטוס ההפניה לאורך המשפך.
 enum AffiliateReferralStatus {
-  NEW          // התקבל מהשותף, טרם טופל
-  IN_PROGRESS  // בטיפול (הופך למשימה אצלנו)
-  WON          // נסגר (הפך ללקוח משלם)
-  LOST         // לא רלוונטי / לא נסגר
+  NEW // התקבל מהשותף, טרם טופל
+  IN_PROGRESS // בטיפול (הופך למשימה אצלנו)
+  WON // נסגר (הפך ללקוח משלם)
+  LOST // לא רלוונטי / לא נסגר
 }
 
 /// ליד/לקוח שהופנה אלינו ע"י שותף. נוצר כשהשותף שולח לנו לקוח דרך הפורטל.
 model AffiliateReferral {
-  id             String   @id @default(uuid())
-  affiliateId    String
-  affiliate      Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  id          String    @id @default(uuid())
+  affiliateId String
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
 
   /// פרטי הלקoח שהופנה (כפי שהשותף הזין).
-  customerName   String
-  customerPhone  String?
-  customerEmail  String?
-  serviceType    String?
-  note           String?  @db.Text
+  customerName  String
+  customerPhone String?
+  customerEmail String?
+  serviceType   String?
+  note          String? @db.Text
 
-  status         AffiliateReferralStatus @default(NEW)
+  status AffiliateReferralStatus @default(NEW)
 
   /// קישור רופף (בלי FK) לישויות הפנימיות שנוצרו מההפניה — לצורך מעקב וחישוב עמלה.
-  leadId         String?
-  taskId         String?
+  leadId String?
+  taskId String?
 
   /// חישוב עמלה — מתעדכן אוטומטית כשההצעה/דוח של הלקוח מסומנים "שולם".
   /// paidAmount = הסכום ששולם בפועל; commissionAmount = paidAmount * (commissionPct/100)
   /// (commissionPct נלקח מהשותף במועד החישוב ונצרב כאן לשקיפות היסטורית).
-  paidAmount        Float?
-  commissionPct     Float?
-  commissionAmount  Float?
-  paidAt            DateTime?
+  paidAmount          Float?
+  commissionPct       Float?
+  commissionAmount    Float?
+  paidAt              DateTime?
   /// האם העמלה שולמה לשותף על ידינו (מעקב תשלומי-עמלה יוצא).
   commissionSettledAt DateTime?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([affiliateId])
   @@index([status])
@@ -1875,17 +1880,17 @@ model AffiliateReferral {
 /// (למשל פנייה) שלא נכנס כליד — העובד שולף את המיילים האחרונים מהתיבה שלו ומצרף
 /// את הרלוונטי לכרטיס. נשמר נושא/שולח/תאריך/גוף הטקסט (לא הקובץ המלא).
 model CustomerEmailRequest {
-  id             String   @id @default(uuid())
-  customerId     String
-  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  id         String   @id @default(uuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   /// מספר בקשה סדרתי לתצוגה (REQ-<requestNumber>). autoincrement כדי שלא יתנגש.
-  requestNumber  Int      @default(autoincrement())
+  requestNumber Int @default(autoincrement())
 
   /// מקור הבקשה: MANUAL (צירוף ידני מהכרטיס) או OUTLOOK_ADDIN (תוסף Outlook).
-  source         String   @default("MANUAL")
+  source String @default("MANUAL")
   /// סטטוס הבקשה. NEW כברירת מחדל.
-  status         String   @default("NEW")
+  status String @default("NEW")
 
   /// מזהה ההודעה ב-Graph (id) — למניעת צירוף כפול של אותו מייל לאותו לקוח.
   graphMessageId    String?
@@ -1897,23 +1902,23 @@ model CustomerEmailRequest {
   /// תיבת הדואר שממנה נשלף המייל (לדדופ ולאודיט).
   mailboxEmail      String?
 
-  subject        String?
-  fromName       String?
-  fromEmail      String?
+  subject    String?
+  fromName   String?
+  fromEmail  String?
   /// נמענים (to/cc) כמחרוזת JSON של [{name,email}]. טקסט כדי לא לחייב jsonb.
-  toJson         String?  @db.Text
-  ccJson         String?  @db.Text
+  toJson     String?   @db.Text
+  ccJson     String?   @db.Text
   /// תאריך קבלת המייל המקורי (receivedDateTime).
-  receivedAt     DateTime?
+  receivedAt DateTime?
   /// גוף המייל כטקסט נקי (HTML הומר לטקסט בזמן הצירוף).
-  bodyText       String?  @db.Text
+  bodyText   String?   @db.Text
   /// גוף המייל כ-HTML (מנוקה לפני הצגה ב-CRM).
-  bodyHtml       String?  @db.Text
+  bodyHtml   String?   @db.Text
 
   /// האם קובץ ה-EML אורכב בהצלחה כמסמך. false אם יצירת ה-EML נכשלה/לא נתמכה.
-  emlArchived    Boolean  @default(false)
+  emlArchived   Boolean @default(false)
   /// מזהה מסמך ה-EML שנשמר (Document), אם קיים. קישור רופף בלי FK.
-  emlDocumentId  String?
+  emlDocumentId String?
 
   /// סוג שירות משוער מהסיווג האוטומטי (טקסט חופשי, best-effort).
   serviceTypeGuess String?
@@ -1922,8 +1927,8 @@ model CustomerEmailRequest {
   attachedByUserId String?
   attachedByName   String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([customerId])
   @@index([graphMessageId])
@@ -1948,4 +1953,88 @@ model OutlookImportAudit {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+/// סטטוס התמלול של הקלטת שיחה.
+///
+/// התמלול הוא צעד נפרד מהקליטה: ההקלטה נכנסת למערכת מיד (PENDING), והתמלול
+/// מתבצע אחריו — הוא איטי, עולה כסף, ועלול להיכשל. סטטוס מפורש הוא מה שמאפשר
+/// לנסות שוב בלי לקלוט את השיחה פעמיים, ומה שמבדיל "עוד לא תומלל" מ"נכשל".
+enum TranscriptStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  /// אין אודיו לתמלל — למשל שיחה שנענתה ולא הוקלטה.
+  SKIPPED
+}
+
+/// הקלטת שיחה והתמלול שלה.
+///
+/// מגיעה ממערכת הטלפוניה החיצונית (ה-API שלה טרם נמסר — ראה CallRecordingsService),
+/// ומשויכת ללקוח לפי מספר הטלפון. שיחה שלא נמצא לה לקוח נשמרת בכל זאת עם
+/// customerId ריק ומופיעה ב"שיחות לא משויכות", כדי שאפשר יהיה לשייך אותה ידנית —
+/// שיחה שנזרקת כי לא זוהתה היא שיחה שאבדה.
+///
+/// המשימה היא שיוך רך ונוסף: השיחה שייכת ללקוח, ורק במקרה גם למשימה הפעילה שלו
+/// באותו רגע. מחיקת משימה לא אמורה למחוק את היסטוריית השיחות של הלקוח, ולכן
+/// הקשר הוא SetNull ולא Cascade.
+model CallRecording {
+  id String @id @default(uuid())
+
+  /// המזהה של השיחה במערכת החיצונית. ייחודי — הוא מה שמונע קליטה כפולה של
+  /// אותה שיחה בכל משיכה מחזורית.
+  externalId String @unique
+
+  /// מספר הטלפון של הצד השני, כפי שהגיע מהמערכת החיצונית.
+  phone String
+
+  /// ספרות בלבד (ללא מקפים/רווחים/קידומת) — לפיו מתבצע השיוך ללקוח.
+  /// נשמר בנפרד כי התאמה על השדה הגולמי נכשלת בין "050-1234567" ל-"0501234567".
+  phoneDigits String
+
+  /// IN / OUT — האם השיחה נכנסת או יוצאת.
+  direction String @default("IN")
+
+  /// מתי השיחה התרחשה בפועל (לא מתי נקלטה אצלנו).
+  startedAt DateTime
+
+  /// אורך השיחה בשניות.
+  durationSec Int @default(0)
+
+  /// כתובת קובץ האודיו במערכת החיצונית. לא מורידים אותו לכאן אלא בזמן התמלול.
+  audioUrl String?
+
+  /// שם הנציג/השלוחה כפי שדווח מהמערכת החיצונית.
+  agentName String?
+
+  transcriptStatus TranscriptStatus @default(PENDING)
+
+  /// הטקסט המלא. נשאר ריק עד שהתמלול מצליח.
+  transcript String?
+
+  /// סיבת הכישלון האחרונה — מוצגת למשתמש כדי שידע אם כדאי לנסות שוב.
+  transcriptError String?
+
+  transcribedAt DateTime?
+
+  /// הלקוח שאליו שויכה השיחה. ריק = טרם שויכה.
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  /// המשימה הפעילה של הלקוח בזמן השיחה, אם הייתה כזו.
+  taskId String?
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  /// האם השיוך נעשה ביד. שיוך ידני גובר ולא נדרס במשיכה הבאה.
+  manuallyLinked Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId, startedAt])
+  @@index([taskId])
+  @@index([phoneDigits])
+  @@index([transcriptStatus])
+  @@index([startedAt])
 }

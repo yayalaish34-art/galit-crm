@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Param, Query, Body, Res, NotFoundException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReviewRequestService } from '../reviews/review-request.service';
+import { CallRecordingsService } from '../call-recordings/call-recordings.service';
 
 /**
  * נתיבים ציבוריים (ללא RolesGuard) — לשיתוף קבצים בקישור ישיר (capability URL)
@@ -13,6 +14,7 @@ export class PublicController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly reviews: ReviewRequestService,
+    private readonly calls: CallRecordingsService,
   ) {}
 
   private async sendAttachment(id: string, res: Response) {
@@ -185,5 +187,36 @@ export class PublicController {
 
   private esc(s: string): string {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ───────────────────────── Webhook שיחות מהמרכזייה ─────────────────────────
+
+  /**
+   * GET/POST /public/call-webhook?key=<טוקן>&call_id=…&from_phone=…&direction=…
+   *
+   * המרכזייה (CloudPlus/BlueBe, סעיף 1.9 — ALERTs) שולחת לכאן על כל שיחה. זה
+   * הנתיב הציבורי היחיד ההגיוני עבורה: למרכזייה אין JWT של המערכת, ולכן היא לא
+   * יכולה לעבור דרך RolesGuard. במקום זאת היא מאומתת ב-`key` שמוגדר במרכזייה
+   * ומושווה ל-CLOUDPLUS_TOKEN — בלי טוקן תואם, הבקשה נדחית ב-403.
+   *
+   * שתי השיטות (GET ו-POST) כי מרכזיות שונות שולחות אחרת, והמסמך מתיר את שתיהן.
+   */
+  @Get('call-webhook')
+  async callWebhookGet(@Query() q: Record<string, string>) {
+    return this.handleCallWebhook(q);
+  }
+
+  @Post('call-webhook')
+  async callWebhookPost(@Query() q: Record<string, string>, @Body() body: Record<string, string>) {
+    // הפרמטרים עשויים להגיע ב-query או בגוף — ממזגים, גוף גובר.
+    return this.handleCallWebhook({ ...q, ...(body || {}) });
+  }
+
+  private async handleCallWebhook(params: Record<string, string>) {
+    if (!this.calls.verifyWebhookKey(params.key)) {
+      // הודעה כללית בכוונה — לא רומזים אם הטוקן קרוב או לא מוגדר.
+      throw new ForbiddenException('unauthorized');
+    }
+    return this.calls.ingestWebhook(params);
   }
 }
