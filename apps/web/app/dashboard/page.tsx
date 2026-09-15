@@ -4,6 +4,8 @@ import { apiUrl, getApiBaseUrl, apiFetch } from '../lib/api-base';
 import { parseApiErrorResponse } from '../lib/api-error';
 import { whatsAppLink } from '../lib/whatsapp';
 import { CustomerLegacyCard } from '../customer-legacy-card';
+import { CallTranscriptsSection } from '../call-transcripts-section';
+import { dialCustomer } from '../lib/pbx-dial';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { AffiliatesAdminPage } from '../affiliates-admin-section';
 import { SendReportModal } from '../send-report-modal';
@@ -20552,10 +20554,21 @@ function TasksPage({
                                   <span style={{ display: 'inline-flex', alignItems: 'center', marginTop: 3, borderRadius: 20, padding: '1px 8px', fontSize: 10, fontWeight: 700, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
                                 </div>
                                 {contactPhone && stageKey !== 'closed' && (
-                                  <a href={`tel:${phoneClean(contactPhone)}`} style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 12, padding: '8px 16px', background: '#fff', color: stageColor, fontWeight: 700, fontSize: 12, textDecoration: 'none', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.12)', whiteSpace: 'nowrap' }}>
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      // חיוג דרך המרכזייה (מוקלט + מתומלל); נפילה ל-tel: כשאין מרכזייה/שלוחה.
+                                      const r = await dialCustomer(contactPhone, currentUser);
+                                      if (r.via === 'pbx' && r.message) alert(r.message);
+                                      // הנפילה ל-tel: פותחת חייגן ולכן *נראית* כמו הצלחה — אבל השיחה
+                                      // לא עוברת במרכזייה ולא תוקלט. אומרים את זה במפורש.
+                                      else if (r.error) alert(`השיחה לא יצאה דרך המרכזייה (ולכן לא תוקלט).\n\n${r.error}`);
+                                    }}
+                                    style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 12, padding: '8px 16px', background: '#fff', color: stageColor, fontWeight: 700, fontSize: 12, border: 'none', cursor: 'pointer', flexShrink: 0, boxShadow: '0 2px 8px rgba(0,0,0,0.12)', whiteSpace: 'nowrap' }}
+                                  >
                                     <PhoneCall style={{ width: 14, height: 14 }} />
                                     התקשר עכשיו
-                                  </a>
+                                  </button>
                                 )}
                                 <div className="hidden md:flex" style={{ alignItems: 'center', gap: 6, background: 'rgba(255,255,255,0.15)', borderRadius: 20, padding: '4px 10px', flexShrink: 0 }}>
                                   <UserCircle2 style={{ width: 16, height: 16, color: 'rgba(255,255,255,0.8)' }} />
@@ -20732,42 +20745,16 @@ function TasksPage({
                                 );
                               })()}
 
-                              {(taskAttachments[t.id] || []).length > 0 && (
-                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                  <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                    <Paperclip style={{ width: 11, height: 11 }} />
-                                    מסמכים מצורפים
-                                  </div>
-                                  {(taskAttachments[t.id] || []).map((att) => (
-                                    <button
-                                      key={att.id}
-                                      type="button"
-                                      onClick={(e) => { e.stopPropagation(); downloadTaskAttachment(t.id, att); }}
-                                      disabled={!!attachmentDownloading[att.id]}
-                                      title={att.fileName}
-                                      style={{ display: 'flex', alignItems: 'center', gap: 6, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', padding: '6px 8px', fontSize: 11, fontWeight: 600, color: '#334155', cursor: 'pointer', textAlign: 'right' }}
-                                    >
-                                      <FileText style={{ width: 12, height: 12, color: '#2563eb', flexShrink: 0 }} />
-                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{att.fileName}</span>
-                                      {attachmentDownloading[att.id] ? (
-                                        <Loader2 style={{ width: 12, height: 12, flexShrink: 0 }} className="animate-spin" />
-                                      ) : (
-                                        <Download style={{ width: 12, height: 12, color: '#94a3b8', flexShrink: 0 }} />
-                                      )}
-                                    </button>
-                                  ))}
+                              {/* תמלולי השיחות של המשימה.
+                                  מסמכים מצורפים וכפתורי התקשר/WhatsApp הוסרו מכאן לבקשת המשתמש (2026-09-09):
+                                  הרכיב הימני מחזיק עכשיו את ההערות ואת תמלולי השיחות בלבד. */}
+                              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+                                <div style={{ fontSize: 9, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.12em', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+                                  <PhoneCall style={{ width: 11, height: 11 }} />
+                                  תמלולי שיחות
                                 </div>
-                              )}
-                              {contactPhone && (
-                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                  <a href={`tel:${phoneClean(contactPhone)}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, background: '#eff6ff', padding: 8, fontSize: 11, fontWeight: 700, color: '#2563eb', textDecoration: 'none' }}>
-                                    <PhoneCall style={{ width: 12, height: 12 }} />התקשר
-                                  </a>
-                                  <a href={waLink(contactPhone)} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, background: '#f0fdf4', padding: 8, fontSize: 11, fontWeight: 700, color: '#16a34a', textDecoration: 'none' }}>
-                                    <MessageCircle style={{ width: 12, height: 12 }} />WhatsApp
-                                  </a>
-                                </div>
-                              )}
+                                <CallTranscriptsSection taskId={t.id} currentUser={currentUser} compact />
+                              </div>
                             </div>
 
                             {/* ──── CENTER: stage content ──── */}
