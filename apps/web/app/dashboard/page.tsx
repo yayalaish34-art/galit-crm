@@ -26542,6 +26542,56 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
     playNotifyChime();
   }, [leadToasts]);
 
+  // ── התראה צידית גלובלית: שיחה נכנסת "חיה" (גלובלי, בכל עמוד) ──
+  // אין עדיין אירוע "צלצול" נפרד מ-CloudPlus (ממתין לסעיף 1.9 של המסמך שלהם) —
+  // "חי" הוא חלון זמן קצר מרגע שהשיחה נקלטה אצלנו (ראה CallRecordingsService.listLive).
+  // קצב פולינג מהיר יותר מהרגיל (5ש' ולא 20) כי צלצול טיפוסי קצר בהרבה מהחלון
+  // הרגיל שמשמש לידים/אישורים.
+  const [callToasts, setCallToasts] = useState<{ id: string; phone: string; customerId?: string | null; customerName?: string | null }[]>([]);
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/call-recordings/live'), { authUser: currentUser });
+        if (!r.ok) return;
+        const list = await r.json();
+        if (cancelled || !Array.isArray(list)) return;
+        setCallToasts((prev) => {
+          const liveIds = new Set<string>((list as any[]).map((c) => c.id));
+          const kept = prev.filter((x) => liveIds.has(x.id));
+          const have = new Set(kept.map((x) => x.id));
+          const fresh = (list as any[])
+            .filter((c) => !have.has(c.id))
+            .map((c) => ({ id: c.id, phone: c.phone, customerId: c.customerId ?? null, customerName: c.customer?.name ?? null }));
+          if (kept.length === prev.length && fresh.length === 0) return prev;
+          return [...kept, ...fresh];
+        });
+      } catch { /* ignore */ }
+    };
+    void check();
+    const t = window.setInterval(check, 5_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [currentUser?.id]);
+
+  const chimedCallIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const hasNew = callToasts.some((x) => !chimedCallIdsRef.current.has(x.id));
+    if (!hasNew) return;
+    for (const x of callToasts) chimedCallIdsRef.current.add(x.id);
+    playNotifyChime();
+  }, [callToasts]);
+
+  const openCallCustomer = async (customerId: string) => {
+    if (!currentUser) return;
+    try {
+      const r = await apiFetch(apiUrl(`/customers/${customerId}`), { authUser: currentUser });
+      if (!r.ok) return;
+      const c = await r.json();
+      openCustomerPage(c);
+    } catch { /* ignore */ }
+  };
+
   // ── התראה צידית: בלוג שנוסח אוטומטית וממתין לאישור המנהל (גלובלי, בכל עמוד) ──
   // אותה חוויה כמו "ליד חדש נכנס": פופ-אפ משמאל למעלה, צליל, וכפתור שפותח את
   // המסך הרלוונטי. הטיוטה יושבת בוורדפרס כ-draft ולא נראית באתר עד שיפורסם.
@@ -26691,6 +26741,31 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
                 <button onClick={() => { if (lt.taskId) setPendingExpandTaskId(lt.taskId); navigateSafely('tasks'); void reloadTasks(); dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey); }} className="mt-2 rounded-lg bg-blue-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-blue-700">פתח את הליד</button>
               </div>
               <button onClick={() => dismissLeadToast(lt.id, lt.ownerId, lt.dedupeKey)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── התראה צידית: שיחה נכנסת חיה (גלובלי, בכל עמוד) — פינה נפרדת (ימין) כדי לא לגעת בחישוב המדורג של הערימה השמאלית ── */}
+      {callToasts.length > 0 && (
+        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72, right: 16 }} dir="rtl">
+          {callToasts.map((ct) => (
+            <div key={ct.id} className="flex items-start gap-3 rounded-xl border border-green-200 bg-white p-4 shadow-xl" style={{ width: 300, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dcfce7' }}><PhoneCall className="h-5 w-5 text-green-600" /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-green-900">שיחה נכנסת</div>
+                <div className="text-[12px] text-slate-600 truncate">{ct.customerName || ct.phone}</div>
+                {ct.customerName && <div className="text-[11px] text-slate-400 truncate">{ct.phone}</div>}
+                {ct.customerId && (
+                  <button
+                    onClick={() => { void openCallCustomer(ct.customerId as string); setCallToasts((prev) => prev.filter((x) => x.id !== ct.id)); }}
+                    className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-green-700"
+                  >
+                    פתח כרטיס לקוח
+                  </button>
+                )}
+              </div>
+              <button onClick={() => setCallToasts((prev) => prev.filter((x) => x.id !== ct.id))} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
             </div>
           ))}
         </div>

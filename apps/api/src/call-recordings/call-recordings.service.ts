@@ -298,6 +298,34 @@ export class CallRecordingsService {
     return !!expected && String(key || '').trim() === expected;
   }
 
+  /**
+   * חלון הזמן שבתוכו שיחה נכנסת נחשבת "חיה" (לבאנר "מתקשר עכשיו" במסך).
+   *
+   * אין לנו עדיין אירוע "צלצול" נפרד מ-CloudPlus (ה-webhook היחיד שקיים כרגע
+   * מכסה קליטה כללית של שיחה, לא בהכרח את רגע הצלצול המדויק — ממתין לסעיף 1.9
+   * של המסמך שלהם). לכן "חי" מוגדר בינתיים כחלון קצר מרגע שהשיחה נקלטה אצלנו,
+   * שמספיק לצלצול טיפוסי. אם/כשיתברר אירוע ring אמיתי, אפשר לדייק כאן בלי לגעת
+   * בצד הלקוח (הוא רק פולינג על ה-endpoint הזה).
+   */
+  private static readonly LIVE_WINDOW_MS = 45_000;
+
+  /** שיחות נכנסות "חיות" — לבאנר מסך בזמן אמת שמראה מי מתקשר עכשיו. */
+  async listLive() {
+    const since = new Date(Date.now() - CallRecordingsService.LIVE_WINDOW_MS);
+    return this.prisma.callRecording.findMany({
+      where: { direction: 'IN', startedAt: { gte: since } },
+      orderBy: { startedAt: 'desc' },
+      take: 10,
+      select: {
+        id: true,
+        phone: true,
+        startedAt: true,
+        customerId: true,
+        customer: { select: { id: true, name: true } },
+      },
+    });
+  }
+
   /** שיחות הלקוח, החדשה קודם. */
   async listForCustomer(customerId: string) {
     return this.prisma.callRecording.findMany({

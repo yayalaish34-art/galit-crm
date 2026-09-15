@@ -60,6 +60,13 @@ export class CallRecordingsController {
     return this.calls.listUnlinked(Number(limit) || 100);
   }
 
+  /** שיחות נכנסות "חיות" (חלון קצר) — לבאנר "מתקשר עכשיו" שהפרונט פוליג עליו. */
+  @Get('live')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
+  live() {
+    return this.calls.listLive();
+  }
+
   @Get('customer/:customerId')
   @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
   forCustomer(@Param('customerId') customerId: string) {
