@@ -226,9 +226,15 @@ export class CallRecordingsService {
    * נקלטת עם מה שיש, וההקלטה/התמלול מגיעים אחר-כך: כתובת ההורדה נבנית מ-call_id
    * (recordingUrl), והתמלול מנסה למשוך אותה כשהתור רץ. אם אין עדיין הקלטה —
    * הניסיון נכשל בשקט ויחזור בסבב הבא, עד שההקלטה מוכנה.
+   *
+   * `audio`, אם צורף (ראה PublicController.extractRecordingAudio) — הקלטה
+   * שהגיעה מצורפת ישירות לוובהוק. במקרה כזה מתמללים ממנה מיד ומדלגים לגמרי על
+   * ההורדה המאומתת מהמרכזייה (זו שדורשת session, וכרגע נכשלת — ראה
+   * CloudPlusClient). לא חוסם את התשובה ל-webhook: רץ ברקע, וכישלון נשמר בשדה.
    */
   async ingestWebhook(
     params: Record<string, string>,
+    audio?: { bytes: Buffer; contentType: string },
   ): Promise<{ ok: boolean }> {
     const callId = (
       params.call_id ||
@@ -258,18 +264,30 @@ export class CallRecordingsService {
     const external = incoming ? from : target;
     if (!external) throw new BadRequestException('חסר מספר טלפון');
 
-    await this.ingestOne({
+    const record = await this.ingestOne({
       externalId: callId,
       phone: external,
       direction: incoming ? 'IN' : 'OUT',
       startedAt: new Date(),
       durationSec: Number(params.duration || params.billsec || 0) || 0,
-      // כתובת ההורדה נבנית מ-call_id; ההקלטה תימשך בזמן התמלול (אם קיימת).
+      // כתובת ההורדה נבנית מ-call_id; ההקלטה תימשך בזמן התמלול (אם קיימת) —
+      // גם כשיש audio מצורף, כגיבוי: אם התמלול המיידי ממנו נכשל, ניתן עדיין
+      // לנסות שוב דרך ההורדה המאומתת (ראה transcribe).
       audioUrl: this.cloudplus.configured
         ? this.cloudplus.recordingUrl(callId)
         : null,
       agentName: params.agent || params.extension || null,
     });
+
+    if (audio) {
+      // ברקע — לא חוסם את התשובה ל-webhook, וכישלון נשמר על השורה (transcribeBytes).
+      this.transcribeBytes(record.id, audio.bytes, audio.contentType).catch(
+        (e: any) =>
+          this.logger.warn(
+            `webhook-attached transcription failed for ${record.id}: ${e?.message || e}`,
+          ),
+      );
+    }
     return { ok: true };
   }
 
@@ -496,12 +514,6 @@ export class CallRecordingsService {
    * לעצור את השאר.
    */
   async transcribe(id: string) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey)
-      throw new BadRequestException(
-        'תמלול אינו מוגדר בשרת — חסר OPENAI_API_KEY',
-      );
-
     const call = await this.getOne(id);
     if (!call.audioUrl) {
       await this.prisma.callRecording.update({
@@ -514,18 +526,35 @@ export class CallRecordingsService {
       throw new BadRequestException('אין קובץ אודיו לשיחה זו');
     }
 
+    const audio = await this.downloadAudio(call.externalId);
+    return this.transcribeBytes(id, audio.bytes, audio.contentType);
+  }
+
+  /**
+   * מתמלל מבתים שכבר בידינו — משותף לשני מקורות: הורדה מהמרכזייה (`transcribe`)
+   * וקובץ שצורף ישירות לוובהוק (`ingestWebhook`), שעוקף לגמרי את ההורדה המאומתת.
+   *
+   * הסטטוס מתעדכן לפני ואחרי, כדי ששיחה שנתקעה באמצע תיראה כ-PROCESSING ולא
+   * כ"ממתינה" — ההבדל בין "עוד לא התחיל" ל"התחיל ולא חזר" הוא מה שמאפשר לדעת
+   * אם כדאי לנסות שוב.
+   *
+   * כישלון נשמר בשדה ולא נזרק החוצה במשיכה מרובה: שיחה אחת פגומה לא אמורה
+   * לעצור את השאר.
+   */
+  private async transcribeBytes(id: string, bytes: Buffer, contentType: string) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey)
+      throw new BadRequestException(
+        'תמלול אינו מוגדר בשרת — חסר OPENAI_API_KEY',
+      );
+
     await this.prisma.callRecording.update({
       where: { id },
       data: { transcriptStatus: 'PROCESSING', transcriptError: null },
     });
 
     try {
-      const audio = await this.downloadAudio(call.externalId);
-      const text = await this.speechToText(
-        audio.bytes,
-        audio.contentType,
-        apiKey,
-      );
+      const text = await this.speechToText(bytes, contentType, apiKey);
       return await this.prisma.callRecording.update({
         where: { id },
         data: {

@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReviewRequestService } from '../reviews/review-request.service';
@@ -206,17 +207,71 @@ export class PublicController {
     return this.handleCallWebhook(q);
   }
 
+  /**
+   * הורדת ההקלטה (סעיף 1.8) דורשת session מחובר למרכזייה — וזה נכשל אצלנו
+   * (ראה CallRecordingsService/CloudPlusClient). לכן הנתיב הזה מקבל גם, כאופציה,
+   * את קובץ ההקלטה עצמו מצורף ישירות לוובהוק — אם המרכזייה תוגדר לצרף אותו
+   * (multipart, שדה recording_base64/audio_base64, או recording_url ציבורי בלי
+   * אימות) אנחנו מתמללים ישר מהקובץ שצורף ומדלגים לגמרי על ההורדה המאומתת.
+   */
   @Post('call-webhook')
-  async callWebhookPost(@Query() q: Record<string, string>, @Body() body: Record<string, string>) {
+  @UseInterceptors(AnyFilesInterceptor())
+  async callWebhookPost(
+    @Query() q: Record<string, string>,
+    @Body() body: Record<string, string>,
+    @UploadedFiles() files?: Array<{ buffer: Buffer; mimetype?: string }>,
+  ) {
     // הפרמטרים עשויים להגיע ב-query או בגוף — ממזגים, גוף גובר.
-    return this.handleCallWebhook({ ...q, ...(body || {}) });
+    const params = { ...q, ...(body || {}) };
+    const audio = await this.extractRecordingAudio(params, files);
+    return this.handleCallWebhook(params, audio);
   }
 
-  private async handleCallWebhook(params: Record<string, string>) {
+  /**
+   * מחלץ את בתי האודיו מהוובהוק, אם צורפו — בשלוש הצורות הסבירות שמרכזייה
+   * עשויה לתמוך בהן: קובץ multipart, שדה base64, או קישור ציבורי בלי אימות.
+   * לא ידוע איזו מהן CloudPlus/BlueBe בפועל תומכת בה (סעיף 1.9 טרם התקבל) —
+   * לכן תומכים בכל השלוש ומשתמשים במה שהגיע.
+   */
+  private async extractRecordingAudio(
+    params: Record<string, string>,
+    files?: Array<{ buffer: Buffer; mimetype?: string }>,
+  ): Promise<{ bytes: Buffer; contentType: string } | undefined> {
+    if (files?.length) {
+      const f = files[0];
+      if (f.buffer?.length) return { bytes: f.buffer, contentType: f.mimetype || 'audio/wav' };
+    }
+    const b64 = params.recording_base64 || params.audio_base64;
+    if (b64) {
+      try {
+        const bytes = Buffer.from(b64, 'base64');
+        if (bytes.length) return { bytes, contentType: 'audio/wav' };
+      } catch {
+        // התעלמות — ממשיכים לנסות דרכים אחרות.
+      }
+    }
+    if (params.recording_url) {
+      try {
+        const res = await fetch(params.recording_url);
+        if (res.ok) {
+          const bytes = Buffer.from(await res.arrayBuffer());
+          if (bytes.length) return { bytes, contentType: res.headers.get('content-type') || 'audio/wav' };
+        }
+      } catch {
+        // קישור לא זמין/לא תקין — לא חוסם את קליטת השיחה עצמה.
+      }
+    }
+    return undefined;
+  }
+
+  private async handleCallWebhook(
+    params: Record<string, string>,
+    audio?: { bytes: Buffer; contentType: string },
+  ) {
     if (!this.calls.verifyWebhookKey(params.key)) {
       // הודעה כללית בכוונה — לא רומזים אם הטוקן קרוב או לא מוגדר.
       throw new ForbiddenException('unauthorized');
     }
-    return this.calls.ingestWebhook(params);
+    return this.calls.ingestWebhook(params, audio);
   }
 }
