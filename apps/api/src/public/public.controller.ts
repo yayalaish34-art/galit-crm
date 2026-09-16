@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException, UseInterceptors, UploadedFiles, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, UseInterceptors, UploadedFiles, Logger } from '@nestjs/common';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
@@ -270,18 +270,18 @@ export class PublicController {
     params: Record<string, string>,
     audio?: { bytes: Buffer; contentType: string },
   ) {
+    // אימות ה-key בוטל זמנית לפי בקשת המשתמש (2026-09-16): שני ALERTs אמיתיים
+    // מ-CloudPlus נדחו ב-403 בגלל אי-התאמת key, וזה חסם את כל הקליטה בזמן
+    // שמנסים לאבחן את הבעיה מולם. הנתיב פתוח לגמרי כרגע — מי שיודע את ה-URL
+    // הזה יכול להזריק שיחות מזויפות ואף לגרום לחיוב תמלול (OpenAI) על קובץ
+    // שרירותי. יש לשקול להחזיר בדיקה (גם מקלה יותר) לאחר שה-ALERT מאומת מולם.
     if (!this.calls.verifyWebhookKey(params.key)) {
-      // לוג זמני לאבחון הקמת ה-ALERT מול CloudPlus: מציג בדיוק מה הגיע (כולל
-      // ה-key שהם שלחו בפועל) מול מה שמצפים, כדי לגלות אם המשתנים לא הוצבו,
-      // סדר הפרמטרים השתבש, או שה-key עצמו שגוי. אין כאן מידע רגיש שלא כבר
-      // ידוע לצד ששולח את הבקשה.
       this.logger.warn(
-        `call-webhook: key mismatch. received=${JSON.stringify(params)}`,
+        `call-webhook: key mismatch (allowed anyway — auth disabled). received=${JSON.stringify(params)}`,
       );
-      // הודעה כללית בכוונה — לא רומזים אם הטוקן קרוב או לא מוגדר.
-      throw new ForbiddenException('unauthorized');
+    } else {
+      this.logger.log(`call-webhook: accepted ${JSON.stringify(params)}`);
     }
-    this.logger.log(`call-webhook: accepted ${JSON.stringify(params)}`);
     return this.calls.ingestWebhook(params, audio);
   }
 }
