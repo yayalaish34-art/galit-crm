@@ -309,11 +309,16 @@ export class CallRecordingsService {
    */
   private static readonly LIVE_WINDOW_MS = 45_000;
 
-  /** שיחות נכנסות "חיות" — לבאנר מסך בזמן אמת שמראה מי מתקשר עכשיו. */
+  /**
+   * שיחות נכנסות "חיות" — לבאנר מסך בזמן אמת שמראה מי מתקשר עכשיו.
+   *
+   * רק שיחות שזוהה להן לקוח: שיחה ממספר לא מזוהה אין למי לשייך בבאנר (אין
+   * "פתח כרטיס לקוח" בלי לקוח), ותציף בפופ-אפים על כל שיחת שיווק/טעות שמגיעה.
+   */
   async listLive() {
     const since = new Date(Date.now() - CallRecordingsService.LIVE_WINDOW_MS);
     return this.prisma.callRecording.findMany({
-      where: { direction: 'IN', startedAt: { gte: since } },
+      where: { direction: 'IN', startedAt: { gte: since }, customerId: { not: null } },
       orderBy: { startedAt: 'desc' },
       take: 10,
       select: {

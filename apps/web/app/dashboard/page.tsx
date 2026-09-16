@@ -26729,9 +26729,32 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
         </div>
       )}
 
+      {/* ── התראה צידית: שיחה נכנסת חיה מלקוח מזוהה (גלובלי, בכל עמוד) — אותה פינה/עיצוב כמו ליד חדש, ומעל אותה (שיחה מצלצלת דחופה יותר) ── */}
+      {callToasts.length > 0 && (
+        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: dueTaskToasts.length > 0 ? 72 + dueTaskToasts.length * 132 : 72, left: 16 }} dir="rtl">
+          {callToasts.map((ct) => (
+            <div key={ct.id} className="flex items-start gap-3 rounded-xl border border-green-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dcfce7' }}><PhoneCall className="h-5 w-5 text-green-600" /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-green-900">שיחה נכנסת</div>
+                <div className="text-[12px] text-slate-600 truncate">{ct.customerName || ct.phone}</div>
+                {ct.customerName && <div className="text-[11px] text-slate-400 truncate">{ct.phone}</div>}
+                <button
+                  onClick={() => { if (ct.customerId) void openCallCustomer(ct.customerId); setCallToasts((prev) => prev.filter((x) => x.id !== ct.id)); }}
+                  className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-green-700"
+                >
+                  פתח כרטיס לקוח
+                </button>
+              </div>
+              <button onClick={() => setCallToasts((prev) => prev.filter((x) => x.id !== ct.id))} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── התראות צידיות: לידים נכנסים חדשים (גלובלי, בכל עמוד) ── */}
       {leadToasts.length > 0 && (
-        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: dueTaskToasts.length > 0 ? 72 + dueTaskToasts.length * 132 : 72, left: 16 }} dir="rtl">
+        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72 + (dueTaskToasts.length + callToasts.length) * 132, left: 16 }} dir="rtl">
           {leadToasts.map((lt) => (
             <div key={lt.id} className="flex items-start gap-3 rounded-xl border border-blue-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
               <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dbeafe' }}><Mail className="h-5 w-5 text-blue-600" /></span>
@@ -26746,36 +26769,11 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
         </div>
       )}
 
-      {/* ── התראה צידית: שיחה נכנסת חיה (גלובלי, בכל עמוד) — פינה נפרדת (ימין) כדי לא לגעת בחישוב המדורג של הערימה השמאלית ── */}
-      {callToasts.length > 0 && (
-        <div className="fixed z-[10000] flex flex-col gap-2" style={{ top: 72, right: 16 }} dir="rtl">
-          {callToasts.map((ct) => (
-            <div key={ct.id} className="flex items-start gap-3 rounded-xl border border-green-200 bg-white p-4 shadow-xl" style={{ width: 300, animation: 'fadeSlideIn 0.3s ease-out both' }}>
-              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#dcfce7' }}><PhoneCall className="h-5 w-5 text-green-600" /></span>
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-extrabold text-green-900">שיחה נכנסת</div>
-                <div className="text-[12px] text-slate-600 truncate">{ct.customerName || ct.phone}</div>
-                {ct.customerName && <div className="text-[11px] text-slate-400 truncate">{ct.phone}</div>}
-                {ct.customerId && (
-                  <button
-                    onClick={() => { void openCallCustomer(ct.customerId as string); setCallToasts((prev) => prev.filter((x) => x.id !== ct.id)); }}
-                    className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-green-700"
-                  >
-                    פתח כרטיס לקוח
-                  </button>
-                )}
-              </div>
-              <button onClick={() => setCallToasts((prev) => prev.filter((x) => x.id !== ct.id))} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* ── התראות צידיות: בלוג אוטומטי שממתין לאישור המנהל (גלובלי, בכל עמוד) ── */}
       {blogToasts.length > 0 && (
         <div
           className="fixed z-[9999] flex flex-col gap-2"
-          style={{ top: 72 + (dueTaskToasts.length + leadToasts.length) * 132, left: 16 }}
+          style={{ top: 72 + (dueTaskToasts.length + callToasts.length + leadToasts.length) * 132, left: 16 }}
           dir="rtl"
         >
           {blogToasts.map((bt) => (
