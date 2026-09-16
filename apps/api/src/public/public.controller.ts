@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException, UseInterceptors, UploadedFiles } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException, UseInterceptors, UploadedFiles, Logger } from '@nestjs/common';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +12,8 @@ import { CallRecordingsService } from '../call-recordings/call-recordings.servic
  */
 @Controller('public')
 export class PublicController {
+  private readonly logger = new Logger(PublicController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly reviews: ReviewRequestService,
@@ -269,9 +271,17 @@ export class PublicController {
     audio?: { bytes: Buffer; contentType: string },
   ) {
     if (!this.calls.verifyWebhookKey(params.key)) {
+      // לוג זמני לאבחון הקמת ה-ALERT מול CloudPlus: מציג בדיוק מה הגיע (כולל
+      // ה-key שהם שלחו בפועל) מול מה שמצפים, כדי לגלות אם המשתנים לא הוצבו,
+      // סדר הפרמטרים השתבש, או שה-key עצמו שגוי. אין כאן מידע רגיש שלא כבר
+      // ידוע לצד ששולח את הבקשה.
+      this.logger.warn(
+        `call-webhook: key mismatch. received=${JSON.stringify(params)}`,
+      );
       // הודעה כללית בכוונה — לא רומזים אם הטוקן קרוב או לא מוגדר.
       throw new ForbiddenException('unauthorized');
     }
+    this.logger.log(`call-webhook: accepted ${JSON.stringify(params)}`);
     return this.calls.ingestWebhook(params, audio);
   }
 }
