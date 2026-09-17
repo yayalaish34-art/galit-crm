@@ -48,6 +48,26 @@ export class CallRecordingsService {
   }
 
   /**
+   * "17-09-2026 - 09:03:42" (BlueBe) ← Date. לא ISO, ולא מציין אזור זמן.
+   *
+   * הזמן מגיע בשעון ישראל; מניחים UTC+3 (שעון קיץ) כי זה נכון לרוב חודשי השנה
+   * ולכל התקופה שנבדקה בפועל — סטייה של שעה בחורף (UTC+2) מקובלת כאן: השדה
+   * הזה משמש לתצוגה ולשיוך משימה פעילה בזמן השיחה, לא לחישוב מדויק.
+   */
+  private static parseBlueBeStartTime(s: string | undefined): Date | null {
+    const m = String(s ?? '')
+      .trim()
+      .match(/^(\d{2})-(\d{2})-(\d{4})\s*-\s*(\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return null;
+    const [, dd, mm, yyyy, hh, mi, ss] = m;
+    const utcMs =
+      Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi), Number(ss)) -
+      3 * 3600_000;
+    const d = new Date(utcMs);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  /**
    * מאתר את הלקוח ששייך למספר הטלפון.
    *
    * בודק את שלושת שדות הטלפון של הלקוח וגם את אנשי הקשר שלו — שיחה מגיעה לא
@@ -236,47 +256,81 @@ export class CallRecordingsService {
     params: Record<string, string>,
     audio?: { bytes: Buffer; contentType: string },
   ): Promise<{ ok: boolean }> {
+    // שני פורמטים שונים מגיעים בפועל לאותו URL:
+    //   1) ה-ALERT "הרשמי" של CloudPlus (מסמך §1.9): call_id/from_phone/target_phone/direction.
+    //   2) הפורמט העשיר של BlueBe עצמם (נצפה בפרודקשן, 17.9) — callid/source_number/
+    //      dest_number/caller_ID, ו-direction תמיד ריק אצלם. זה גם מגיע *אחרי* שהשיחה
+    //      הסתיימה (יש כבר Duration/BillableSeconds), לא בתחילתה.
     const callId = (
       params.call_id ||
       params.UNIQUEID ||
       params.uniqueid ||
+      params.callid ||
       ''
     ).trim();
-    const from = (
+    if (!callId) throw new BadRequestException('חסר call_id');
+
+    const rawSrc = (
       params.from_phone ||
       params.CALLERID ||
       params.src ||
+      params.source_number ||
+      params.caller_ID ||
       ''
     ).trim();
-    const target = (
+    const rawDst = (
       params.target_phone ||
       params.FROM_DID ||
       params.dst ||
+      params.dest_number ||
       ''
     ).trim();
     const dirRaw = (params.direction || '').toLowerCase();
 
-    if (!callId) throw new BadRequestException('חסר call_id');
-
-    // כיוון: Incoming = הלקוח התקשר אלינו; אז הצד החיצוני הוא from_phone.
-    // Outgoing = אנחנו התקשרנו; הצד החיצוני הוא target_phone.
-    const incoming = dirRaw ? dirRaw.startsWith('in') : true;
-    const external = incoming ? from : target;
+    let incoming: boolean;
+    if (dirRaw) {
+      // יש direction מפורש (הפורמט הרשמי) — סומכים עליו: Incoming = הלקוח
+      // התקשר אלינו, אז הצד החיצוני הוא from_phone; Outgoing = target_phone.
+      incoming = dirRaw.startsWith('in');
+    } else {
+      // BlueBe לא שולחים direction בכלל. נגזר מאיזה צד נראה כמו שלוחה פנימית
+      // (עד 5 ספרות) — בדיוק כמו ב-CDR (`fromCdr`/`isExtension`): המתקשר לא
+      // נראה כמו שלוחה ⇒ הוא הצד החיצוני ⇒ נכנסת.
+      incoming = !/^\d{1,5}$/.test(rawSrc);
+    }
+    const external = incoming ? rawSrc : rawDst;
     if (!external) throw new BadRequestException('חסר מספר טלפון');
+
+    const durationSec =
+      Number(
+        params.duration ||
+          params.billsec ||
+          params.BillableSeconds ||
+          params.Duration_in_sec ||
+          0,
+      ) || 0;
+
+    // אצל BlueBe יש קישור הורדה ישיר (RecordFile) — עדיף על הכתובת שאנחנו
+    // בונים בעצמנו, כי הוא ה-URL האמיתי מהם ולא ניחוש. שיחה שלא נענתה
+    // (CANCEL/BUSY/NOANSWER) אין לה הקלטה בכלל, גם אם המספר תפוס-נראה-כמו-URL.
+    const answered = !params.phone_call_status || params.phone_call_status === 'ANSWER';
+    const recordFile = (params.RecordFile || '').trim();
+    const audioUrl = !answered
+      ? null
+      : recordFile ||
+        (this.cloudplus.configured ? this.cloudplus.recordingUrl(callId) : null);
 
     const record = await this.ingestOne({
       externalId: callId,
       phone: external,
       direction: incoming ? 'IN' : 'OUT',
-      startedAt: new Date(),
-      durationSec: Number(params.duration || params.billsec || 0) || 0,
-      // כתובת ההורדה נבנית מ-call_id; ההקלטה תימשך בזמן התמלול (אם קיימת) —
-      // גם כשיש audio מצורף, כגיבוי: אם התמלול המיידי ממנו נכשל, ניתן עדיין
-      // לנסות שוב דרך ההורדה המאומתת (ראה transcribe).
-      audioUrl: this.cloudplus.configured
-        ? this.cloudplus.recordingUrl(callId)
-        : null,
-      agentName: params.agent || params.extension || null,
+      // StartTime (BlueBe) מדויק בהרבה מרגע קליטת ה-webhook — הוא מגיע רק אחרי
+      // שהשיחה הסתיימה, לפעמים כמה דקות אחרי שהתחילה.
+      startedAt: CallRecordingsService.parseBlueBeStartTime(params.StartTime) || new Date(),
+      durationSec,
+      audioUrl,
+      agentName:
+        params.agent || params.extension || (incoming ? rawDst : rawSrc) || null,
     });
 
     if (audio) {
@@ -301,23 +355,30 @@ export class CallRecordingsService {
   /**
    * חלון הזמן שבתוכו שיחה נכנסת נחשבת "חיה" (לבאנר "מתקשר עכשיו" במסך).
    *
-   * אין לנו עדיין אירוע "צלצול" נפרד מ-CloudPlus (ה-webhook היחיד שקיים כרגע
-   * מכסה קליטה כללית של שיחה, לא בהכרח את רגע הצלצול המדויק — ממתין לסעיף 1.9
-   * של המסמך שלהם). לכן "חי" מוגדר בינתיים כחלון קצר מרגע שהשיחה נקלטה אצלנו,
-   * שמספיק לצלצול טיפוסי. אם/כשיתברר אירוע ring אמיתי, אפשר לדייק כאן בלי לגעת
-   * בצד הלקוח (הוא רק פולינג על ה-endpoint הזה).
+   * התברר בפרודקשן (17.9) שה-webhook שבפועל מגיע מ-BlueBe הוא אירוע *סיום*
+   * שיחה, לא צלצול — הוא כולל כבר משך שיחה, ומגיע לפעמים כמה דקות אחרי
+   * שהשיחה התחילה (`StartTime`). לכן זה כבר לא "חי" במובן "מצלצל עכשיו", אלא
+   * "שיחה שקרתה לאחרונה" — וחלון קצר מדי (45 שניות) היה מפספס כמעט הכל.
+   * אם/כשיתברר אירוע ring אמיתי בנפרד, אפשר לצמצם בחזרה בלי לגעת בצד הלקוח.
    */
-  private static readonly LIVE_WINDOW_MS = 45_000;
+  private static readonly LIVE_WINDOW_MS = 5 * 60_000;
 
   /**
    * שיחות נכנסות "חיות" — לבאנר מסך בזמן אמת שמראה מי מתקשר עכשיו.
    *
    * רק שיחות שזוהה להן לקוח: שיחה ממספר לא מזוהה אין למי לשייך בבאנר (אין
    * "פתח כרטיס לקוח" בלי לקוח), ותציף בפופ-אפים על כל שיחת שיווק/טעות שמגיעה.
+   *
+   * `answeredByUserId` — המשתמש שהשלוחה שענתה (agentName) שייכת לו, לפי
+   * User.pbxExtension. יורם ביקש (2026-09-16) שהפופ-אפ ייפתח רק אצל מי שענה
+   * בפועל ולא אצל כל המשתמשים; עם זאת עדיין לא אושר אם/איך CloudPlus שולחת
+   * את השלוחה שענתה (ה-webhooks שנתפסו עד כה לא כללו שדה כזה) — כשהוא לא
+   * ידוע, `answeredByUserId` יוצא null וה-frontend נופל חזרה להצגה לכולם,
+   * כדי שהבאנר לא ייעלם בשקט אם השדה עוד לא זורם.
    */
   async listLive() {
     const since = new Date(Date.now() - CallRecordingsService.LIVE_WINDOW_MS);
-    return this.prisma.callRecording.findMany({
+    const calls = await this.prisma.callRecording.findMany({
       where: { direction: 'IN', startedAt: { gte: since }, customerId: { not: null } },
       orderBy: { startedAt: 'desc' },
       take: 10,
@@ -327,7 +388,24 @@ export class CallRecordingsService {
         startedAt: true,
         customerId: true,
         customer: { select: { id: true, name: true } },
+        agentName: true,
       },
+    });
+    if (!calls.length) return calls;
+
+    const users = await this.prisma.user.findMany({
+      where: { pbxExtension: { not: null } },
+      select: { id: true, pbxExtension: true },
+    });
+    const userIdByExtension = new Map(
+      users
+        .map((u) => [CallRecordingsService.digitsOf(u.pbxExtension), u.id] as const)
+        .filter(([ext]) => ext),
+    );
+
+    return calls.map((c) => {
+      const ext = CallRecordingsService.digitsOf(c.agentName);
+      return { ...c, answeredByUserId: (ext && userIdByExtension.get(ext)) || null };
     });
   }
 

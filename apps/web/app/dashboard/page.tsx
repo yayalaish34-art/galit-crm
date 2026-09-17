@@ -26555,8 +26555,14 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
       try {
         const r = await apiFetch(apiUrl('/call-recordings/live'), { authUser: currentUser });
         if (!r.ok) return;
-        const list = await r.json();
-        if (cancelled || !Array.isArray(list)) return;
+        const raw = await r.json();
+        if (cancelled || !Array.isArray(raw)) return;
+        // אם ידוע מי ענתה (answeredByUserId) — הפופ-אפ נפתח רק אצלה/ו, לא אצל כולם.
+        // כל עוד השלוחה שענתה לא ידועה (answeredByUserId null, ר' listLive) נופלים
+        // חזרה להצגה לכולם, כמו היום — עדיף פופ-אפ מיותר מבאנר ששקט לגמרי.
+        const list = (raw as any[]).filter(
+          (c) => !c.answeredByUserId || c.answeredByUserId === currentUser.id,
+        );
         setCallToasts((prev) => {
           const liveIds = new Set<string>((list as any[]).map((c) => c.id));
           const kept = prev.filter((x) => liveIds.has(x.id));
