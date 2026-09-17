@@ -88,14 +88,20 @@ export function CallTranscriptsSection({
       const res = await apiFetch(apiUrl(`/call-recordings/${scope}`), { authUser: currentUser });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      setCalls(Array.isArray(data) ? data : []);
+      const list: CallRecording[] = Array.isArray(data) ? data : [];
+      setCalls(list);
+      // ברכיב המשימה התמלול הוא התוכן עצמו — האחרון שתומלל נפתח מיד, בלי לחיצה.
+      if (compact) {
+        const latest = list.find((c) => c.transcriptStatus === 'DONE' && c.transcript);
+        setOpenId((cur) => cur ?? latest?.id ?? null);
+      }
     } catch {
       setError('טעינת השיחות נכשלה');
       setCalls([]);
     } finally {
       setLoading(false);
     }
-  }, [scope, currentUser]);
+  }, [scope, currentUser, compact]);
 
   useEffect(() => { void load(); }, [load]);
 

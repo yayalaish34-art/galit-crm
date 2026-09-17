@@ -26563,10 +26563,26 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
      כבר לא ב-prev (נסגרה), ולוגיקת המיזוג סופרת אותה כ"חדשה" ומוסיפה מחדש.
      דרוך: לזכור ID-ים שנסגרו ולסנן אותם *מהמקור*, לא רק מה-state הנוכחי. */
   const dismissedCallIdsRef = useRef<Set<string>>(new Set());
+  /* הזיכרון חייב לשרוד גם רענון, remount של הדשבורד וכרטיסייה נוספת — אחרת
+     השיחה (שנשארת "חיה" בשרת 5 דקות) חוזרת. לכן נשמר ב-localStorage לכל
+     משתמש, ונקרא מחדש בכל סבב פולינג (כך גם סגירה בכרטיסייה אחרת נספרת). */
+  const dismissedCallsKey = currentUser?.id ? `galit_dismissed_call_ids_${currentUser.id}` : '';
+  const readDismissedCalls = useCallback(() => {
+    if (!dismissedCallsKey) return;
+    try {
+      const arr = JSON.parse(window.localStorage.getItem(dismissedCallsKey) || '[]');
+      if (Array.isArray(arr)) for (const id of arr) dismissedCallIdsRef.current.add(String(id));
+    } catch { /* ignore */ }
+  }, [dismissedCallsKey]);
   const dismissCallToast = useCallback((id: string) => {
+    readDismissedCalls();
     dismissedCallIdsRef.current.add(id);
+    try {
+      const arr = Array.from(dismissedCallIdsRef.current).slice(-300);
+      if (dismissedCallsKey) window.localStorage.setItem(dismissedCallsKey, JSON.stringify(arr));
+    } catch { /* ignore */ }
     setCallToasts((prev) => prev.filter((x) => x.id !== id));
-  }, []);
+  }, [dismissedCallsKey, readDismissedCalls]);
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
@@ -26582,9 +26598,10 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
         const list = (raw as any[]).filter(
           (c) => !c.answeredByUserId || c.answeredByUserId === currentUser.id,
         );
+        readDismissedCalls();
         setCallToasts((prev) => {
           const liveIds = new Set<string>((list as any[]).map((c) => c.id));
-          const kept = prev.filter((x) => liveIds.has(x.id));
+          const kept = prev.filter((x) => liveIds.has(x.id) && !dismissedCallIdsRef.current.has(x.id));
           const have = new Set(kept.map((x) => x.id));
           const fresh = (list as any[])
             .filter((c) => !have.has(c.id) && !dismissedCallIdsRef.current.has(c.id))

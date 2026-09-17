@@ -441,11 +441,22 @@ export class CallRecordingsService {
     });
   }
 
-  /** שיחות המשימה. */
+  /**
+   * שיחות המשימה — כולל כל שיחות הלקוח של המשימה, לא רק אלה שקושרו אליה.
+   * הקישור למשימה (findActiveTask) הוא ניחוש רך ולרוב נשאר ריק, ובלי זה
+   * רכיב התמלולים במשימה הציג "אין שיחות" גם כשהלקוח דיבר איתנו.
+   */
   async listForTask(taskId: string) {
+    const task = await this.prisma.task.findUnique({
+      where: { id: taskId },
+      select: { customerId: true },
+    });
     return this.prisma.callRecording.findMany({
-      where: { taskId },
+      where: task?.customerId
+        ? { OR: [{ taskId }, { customerId: task.customerId }] }
+        : { taskId },
       orderBy: { startedAt: 'desc' },
+      take: 50,
       select: this.listSelect,
     });
   }
@@ -702,7 +713,8 @@ export class CallRecordingsService {
     });
 
     try {
-      const text = await this.speechToText(bytes, contentType, apiKey);
+      const raw = await this.speechToText(bytes, contentType, apiKey);
+      const text = await this.polishTranscript(raw, apiKey);
       return await this.prisma.callRecording.update({
         where: { id },
         data: {
@@ -789,6 +801,9 @@ export class CallRecordingsService {
     );
     form.append('language', 'he');
     form.append('response_format', 'text');
+    // הקלטת טלפון ב-8kHz — המנוע מחליף מונחים מקצועיים במילים דומות. רמז
+    // תחום משפר את זיהוי השמות והמונחים שחוזרים בכל שיחה.
+    form.append('prompt', CallRecordingsService.TRANSCRIBE_HINT);
 
     const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -801,6 +816,55 @@ export class CallRecordingsService {
     const text = body.trim();
     if (!text) throw new Error('התמלול חזר ריק');
     return text;
+  }
+
+  private static readonly TRANSCRIBE_HINT =
+    'שיחת טלפון בעברית עם חברת גלית — מעבדה לבדיקות סביבה ובטיחות. ' +
+    'מונחים נפוצים: הצעת מחיר, בדיקת קרינה, קרינה אלקטרומגנטית, לוח חשמל, אנטנה סלולרית, ' +
+    'ראדון, ערכת ראדון, גלאי, אסבסט, עובש, לחות, רעש, אקוסטיקה, בידוד אקוסטי, ' +
+    'דוח קרקע, סקר קרקע, איכות אוויר, גז, ממ"ד, היתר בנייה, טופס 4, קבלן, דירה, משרד, ' +
+    'תיאום בדיקה, בודק, טכנאי, דוח, חשבונית, תשלום. שמות: גלית, יורם, אורי, סשה, גיא.';
+
+  /**
+   * תיקון קל של התמלול הגולמי: שגיאות שמיעה ברורות לפי הקשר, פיסוק, וסימון
+   * דוברים (נציג/לקוח). לא מסכם ולא מוסיף מידע — אם הניקוי נכשל או חוזר
+   * חשוד (קצר מדי ביחס למקור), נשמר התמלול הגולמי.
+   */
+  private async polishTranscript(raw: string, apiKey: string): Promise<string> {
+    if (raw.length < 20) return raw;
+    try {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: process.env.OPENAI_TRANSCRIPT_CLEANUP_MODEL || 'gpt-4.1',
+          temperature: 0,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'אתה מתקן תמלולים אוטומטיים של שיחות טלפון בעברית בחברת גלית (מעבדה לבדיקות ' +
+                'סביבה: קרינה, ראדון, אסבסט, עובש, רעש, קרקע, איכות אוויר). התמלול הגולמי מכיל ' +
+                'שגיאות שמיעה של מנוע ההמרה. המשימה:\n' +
+                '1. תקן רק מילים ששובשו בבירור, לפי ההקשר והתחום. אל תשנה משמעות.\n' +
+                '2. הוסף פיסוק.\n' +
+                '3. חלק לשורות לפי דובר, בפורמט "נציג: ..." / "לקוח: ...". הנציג הוא איש חברת גלית. ' +
+                'אם לא ברור מי דיבר — "דובר: ...".\n' +
+                'אסור: לסכם, להשמיט, להוסיף מידע שלא נאמר, או להמציא שמות ומספרים. ' +
+                'מילה שאי אפשר לשחזר — השאר כמו שהיא. החזר את התמלול בלבד, בלי הקדמה.',
+            },
+            { role: 'user', content: raw },
+          ],
+        }),
+      });
+      if (!res.ok) throw new Error(`cleanup ${res.status}`);
+      const data: any = await res.json();
+      const cleaned = String(data?.choices?.[0]?.message?.content ?? '').trim();
+      return cleaned.length >= raw.length * 0.6 ? cleaned : raw;
+    } catch (e: any) {
+      this.logger.warn(`transcript cleanup skipped: ${e?.message || e}`);
+      return raw;
+    }
   }
 
   /** OpenAI מזהה את הפורמט לפי הסיומת, ולכן לשם הקובץ יש משמעות. */
