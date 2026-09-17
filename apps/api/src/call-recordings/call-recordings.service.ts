@@ -658,7 +658,23 @@ export class CallRecordingsService {
       throw new BadRequestException('אין קובץ אודיו לשיחה זו');
     }
 
-    const audio = await this.downloadAudio(call.externalId);
+    let audio: { bytes: Buffer; contentType: string };
+    try {
+      audio = await this.downloadAudio(call);
+    } catch (e: any) {
+      // הקובץ לא תמיד זמין מיד אחרי ה-webhook, ולכן כישלון הורדה נשאר PENDING
+      // (התור ינסה שוב) עם הסיבה גלויה בכרטיס — ורק אחרי יממה נכנעים.
+      const message = String(e?.message || e).slice(0, 500);
+      const expired = Date.now() - new Date(call.startedAt).getTime() > 24 * 3600_000;
+      await this.prisma.callRecording.update({
+        where: { id },
+        data: {
+          transcriptStatus: expired ? 'FAILED' : 'PENDING',
+          transcriptError: `הורדת ההקלטה נכשלה: ${message}`,
+        },
+      });
+      throw new BadRequestException(`הורדת ההקלטה נכשלה: ${message}`);
+    }
     return this.transcribeBytes(id, audio.bytes, audio.contentType);
   }
 
@@ -709,22 +725,40 @@ export class CallRecordingsService {
   }
 
   /**
-   * מוריד את קובץ ההקלטה מהמרכזייה.
+   * מוריד את קובץ ההקלטה.
    *
-   * עובר דרך CloudPlusClient ולא ב-fetch ישיר: ההורדה דורשת session פתוח
-   * מול ה-PBX (מסמך §1.8), והלקוח הוא שמחזיק אותו ומתחבר מחדש כשהוא פג.
+   * שני מקורות: קישור ישיר שהמרכזייה שלחה ב-webhook (RecordFile של BlueBe,
+   * נשמר ב-audioUrl) — מורד כמו שהוא; ורק אם אין כזה, הכתובת שאנחנו בונים
+   * מול `/admin/` של ה-PBX, שדורשת session (מסמך §1.8) ולכן עוברת דרך
+   * CloudPlusClient. עד 17.9 גם קישור ישיר נשלח בטעות למסלול ה-session.
    *
-   * מוגבל ב-25MB, המגבלה של OpenAI: קובץ גדול יותר ייכשל אצלם ממילא, ועדיף
-   * להיכשל כאן עם הודעה ברורה מאשר על שגיאה זרה.
+   * מוגבל ב-25MB, המגבלה של OpenAI.
    */
-  private async downloadAudio(
-    externalId: string,
-  ): Promise<{ bytes: Buffer; contentType: string }> {
-    const file = await this.cloudplus.downloadRecording(externalId);
+  private async downloadAudio(call: {
+    externalId: string;
+    audioUrl: string | null;
+  }): Promise<{ bytes: Buffer; contentType: string }> {
+    const direct = call.audioUrl && !/\/admin\/\?menu=monitoring/.test(call.audioUrl);
+    const file = direct
+      ? await this.fetchDirectRecording(call.audioUrl!)
+      : await this.cloudplus.downloadRecording(call.externalId);
     if (file.bytes.length > 25 * 1024 * 1024) {
       throw new Error('קובץ ההקלטה גדול מ-25MB ואינו נתמך לתמלול');
     }
     return file;
+  }
+
+  /** המרכזייה עונה 200 גם כשאין קובץ ("File Not Found") — לכן בודקים את התוכן. */
+  private async fetchDirectRecording(url: string): Promise<{ bytes: Buffer; contentType: string }> {
+    const res = await fetch(url);
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || /text\/|json|html/i.test(contentType)) {
+      const body = (await res.text().catch(() => '')).trim().slice(0, 200);
+      throw new Error(body || `HTTP ${res.status}`);
+    }
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!bytes.length) throw new Error('קובץ ההקלטה ריק');
+    return { bytes, contentType: contentType || 'audio/wav' };
   }
 
   /**
@@ -882,14 +916,14 @@ export class CallRecordingsService {
   }
 
   /**
-   * תמלול התור ברקע — מדי שעה.
-   *
-   * נפרד מהמשיכה בכוונה: המשיכה זולה ומהירה, התמלול איטי ועולה כסף. מוגבל
-   * ל-20 שיחות בסבב כדי שיום עמוס לא ייצור חשבון בלתי צפוי.
+   * תמלול התור ברקע — כל 10 דקות, כדי ששיחה תתומלל זמן קצר אחרי שהקובץ זמין.
+   * כישלון הורדה לא עולה כסף (אין קריאה ל-OpenAI), ולכן הקצב הזה זול.
+   * מוגבל ל-20 שיחות בסבב כדי שיום עמוס לא ייצור חשבון בלתי צפוי.
+   * לא תלוי ב-`cloudplus.configured`: קישור ישיר מה-webhook לא צריך אותו.
    */
-  @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async transcribeQueue(): Promise<void> {
-    if (!this.transcriptionAvailable || !this.cloudplus.configured) return;
+    if (!this.transcriptionAvailable) return;
     try {
       const r = await this.transcribePending(20);
       if (r.done || r.failed)
