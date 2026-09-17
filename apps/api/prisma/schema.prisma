@@ -1683,6 +1683,14 @@ model RadonJob {
   contactPhone  String?
   notes         String? @db.Text
 
+  // ── טאב "גלאים" בכרטיס הלקוח ──
+  // קצר/ארוך *לא* נשמר כשדה נפרד: זו בדיוק ההבחנה שכבר קיימת בין sku='61'
+  // (SKU_SHORT_KIT) ל-sku='10000' (SKU_LONG_KIT) — שדה נוסף שיכול להיסתר
+  // מה-sku בפועל היה יוצר שני מקורות אמת סותרים. הטאב מציג את זה כערך נגזר.
+  /// המספר הסידורי המודפס על הגלאי שנשלח בפועל — לתיעוד בלבד, לא קשור
+  /// למערכת המלאי המלאה (RadonDetector) שמיועדת לגלאי השירות המקצועי.
+  detectorNumber String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

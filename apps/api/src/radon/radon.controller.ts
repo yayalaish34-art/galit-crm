@@ -272,6 +272,34 @@ export class RadonController {
     return this.kit.markReturned(body?.taskId, body?.sku);
   }
 
+  // ── טאב "גלאים" בכרטיס הלקוח ──
+  // אותו מעקב כמו בסרגל המשימה, אבל לפי לקוח ולא לפי משימה בודדת — כדי
+  // שהתהליך (שרץ ברקע 90 יום בלי שאף אחד נוגע במשימה) יהיה נגיש מהמקום
+  // שהעובד באמת חוזר אליו.
+
+  /** כל עבודות הערכה של הלקוח, החדשה קודם. */
+  @Get('kit/customer/:customerId')
+  kitForCustomer(@Param('customerId') customerId: string) {
+    return this.kit.listForCustomer(customerId);
+  }
+
+  /**
+   * עריכת מספר גלאי/תאריך מסירה — לא מפעיל שום הודעה, רק תיעוד.
+   *
+   * `?? undefined` היה הופך גם `null` מפורש (ניקוי שדה) ל-undefined (השאר
+   * כמו שהיה) — משתמשים ב-`in` כדי להבדיל "המפתח לא נשלח" מ-"נשלח כ-null".
+   */
+  @Post('kit/details')
+  kitDetails(@Body() body: any) {
+    const b = body ?? {};
+    return this.kit.setKitDetails({
+      radonJobId: b.radonJobId ?? null,
+      taskId: b.taskId ?? null,
+      detectorNumber: 'detectorNumber' in b ? b.detectorNumber : undefined,
+      kitSentAt: 'kitSentAt' in b ? b.kitSentAt : undefined,
+    });
+  }
+
   /** הרצה ידנית של סריקת 48 השעות — לבדיקה ולתפעול. */
   @Post('kit/autosend/run')
   @Roles('ADMIN', 'MANAGER')

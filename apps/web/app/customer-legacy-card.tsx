@@ -12,6 +12,7 @@ import { ManualIncomeSection } from './manual-income-section';
 import { ProducedReportsSection } from './produced-reports-section';
 import { CaspitDocumentsSection } from './caspit-documents-section';
 import { CallTranscriptsSection } from './call-transcripts-section';
+import { RadonKitCustomerSection } from './radon/radon-kit-customer-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -889,6 +890,7 @@ type LowerTabKey =
   | 'signedQuotes'
   | 'producedReports'
   | 'caspitDocuments'
+  | 'radonKits'
   | 'requests'
   | 'callTranscripts'
   | 'additionalData'
@@ -911,6 +913,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'signedQuotes', label: 'הצעות מחיר חתומות' },
   { key: 'producedReports', label: 'דוחות שהופקו' },
   { key: 'caspitDocuments', label: 'חשבוניות/קבלות' },
+  { key: 'radonKits', label: 'גלאים' },
 ];
 
 function formatLegacyDate(v: unknown): string {
@@ -4199,6 +4202,18 @@ export function CustomerLegacyCard({
           <div className="space-y-3" dir="rtl">
             <div className="text-lg font-bold text-black">חשבוניות / קבלות</div>
             <CaspitDocumentsSection customerId={customer?.id ?? null} currentUser={currentUser} />
+          </div>
+        )}
+
+        {activeLowerTab === 'radonKits' && (
+          <div className="space-y-3" dir="rtl">
+            <div className="text-lg font-bold text-black">גלאים — מעקב ערכות ראדון</div>
+            <p className="rounded border border-blue-200 bg-blue-50/80 px-3 py-2 text-[11px] text-slate-800">
+              מעקב ערכות ראדון (61/10000) שהלקוח מתקין בעצמו: שליחה, אישור התקנה בוואטסאפ, ספירת 90
+              הימים, והחזרה. אותו מעקב שמופיע בסרגל המשימה — כאן ריכוז של כל הערכות של הלקוח במקום
+              אחד.
+            </p>
+            <RadonKitCustomerSection customerId={customer?.id ?? null} currentUser={currentUser} />
           </div>
         )}
 

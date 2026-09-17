@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CustomerReminderService } from './customer-reminder.service';
-import { isRadonKitSku, RADON_KIT_SKUS } from './radon-tracks';
+import { isRadonKitSku, RADON_KIT_SKUS, SKU_SHORT_KIT } from './radon-tracks';
 import {
   buildKitInstructionsText,
   buildKitReturnText,
@@ -61,28 +61,61 @@ export class RadonKitService {
 
     const job = await this.prisma.radonJob.findFirst({ where: { taskId } });
     const recipient = await this.bridge.resolveRecipient(taskId);
-    const days = job?.testDurationDays ?? 90;
 
+    return {
+      taskId,
+      sku,
+      recipient,
+      configured: this.bridge.isConfigured(),
+      ...this.jobView(job, { name: recipient.name, siteAddress: recipient.siteAddress }),
+    };
+  }
+
+  /**
+   * כל עבודות הערכה של הלקוח — לטאב "גלאים" בכרטיס הלקוח.
+   *
+   * לא דורש task פעיל: כל שדה תצוגה נשען על מה שנשמר על העבודה עצמה
+   * (contactName/contactPhone/siteAddress), לא על resolveRecipient — עבודה
+   * ישנה עשויה להצביע על משימה שכבר נסגרה או נמחקה.
+   */
+  async listForCustomer(customerId: string) {
+    const jobs = await this.prisma.radonJob.findMany({
+      where: { customerId, sku: { in: [...RADON_KIT_SKUS] } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return jobs.map((job) => ({
+      taskId: job.taskId,
+      sku: job.sku,
+      ...this.jobView(job, { name: job.contactName, siteAddress: job.siteAddress }),
+    }));
+  }
+
+  /**
+   * תמונת המצב המשותפת לתצוגת משימה (`getState`) ותצוגת לקוח (`listForCustomer`).
+   * לא כולל recipient/configured — אלה תלויי-הקשר (task מול customer) ומורכבים
+   * בנפרד בכל אחת מהשתיים.
+   */
+  private jobView(job: any, fallback: { name: string | null; siteAddress?: string | null }) {
+    const days = job?.testDurationDays ?? 90;
     const ctx: RadonKitMessageContext = {
-      customerName: recipient.name,
-      siteAddress: job?.siteAddress ?? recipient.siteAddress,
+      customerName: fallback.name,
+      siteAddress: job?.siteAddress ?? fallback.siteAddress ?? null,
       testDurationDays: days,
       officePhone: this.officePhone(),
     };
 
     return {
-      taskId,
-      sku,
       stage: this.stageOf(job),
       testDurationDays: days,
       daysLeft: this.daysLeft(job),
       daysElapsed: this.daysElapsed(job),
-      recipient,
-      configured: this.bridge.isConfigured(),
 
       job: job
         ? {
             id: job.id,
+            /** נגזר מה-sku (61=קצרה, 10000=ארוכה) — לא שדה נפרד, כדי שלא יסתור אותו. */
+            kitType: job.sku === SKU_SHORT_KIT ? 'SHORT' : 'LONG',
+            detectorNumber: job.detectorNumber,
             kitSentAt: job.kitSentAt,
             kitSentByUserId: job.kitSentByUserId,
             kitSentVia: job.kitSentVia,
@@ -346,6 +379,50 @@ export class RadonKitService {
       });
     }
     return this.getState(taskId, sku);
+  }
+
+  /**
+   * עריכת שדות "גלאים" מכרטיס הלקוח — מספר גלאי ותאריך מסירה. (הסוג קצר/ארוך
+   * לא ניתן לעריכה כאן — הוא נגזר מה-sku שבו נמכר השירות, ראה jobView.)
+   *
+   * נפרד במכוון מ-markKitSent/setDuration: אלה לא מפעילים שום הודעת וואטסאפ,
+   * רק מתעדים מידע. תאריך מסירה ניתן לעריכה תמיד (גם אחרי ששליחת ההוראות כבר
+   * יצאה) — בניגוד למשך הבדיקה, שנעול כי הוא מופיע בתוך נוסח הודעה שכבר נשלחה.
+   */
+  async setKitDetails(input: {
+    radonJobId?: string | null;
+    taskId?: string | null;
+    detectorNumber?: string | null;
+    /** תאריך מסירה בפורמט ISO/YYYY-MM-DD, או null כדי לנקות. */
+    kitSentAt?: string | null;
+  }) {
+    const job = input.radonJobId
+      ? await this.prisma.radonJob.findUnique({ where: { id: input.radonJobId } })
+      : input.taskId
+        ? await this.prisma.radonJob.findFirst({ where: { taskId: input.taskId } })
+        : null;
+    if (!job) throw new NotFoundException('לא נמצאה עבודת ראדון');
+
+    const data: Record<string, unknown> = {};
+    if (input.detectorNumber !== undefined) {
+      data.detectorNumber = (input.detectorNumber ?? '').trim() || null;
+    }
+    if (input.kitSentAt !== undefined) {
+      if (!input.kitSentAt) {
+        data.kitSentAt = null;
+      } else {
+        const d = new Date(input.kitSentAt);
+        if (Number.isNaN(d.getTime())) throw new BadRequestException('תאריך מסירה לא תקין');
+        data.kitSentAt = d;
+      }
+    }
+
+    const updated = await this.prisma.radonJob.update({ where: { id: job.id }, data });
+    return {
+      taskId: updated.taskId,
+      sku: updated.sku,
+      ...this.jobView(updated, { name: updated.contactName, siteAddress: updated.siteAddress }),
+    };
   }
 
   /** סימון שהערכה חזרה אלינו — סוגר את הספירה ואת ההתראה. */
