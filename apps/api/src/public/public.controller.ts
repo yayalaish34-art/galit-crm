@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, UseInterceptors, UploadedFiles, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, Req, Res, NotFoundException, ForbiddenException, UseInterceptors, UploadedFiles, Logger } from '@nestjs/common';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
@@ -206,7 +206,10 @@ export class PublicController {
    */
   @Get('call-webhook')
   async callWebhookGet(@Query() q: Record<string, string>) {
-    return this.handleCallWebhook(q);
+    // קישור הקלטה יכול להגיע גם ב-GET (query) — ר' extractRecordingAudio; לא רק
+    // ב-POST. בלי זה, ALERT עם קישור שמגיע כ-GET היה מתעלם לגמרי מההקלטה.
+    const audio = await this.extractRecordingAudio(q);
+    return this.handleCallWebhook(q, audio);
   }
 
   /**
@@ -232,8 +235,14 @@ export class PublicController {
   /**
    * מחלץ את בתי האודיו מהוובהוק, אם צורפו — בשלוש הצורות הסבירות שמרכזייה
    * עשויה לתמוך בהן: קובץ multipart, שדה base64, או קישור ציבורי בלי אימות.
-   * לא ידוע איזו מהן CloudPlus/BlueBe בפועל תומכת בה (סעיף 1.9 טרם התקבל) —
-   * לכן תומכים בכל השלוש ומשתמשים במה שהגיע.
+   *
+   * גלית אישרה (2026-09-16) שאצל CloudPlus זו הדרך השלישית — הם פשוט שולחים
+   * קישור, לא קובץ מצורף — אבל שם השדה המדויק עדיין לא ידוע (ה-webhooks
+   * שנתפסו עד כה הם רק אירועי התחלה/סוף שיחה, בלי קישור הקלטה). לכן מנחשים
+   * כמה שמות סבירים, ואם אף אחד לא תאם — נופלים חזרה לכל ערך בפרמטרים
+   * שנראה כמו URL http(s). ברגע שמגיע webhook אמיתי עם קישור, השורה
+   * `call-webhook: accepted {...}` בלוג מדפיסה את כל הפרמטרים כפי שהתקבלו,
+   * כך שאפשר לאשר את שם השדה האמיתי ולצמצם את הניחוש בהמשך.
    */
   private async extractRecordingAudio(
     params: Record<string, string>,
@@ -252,15 +261,35 @@ export class PublicController {
         // התעלמות — ממשיכים לנסות דרכים אחרות.
       }
     }
-    if (params.recording_url) {
+
+    const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\/\S+$/i.test(v.trim());
+    const namedGuesses = [
+      params.recording_url,
+      params.record_url,
+      params.recording,
+      params.record,
+      params.audio_url,
+      params.file_url,
+      params.file,
+      params.url,
+      params.link,
+    ].filter(isUrl);
+    // שם השדה לא ידוע — נופלים חזרה לכל ערך שנראה כמו URL, כדי לא לפספס קישור
+    // תחת שם שלא ניחשנו.
+    if (!namedGuesses.length) {
+      const anyUrlValue = Object.values(params).find(isUrl);
+      if (anyUrlValue) namedGuesses.push(anyUrlValue);
+    }
+
+    for (const url of namedGuesses) {
       try {
-        const res = await fetch(params.recording_url);
+        const res = await fetch(url.trim());
         if (res.ok) {
           const bytes = Buffer.from(await res.arrayBuffer());
           if (bytes.length) return { bytes, contentType: res.headers.get('content-type') || 'audio/wav' };
         }
       } catch {
-        // קישור לא זמין/לא תקין — לא חוסם את קליטת השיחה עצמה.
+        // קישור לא זמין/לא תקין — ממשיכים לנסות מועמד אחר, ולא חוסמים את קליטת השיחה.
       }
     }
     return undefined;
@@ -270,18 +299,17 @@ export class PublicController {
     params: Record<string, string>,
     audio?: { bytes: Buffer; contentType: string },
   ) {
-    // אימות ה-key בוטל זמנית לפי בקשת המשתמש (2026-09-16): שני ALERTs אמיתיים
-    // מ-CloudPlus נדחו ב-403 בגלל אי-התאמת key, וזה חסם את כל הקליטה בזמן
-    // שמנסים לאבחן את הבעיה מולם. הנתיב פתוח לגמרי כרגע — מי שיודע את ה-URL
-    // הזה יכול להזריק שיחות מזויפות ואף לגרום לחיוב תמלול (OpenAI) על קובץ
-    // שרירותי. יש לשקול להחזיר בדיקה (גם מקלה יותר) לאחר שה-ALERT מאומת מולם.
+    // אימות הוחזר (17.9) אחרי שהתברר למה ה-key נדחה: BlueBe מדביקים את הפרמטר
+    // הראשון שלהם ישר אחרי הטוקן בלי `&` (`key=<TOKEN>?BillableSeconds=...`),
+    // וverifyWebhookKey תוקן להשוות קידומת (startsWith) ולא שוויון מלא — ראה
+    // [[call-recordings-cloudplus]]. עד הרגע הזה הנתיב היה פתוח לגמרי לפי בקשה
+    // מפורשת (2026-09-16) כדי לא לחסום ALERTs אמיתיים בזמן האבחון.
     if (!this.calls.verifyWebhookKey(params.key)) {
-      this.logger.warn(
-        `call-webhook: key mismatch (allowed anyway — auth disabled). received=${JSON.stringify(params)}`,
-      );
-    } else {
-      this.logger.log(`call-webhook: accepted ${JSON.stringify(params)}`);
+      this.logger.warn(`call-webhook: rejected, key mismatch. received=${JSON.stringify(params)}`);
+      // הודעה כללית בכוונה — לא רומזים אם הטוקן קרוב או לא מוגדר.
+      throw new ForbiddenException('unauthorized');
     }
+    this.logger.log(`call-webhook: accepted ${JSON.stringify(params)}`);
     return this.calls.ingestWebhook(params, audio);
   }
 }

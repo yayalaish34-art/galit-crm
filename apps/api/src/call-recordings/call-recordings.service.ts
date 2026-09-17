@@ -346,10 +346,17 @@ export class CallRecordingsService {
   }
 
   /** האם ה-key שהגיע ב-webhook תואם לטוקן המוגדר. */
+  /**
+   * `startsWith` ולא `===`: התברר בפרודקשן (17.9) ש-BlueBe מדביק את הטוקן שלנו
+   * לתחילת ה-`key` ומצרפים מיד אחריו את הפרמטר הראשון שלהם בלי `&` מפריד —
+   * `key=<TOKEN>?BillableSeconds=159` — במקום `key=<TOKEN>&BillableSeconds=159`.
+   * זו כנראה תקלה קבועה בצד שלהם (בונים URL בהנחה שאין query string קודם),
+   * לא משהו חד-פעמי, ולכן משווים על הקידומת ולא על שוויון מלא.
+   */
   verifyWebhookKey(key: string | undefined): boolean {
     const expected = (process.env.CLOUDPLUS_TOKEN || '').trim();
     // בלי טוקן מוגדר — לא מקבלים webhook כלל (אחרת כל אחד יכול להזריק שיחות).
-    return !!expected && String(key || '').trim() === expected;
+    return !!expected && String(key || '').trim().startsWith(expected);
   }
 
   /**
