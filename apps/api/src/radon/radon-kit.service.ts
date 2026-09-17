@@ -91,6 +91,80 @@ export class RadonKitService {
   }
 
   /**
+   * הוספת גלאי ידנית מכרטיס הלקוח — בלי משימה ובלי לשלוח שום הודעת וואטסאפ.
+   *
+   * לתיעוד ערכות שכבר טופלו מחוץ למערכת (נמכרו/הותקנו לפני שהתכונה הזו
+   * נבנתה), או פשוט כשעדיין אין משימה. פרטי הקשר נלקחים מכרטיס הלקוח עצמו —
+   * אין כאן resolveRecipient כי הוא דורש משימה קיימת בפועל.
+   */
+  async createManual(input: {
+    customerId: string;
+    sku: string;
+    detectorNumber?: string | null;
+    /** תאריך מסירה — ISO/YYYY-MM-DD. */
+    kitSentAt?: string | null;
+    /** תאריך התקנה, אם כבר ידוע — מתחיל את ספירת ה-90 יום מיד. */
+    installedOn?: string | null;
+  }) {
+    const sku = String(input.sku ?? '').trim();
+    if (!isRadonKitSku(sku)) {
+      throw new BadRequestException(
+        `סוג ערכה לא תקין — יש לבחור מבין ${RADON_KIT_SKUS.join(', ')}`,
+      );
+    }
+    const customer = await this.prisma.customer.findUnique({
+      where: { id: input.customerId },
+      select: { id: true, name: true, phone: true, address: true },
+    });
+    if (!customer) throw new NotFoundException('הלקוח לא נמצא');
+
+    const kitSentAt = this.parseOptionalDate(input.kitSentAt, 'תאריך מסירה');
+    const installedOn = this.parseOptionalDate(input.installedOn, 'תאריך התקנה');
+    const testDurationDays = 90;
+    const expectedEndAt = installedOn
+      ? new Date(installedOn.getTime() + testDurationDays * 86_400_000)
+      : null;
+
+    const job = await this.prisma.radonJob.create({
+      data: {
+        sku,
+        customerId: customer.id,
+        contactName: customer.name,
+        contactPhone: customer.phone,
+        siteAddress: customer.address,
+        detectorNumber: (input.detectorNumber ?? '').trim() || null,
+        kitSentAt,
+        testDurationDays,
+        clientReportedAt: installedOn,
+        placedAt: installedOn,
+        expectedEndAt,
+        status: installedOn ? 'IN_FIELD' : 'OPEN',
+      },
+    });
+
+    return {
+      taskId: job.taskId,
+      sku: job.sku,
+      ...this.jobView(job, { name: job.contactName, siteAddress: job.siteAddress }),
+    };
+  }
+
+  /** מחיקת רשומת מעקב — לתיקון רשומה שנוספה בטעות. */
+  async deleteJob(radonJobId: string) {
+    const job = await this.prisma.radonJob.findUnique({ where: { id: radonJobId } });
+    if (!job) throw new NotFoundException('הרשומה לא נמצאה');
+    await this.prisma.radonJob.delete({ where: { id: radonJobId } });
+    return { ok: true };
+  }
+
+  private parseOptionalDate(raw: string | null | undefined, label: string): Date | null {
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) throw new BadRequestException(`${label} לא תקין`);
+    return d;
+  }
+
+  /**
    * תמונת המצב המשותפת לתצוגת משימה (`getState`) ותצוגת לקוח (`listForCustomer`).
    * לא כולל recipient/configured — אלה תלויי-הקשר (task מול customer) ומורכבים
    * בנפרד בכל אחת מהשתיים.

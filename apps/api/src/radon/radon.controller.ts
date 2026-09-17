@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   Param,
@@ -298,6 +299,24 @@ export class RadonController {
       detectorNumber: 'detectorNumber' in b ? b.detectorNumber : undefined,
       kitSentAt: 'kitSentAt' in b ? b.kitSentAt : undefined,
     });
+  }
+
+  /** "גלאי חדש" — הוספה ידנית מכרטיס הלקוח, בלי משימה ובלי הודעת וואטסאפ. */
+  @Post('kit/customer')
+  kitCreateManual(@Body() body: any) {
+    return this.kit.createManual({
+      customerId: body?.customerId,
+      sku: body?.sku,
+      detectorNumber: body?.detectorNumber ?? null,
+      kitSentAt: body?.kitSentAt ?? null,
+      installedOn: body?.installedOn ?? null,
+    });
+  }
+
+  /** מחיקת רשומת מעקב — לתיקון רשומה שנוספה בטעות. */
+  @Delete('kit/:id')
+  kitDelete(@Param('id') id: string) {
+    return this.kit.deleteJob(id);
   }
 
   /** הרצה ידנית של סריקת 48 השעות — לבדיקה ולתפעול. */

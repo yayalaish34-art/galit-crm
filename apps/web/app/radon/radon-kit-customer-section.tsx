@@ -10,7 +10,9 @@ import {
   Loader2,
   MessageSquareText,
   PackageCheck,
+  Plus,
   Send,
+  Trash2,
   X,
 } from 'lucide-react';
 import { apiFetch, apiUrl, type ApiAuthUser } from '../lib/api-base';
@@ -122,6 +124,8 @@ export function RadonKitCustomerSection({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [addOpen, setAddOpen] = useState(false);
+
   const authRef = useRef(currentUser);
   authRef.current = currentUser;
 
@@ -152,33 +156,181 @@ export function RadonKitCustomerSection({
     void load();
   }, [load]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center gap-1.5 p-4 text-[12px] font-semibold text-slate-500">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        טוען מעקב גלאים…
-      </div>
-    );
-  }
-
-  if (error) {
-    return <div className="rounded-lg bg-rose-50 p-3 text-[12px] font-semibold text-rose-700">{error}</div>;
-  }
-
-  if (!jobs.length) {
-    return (
-      <div className="p-4 text-center text-[12px] text-slate-400">
-        אין ערכות ראדון (61/10000) ללקוח זה. ערכה תופיע כאן ברגע שהיא נפתחת דרך משימה.
-      </div>
-    );
-  }
+  const addButton = (
+    <button
+      type="button"
+      disabled={!customerId}
+      onClick={() => setAddOpen(true)}
+      className="flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-white transition hover:bg-slate-900 disabled:opacity-50"
+    >
+      <Plus className="h-3.5 w-3.5" />
+      גלאי חדש
+    </button>
+  );
 
   return (
-    <div className="space-y-3" dir="rtl">
-      {jobs.map((j) => (
-        <KitJobCard key={j.job?.id ?? j.taskId} summary={j} authUser={currentUser} onChange={load} />
-      ))}
+    <div dir="rtl">
+      <div className="mb-3 flex justify-end">{addButton}</div>
+
+      {loading ? (
+        <div className="flex items-center gap-1.5 p-4 text-[12px] font-semibold text-slate-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          טוען מעקב גלאים…
+        </div>
+      ) : error ? (
+        <div className="rounded-lg bg-rose-50 p-3 text-[12px] font-semibold text-rose-700">{error}</div>
+      ) : !jobs.length ? (
+        <div className="p-4 text-center text-[12px] text-slate-400">
+          אין ערכות ראדון (61/10000) ללקוח זה. ערכה תופיע כאן ברגע שהיא נפתחת דרך משימה, או שאפשר
+          להוסיף אחת ידנית למעלה.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {jobs.map((j) => (
+            <KitJobCard key={j.job?.id ?? j.taskId} summary={j} authUser={currentUser} onChange={load} />
+          ))}
+        </div>
+      )}
+
+      {addOpen && customerId && (
+        <AddKitOverlay
+          customerId={customerId}
+          authUser={currentUser}
+          onClose={() => setAddOpen(false)}
+          onCreated={() => {
+            setAddOpen(false);
+            void load();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function AddKitOverlay({
+  customerId,
+  authUser,
+  onClose,
+  onCreated,
+}: {
+  customerId: string;
+  authUser?: ApiAuthUser | null;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [sku, setSku] = useState<'SHORT' | 'LONG'>('SHORT');
+  const [detectorNumber, setDetectorNumber] = useState('');
+  const [kitSentAt, setKitSentAt] = useState(todayLocalDate());
+  const [installedOn, setInstalledOn] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await apiFetch(apiUrl('/radon/kit/customer'), {
+        method: 'POST',
+        authUser,
+        body: JSON.stringify({
+          customerId,
+          sku: sku === 'SHORT' ? '61' : '10000',
+          detectorNumber: detectorNumber.trim() || null,
+          kitSentAt: kitSentAt || null,
+          installedOn: installedOn || null,
+        }),
+      });
+      const data = await readJson(res);
+      if (!res.ok) {
+        setError(data?.message ?? 'ההוספה נכשלה');
+        return;
+      }
+      onCreated();
+    } catch {
+      setError('שגיאת רשת — נסו שוב');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Overlay title="גלאי חדש" onClose={onClose}>
+      <div className="space-y-3">
+        <label className="block text-[11px] font-bold text-slate-600">
+          סוג הערכה
+          <div className="mt-1 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setSku('SHORT')}
+              className={`flex-1 rounded-lg border px-3 py-1.5 text-[12px] font-bold transition ${
+                sku === 'SHORT' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              קצרת טווח
+            </button>
+            <button
+              type="button"
+              onClick={() => setSku('LONG')}
+              className={`flex-1 rounded-lg border px-3 py-1.5 text-[12px] font-bold transition ${
+                sku === 'LONG' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              ארוכת טווח
+            </button>
+          </div>
+        </label>
+
+        <label className="block text-[11px] font-bold text-slate-600">
+          מספר גלאי
+          <input
+            type="text"
+            value={detectorNumber}
+            onChange={(e) => setDetectorNumber(e.target.value)}
+            placeholder="לא חובה"
+            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[12px]"
+          />
+        </label>
+
+        <label className="block text-[11px] font-bold text-slate-600">
+          תאריך מסירה
+          <input
+            type="date"
+            value={kitSentAt}
+            max={todayLocalDate()}
+            onChange={(e) => setKitSentAt(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[12px]"
+          />
+        </label>
+
+        <label className="block text-[11px] font-bold text-slate-600">
+          תאריך התקנה (אם כבר ידוע — מתחיל מיד את ספירת 90 הימים)
+          <input
+            type="date"
+            value={installedOn}
+            max={todayLocalDate()}
+            onChange={(e) => setInstalledOn(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-[12px]"
+          />
+        </label>
+
+        {error && <p className="rounded bg-rose-50 p-1.5 text-[11px] font-semibold text-rose-700">{error}</p>}
+
+        <div className="flex gap-2 pt-1">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={save}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-[12px] font-bold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            שמור
+          </button>
+          <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-50">
+            ביטול
+          </button>
+        </div>
+      </div>
+    </Overlay>
   );
 }
 
@@ -196,6 +348,8 @@ function KitJobCard({
   const [showMessage, setShowMessage] = useState<'instructions' | 'return' | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [manualDate, setManualDate] = useState(todayLocalDate());
   const [detectorNumber, setDetectorNumber] = useState(summary.job?.detectorNumber ?? '');
   const [deliveryDate, setDeliveryDate] = useState(toDateInput(summary.job?.kitSentAt ?? null));
@@ -265,6 +419,26 @@ function KitJobCard({
     if (await post('/radon/kit/details', { radonJobId: summary.job.id, kitSentAt: value || null })) onChange();
   };
 
+  const deleteThisJob = async () => {
+    if (!summary.job) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await apiFetch(apiUrl(`/radon/kit/${summary.job.id}`), { method: 'DELETE', authUser });
+      if (!res.ok) {
+        const data = await readJson(res);
+        setError(data?.message ?? 'המחיקה נכשלה');
+        return;
+      }
+      setDeleteOpen(false);
+      onChange();
+    } catch {
+      setError('שגיאת רשת — נסו שוב');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const stage = summary.stage;
   const currentIdx = STEP_INDEX[stage];
   const overdue = stage === 'ended';
@@ -285,6 +459,15 @@ function KitJobCard({
             <PackageCheck className={`h-4 w-4 ${overdue ? 'text-rose-600' : 'text-emerald-700'}`} />
             ערכת ראדון — {kitTypeLabel}
           </span>
+
+          <button
+            type="button"
+            title="מחיקת רשומה"
+            onClick={() => setDeleteOpen(true)}
+            className="mr-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
 
           <label className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
             תאריך מסירה
@@ -523,6 +706,30 @@ function KitJobCard({
               התחל ספירה
             </button>
             <button type="button" onClick={() => setConfirmOpen(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-50">
+              ביטול
+            </button>
+          </div>
+        </Overlay>
+      )}
+
+      {deleteOpen && (
+        <Overlay title="מחיקת רשומת מעקב" onClose={() => setDeleteOpen(false)}>
+          <p className="mb-3 text-[12px] leading-relaxed text-slate-600">
+            הרשומה, ההודעות שנוסחו, ותזכורת ההחזרה (אם נדרכה) יימחקו. לא ניתן לבטל. הפעולה הזו לא
+            מוחקת את המשימה עצמה, רק את מעקב הגלאי שלה.
+          </p>
+          {error && <p className="mb-2 rounded bg-rose-50 p-1.5 text-[11px] font-semibold text-rose-700">{error}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={deleting}
+              onClick={deleteThisJob}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-3 py-2 text-[12px] font-bold text-white transition hover:bg-rose-700 disabled:opacity-50"
+            >
+              {deleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+              מחק לצמיתות
+            </button>
+            <button type="button" onClick={() => setDeleteOpen(false)} className="rounded-lg border border-slate-300 px-3 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-50">
               ביטול
             </button>
           </div>
