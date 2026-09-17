@@ -328,9 +328,12 @@ export class PublicController {
     for (const url of namedGuesses) {
       try {
         const res = await fetch(url.trim());
-        if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        // המרכזייה עונה 200 גם על שגיאה ("File Not Found" / "bad request") —
+        // בלי הבדיקה הזו טקסט השגיאה נשלח ל-OpenAI כאילו היה אודיו (17.9).
+        if (res.ok && !/text\/|json|html/i.test(contentType)) {
           const bytes = Buffer.from(await res.arrayBuffer());
-          if (bytes.length) return { bytes, contentType: res.headers.get('content-type') || 'audio/wav' };
+          if (bytes.length) return { bytes, contentType: contentType || 'audio/wav' };
         }
       } catch {
         // קישור לא זמין/לא תקין — ממשיכים לנסות מועמד אחר, ולא חוסמים את קליטת השיחה.
