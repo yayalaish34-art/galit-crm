@@ -727,6 +727,8 @@ type AppUser = {
   canViewAllRecords: boolean;
 };
 
+const APP_VERSION = 'v1.0.1';
+
 const GALIT_CRM_SESSION_STORAGE_KEY = 'galit-crm-session';
 
 type StoredSessionUser = {
@@ -6375,7 +6377,7 @@ function ManagerDashboard({
 
 type MeDashboardPayload = {
   updatedAt: string;
-  user: { id: string; name: string; role: string };
+  user: { id: string; name: string; role: string; pbxExtension?: string | null };
   kpis: {
     leadsNew: number;
     leadsInTreatment: number;
@@ -6712,6 +6714,8 @@ function DashboardPage({
     return 'ערב טוב';
   })();
   const todayLabel = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const pbxExtension = (me?.user.pbxExtension || '').trim();
+  const pbxExtensionLabel = pbxExtension.includes(',') ? 'שלוחות מרכזייה' : 'שלוחת מרכזייה';
 
   const myTasks = useMemo(
     () =>
@@ -6741,11 +6745,16 @@ function DashboardPage({
           <div>
             <div className="flex items-center gap-2 text-sm font-medium text-white/80">
               <Sparkles className="h-4 w-4" /> {todayLabel}
+              <span className="text-white/40">•</span>
+              <span className="text-xs text-white/60">גרסה {APP_VERSION}</span>
             </div>
             <h1 className="mt-2 text-2xl font-black tracking-tight md:text-2xl">
               {greeting}{firstName ? `, ${firstName}` : ''}
             </h1>
             <p className="mt-1 text-sm text-white/85">סקירת הביצועים האישית שלך — הנתונים מתעדכנים ישירות ממסד הנתונים.</p>
+            {pbxExtension && (
+              <p className="mt-1 text-xs text-white/70">{pbxExtensionLabel}: {pbxExtension}</p>
+            )}
           </div>
           <div className="flex flex-wrap gap-3">
             <div className="rounded-xl bg-white/15 px-4 py-2 backdrop-blur-sm">
