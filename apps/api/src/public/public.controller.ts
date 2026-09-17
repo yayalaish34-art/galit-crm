@@ -241,17 +241,35 @@ export class PublicController {
    * ה-query הרגיל (Express, מאחורי `@Query()`) מזהה רק את ה-`?` הראשון, ולכן
    * `event=start` נבלע לתוך הערך של `key` במקום להיות פרמטר עצמאי.
    *
-   * הפתרון: לקרוא את ה-URL הגולמי (`req.url`), ולהחליף כל `?` אחרי הראשון
-   * ב-`&` לפני הפירוק — כך `?event=start` הופך ל-`&event=start` ומתפרק נכון.
+   * הפתרון: לקרוא את ה-URL הגולמי (`req.url`) ולפצל `?` תועה לפרמטר נפרד —
+   * אבל רק בערך שאינו קישור. `RecordFile` מגיע כ-URL לא מקודד שמכיל `?` לגיטימי
+   * (`download-file.php?fileid=...`); החלפה גורפת של כל `?` חתכה אותו לשניים
+   * ואיבדה את ה-fileid (נצפה 17.9).
    * מחזיר `null` אם אין query string בכלל (הקורא נופל חזרה ל-`@Query()`).
    */
   private repairMangledQuery(req: any): Record<string, string> | null {
     const url: string = req?.url || req?.originalUrl || '';
     const qIndex = url.indexOf('?');
     if (qIndex === -1) return null;
-    const fixedQuery = url.slice(qIndex + 1).replace(/\?/g, '&');
+
+    const pieces: string[] = [];
+    for (const piece of url.slice(qIndex + 1).split('&')) {
+      const eq = piece.indexOf('=');
+      const value = eq === -1 ? '' : piece.slice(eq + 1);
+      const q = piece.indexOf('?', eq + 1);
+      const isLink = /^https?(:|%3A)/i.test(value);
+      if (eq !== -1 && q !== -1 && !isLink) {
+        pieces.push(piece.slice(0, q), piece.slice(q + 1));
+      } else if (isLink) {
+        // fileid הוא base64 ויכול להכיל `+`, שהפרסר היה הופך לרווח.
+        pieces.push(piece.replace(/\+/g, '%2B'));
+      } else {
+        pieces.push(piece);
+      }
+    }
+
     const params: Record<string, string> = {};
-    for (const [k, v] of new URLSearchParams(fixedQuery)) params[k] = v;
+    for (const [k, v] of new URLSearchParams(pieces.join('&'))) params[k] = v;
     return params;
   }
 
