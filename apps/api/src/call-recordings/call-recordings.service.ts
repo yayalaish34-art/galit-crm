@@ -714,7 +714,7 @@ export class CallRecordingsService {
 
     try {
       const raw = await this.speechToText(bytes, contentType, apiKey);
-      const text = await this.polishTranscript(raw, apiKey);
+      const text = await this.polishTranscript(raw, apiKey, await this.speakerContext(id));
       return await this.prisma.callRecording.update({
         where: { id },
         data: {
@@ -830,7 +830,27 @@ export class CallRecordingsService {
    * דוברים (נציג/לקוח). לא מסכם ולא מוסיף מידע — אם הניקוי נכשל או חוזר
    * חשוד (קצר מדי ביחס למקור), נשמר התמלול הגולמי.
    */
-  private async polishTranscript(raw: string, apiKey: string): Promise<string> {
+  /**
+   * מי מדבר ראשון — בלי זה מעבר הניקוי ניחש, ובשיחה יוצאת סימן את העובדת
+   * כ"לקוח" (נצפה 17.9). בשיחה יוצאת הלקוח עונה ("הלו?") והנציג פותח;
+   * בנכנסת הנציג עונה. שם העובד נגזר מהשלוחה (User.pbxExtension).
+   */
+  private async speakerContext(id: string): Promise<string> {
+    const call = await this.prisma.callRecording.findUnique({
+      where: { id },
+      select: { direction: true, agentName: true },
+    });
+    const ext = CallRecordingsService.digitsOf(call?.agentName);
+    const agent = ext
+      ? await this.prisma.user.findFirst({ where: { pbxExtension: ext }, select: { name: true } })
+      : null;
+    const who = agent?.name ? `נציג גלית בשיחה: ${agent.name}.` : '';
+    return call?.direction === 'OUT'
+      ? `שיחה יוצאת: נציג גלית חייג ללקוח — מי שעונה ראשון ("הלו?") הוא הלקוח. ${who}`
+      : `שיחה נכנסת: הלקוח התקשר לגלית — מי שעונה ראשון הוא הנציג. ${who}`;
+  }
+
+  private async polishTranscript(raw: string, apiKey: string, context: string): Promise<string> {
     if (raw.length < 20) return raw;
     try {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -853,7 +873,7 @@ export class CallRecordingsService {
                 'אסור: לסכם, להשמיט, להוסיף מידע שלא נאמר, או להמציא שמות ומספרים. ' +
                 'מילה שאי אפשר לשחזר — השאר כמו שהיא. החזר את התמלול בלבד, בלי הקדמה.',
             },
-            { role: 'user', content: raw },
+            { role: 'user', content: `${context}\n\nתמלול גולמי:\n${raw}` },
           ],
         }),
       });
