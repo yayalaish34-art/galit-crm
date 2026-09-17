@@ -1,10 +1,24 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UnauthorizedException,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { RadonJobsService } from './radon-jobs.service';
 import { RadonDetectorsService } from './radon-detectors.service';
 import { RadonAlertsService } from './radon-alerts.service';
 import { CustomerReminderService } from './customer-reminder.service';
+import { RadonKitService } from './radon-kit.service';
+import { RadonKitAutoSendService } from './radon-kit-autosend.service';
 import {
   ALL_TRACKS,
   RADON_TEST_SKUS,
@@ -28,6 +42,8 @@ export class RadonController {
     private readonly detectors: RadonDetectorsService,
     private readonly alerts: RadonAlertsService,
     private readonly reminders: CustomerReminderService,
+    private readonly kit: RadonKitService,
+    private readonly autoSend: RadonKitAutoSendService,
   ) {}
 
   // ── מטא-דאטה: קודי השירות, המסלולים והתוויות — הממשק נטען מכאן ──
@@ -205,5 +221,99 @@ export class RadonController {
   @Post('reminder/:id/cancel')
   cancelReminder(@Param('id') id: string) {
     return this.reminders.cancel(id);
+  }
+
+  // ── מעקב ערכת ראדון — הקומפוננטה הקבועה בסרגל הימני ──
+  //
+  // כל התהליך שהלקוח מבצע לבדו: שליחת הערכה, אישור ההתקנה שלו בוואטסאפ,
+  // הספירה לאחור, וסיום התקופה. ראה RadonKitService.
+
+  /** המצב המלא של המשימה: שלב, ספירה לאחור, ושתי ההודעות המנוסחות. */
+  @Get('kit/:taskId')
+  kitState(@Param('taskId') taskId: string, @Query('sku') sku: string) {
+    return this.kit.getState(taskId, sku);
+  }
+
+  /** "הערכה נשלחה ללקוח" — מסמן, ושולח מיד את הודעת ההוראות + בקשת התאריך. */
+  @Post('kit/sent')
+  kitSent(@Body() body: any, @Req() req: any) {
+    return this.kit.markKitSent({
+      taskId: body?.taskId,
+      sku: body?.sku,
+      customerId: body?.customerId ?? null,
+      testDurationDays: body?.testDurationDays ?? null,
+      phoneOverride: body?.phoneOverride ?? null,
+      actorUserId: req?.user?.id ?? null,
+    });
+  }
+
+  /** אישור התקנה ידני — כשהלקוח מסר את התאריך בטלפון ולא בוואטסאפ. */
+  @Post('kit/confirm')
+  kitConfirm(@Body() body: any, @Req() req: any) {
+    return this.kit.confirmInstallation({
+      taskId: body?.taskId,
+      radonJobId: body?.radonJobId ?? null,
+      installedOn: body?.installedOn,
+      note: body?.note ?? null,
+      via: 'manual',
+      actorUserId: req?.user?.id ?? null,
+    });
+  }
+
+  /** שינוי משך תקופת הבדיקה — אפשרי רק לפני שהודעת ההוראות יצאה. */
+  @Post('kit/duration')
+  kitDuration(@Body() body: any) {
+    return this.kit.setDuration(body?.taskId, body?.sku, Number(body?.testDurationDays));
+  }
+
+  /** הערכה חזרה אלינו — סוגר את הספירה ואת ההתראה. */
+  @Post('kit/returned')
+  kitReturned(@Body() body: any) {
+    return this.kit.markReturned(body?.taskId, body?.sku);
+  }
+
+  /** הרצה ידנית של סריקת 48 השעות — לבדיקה ולתפעול. */
+  @Post('kit/autosend/run')
+  @Roles('ADMIN', 'MANAGER')
+  kitAutoSendRun() {
+    return this.autoSend.run();
+  }
+}
+
+/**
+ * הנתיב שהבוט קורא לו כשהלקוח אישר בוואטסאפ מתי הוא התקין.
+ *
+ * מופרד לבקר משלו כי RolesGuard דורש JWT של משתמש, ולבוט אין כזה — הוא
+ * מזדהה בסוד המשותף, אותו סוד שה-CRM שולח לבוט בכיוון ההפוך. הבדיקה כאן
+ * היא timing-safe באותה מידה שהיא בצד הבוט.
+ */
+@Controller('radon/internal')
+export class RadonInternalController {
+  constructor(private readonly kit: RadonKitService) {}
+
+  private assertSecret(provided?: string) {
+    const expected =
+      (process.env.CUSTOMER_REMINDER_SECRET ?? '').trim() ||
+      (process.env.INTERNAL_API_SECRET ?? '').trim();
+    // סוד לא מוגדר = הנתיב סגור. לא פתוח.
+    if (!expected) throw new UnauthorizedException('internal API not configured');
+    const got = (provided ?? '').trim();
+    if (got.length !== expected.length) throw new UnauthorizedException('unauthorized');
+    let diff = 0;
+    for (let i = 0; i < expected.length; i++) diff |= got.charCodeAt(i) ^ expected.charCodeAt(i);
+    if (diff !== 0) throw new UnauthorizedException('unauthorized');
+  }
+
+  /** הלקוח אישר התקנה — מכאן מתחילה הספירה לאחור. */
+  @Post('kit-installed')
+  kitInstalled(@Body() body: any, @Headers('x-internal-secret') secret?: string) {
+    this.assertSecret(secret);
+    return this.kit.confirmInstallation({
+      taskId: body?.taskId ?? null,
+      radonJobId: body?.radonJobId ?? null,
+      installedOn: body?.installedOn,
+      note: body?.note ?? null,
+      via: 'whatsapp',
+    });
   }
 }

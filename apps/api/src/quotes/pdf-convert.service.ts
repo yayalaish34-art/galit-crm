@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import PizZip from 'pizzip';
 import { GraphPdfService } from '../microsoft/graph-pdf.service';
 import { MicrosoftAuthService } from '../microsoft/microsoft-auth.service';
+import { keepHeadingsWithNext } from './docx-pagination.util';
 
 /**
  * המרת DOCX ל-PDF. מנוע ראשי: Microsoft Graph (Word עצמו — כותרת/עיצוב זהים לתבנית), בתנאי
@@ -118,6 +119,43 @@ export class PdfConvertService {
   }
 
   /**
+   * מסמן keepNext על כותרות לפני ההמרה — ראו docx-pagination.util.ts.
+   *
+   * דוחות דוחפים כותרת לעמוד הבא בשורות ריקות, וכשהן נגמרות בדיוק בתחתית העמוד הכותרת נשארת
+   * שם לבדה והתוכן שלה עובר לעמוד הבא. Word עצמו מעמד כך — ההמרה רק חושפת את זה. הקובץ השמור
+   * בכרטיס אינו משתנה; רק העותק שנשלח להמרה.
+   * רשת ביטחון כמו בהקפאת התאריכים: שינוי במבנה = חוזרים למקור.
+   */
+  private keepHeadingsTogether(docx: Buffer, fileName: string): Buffer {
+    try {
+      const zip = new PizZip(docx);
+      const docFile = zip.file('word/document.xml');
+      if (!docFile) return docx;
+      const orig = docFile.asText();
+      const { xml, changed } = keepHeadingsWithNext(orig, zip.file('word/styles.xml')?.asText());
+      if (!changed) return docx;
+
+      const STRUCT = ['<w:p>', '<w:p ', '</w:p>', '<w:tbl>', '</w:tbl>', '<w:tc>', '</w:tc>', '<w:txbxContent>', '<w:drawing', '<w:sectPr'];
+      const sig = (s: string) => STRUCT.map((t) => s.split(t).length).join(',');
+      const added = xml.split('<w:keepNext/>').length - orig.split('<w:keepNext/>').length;
+      // פסקה ריקה בתגית סוגרת-עצמית (<w:p/>) נפתחת ל-<w:p>…</w:p>, ולכן מותר שינוי רק בזוג הזה.
+      const sigLoose = (s: string) => sig(s.replace(/<w:p\/>/g, '<w:p></w:p>'));
+      if (added !== changed || sigLoose(xml) !== sigLoose(orig)) {
+        this.logger.warn(`keepHeadingsTogether: unexpected structural change in "${fileName}" — using original`);
+        return docx;
+      }
+
+      zip.file('word/document.xml', xml);
+      const out = zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+      this.logger.log(`Kept ${changed} heading paragraph(s) with next in "${fileName}" before PDF conversion`);
+      return out;
+    } catch (e: any) {
+      this.logger.warn(`keepHeadingsTogether failed for "${fileName}" (using original): ${e?.message || e}`);
+      return docx;
+    }
+  }
+
+  /**
    * ממיר buffer של DOCX ל-PDF ומחזיר את ה-buffer של ה-PDF.
    * מנוע ראשי: Microsoft Graph (כש-userId מחובר ל-Outlook) → פלט נאמן ל-Word.
    * אם Graph לא זמין/נכשל — נופלים ל-CloudConvert. אם גם הוא לא מוגדר — זורקים.
@@ -132,7 +170,8 @@ export class PdfConvertService {
     }
 
     // הקפאת שדות התאריך לעברית פעם אחת, לפני שני המנועים (טקסט תאריך זהה למה שמוצג היום).
-    const frozen = await this.freezeDocxDates(docx);
+    // ואחריה נעילת כותרות לתוכן שאחריהן — שלא תישאר כותרת לבדה בתחתית עמוד ב-PDF.
+    const frozen = this.keepHeadingsTogether(await this.freezeDocxDates(docx), fileName);
 
     // 1) ניסיון ראשי: Microsoft Graph (מנוע Word — כותרת/עיצוב זהים לתבנית).
     //    ההמרה עוברת דרך חשבון ה-OneDrive הייעודי המחובר (לא דרך חשבון הקורא), ולכן די בכך

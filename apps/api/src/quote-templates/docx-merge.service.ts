@@ -261,6 +261,70 @@ function patchRtlOnlyRunsDavid14(documentXml: string): string {
   return documentXml.replace(RTL_ONLY_RPR, RTL_ONLY_RPR_REPLACEMENT);
 }
 
+/**
+ * מונע מכותרת ממוסגרת (כמו "נספח מס 1: שכר טרחה והסדרי עבודה") להישבר בין שני עמודים.
+ *
+ * הכותרת האפורה אינה פסקה אחת אלא רצף של פסקאות צמודות עם אותה מסגרת (pBdr) ואותו
+ * ריקון (shd) — רובן ריקות ומשמשות כריפוד עליון ותחתון. Word מאחד פסקאות עוקבות בעלות
+ * מסגרת זהה לתיבה ויזואלית אחת, אבל לעניין פריסת עמודים הן נשארות נפרדות. בלי keepNext
+ * מעבר העמוד נופל באמצע התיבה: פס אפור עם גג המסגרת נשאר בתחתית עמוד אחד והכיתוב עובר
+ * לבא. זה מסביר למה זה קורה רק בחלק מהקבצים — רק כשאורך התוכן שלפני מציב את שבירת
+ * העמוד בדיוק שם.
+ *
+ * כל פסקה ברצף מקבלת keepLines (לא לפצל אותה לבדה), וכל אחת חוץ מהאחרונה מקבלת גם
+ * keepNext (להישאר עם זו שאחריה). על האחרונה לא שמים keepNext בכוונה: כך התיבה נשארת
+ * שלמה אבל אינה גוררת אחריה את כל הטקסט שמתחתיה לעמוד הבא — אותה תקלה שתועדה
+ * ב-signature-table.ts כשבלוק שלם נשא keepNext.
+ */
+export function keepBoxedHeadingsTogether(documentXml: string): string {
+  const paras: Array<{ start: number; end: number; text: string }> = [];
+  const pRe = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>|<w:p(?:\s[^>]*)?\/>/g;
+  let m: RegExpExecArray | null;
+  while ((m = pRe.exec(documentXml)) !== null) {
+    paras.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  }
+
+  // פסקת כותרת = יש לה מסגרת וגם ריקון. שניהם יחד — מסגרת לבדה מופיעה גם בקווים
+  // מפרידים רגילים, שאותם אין סיבה לנעול.
+  const isBoxed = (t: string) => /<w:pBdr>/.test(t) && /<w:shd\b/.test(t);
+
+  // מיקום הפסקה האחרונה בכל רצף — עליה לא שמים keepNext.
+  const lastOfRun = new Set<number>();
+  for (let i = 0; i < paras.length; i++) {
+    if (!isBoxed(paras[i].text)) continue;
+    if (i + 1 >= paras.length || !isBoxed(paras[i + 1].text)) lastOfRun.add(i);
+  }
+
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < paras.length; i++) {
+    const para = paras[i];
+    if (!isBoxed(para.text)) continue;
+    const wanted = lastOfRun.has(i) ? '<w:keepLines/>' : '<w:keepNext/><w:keepLines/>';
+    let patched = para.text;
+    if (/<w:pPr>/.test(patched)) {
+      // לא להכפיל: תבנית שכבר תוקנה ביד נשארת כמות שהיא.
+      const hasNext = /<w:keepNext\b/.test(patched);
+      const hasLines = /<w:keepLines\b/.test(patched);
+      let inject = wanted;
+      if (hasNext) inject = inject.replace('<w:keepNext/>', '');
+      if (hasLines) inject = inject.replace('<w:keepLines/>', '');
+      if (inject === '') continue;
+      // keepNext/keepLines חייבים לבוא בראש pPr — סדר האלמנטים ב-CT_PPr הוא רצף מחייב,
+      // ו-Word מסרב לפתוח מסמך שבו הם מופיעים אחרי pBdr/shd.
+      patched = patched.replace('<w:pPr>', '<w:pPr>' + inject);
+    } else {
+      // אין pPr כלל (זה המצב של כותרת "נספח מס 1") — יוצרים אחד מיד אחרי תג הפתיחה.
+      const open = patched.match(/^<w:p(?:\s[^>]*)?>/);
+      if (!open) continue;
+      patched = open[0] + '<w:pPr>' + wanted + '</w:pPr>' + patched.slice(open[0].length);
+    }
+    out += documentXml.slice(cursor, para.start) + patched;
+    cursor = para.end;
+  }
+  return out + documentXml.slice(cursor);
+}
+
 /** סכום רוחב העמודות (gridCol) של טבלה ב-OOXML, או null אם אין tblGrid */
 function tableGridWidth(tbl: string): number | null {
   const grid = tbl.match(/<w:tblGrid>[\s\S]*?<\/w:tblGrid>/);
@@ -997,18 +1061,27 @@ export class DocxMergeService {
     }
   }
 
-  /** מבצע מיזוג של תבנית DOCX עם נתונים ומחזיר Buffer */
+  /**
+   * מבצע מיזוג של תבנית DOCX עם נתונים ומחזיר Buffer.
+   *
+   * הגרסה לפי נתיב נשארת לתאימות; המיזוג האמיתי עובד על **בייטים**, כדי שקוד
+   * שקורא ל-TemplateDocxStore יוכל להזין את הגרסה שהמנהל ערך במקום הקובץ
+   * המקורי שבתיקייה.
+   */
   mergeTemplate(templatePath: string, data: Record<string, unknown>): Buffer {
-    ensureDeps();
-
     const fullPath = path.resolve(this.templatesDir, templatePath);
     if (!fs.existsSync(fullPath)) {
       throw new NotFoundException(`Template file not found: ${templatePath}`);
     }
+    return this.mergeTemplateBytes(fs.readFileSync(fullPath), data);
+  }
+
+  /** מיזוג מתוך בייטים של DOCX (הגרסה הפעילה של התבנית — ערוכה או מקורית). */
+  mergeTemplateBytes(templateBytes: Buffer, data: Record<string, unknown>): Buffer {
+    ensureDeps();
 
     const normalized = normalizeDocxMergePayload(data);
-    const templateContent = fs.readFileSync(fullPath, 'binary');
-    const zip = new PizZip(templateContent);
+    const zip = new PizZip(templateBytes);
 
     // עיבוד מקדים של document.xml לפני render (פעם אחת על תבנית הלולאה/הטבלאות)
     {
@@ -1071,6 +1144,8 @@ export class DocxMergeService {
       const xml = docXml.asText();
       let replaced = injectRecipientBlockOoxml(xml, buildRecipientBlockOoxml(recData));
       replaced = patchRtlOnlyRunsDavid14(replaced);
+      // כותרות ממוסגרות ("נספח מס 1: ...") — שלא ייחצו בין שני עמודים.
+      replaced = keepBoxedHeadingsTogether(replaced);
       // אין נגיעה ברוחב/ביישור של טבלאות המחיר — הן מרונדרות בדיוק כפי
       // שהוגדרו בתבנית. (בעבר alignPriceTablesRight מתח את רוחב עמודות
       // טבלת הסיכום/הנחה כדי להשוות לרוחב טבלת הפריטים — הוסר ביודעין.)
@@ -1122,17 +1197,18 @@ export class DocxMergeService {
 
   /** רשימת placeholders בתבנית DOCX */
   extractPlaceholders(templatePath: string): string[] {
-    ensureDeps();
-
     const fullPath = path.resolve(this.templatesDir, templatePath);
     if (!fs.existsSync(fullPath)) {
       throw new NotFoundException(`Template file not found: ${templatePath}`);
     }
+    return this.extractPlaceholdersFromBytes(fs.readFileSync(fullPath));
+  }
 
-    const content = fs.readFileSync(fullPath, 'binary');
-    const zip = new PizZip(content);
+  /** רשימת placeholders מתוך בייטים (הגרסה הפעילה של התבנית). */
+  extractPlaceholdersFromBytes(templateBytes: Buffer): string[] {
+    ensureDeps();
+    const zip = new PizZip(templateBytes);
     const xml = zip.file('word/document.xml')?.asText() || '';
-
     const matches: string[] = xml.match(/\{[a-zA-Z][a-zA-Z0-9_]*\}/g) || [];
     return [...new Set(matches)].sort();
   }

@@ -30,8 +30,8 @@ describe('CustomersService.resolve', () => {
       // שלב 3 (טלפון + דמיון שם) עובר ב-raw SQL — ברירת המחדל: אין מועמדים.
       $queryRawUnsafe: jest.fn().mockResolvedValue([]),
     };
-    // GraphMailService אינו בשימוש ב-resolve; מספיק stub.
-    svc = new CustomersService(prisma as never, {} as never);
+    // GraphMailService / GraphFilesService אינם בשימוש ב-resolve; מספיק stubs.
+    svc = new CustomersService(prisma as never, {} as never, {} as never);
     // assertClassificationCode פונה ל-DB; לא מה שנבדק כאן.
     jest.spyOn(svc as never as { assertClassificationCode: () => Promise<void> },
       'assertClassificationCode').mockResolvedValue(undefined as never);

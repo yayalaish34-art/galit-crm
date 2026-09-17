@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
-import { FileBarChart, Upload, Download, Trash2, Eye, Loader2, FileText, Mail, Pencil } from 'lucide-react';
+import { FileBarChart, Upload, Download, Trash2, Eye, Loader2, FileText, Mail, Check, X } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
 import { CustomerReportEmailModal } from './customer-report-email-modal';
-import { ReportEditModal } from './report-edit-modal';
 
 type ReportDoc = {
   id: string;
@@ -16,6 +15,11 @@ type ReportDoc = {
   description?: string | null;
   documentDate?: string | null;
   createdAt?: string;
+  /** קיים כשהדוח נפתח לעריכה ב-Word — ואז הגרסה החיה יושבת ב-OneDrive. */
+  onedriveItemId?: string | null;
+  /** מי שהדוח מוען אליו, כפי שהוזן במערכת הפקת הדוחות. */
+  recipientName?: string | null;
+  recipientEmail?: string | null;
 };
 
 function base64ToBlob(b64: string, mime: string): Blob {
@@ -33,10 +37,14 @@ function fmtSize(n?: number | null): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fmtDate(v?: string): string {
+/** "01/09/2026, 09:55" — תאריך ושעה של הפקת הדוח. */
+function fmtDateTime(v?: string): string {
   if (!v) return '';
   const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('he-IL');
+  if (Number.isNaN(d.getTime())) return '';
+  const date = d.toLocaleDateString('he-IL');
+  const time = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return `${date}, ${time}`;
 }
 
 /**
@@ -61,9 +69,15 @@ export function ProducedReportsSection({
   const [dragOver, setDragOver] = useState(false);
   const [err, setErr] = useState('');
   const [emailFor, setEmailFor] = useState<ReportDoc | null>(null);
-  const [editFor, setEditFor] = useState<ReportDoc | null>(null);
+  const [wordBusyId, setWordBusyId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const dragDepth = useRef(0);
+  /** דוחות שנפתחו ב-Word בעמוד הזה — חזרה ללשונית מסנכרנת אותם. */
+  const editingRef = useRef<Set<string>>(new Set());
   const valid = !!customerId && customerId !== '__new__';
 
   const load = useCallback(async () => {
@@ -86,6 +100,33 @@ export function ProducedReportsSection({
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * פתיחת טופס המייל ישירות מקישור: ‎?sendReport=<documentId>‎.
+   *
+   * מערכת הפקת הדוחות מתייקת את קובץ ה-Word בכרטיס הלקוח ברגע שהוא מופק, ואז
+   * שולחת את הבודק לכאן. השליחה עצמה נשארת ב-CRM כי כאן יש זהות — המייל יוצא
+   * מה-Outlook של מי שמחובר — ולכן הקישור רק פותח את הטופס הקיים על הדוח הנכון.
+   *
+   * הפרמטר מוסר מה-URL אחרי הפתיחה, כדי שרענון של הדף לא יפתח את הטופס שוב.
+   */
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current || !valid || docs.length === 0) return;
+    if (typeof window === 'undefined') return;
+
+    const url = new URL(window.location.href);
+    const wanted = url.searchParams.get('sendReport');
+    if (!wanted) return;
+
+    const doc = docs.find((d) => d.id === wanted);
+    autoOpenedRef.current = true;
+    url.searchParams.delete('sendReport');
+    window.history.replaceState(null, '', url.toString());
+
+    if (doc) setEmailFor(doc);
+    else setErr('הדוח שהקישור מפנה אליו לא נמצא בכרטיס הלקוח.');
+  }, [docs, valid]);
 
   const onPick = async (file: File): Promise<ReportDoc | null> => {
     if (!valid || !file) return null;
@@ -177,6 +218,134 @@ export function ProducedReportsSection({
       });
     } else {
       void onPickMany(files);
+    }
+  };
+
+  /* ── עריכת הדוח ב-Word דרך OneDrive ──
+   * אותו דפוס שכבר עובד בהצעות מחיר: מעלים פעם אחת ל-OneDrive ופותחים ב-Word *של המחשב*
+   * (לא Word Online — הוא לא שומר נאמנות לתמונות צפות ודוחף אותן לראש העמוד). Word שומר
+   * לענן, וכשחוזרים ללשונית ה-CRM הגרסה הערוכה נמשכת אוטומטית חזרה לדוח. */
+  function buildDesktopWordUrl(fileUrl: string): string {
+    // הקישור הפנימי חייב להיות מקודד (רווחים/עברית) אחרת Word לא מזהה את הפקודה,
+    // אבל לא מקודדים שוב כתובת שכבר מקודדת — זה היה שובר %20 קיימים.
+    const needsEncoding = / |[^\x00-\x7f]/.test(fileUrl);
+    return `ms-word:ofe|u|${needsEncoding ? encodeURI(fileUrl) : fileUrl}`;
+  }
+
+  function openInDesktopWord(fileUrl: string) {
+    const url = buildDesktopWordUrl(fileUrl);
+    // לא <a href>: דפדפני Chromium עדכניים מקודדים את ה-"|" של ms-word:ofe|u| ל-%7C
+    // ואז Word לא מזהה את הפקודה. iframe נסתר משאיר את ה-"|" כפי שהוא ולא מנווט מהדף.
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+      const win = iframe.contentWindow;
+      if (win) win.location.href = url;
+      else window.location.href = url;
+      setTimeout(() => iframe.remove(), 2000);
+    } catch {
+      window.location.href = url;
+    }
+  }
+
+  const editInWord = async (d: ReportDoc) => {
+    if (!customerId) return;
+    setWordBusyId(d.id);
+    setErr('');
+    try {
+      const r = await apiFetch(
+        apiUrl(`/customers/${customerId}/documents/${d.id}/onedrive-open`),
+        { authUser: currentUser as never, method: 'POST' },
+      );
+      if (!r.ok) {
+        let msg = 'פתיחה ב-Word נכשלה — ודא שחשבון ה-Outlook מחובר';
+        try { const e = await r.json(); msg = e?.message || msg; } catch { /* ignore */ }
+        setErr(msg);
+        return;
+      }
+      const data = await r.json();
+      const target = data?.webDavUrl || data?.webUrl;
+      if (!target) { setErr('לא התקבלה כתובת פתיחה'); return; }
+      // מסמנים שהדוח הזה נערך — כדי שחזרה ללשונית תסנכרן אותו.
+      editingRef.current.add(d.id);
+      openInDesktopWord(target);
+    } catch {
+      setErr('פתיחה ב-Word נכשלה');
+    } finally {
+      setWordBusyId(null);
+    }
+  };
+
+  /** מושך את הגרסה הערוכה מ-OneDrive אל הדוח. שקט by default — רץ אוטומטית בחזרה מ-Word. */
+  const syncFromWord = useCallback(async (documentId: string, opts?: { loud?: boolean }): Promise<boolean> => {
+    if (!customerId) return false;
+    try {
+      const r = await apiFetch(
+        apiUrl(`/customers/${customerId}/documents/${documentId}/onedrive-sync`),
+        { authUser: currentUser as never, method: 'POST' },
+      );
+      if (!r.ok) return false;
+      const d = await r.json().catch(() => null);
+      if (d?.synced) {
+        if (opts?.loud) {
+          setSyncMsg('הגרסה מ-Word נשמרה במערכת ✓');
+          setTimeout(() => setSyncMsg(''), 5000);
+        }
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }, [customerId, currentUser]);
+
+  /* חזרה מ-Word אל לשונית ה-CRM — מסנכרנים אוטומטית כל דוח שנפתח לעריכה.
+   * זה מה שהופך את הזרימה ל"ערוך, שמור, וזהו": בלי הסנכרון הזה המשתמש היה צריך
+   * לזכור ללחוץ כפתור, ושליחה מיד אחרי עריכה הייתה שולחת את הגרסה שלפניה. */
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const ids = Array.from(editingRef.current);
+      if (ids.length === 0) return;
+      void (async () => {
+        const results = await Promise.all(ids.map((id) => syncFromWord(id, { loud: true })));
+        if (results.some(Boolean)) void load();
+      })();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [syncFromWord, load]);
+
+  /**
+   * שינוי שם הדוח.
+   *
+   * השרת מריץ את אותו שינוי גם על הקובץ שב-OneDrive, כך שהשם שנשלח ללקוח במייל
+   * זהה למה שרואים כאן — השליחה מעדיפה את השם שב-OneDrive כשיש קישור.
+   */
+  const saveRename = async (d: ReportDoc) => {
+    const next = renameValue.trim();
+    if (!next || next === d.name) { setRenamingId(null); return; }
+    if (!customerId) return;
+    setRenameBusy(true);
+    setErr('');
+    try {
+      const r = await apiFetch(apiUrl(`/customers/${customerId}/documents/${d.id}`), {
+        authUser: currentUser as never,
+        method: 'PATCH',
+        body: JSON.stringify({ name: next }),
+      });
+      if (!r.ok) { setErr('שינוי שם הדוח נכשל'); return; }
+      setRenamingId(null);
+      await load();
+    } catch {
+      setErr('שינוי שם הדוח נכשל');
+    } finally {
+      setRenameBusy(false);
     }
   };
 
@@ -297,6 +466,45 @@ export function ProducedReportsSection({
                 key={d.id}
                 className="flex items-center justify-between gap-2 rounded-xl border border-indigo-100 bg-white px-3 py-2"
               >
+                {renamingId === d.id ? (
+                  <>
+                    {/* עריכה במקום ולא בחלון נפרד: שינוי שם הוא שדה אחד, והשורה עצמה
+                        מראה את ההקשר. Enter שומר, Escape מבטל. */}
+                    <FileText className="h-4 w-4 shrink-0 text-indigo-600" />
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      disabled={renameBusy}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); void saveRename(d); }
+                        if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
+                      }}
+                      className="min-w-0 flex-1 rounded-lg border border-indigo-200 px-2 py-1 text-xs text-slate-700 outline-none focus:border-indigo-400"
+                    />
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => void saveRename(d)}
+                        disabled={renameBusy}
+                        className="rounded-lg p-1.5 text-emerald-600 transition hover:bg-emerald-50 disabled:opacity-50"
+                        title="שמור"
+                      >
+                        {renameBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRenamingId(null)}
+                        disabled={renameBusy}
+                        className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 disabled:opacity-50"
+                        title="ביטול"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                <>
                 <button
                   type="button"
                   onClick={() => view(d)}
@@ -311,21 +519,33 @@ export function ProducedReportsSection({
                       <span className="block truncate text-[10px] text-slate-400">{d.description}</span>
                     )}
                   </span>
-                  {!!d.sizeBytes && <span className="shrink-0 text-[10px] text-slate-400">{fmtSize(d.sizeBytes)}</span>}
-                  {!!(d.documentDate || d.createdAt) && (
-                    <span className="shrink-0 text-[10px] text-slate-300">
-                      {fmtDate(d.documentDate ?? d.createdAt)}
+                  {/* תאריך ושעת הפקת הדוח. נלקח מ-createdAt ולא מ-documentDate: השני הוא
+                      תאריך שניתן לעריכה ידנית ואין לו שעה, ולכן אינו מעיד על רגע ההפקה בפועל. */}
+                  {!!d.createdAt && (
+                    <span className="shrink-0 text-[10px] font-bold text-slate-600">
+                      {fmtDateTime(d.createdAt)}
                     </span>
                   )}
+                  {!!d.sizeBytes && <span className="shrink-0 text-[10px] text-slate-400">{fmtSize(d.sizeBytes)}</span>}
                 </button>
                 <div className="flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    onClick={() => setEditFor(d)}
-                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-amber-50 hover:text-amber-600"
-                    title="ערוך"
+                    onClick={() => { setRenamingId(d.id); setRenameValue(d.name); }}
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50"
+                    title="משנה גם את שם הקובץ ב-OneDrive ואת השם שנשלח ללקוח"
                   >
-                    <Pencil className="h-4 w-4" />
+                    ערוך שם
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void editInWord(d)}
+                    disabled={wordBusyId === d.id}
+                    className="flex shrink-0 items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700 transition hover:bg-sky-100 disabled:opacity-50"
+                    title="העריכה נשמרת ומסתנכרנת אוטומטית"
+                  >
+                    {wordBusyId === d.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                    ערוך בוורד
                   </button>
                   <button
                     type="button"
@@ -360,6 +580,8 @@ export function ProducedReportsSection({
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
+                </>
+                )}
               </div>
             ))}
           </div>
@@ -367,26 +589,21 @@ export function ProducedReportsSection({
       )}
 
       {err && <div className="mt-2 text-xs text-red-500">{err}</div>}
+      {syncMsg && <div className="mt-2 text-xs text-emerald-600">{syncMsg}</div>}
 
       <CustomerReportEmailModal
         open={!!emailFor && valid}
         onClose={() => setEmailFor(null)}
         customerId={customerId as string}
         customerName={customerName}
-        defaultEmail={defaultEmail}
+        /* הכתובת שהדוח מוען אליה מנצחת את כתובת הלקוח הכללית: אצל חברה הכתובת
+           הכללית היא המרכזייה או מי שיובא ראשון, ולא האדם שהדוח נכתב עבורו.
+           דוחות שהופקו לפני שהשדה הזה נוסף נופלים לכתובת הלקוח כמקודם. */
+        defaultEmail={emailFor?.recipientEmail || defaultEmail}
         report={emailFor ? { id: emailFor.id, name: emailFor.name } : null}
         currentUser={currentUser as { id?: string; name?: string } & Record<string, unknown>}
       />
 
-      {editFor && valid && (
-        <ReportEditModal
-          customerId={customerId as string}
-          doc={editFor}
-          currentUser={currentUser}
-          onClose={() => setEditFor(null)}
-          onSaved={load}
-        />
-      )}
     </div>
   );
 }

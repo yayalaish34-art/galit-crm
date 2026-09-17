@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { AlertTriangle, CalendarClock, FileText, Loader2, User } from 'lucide-react';
+import { AlertTriangle, CalendarClock, FileText, Loader2, Pencil, User } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
 
 /**
@@ -58,6 +58,7 @@ export function CollectionPaymentTermsModal({
   taskId,
   kindLabel,
   paid,
+  canEdit = false,
   currentUser,
   onCancel,
   onConfirm,
@@ -66,9 +67,20 @@ export function CollectionPaymentTermsModal({
   kindLabel: string;
   /** מסמך ששולם במעמד — בלי תנאי תשלום, עם בחירת אמצעי תשלום במקום. */
   paid: boolean;
+  /**
+   * האם להציע "ערוך לפני הנפקה". לקבלה אין שורות מסמך ולכן אין מה לערוך בה,
+   * וגם המסלול שלה בשרת אינו יוצר טיוטה.
+   */
+  canEdit?: boolean;
   currentUser: unknown;
   onCancel: () => void;
-  onConfirm: (v: { paymentTerms: string | null; contactId: string | null; paymentTypeId?: number }) => void;
+  onConfirm: (v: {
+    paymentTerms: string | null;
+    contactId: string | null;
+    paymentTypeId?: number;
+    /** true = ליצור טיוטה ולפתוח את עורך המסמך במקום להנפיק מיד. */
+    draft?: boolean;
+  }) => void;
 }) {
   const [options, setOptions] = useState<TermOption[]>([]);
   const [terms, setTerms] = useState<string>('');
@@ -293,6 +305,25 @@ export function CollectionPaymentTermsModal({
           >
             ביטול
           </button>
+          {/* עריכה לפני הנפקה: יוצר טיוטה בכספית ופותח אותה לעריכה. חייב להיות
+              *לפני* ההנפקה — מרגע שהמסמך נסגר כספית נועלת אותו לעריכה. */}
+          {canEdit && (
+            <button
+              onClick={() =>
+                onConfirm({
+                  paymentTerms: paid ? null : (terms.trim() || null),
+                  contactId,
+                  ...(paid ? { paymentTypeId } : {}),
+                  draft: true,
+                })
+              }
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-[12.5px] font-bold text-blue-700 transition hover:bg-blue-100 disabled:opacity-50"
+            >
+              <Pencil className="h-4 w-4" />
+              ערוך לפני הנפקה
+            </button>
+          )}
           <button
             onClick={() =>
               onConfirm({

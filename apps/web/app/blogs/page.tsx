@@ -112,8 +112,10 @@ export default function BlogsPage() {
     topic: '',
     audience: '',
     tone: 'מקצועי ונגיש',
-    length: 'medium' as 'short' | 'medium' | 'long',
+    length: 'long' as 'short' | 'medium' | 'long',
     notes: '',
+    /** מחקר ממקורות אמיתיים ברשת לפני הכתיבה — ברירת מחדל דולקת. */
+    research: true,
   });
 
   /** "נסח מחדש" — משפר טיוטה קיימת במקום להתחיל מאפס. */
@@ -121,8 +123,21 @@ export default function BlogsPage() {
   const [rewriteBusy, setRewriteBusy] = useState(false);
   const [rewriteInstruction, setRewriteInstruction] = useState('');
   /** האם הגענו לכאן מהפופ-אפ של אישור טיוטה אוטומטית — משנה את הכותרת בעורך. */
+  /** המקורות שנוסחו לתוך הבלוג האחרון — מוצגים כדי שהמנהל יוכל לבדוק אותם. */
+  const [aiSources, setAiSources] = useState<{ url: string; title: string; publisher: string }[]>([]);
   const [fromApproval, setFromApproval] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
+  /** יצירת התמונה הראשית רצה ~15 שניות — דגל נפרד כדי לא לנעול את כל המסך. */
+  const [imaging, setImaging] = useState(false);
+  /**
+   * החלופות שחזרו מהשרת. הן עדיין *לא* בוורדפרס — רק הנבחרת תועלה, כדי
+   * שספריית המדיה לא תתמלא בתמונות שאיש לא בחר.
+   */
+  const [imageOptions, setImageOptions] = useState<
+    { dataUrl: string; filename: string; scene: string }[]
+  >([]);
+  /** אינדקס החלופה שנמצאת כרגע בהעלאה — משבית את השאר בזמן ההמתנה. */
+  const [pickingImage, setPickingImage] = useState<number | null>(null);
 
   const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -339,6 +354,46 @@ export default function BlogsPage() {
     setDirty(true);
   };
 
+  /* שלוש הצעות תמונה מנושא הבלוג. השרת מייצר בלבד — ההעלאה לוורדפרס קורית
+     רק על החלופה שנבחרה (`chooseImage`), דרך אותו מסלול של העלאה ידנית. */
+  const generateImage = async () => {
+    const title = draft.title.trim();
+    if (!title) {
+      setErr('כדי לייצר תמונה צריך קודם כותרת לבלוג');
+      return;
+    }
+    setErr('');
+    setNotice('');
+    setImageOptions([]);
+    setImaging(true);
+    const r = await call('/blog/ai-image-options', {
+      method: 'POST',
+      body: JSON.stringify({ title, topic: draft.excerpt.trim() || title }),
+    });
+    setImaging(false);
+    if (!r?.options?.length) return;
+    setImageOptions(r.options);
+    setNotice(`נוצרו ${r.options.length} הצעות — בחרו אחת`);
+  };
+
+  /** מעלה את החלופה שנבחרה לוורדפרס וקובעת אותה כתמונה הראשית. */
+  const chooseImage = async (index: number) => {
+    const opt = imageOptions[index];
+    if (!opt) return;
+    setErr('');
+    setPickingImage(index);
+    const r = await call('/blog/media', {
+      method: 'POST',
+      body: JSON.stringify({ dataUrl: opt.dataUrl, filename: opt.filename }),
+    });
+    setPickingImage(null);
+    if (!r) return;
+    setDraft((d) => ({ ...d, featuredMediaId: r.id, featuredMediaUrl: r.url }));
+    setImageOptions([]);
+    setDirty(true);
+    setNotice('נבחרה תמונה — לא לשכוח לשמור');
+  };
+
   const runAi = async () => {
     if (!aiForm.topic.trim()) {
       setErr('נושא נדרש');
@@ -355,9 +410,14 @@ export default function BlogsPage() {
       excerpt: r.excerpt || d.excerpt,
       body: r.body || d.body,
     }));
+    setAiSources(Array.isArray(r.sources) ? r.sources : []);
     setDirty(true);
     setAiOpen(false);
-    setNotice('נוצרה טיוטה — עברו עליה, ערכו, ורק אז פרסמו');
+    setNotice(
+      r.sources?.length
+        ? `נוצרה טיוטה על בסיס ${r.sources.length} מקורות — עברו עליה, ערכו, ורק אז פרסמו`
+        : 'נוצרה טיוטה — עברו עליה, ערכו, ורק אז פרסמו',
+    );
   };
 
   /**
@@ -387,6 +447,7 @@ export default function BlogsPage() {
       excerpt: r.excerpt || d.excerpt,
       body: r.body || d.body,
     }));
+    setAiSources(Array.isArray(r.sources) ? r.sources : []);
     setDirty(true);
     setRewriteOpen(false);
     setRewriteInstruction('');
@@ -414,6 +475,12 @@ export default function BlogsPage() {
       await openPost(Number(r.postId));
     }
     setNotice('נוצרה טיוטה חדשה — עברו עליה ופרסמו כשהיא מוכנה');
+  };
+
+  /** חזרה לדשבורד — שואלת קודם אם יש עריכה שלא נשמרה, כי היא תאבד. */
+  const backToDashboard = () => {
+    if (dirty && !window.confirm('יש שינויים שלא נשמרו. לחזור לדשבורד בלי לשמור?')) return;
+    window.location.href = '/dashboard';
   };
 
   const blogPageUrl = useMemo(
@@ -454,6 +521,12 @@ export default function BlogsPage() {
           <div className="text-sm text-amber-700">
             כתיבת בלוגים זמינה למנהלים בלבד — התוכן מתפרסם באתר הציבורי.
           </div>
+          <a
+            href="/dashboard"
+            className="mt-4 inline-block rounded-xl border border-amber-300 bg-white px-5 py-2 text-sm font-bold text-amber-800 hover:bg-amber-100"
+          >
+            חזרה לדשבורד
+          </a>
         </div>
       </main>
     );
@@ -467,6 +540,13 @@ export default function BlogsPage() {
         {/* כותרת */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
+            <button
+              onClick={backToDashboard}
+              className="mb-2 inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <span aria-hidden="true">→</span>
+              חזרה לדשבורד
+            </button>
             <h1 className="text-2xl font-bold">בלוגים</h1>
             <p className="text-sm text-slate-500">
               כתיבה ופרסום ישירות לאתר. כל בלוג שמפורסם מופיע אוטומטית בעמוד{' '}
@@ -747,10 +827,25 @@ export default function BlogsPage() {
                         }
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                       >
-                        <option value="short">קצר (~300 מילים)</option>
-                        <option value="medium">בינוני (~550 מילים)</option>
-                        <option value="long">ארוך (~950 מילים)</option>
+                        <option value="short">קצר (~400 מילים)</option>
+                        <option value="medium">בינוני (~650 מילים)</option>
+                        <option value="long">ארוך (~1000 מילים)</option>
                       </select>
+                    </label>
+                    <label className="flex items-start gap-2 sm:col-span-2">
+                      <input
+                        type="checkbox"
+                        checked={aiForm.research}
+                        onChange={(e) =>
+                          setAiForm((f) => ({ ...f, research: e.target.checked }))
+                        }
+                        className="mt-0.5 h-4 w-4 accent-violet-600"
+                      />
+                      <span className="text-xs text-slate-600">
+                        <b className="text-slate-800">מחקר ממקורות אמיתיים</b> — חיפוש באתרי
+                        רשויות, משרד הבריאות, המשרד להגנת הסביבה, WHO, EPA ומכוני תקינה, וכתיבת
+                        הבלוג מתוכם עם קישורים בגוף הטקסט. לוקח כחצי דקה יותר.
+                      </span>
                     </label>
                     <label className="block">
                       <span className="mb-1 block text-xs font-medium text-slate-600">
@@ -770,12 +865,48 @@ export default function BlogsPage() {
                       disabled={aiBusy}
                       className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
                     >
-                      {aiBusy ? 'מנסח…' : 'צור טיוטה'}
+                      {aiBusy ? (aiForm.research ? 'אוסף מקורות ומנסח…' : 'מנסח…') : 'צור טיוטה'}
                     </button>
                     <span className="text-xs text-slate-500">
                       הטיוטה נכנסת לעורך לעריכה — היא לא מתפרסמת לבד.
                     </span>
                   </div>
+                </div>
+              )}
+
+              {/* המקורות שנכנסו לבלוג — כדי שהמנהל יוכל ללחוץ ולוודא לפני פרסום */}
+              {aiSources.length > 0 && (
+                <div className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-sm font-bold text-emerald-900">
+                      {aiSources.length} מקורות שולבו בבלוג
+                    </span>
+                    <button
+                      onClick={() => setAiSources([])}
+                      className="text-xs text-emerald-700 hover:underline"
+                    >
+                      הסתר
+                    </button>
+                  </div>
+                  <ul className="space-y-1">
+                    {aiSources.map((s) => (
+                      <li key={s.url} className="text-xs">
+                        <span className="font-mono text-emerald-800">{s.publisher}</span>
+                        <span className="mx-1 text-slate-400">·</span>
+                        <a
+                          href={s.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-slate-700 hover:underline"
+                        >
+                          {s.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-2 text-xs text-slate-500">
+                    הקישורים מוטמעים בגוף הבלוג. כדאי לפתוח ולוודא שהם נכונים לפני פרסום.
+                  </p>
                 </div>
               )}
 
@@ -871,6 +1002,14 @@ export default function BlogsPage() {
                         onChange={(e) => onPickImage(e.target.files?.[0] || null)}
                       />
                       <button
+                        onClick={generateImage}
+                        disabled={imaging}
+                        title="מייצר שלוש הצעות תמונה מנושא הבלוג, לבחירתכם"
+                        className="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                      >
+                        {imaging ? 'מייצר 3 הצעות…' : '✨ צור תמונות'}
+                      </button>
+                      <button
                         onClick={() => fileRef.current?.click()}
                         className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-slate-50"
                       >
@@ -893,6 +1032,46 @@ export default function BlogsPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* בורר החלופות. נעלם ברגע שנבחרה אחת — השאר לא נשמרות בשום מקום. */}
+                  {imageOptions.length > 0 && (
+                    <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-indigo-900">
+                          בחרו תמונה ({imageOptions.length} הצעות)
+                        </span>
+                        <button
+                          onClick={() => setImageOptions([])}
+                          className="text-xs text-indigo-700 hover:underline"
+                        >
+                          ביטול
+                        </button>
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {imageOptions.map((opt, i) => (
+                          <button
+                            key={i}
+                            onClick={() => chooseImage(i)}
+                            disabled={pickingImage !== null}
+                            title={opt.scene}
+                            className="group relative overflow-hidden rounded-lg border-2 border-transparent bg-white ring-1 ring-slate-200 transition hover:border-indigo-500 disabled:opacity-60"
+                          >
+                            <img
+                              src={opt.dataUrl}
+                              alt={`הצעה ${i + 1}`}
+                              className="block aspect-[3/2] w-full object-cover"
+                            />
+                            <span className="absolute inset-x-0 bottom-0 bg-black/55 px-2 py-1 text-[11px] font-medium text-white">
+                              {pickingImage === i ? 'מעלה…' : `בחירה ${i + 1}`}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        רק התמונה שתבחרו תועלה לוורדפרס. הלוגו כבר חתום בפינה.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <label className="block">

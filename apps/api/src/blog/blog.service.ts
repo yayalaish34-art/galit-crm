@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encryptSecret, decryptSecret } from '../common/crypto.util';
+import { BlogResearchService, type ResearchSource } from './blog-research.service';
+import { BlogImageService } from './blog-image.service';
 
 const SETTINGS_KEY = 'wordpress';
 /** מצב הניסוח האוטומטי היומי — תור האישורים + מתי רצה הפעם האחרונה. */
@@ -118,7 +120,11 @@ export type BlogPostSummary = {
 export class BlogService {
   private readonly logger = new Logger(BlogService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly research: BlogResearchService,
+    private readonly images: BlogImageService,
+  ) {}
 
   // ── פרטי גישה ──────────────────────────────────────────────────────────────
 
@@ -430,11 +436,58 @@ export class BlogService {
     return [creds.categoryId, ...this.sanitizeTopics(topicIds)];
   }
 
+  /**
+   * שומר הקישורים — נבדק על *כל* שמירה, לא רק על טקסט שה-AI ניסח.
+   *
+   * `sanitizeLinks` מנקה את מה שהמודל מחזיר, אבל הוא לא רואה טקסט שהמנהל
+   * הדביק בעורך, בלוג ישן שנפתח לעריכה, או תוכן שנכתב באתר עצמו — וזה בדיוק
+   * המסלול שבו קישור לאתר של חברת בדיקות מתחרה יכול להגיע לבלוג של גלית.
+   * לכן הבדיקה יושבת כאן: בנקודה היחידה שדרכה תוכן עובר לוורדפרס.
+   *
+   * מותר: אותה רשימת היתר של המחקר (רשויות, גופי בריאות בינלאומיים, תקינה,
+   * אקדמיה) ובנוסף האתר שלנו — קישור פנימי לעמוד שירות הוא רצוי, והמחקר
+   * חוסם אותו רק כדי שלא נצטט את עצמנו כמקור.
+   *
+   * זורק ולא מוחק בשקט: מחיקה שקטה של קישור שהמנהל הוסיף בכוונה משנה לו את
+   * הטקסט בלי שידע. הודעת השגיאה נוקבת בדומיין, כדי שיהיה ברור מה להסיר.
+   */
+  private assertAllowedLinks(body: string | undefined, creds: WpCredentials): void {
+    if (typeof body !== 'string' || !body.includes('](')) return;
+    let ownHost = '';
+    try {
+      ownHost = new URL(creds.siteUrl).hostname.replace(/^www\./i, '').toLowerCase();
+    } catch {
+      /* כתובת אתר לא תקינה — ממשיכים עם רשימת ההיתר בלבד */
+    }
+    const bad = new Set<string>();
+    for (const m of body.matchAll(/\[[^\]\n]+\]\((https?:\/\/[^\s)]+)\)/g)) {
+      const url = m[1];
+      let host = '';
+      try {
+        host = new URL(url).hostname.replace(/^www\./i, '').toLowerCase();
+      } catch {
+        bad.add(url.slice(0, 60));
+        continue;
+      }
+      if (ownHost && (host === ownHost || host.endsWith('.' + ownHost))) continue;
+      if (this.research.isAllowed(url)) continue;
+      bad.add(host);
+    }
+    if (!bad.size) return;
+    this.logger.warn(`blog save blocked — disallowed link domains: ${[...bad].join(', ')}`);
+    throw new BadRequestException(
+      `הבלוג מכיל קישורים לאתרים שאינם גופי מחקר או רשויות: ${[...bad].join(', ')}. ` +
+        'מותר לקשר רק לגופים רשמיים (משרדי ממשלה, WHO/EPA/IARC, מכוני תקינה, אקדמיה) ' +
+        'ולעמודים באתר שלנו. הסירו את הקישורים האלה ושמרו שוב.',
+    );
+  }
+
   /** יצירת בלוג חדש. תמיד משויך לקטגוריה "בלוגים" כדי שיופיע בעמוד /blog. */
   async createPost(input: BlogPostInput): Promise<{ id: number; link: string; status: string }> {
     const creds = await this.requireCreds();
     const title = (input.title || '').trim();
     if (!title) throw new BadRequestException('כותרת נדרשת');
+    this.assertAllowedLinks(input.body, creds);
 
     const payload: any = {
       title,
@@ -458,6 +511,7 @@ export class BlogService {
     input: BlogPostInput,
   ): Promise<{ id: number; link: string; status: string }> {
     const creds = await this.requireCreds();
+    this.assertAllowedLinks(input.body, creds);
     const payload: any = {};
     if (typeof input.title === 'string') {
       const title = input.title.trim();
@@ -537,6 +591,92 @@ export class BlogService {
     return { id: Number(data.id), url: String(data.source_url || '') };
   }
 
+  /**
+   * מייצר תמונה ראשית לבלוג ומעלה אותה לוורדפרס. מחזיר את מזהה המדיה.
+   *
+   * שני מסלולים משתמשים בזה: הכפתור בעורך (שם המנהל מחכה לתוצאה ולכן שגיאה
+   * צריכה להיאמר לו), והניסוח היומי (שם אין מי שיחכה — ראו `attachGeneratedImage`
+   * שבולע כישלון). לכן הפונקציה הזו כן זורקת, והמסלול האוטומטי עוטף אותה.
+   */
+  async generateFeaturedImage(input: {
+    title?: string;
+    topic?: string;
+  }): Promise<{ id: number; url: string }> {
+    if (!this.images.enabled()) {
+      throw new BadRequestException('יצירת תמונות אינה מוגדרת בשרת');
+    }
+    const img = await this.images.generate(input);
+    if (!img) throw new BadRequestException('יצירת התמונה נכשלה — נסו שוב');
+    // שם הקובץ נגזר מתיאור הסצנה *באנגלית* ולא מהכותרת העברית: וורדפרס ממיר
+    // עברית בשם קובץ למחרוזת אחוזים, וכל התמונות היו נשמרות בשם הנפילה-חזרה
+    // ("blog-image.webp", "blog-image-1.webp"…) — לא ניתן לאיתור בספריית
+    // המדיה, ובלי ערך ל-SEO של התמונה.
+    return this.uploadMedia(img.dataUrl, `${this.slugForFile(img.scene)}.webp`);
+  }
+
+  /**
+   * מייצר כמה חלופות תמונה ומחזיר אותן **בלי להעלות לוורדפרס**.
+   *
+   * ההפרדה מ-`generateFeaturedImage` מכוונת: המנהל בוחר אחת מתוך שלוש, ואם
+   * היינו מעלים את כולן ספריית המדיה של האתר הייתה מתמלאת בשתי תמונות
+   * נטושות בכל בלוג. העלאה קורית רק לנבחרת, דרך `uploadMedia` הרגיל —
+   * ולכן שם הקובץ מגיע כאן יחד עם התמונה, בזמן שתיאור הסצנה עוד בידינו.
+   */
+  async generateFeaturedImageOptions(input: {
+    title?: string;
+    topic?: string;
+    count?: number;
+  }): Promise<{ options: { dataUrl: string; filename: string; scene: string }[] }> {
+    if (!this.images.enabled()) {
+      throw new BadRequestException('יצירת תמונות אינה מוגדרת בשרת');
+    }
+    const imgs = await this.images.generateMany({
+      title: input.title,
+      topic: input.topic,
+      count: input.count || this.images.optionCount,
+    });
+    if (!imgs.length) throw new BadRequestException('יצירת התמונות נכשלה — נסו שוב');
+    return {
+      options: imgs.map((img) => ({
+        dataUrl: img.dataUrl,
+        filename: `${this.slugForFile(img.scene)}.webp`,
+        scene: img.scene,
+      })),
+    };
+  }
+
+  /**
+   * מצרף תמונה שנוצרה לפוסט קיים. לא זורק — בלוג בלי תמונה עדיף על טיוטה
+   * יומית שנפלה באמצע, אחרי שהתוכן כבר נכתב ושולם עליו.
+   */
+  async attachGeneratedImage(
+    postId: number,
+    input: { title?: string; topic?: string },
+  ): Promise<{ id: number; url: string } | null> {
+    if (!this.images.enabled()) return null;
+    try {
+      const media = await this.generateFeaturedImage(input);
+      await this.updatePost(postId, { featuredMediaId: media.id });
+      return media;
+    } catch (e: any) {
+      this.logger.warn(`blog image for post ${postId} skipped — ${e?.message || e}`);
+      return null;
+    }
+  }
+
+  /** שם קובץ קריא באנגלית. עברית בשם הקובץ הופכת ב-WP למחרוזת אחוזים ארוכה. */
+  private slugForFile(s: string): string {
+    const words = String(s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]+/g, ' ')
+      .split(/[\s-]+/)
+      .filter(Boolean)
+      // מילות קישור אינן מוסיפות דבר לשם הקובץ, ובמשפט באנגלית הן רוב המילים.
+      .filter((w) => !['a', 'an', 'the', 'of', 'in', 'on', 'at', 'with', 'and', 'to'].includes(w))
+      .slice(0, 6);
+    return words.join('-').slice(0, 50) || 'blog-image';
+  }
+
   // ── המרת טקסט לבלוקים של וורדפרס ───────────────────────────────────────────
 
   /**
@@ -546,6 +686,7 @@ export class BlogService {
    *   ## כותרת      → כותרת H2
    *   ### כותרת     → כותרת H3
    *   - פריט        → רשימת תבליטים
+   *   [טקסט](כתובת) → קישור יוצא
    *   שורה ריקה     → פסקה חדשה
    */
   textToBlocks(text: string): string {
@@ -556,14 +697,14 @@ export class BlogService {
 
     const flushParagraph = () => {
       if (!paragraph.length) return;
-      const html = paragraph.map((l) => this.escapeHtml(l)).join('<br>');
+      const html = paragraph.map((l) => this.renderInline(l)).join('<br>');
       blocks.push(`<!-- wp:paragraph -->\n<p>${html}</p>\n<!-- /wp:paragraph -->`);
       paragraph = [];
     };
     const flushList = () => {
       if (!list.length) return;
       const items = list
-        .map((l) => `<!-- wp:list-item -->\n<li>${this.escapeHtml(l)}</li>\n<!-- /wp:list-item -->`)
+        .map((l) => `<!-- wp:list-item -->\n<li>${this.renderInline(l)}</li>\n<!-- /wp:list-item -->`)
         .join('\n');
       blocks.push(`<!-- wp:list -->\n<ul>\n${items}\n</ul>\n<!-- /wp:list -->`);
       list = [];
@@ -612,7 +753,7 @@ export class BlogService {
       const kind = m[1];
       const inner = m[3];
       if (kind === 'paragraph') {
-        const t = this.stripTags(inner.replace(/<br\s*\/?>/gi, '\n'));
+        const t = this.stripTags(this.anchorsToMarkdown(inner.replace(/<br\s*\/?>/gi, '\n')));
         if (t.trim()) parts.push(t.trim());
       } else if (kind === 'heading') {
         const lvl = /"level":(\d)/.exec(m[2] || '')?.[1] || '2';
@@ -620,7 +761,7 @@ export class BlogService {
         if (t) parts.push(`${'#'.repeat(Number(lvl))} ${t}`);
       } else {
         const items = [...inner.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((x) =>
-          this.stripTags(x[1]).trim(),
+          this.stripTags(this.anchorsToMarkdown(x[1])).trim(),
         );
         if (items.length) parts.push(items.map((i) => `- ${i}`).join('\n'));
       }
@@ -635,6 +776,32 @@ export class BlogService {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * טקסט של פסקה → HTML: מבריחים תווים מיוחדים ורק *אחר כך* הופכים
+   * [טקסט](כתובת) לתגית עוגן. הסדר הזה הוא כל העניין — הברחה אחרי בניית
+   * התגית הייתה הופכת את הקישור לטקסט גלוי.
+   *
+   * רק http/https עוברים, כדי ש-`javascript:` שהגיע מ-AI או מהדבקה של עורך
+   * לא ייכנס לאתר הציבורי. קישורים יוצאים מקבלים nofollow — הם מקורות
+   * שאנחנו מצטטים, לא המלצות SEO.
+   */
+  private renderInline(s: string): string {
+    return this.escapeHtml(s).replace(
+      /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (_whole, text: string, url: string) =>
+        `<a href="${url.replace(/"/g, '%22')}" target="_blank" rel="noopener noreferrer nofollow">${text}</a>`,
+    );
+  }
+
+  /** הכיוון ההפוך — כדי שעריכת בלוג קיים תציג קישור ולא כתובת חשופה. */
+  private anchorsToMarkdown(html: string): string {
+    return String(html).replace(
+      /<a\b[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
+      (_whole, href: string, text: string) =>
+        `[${this.stripTags(text).trim()}](${this.decodeEntities(href)})`,
+    );
   }
 
   private stripTags(s: string): string {
@@ -658,6 +825,14 @@ export class BlogService {
   /**
    * מנסח טיוטת בלוג. מחזיר כותרת, תקציר וגוף בפורמט העורך — כדי שהמנהל
    * יערוך ויאשר, ולא כדי לפרסם אוטומטית.
+   *
+   * ברירת המחדל היא **ניסוח מבוסס-מחקר**: קודם נאספים מקורות אמיתיים מהרשת
+   * (ראו BlogResearchService), ורק אז נכתב הבלוג מתוכם, עם קישורים בגוף
+   * הטקסט. בלי המחקר המודל נאלץ להתחמק מכל נתון ("ריכוזים גבוהים", "במקרים
+   * מסוימים") והתוצאה שטוחה — זו בדיוק הסיבה שהבלוגים הקודמים היו רדודים.
+   *
+   * `sources` מאפשר לדלג על החיפוש כשהמקורות כבר בידינו (ניסוח מחדש), כדי לא
+   * לשלם על אותו מחקר פעמיים ולא לקבל מקורות אחרים בכל סבב עריכה.
    */
   async aiDraft(input: {
     topic: string;
@@ -665,7 +840,18 @@ export class BlogService {
     tone?: string;
     length?: 'short' | 'medium' | 'long';
     notes?: string;
-  }): Promise<{ title: string; excerpt: string; body: string }> {
+    /** false = ניסוח מהיר בלי חיפוש ברשת. ברירת מחדל: מחקר מופעל. */
+    research?: boolean;
+    sources?: ResearchSource[];
+    /** דריסת המודל. המסלול היומי משתמש במודל איטי ואיכותי יותר. */
+    model?: string;
+  }): Promise<{
+    title: string;
+    excerpt: string;
+    body: string;
+    sources: ResearchSource[];
+    researchNote: string;
+  }> {
     const topic = (input.topic || '').trim();
     if (!topic) throw new BadRequestException('נושא נדרש');
 
@@ -674,8 +860,25 @@ export class BlogService {
       throw new BadRequestException('ניסוח AI אינו מוגדר בשרת — חסר OPENAI_API_KEY');
     }
 
+    // ── שלב המחקר ────────────────────────────────────────────────────────────
+    let sources: ResearchSource[] = input.sources || [];
+    let findings = '';
+    let researchNote = '';
+    if (input.research !== false && !sources.length) {
+      const r = await this.research.research(topic);
+      sources = r.sources;
+      findings = r.findings;
+      researchNote = sources.length
+        ? `נמצאו ${sources.length} מקורות מ-${new Set(sources.map((s) => s.publisher)).size} גופים שונים`
+        : 'לא נמצאו מקורות מתאימים — הבלוג נוסח בלי קישורים';
+    }
+
+    // בלוג מבוסס מקורות צריך מקום לנשום: אורך "בינוני" בלי מקורות הוא בלוג
+    // שיווקי קצר, אבל עם שמונה ממצאים מצוטטים הוא נהיה רשימת עובדות דחוסה.
+    const grounded = sources.length > 0;
+    const length = input.length || (grounded ? 'long' : 'medium');
     const words =
-      input.length === 'short' ? '250-350' : input.length === 'long' ? '800-1100' : '450-650';
+      length === 'short' ? '350-500' : length === 'long' ? '900-1300' : '550-750';
 
     const system = [
       'אתה כותב תוכן שיווקי-מקצועי עבור "גלית — החברה לאיכות הסביבה", חברה ישראלית',
@@ -699,20 +902,59 @@ export class BlogService {
       'גבולות (הפרה שלהם פוסלת את הבלוג):',
       '- כתוב בעברית תקנית, בגוף שלישי או פנייה ישירה מנומסת. בלי סלנג.',
       '- דחיפות אמיתית, לא הפחדה. בלי "סכנת חיים", בלי אימה, בלי אזהרות דרמטיות.',
-      '- אל תמציא נתונים, תקנים, מספרים, אחוזים, מחקרים או שמות לקוחות.',
-      '- אם נדרש נתון שאינך בטוח בו — נסח כללית ("ריכוזים גבוהים", "במקרים מסוימים")',
-      '  במקום להמציא מספר. עדיף בלי נתון מאשר עם נתון שגוי.',
       '- אל תבטיח תוצאות רפואיות ואל תיתן ייעוץ רפואי או אבחנה.',
-      '- אל תמציא חובה חוקית שאינך בטוח בה. אם לא בטוח — "במקרים מסוימים נדרשת בדיקה"',
-      '  ולא "החוק מחייב".',
-      `- אורך הגוף: ${words} מילים בערך.`,
+      '- אל תמציא שמות לקוחות, פרויקטים או המלצות.',
+      ...(grounded
+        ? [
+            '- כל נתון, ערך סף, מספר תקן, דרישה חוקית או קביעה בריאותית חייב להישען',
+            '  על אחד המקורות שצורפו לך. אין נתון במקורות — אל תכתוב נתון.',
+            '- אל תמציא כתובות אינטרנט. מותר להשתמש אך ורק בכתובות מרשימת המקורות,',
+            '  מילה במילה, בלי לשנות אף תו. כתובת שהמצאת תוסר מהבלוג.',
+          ]
+        : [
+            '- אל תמציא נתונים, תקנים, מספרים, אחוזים או מחקרים.',
+            '- אם נדרש נתון שאינך בטוח בו — נסח כללית ("ריכוזים גבוהים", "במקרים מסוימים")',
+            '  במקום להמציא מספר. עדיף בלי נתון מאשר עם נתון שגוי.',
+            '- אל תמציא חובה חוקית שאינך בטוח בה. אם לא בטוח — "במקרים מסוימים נדרשת בדיקה"',
+            '  ולא "החוק מחייב".',
+            '- אל תוסיף קישורים כלל.',
+          ]),
+      `- אורך הגוף: ${words} מילים. זו דרישה, לא הצעה — בלוג קצר מהמינימום נפסל.`,
+      ...(grounded
+        ? [
+            `- כדי להגיע לאורך הזה כתוב לפחות ${length === 'long' ? 6 : 4} כותרות משנה,`,
+            '  וכל אחת עם 2-3 פסקאות של ממש. אל תסתפק במשפט אחד מתחת לכותרת.',
+          ]
+        : []),
       '',
+      ...(grounded
+        ? [
+            'עומק וביסוס (זה מה שמבדיל את הבלוג הזה מטקסט שיווקי גנרי):',
+            `- שלב לפחות ${Math.min(sources.length, 4)} קישורים שונים *בתוך* המשפטים בגוף הבלוג,`,
+            '  ולא רק ברשימת המקורות בסוף. קישור יושב על טענה עובדתית, לא על מילת קישור.',
+            '- אל תעבור 10 קישורים בגוף. מעבר לזה הטקסט נקרא כרשימת הפניות ולא כמאמר.',
+            '- פזר אותם על פני הבלוג ואל תרכז את כולם בפסקה אחת.',
+            '- העדף מקורות שונים זה מזה: רשות ישראלית, גוף בריאות בינלאומי ותקן מקצועי',
+            '  נותנים ביחד תמונה משכנעת יותר משלושה קישורים לאותו אתר.',
+            '- ייחס כל טענה לגוף שאמר אותה ("לפי ארגון הבריאות העולמי", "בהנחיות המשרד',
+            '  להגנת הסביבה") — זה מה שהופך את הטקסט לאמין.',
+            '- הסבר מה המשמעות המעשית של כל נתון לקורא, ולא רק את הנתון עצמו.',
+            '',
+          ]
+        : []),
       'פורמט הגוף (חשוב מאוד — זה הפורמט של העורך):',
       '- "## " בתחילת שורה = כותרת משנה.',
       '- "### " = כותרת משנה קטנה יותר.',
       '- "- " בתחילת שורה = פריט ברשימת תבליטים.',
       '- שורה ריקה מפרידה בין פסקאות.',
+      '- קישור נכתב בפורמט [טקסט העוגן](הכתובת המלאה) — זה הפורמט היחיד שנתמך.',
       '- אל תשתמש ב-HTML, ב-Markdown אחר (בלי **הדגשה**) או בטבלאות.',
+      ...(grounded
+        ? [
+            '- סיים את הבלוג בכותרת "## מקורות" ואחריה רשימת תבליטים, כל שורה',
+            '  בפורמט [שם הגוף — כותרת העמוד](הכתובת), לכל מקור שהשתמשת בו.',
+          ]
+        : []),
     ].join('\n');
 
     const user = [
@@ -720,6 +962,14 @@ export class BlogService {
       input.audience ? `קהל היעד: ${input.audience}` : '',
       input.tone ? `טון: ${input.tone}` : '',
       input.notes ? `דגשים נוספים: ${input.notes}` : '',
+      ...(grounded
+        ? [
+            '',
+            '── מקורות שנאספו מהרשת (אלה הכתובות היחידות המותרות) ──',
+            ...sources.map((s, i) => `[${i + 1}] ${s.publisher} — ${s.title}\n    ${s.url}`),
+            ...(findings ? ['', '── ממצאים מתוך המקורות ──', findings] : []),
+          ]
+        : []),
       '',
       'החזר JSON בלבד במבנה:',
       '{"title": "כותרת שמדברת אל הצורך של הקורא — לא כותרת אנציקלופדית",',
@@ -729,18 +979,22 @@ export class BlogService {
       .filter(Boolean)
       .join('\n');
 
+    const model = input.model || process.env.BLOG_DRAFT_MODEL || 'gpt-4.1';
     let res: Response;
     try {
       res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o',
+          model,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
           ],
-          temperature: 0.6,
+          // gpt-5 מקבל אך ורק את ברירת המחדל (1) ומחזיר 400 על כל ערך אחר —
+          // שולחים temperature רק למודלים שתומכים בו, כדי שהחלפת מודל דרך
+          // ENV לא תפיל את הניסוח.
+          ...(/^gpt-5/.test(model) ? {} : { temperature: 0.6 }),
           response_format: { type: 'json_object' },
         }),
       });
@@ -764,11 +1018,44 @@ export class BlogService {
       throw new BadRequestException('התקבלה תשובה לא תקינה משירות הניסוח');
     }
 
+    const body = this.sanitizeLinks(String(parsed?.body || '').trim(), sources);
     return {
       title: String(parsed?.title || '').trim(),
       excerpt: String(parsed?.excerpt || '').trim(),
-      body: String(parsed?.body || '').trim(),
+      body,
+      // רק המקורות שבאמת שרדו בגוף — מה שהמנהל רואה תואם למה שיתפרסם.
+      sources: sources.filter((s) => body.includes(s.url)),
+      researchNote,
     };
+  }
+
+  /**
+   * מסיר קישורים שאינם ברשימת המקורות שנאספה.
+   *
+   * המודל מתבקש להשתמש רק בכתובות שקיבל, אבל הוא כן ממציא כתובות — ובלוג
+   * ציבורי עם לינק שבור או לינק לאתר אקראי הוא נזק אמיתי. הטקסט של העוגן
+   * נשמר, רק הקישור יורד, כדי שהמשפט יישאר קריא.
+   */
+  private sanitizeLinks(body: string, sources: ResearchSource[]): string {
+    if (!body.includes('](')) return body;
+    const allowed = new Set(sources.map((s) => s.url));
+    let dropped = 0;
+    const cleaned = body.replace(
+      /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      (whole, text: string, url: string) => {
+        if (allowed.has(url)) return whole;
+        // הבדל של סלאש בסוף אינו כתובת אחרת — משלימים במקום לזרוק.
+        const alt = url.endsWith('/') ? url.slice(0, -1) : url + '/';
+        if (allowed.has(alt)) return `[${text}](${alt})`;
+        dropped++;
+        return text;
+      },
+    );
+    if (dropped) this.logger.warn(`blog draft: dropped ${dropped} link(s) not in the source list`);
+    // כותרת "מקורות" שנשארה בלי אף קישור מתחתיה היא רעש — מורידים אותה.
+    return cleaned.replace(/\n##\s*מקורות\s*\n(?:(?!\n##)[\s\S])*$/u, (tail) =>
+      tail.includes('](') ? tail : '',
+    );
   }
 
   /**
@@ -780,22 +1067,56 @@ export class BlogService {
     title: string;
     body: string;
     instruction?: string;
-  }): Promise<{ title: string; excerpt: string; body: string }> {
+    /** false = לא לחפש מקורות חדשים, רק לשכתב את מה שיש. */
+    research?: boolean;
+  }): Promise<{
+    title: string;
+    excerpt: string;
+    body: string;
+    sources: ResearchSource[];
+    researchNote: string;
+  }> {
     const title = (input.title || '').trim();
     const body = (input.body || '').trim();
     if (!title && !body) throw new BadRequestException('אין תוכן לנסח מחדש');
 
     const instruction = (input.instruction || '').trim();
+    // הקישורים שכבר בבלוג הם מקורות שאושרו — משמרים אותם כדי שהשכתוב לא
+    // ימחק אותם (sanitizeLinks מוריד כל קישור שאינו ברשימה) ולא ישלם על
+    // מחקר חוזר. חיפוש חדש רץ רק אם אין בבלוג אף קישור.
+    const existing = this.extractSources(body);
     return this.aiDraft({
       topic: title || 'שיפור הבלוג המצורף',
+      research: input.research,
+      sources: existing.length ? existing : undefined,
       notes: [
         'זהו ניסוח מחדש של בלוג קיים — שמור על הנושא ועל העובדות שבו.',
         instruction ? `הנחיית העורך: ${instruction}` : 'שפר ניסוח, זרימה ובהירות.',
+        existing.length ? 'שמור על הקישורים הקיימים ואל תמחק אותם מהטקסט.' : '',
         '',
         'הבלוג הקיים:',
         `כותרת: ${title}`,
         body,
-      ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
     });
+  }
+
+  /** הקישורים שכבר קיימים בגוף בלוג, כרשימת מקורות. */
+  private extractSources(body: string): ResearchSource[] {
+    const out = new Map<string, ResearchSource>();
+    for (const m of String(body).matchAll(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
+      const url = m[2];
+      if (out.has(url) || !this.research.isAllowed(url)) continue;
+      let publisher = '';
+      try {
+        publisher = new URL(url).hostname.replace(/^www\./i, '');
+      } catch {
+        continue;
+      }
+      out.set(url, { url, title: m[1].trim(), publisher });
+    }
+    return [...out.values()];
   }
 }

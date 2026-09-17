@@ -38,9 +38,10 @@ import { OutlookModule } from './integrations/outlook/outlook.module';
 import { CaspitModule } from './caspit/caspit.module';
 import { BlogModule } from './blog/blog.module';
 import { MailingModule } from './mailing/mailing.module';
+import { ReferenceNumbersModule } from './reference-numbers/reference-numbers.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, CitiesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule, MailingModule, CallRecordingsModule],
+  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, CitiesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule, MailingModule, CallRecordingsModule, ReferenceNumbersModule],
   controllers: [AppController],
   providers: [AppService],
 })

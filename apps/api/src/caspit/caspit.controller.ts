@@ -1,5 +1,10 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
-import { CaspitService, CASPIT_DOC_KINDS, type CaspitDocKind } from './caspit.service';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import {
+  CaspitService,
+  CASPIT_DOC_KINDS,
+  type CaspitDocKind,
+  type CaspitEditableLine,
+} from './caspit.service';
 import { computeDueDate, PAYMENT_TERM_OPTIONS } from './payment-terms';
 import { PrismaService } from '../prisma/prisma.service';
 import { Roles } from '../auth/roles.decorator';
@@ -71,6 +76,11 @@ export class CaspitController {
       paymentTerms?: string | null;
       /** איש הקשר שנבחר בדיאלוג — אליו מופנה המסמך ואליו יוצע לשלוח אותו. */
       contactId?: string | null;
+      /**
+       * true = ליצור טיוטה בלבד ולא לסגור אותה, כדי שהמנהל יערוך ידנית
+       * ויאשר. מרגע הסגירה כספית נועלת את המסמך לעריכה.
+       */
+      draft?: boolean;
     },
   ) {
     const kind: CaspitDocKind = body?.kind && CASPIT_DOC_KINDS[body.kind] ? body.kind : 'invoice';
@@ -102,7 +112,77 @@ export class CaspitController {
       { amount: body?.amount, paymentTypeId: body?.paymentTypeId },
       body?.paymentTerms,
       body?.contactId,
+      body?.draft === true,
     );
+  }
+
+  // ── עריכה ידנית של מסמך לפני ההנפקה ────────────────────────────────────────
+  // הנתיבים האלה מוצהרים אחרי 'document/task/:taskId' בכוונה: שניהם באורך שלושה
+  // מקטעים, ו-Nest בוחר את הראשון שמתאים.
+
+  /** GET /caspit/document/:documentId — המסמך כפי שהוא בכספית, לעריכה במסך. */
+  @Get('document/:documentId')
+  @Roles('ADMIN', 'MANAGER', 'BILLING', 'SALES')
+  getDocument(@Param('documentId') documentId: string) {
+    return this.caspit.getDocument(documentId);
+  }
+
+  /** PUT /caspit/document/:documentId — שמירת עריכה. נכשל אם המסמך כבר הונפק. */
+  @Put('document/:documentId')
+  @Roles('ADMIN', 'MANAGER', 'BILLING')
+  updateDocument(
+    @Param('documentId') documentId: string,
+    @Body()
+    body: {
+      lines?: CaspitEditableLine[];
+      comments?: string;
+      date?: string | null;
+      dueDate?: string | null;
+      customerBusinessName?: string;
+      customerOsekMorshe?: string;
+      customerContactName?: string;
+      customerAddress1?: string;
+      customerCity?: string;
+      customerEmail?: string;
+    },
+  ) {
+    return this.caspit.updateDocument(documentId, body || {});
+  }
+
+  /** POST /caspit/document/:documentId/issue — סגירת הטיוטה והכנסתה לספרים. */
+  @Post('document/:documentId/issue')
+  @Roles('ADMIN', 'MANAGER', 'BILLING')
+  async issueDocument(@Param('documentId') documentId: string) {
+    const doc = await this.caspit.issueDocument(documentId);
+    // מספר המסמך נקבע סופית רק בהנפקה — שומרים אותו על ההצעה כמו במסלול הרגיל.
+    // 'crm-prof-' היא חשבונית עסקה, שאינה מסמך מס ולכן אינה נשמרת כמספר חשבונית.
+    const quoteId = CaspitController.quoteIdFromDocumentId(documentId);
+    if (quoteId && !documentId.startsWith(CASPIT_DOC_KINDS.proforma.idPrefix)) {
+      try {
+        await (this.prisma.quote.update as any)({
+          where: { id: quoteId },
+          data: { accountingNumber: doc.number || undefined },
+        });
+      } catch {
+        /* לא מפילים הנפקה שהצליחה בגלל שמירה משנית */
+      }
+    }
+    return doc;
+  }
+
+  /** DELETE /caspit/document/:documentId — ביטול טיוטה שלא הונפקה. */
+  @Delete('document/:documentId')
+  @Roles('ADMIN', 'MANAGER', 'BILLING')
+  cancelDraft(@Param('documentId') documentId: string) {
+    return this.caspit.cancelDraft(documentId);
+  }
+
+  /** מחלץ את מזהה ההצעה מתוך DocumentId בנוי (<prefix><quoteId>). */
+  private static quoteIdFromDocumentId(documentId: string): string | null {
+    for (const spec of Object.values(CASPIT_DOC_KINDS)) {
+      if (documentId.startsWith(spec.idPrefix)) return documentId.slice(spec.idPrefix.length) || null;
+    }
+    return null;
   }
 
   /**
@@ -344,6 +424,8 @@ export class CaspitController {
     paymentTerms?: string | null,
     /** איש הקשר שנבחר בדיאלוג; ריק → איש הקשר שעל ההצעה. */
     contactId?: string | null,
+    /** true = להשאיר טיוטה פתוחה לעריכה במקום לסגור מיד. */
+    draft = false,
   ) {
     const quoteId = quote.id;
     const spec = CASPIT_DOC_KINDS[kind];
@@ -402,11 +484,13 @@ export class CaspitController {
       // מסמך שנושא תקבול ("חשבונית מס קבלה") מתעד כסף שכבר התקבל — אין לו מועד
       // תשלום עתידי, ולכן לעולם לא נשלח לו תאריך יעד גם אם נשלחו תנאי תשלום.
       dueDate: spec.hasPayment ? null : computeDueDate(paymentTerms ?? quote.paymentTerms).dueDate,
-    }, kind);
+    }, kind, { finalize: !draft });
 
     // ── שמירת מספר החשבונית על ההצעה (best-effort) ──
     // רק למסמכי מס אמיתיים: "חשבונית עסקה" היא דרישת תשלום ואינה מספר חשבונית.
-    if (kind !== 'proforma') {
+    // טיוטה עדיין עשויה להשתנות (או להתבטל), ולכן המספר נשמר רק בהנפקה בפועל —
+    // ראו issueDocument, ששומר אותו אחרי הסגירה.
+    if (kind !== 'proforma' && !draft) {
       try {
         await (this.prisma.quote.update as any)({
           where: { id: quoteId },

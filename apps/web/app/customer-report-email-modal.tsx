@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Mail, Loader2, FileText, Sparkles } from 'lucide-react';
+import { Mail, Loader2, FileText, Sparkles, Clock, ChevronDown, Check } from 'lucide-react';
 import { apiFetch, apiUrl } from './lib/api-base';
 
 type ReportRef = {
@@ -10,7 +10,51 @@ type ReportRef = {
   name: string;
 };
 
+/** עובד שניתן לבחור כנמען עותק — כמו בטופס שליחת הצעת המחיר. */
+type EmployeeOption = { id: string; name: string; email: string };
+
 type SignatureRec = { id: string; title: string; dataBase64: string; imageType?: string };
+
+/** שליחה שממתינה בתור — כפי שהשרת מחזיר אותה. */
+type ScheduledJob = { id: string; sendAt: string; to: string; subject?: string };
+
+/** איש קשר של הלקוח, כפי ש-/customers/:id/contacts מחזיר (ראשי ראשון). */
+type ContactRec = {
+  id: string;
+  fullName?: string | null;
+  email?: string | null;
+  roleTitle?: string | null;
+  isPrimary?: boolean;
+  isActive?: boolean;
+};
+
+/** "יום ג׳, 27 באוג׳ 09:00" — מספיק כדי לדעת שזה הזמן הנכון, בלי עודף. */
+function fmtWhen(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('he-IL', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Jerusalem',
+  });
+}
+
+/**
+ * ברירת המחדל למועד: מחר ב-09:00, בפורמט שה-input מבין.
+ *
+ * שליחה למחרת בבוקר היא הסיבה השכיחה לתזמון — דוח שנגמר ב-23:00 ולא צריך
+ * להגיע ללקוח ב-23:00. הערך ניתן לשינוי, אבל לרוב לא צריך.
+ */
+function defaultSendAt(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 /**
  * טופס "שלח דוח במייל" מכרטיס הלקוח — לדוח שכבר צורף ב"דוחות שהופקו".
@@ -42,6 +86,19 @@ export function CustomerReportEmailModal({
   const [toInput, setToInput] = useState('');
   const [ccList, setCcList] = useState<string[]>([]);
   const [ccInput, setCcInput] = useState('');
+  const [ccDropdownOpen, setCcDropdownOpen] = useState(false);
+  const [bccList, setBccList] = useState<string[]>([]);
+  const [bccInput, setBccInput] = useState('');
+  const [bccDropdownOpen, setBccDropdownOpen] = useState(false);
+
+  /**
+   * עובדי החברה לבוררי ה-CC/BCC.
+   *
+   * נטענים כאן ולא מגיעים כ-prop: הסקשן שמציג את הטופס יושב עמוק בכרטיס הלקוח,
+   * והעברת הרשימה דרכו הייתה מחייבת prop חדש בשני רכיבים שאינם עוסקים בדואר.
+   * מסונן ל"פעיל" בלבד — עובד מושבת אינו אמור להופיע בשום בורר נמענים.
+   */
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
 
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -53,11 +110,18 @@ export function CustomerReportEmailModal({
   const [requestDeliveryReceipt, setRequestDeliveryReceipt] = useState(false);
 
   // חתימה אישית (זהה לטופס שליחת הדוח בשלב הביצוע)
+  const [contacts, setContacts] = useState<ContactRec[]>([]);
   const [signatures, setSignatures] = useState<SignatureRec[]>([]);
   const [includeSignature, setIncludeSignature] = useState(false);
   const [signatureId, setSignatureId] = useState('');
 
   const [sending, setSending] = useState(false);
+
+  // ── תזמון שליחה ──
+  const [schedulingOpen, setSchedulingOpen] = useState(false);
+  /** ערך של <input type="datetime-local"> — שעון מקומי, מומר ל-UTC בשליחה. */
+  const [sendAt, setSendAt] = useState('');
+  const [scheduled, setScheduled] = useState<ScheduledJob[]>([]);
   const [err, setErr] = useState('');
   const [status, setStatus] = useState('');
 
@@ -97,6 +161,20 @@ export function CustomerReportEmailModal({
     [currentUser, customerId, customerName, report, subject, body],
   );
 
+  /** מה שכבר ממתין בתור לדוח הזה — כדי שלא יתוזמן פעמיים ושאפשר יהיה לבטל. */
+  const loadScheduled = useCallback(async () => {
+    if (!customerId || !report?.id) return;
+    try {
+      const r = await apiFetch(
+        apiUrl(`/customers/${customerId}/documents/${report.id}/scheduled-emails`),
+        { authUser: currentUser as never },
+      );
+      if (r.ok) setScheduled(await r.json());
+    } catch {
+      /* שקט — רשימת התור היא מידע נוסף, לא תנאי לשליחה */
+    }
+  }, [customerId, report?.id, currentUser]);
+
   // אתחול בעת פתיחה + ניסוח אוטומטי פעם אחת
   useEffect(() => {
     if (!open) {
@@ -112,8 +190,40 @@ export function CustomerReportEmailModal({
     setToInput('');
     setCcList([]);
     setCcInput('');
+    setCcDropdownOpen(false);
+    setBccList([]);
+    setBccInput('');
+    setBccDropdownOpen(false);
     setRequestReadReceipt(false);
     setRequestDeliveryReceipt(false);
+    setSchedulingOpen(false);
+    setSendAt(defaultSendAt());
+    setScheduled([]);
+    void loadScheduled();
+    // אנשי הקשר של הלקוח — לבחירת נמען מתוך רשימה במקום לזכור כתובת בעל פה.
+    setContacts([]);
+    void (async () => {
+      try {
+        const r = await apiFetch(apiUrl(`/customers/${customerId}/contacts`), { authUser: currentUser as never });
+        if (r.ok) {
+          const list = await r.json();
+          setContacts(Array.isArray(list) ? list : []);
+        }
+      } catch { /* הרשימה היא נוחות — אפשר להקליד כתובת ידנית גם בלעדיה */ }
+    })();
+    // עובדי החברה לבוררי העותק. עובד מושבת מסונן: הוא לא אמור לקבל דואר לקוחות.
+    void (async () => {
+      try {
+        const r = await apiFetch(apiUrl('/users'), { authUser: currentUser as never });
+        if (!r.ok) return;
+        const list = await r.json();
+        setEmployees(
+          (Array.isArray(list) ? list : [])
+            .filter((u: any) => u?.email && u?.status !== 'לא פעיל' && u?.status !== 'INACTIVE')
+            .map((u: any) => ({ id: String(u.id), name: String(u.name || u.email), email: String(u.email) })),
+        );
+      } catch { /* אפשר להקליד כתובת ידנית גם בלי הרשימה */ }
+    })();
     // טעינת חתימות המשתמש (וברירת מחדל: כלול את הראשונה).
     const uid = currentUser?.id;
     if (uid) {
@@ -135,21 +245,46 @@ export function CustomerReportEmailModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultEmail]);
 
-  const addRecipients = (raw: string, which: 'to' | 'cc') => {
+  /**
+   * אנשי הקשר שאפשר באמת לשלוח אליהם: רק עם כתובת מייל, בלי מי שסומן כלא-פעיל,
+   * ובלי כפילויות — אותה כתובת רשומה לעיתים על שני אנשי קשר ואין טעם להציג אותה פעמיים.
+   */
+  const contactOptions = (() => {
+    const seen = new Set<string>();
+    const out: Array<{ id: string; email: string; label: string }> = [];
+    for (const c of contacts) {
+      const email = (c.email ?? '').trim();
+      if (!email.includes('@') || c.isActive === false) continue;
+      const key = email.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const name = (c.fullName ?? '').trim();
+      const role = (c.roleTitle ?? '').trim();
+      const who = [name, role].filter(Boolean).join(' — ');
+      out.push({ id: c.id, email, label: who ? `${who} · ${email}` : email });
+    }
+    return out;
+  })();
+
+  const addRecipients = (raw: string, which: 'to' | 'cc' | 'bcc') => {
     const emails = raw.split(/[,\s]+/).map((e) => e.trim()).filter((e) => e.includes('@'));
     if (!emails.length) return;
     if (which === 'to') {
       setToList((p) => Array.from(new Set([...p, ...emails])));
       setToInput('');
-    } else {
+    } else if (which === 'cc') {
       setCcList((p) => Array.from(new Set([...p, ...emails])));
       setCcInput('');
+    } else {
+      setBccList((p) => Array.from(new Set([...p, ...emails])));
+      setBccInput('');
     }
   };
 
-  const removeRecipient = (em: string, which: 'to' | 'cc') => {
+  const removeRecipient = (em: string, which: 'to' | 'cc' | 'bcc') => {
     if (which === 'to') setToList((p) => p.filter((x) => x !== em));
-    else setCcList((p) => p.filter((x) => x !== em));
+    else if (which === 'cc') setCcList((p) => p.filter((x) => x !== em));
+    else setBccList((p) => p.filter((x) => x !== em));
   };
 
   const allTo = toInput.includes('@') ? [...toList, toInput.trim()] : toList;
@@ -167,6 +302,7 @@ export function CustomerReportEmailModal({
     setStatus('שולח…');
     try {
       const cc = ccInput.includes('@') ? [...ccList, ccInput.trim()] : ccList;
+      const bcc = bccInput.includes('@') ? [...bccList, bccInput.trim()] : bccList;
       const r = await apiFetch(
         apiUrl(`/customers/${customerId}/documents/${report.id}/send-email`),
         {
@@ -176,6 +312,7 @@ export function CustomerReportEmailModal({
             to: to[0],
             toList: to,
             cc,
+            bcc,
             subject,
             body,
             customerName: customerName || '',
@@ -206,6 +343,95 @@ export function CustomerReportEmailModal({
       setStatus('');
     } finally {
       setSending(false);
+    }
+  };
+
+  /**
+   * תזמון — אותה בקשה, עם מועד.
+   *
+   * הטופס לא מנוסח מחדש ולא נשמר בנפרד: מה שכתוב על המסך ברגע הלחיצה הוא מה
+   * שיישלח, בדיוק כמו ב"שלח דוח". ההבדל היחיד הוא מתי.
+   */
+  const schedule = async () => {
+    if (!report) return;
+    const to = allTo.filter((e) => e.includes('@'));
+    if (!to.length) {
+      setErr('יש להזין נמען');
+      return;
+    }
+    if (!sendAt) {
+      setErr('בחר מועד שליחה');
+      return;
+    }
+    const when = new Date(sendAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now()) {
+      setErr('מועד השליחה כבר עבר');
+      return;
+    }
+
+    setSending(true);
+    setErr('');
+    setStatus('מתזמן…');
+    try {
+      const cc = ccInput.includes('@') ? [...ccList, ccInput.trim()] : ccList;
+      const bcc = bccInput.includes('@') ? [...bccList, bccInput.trim()] : bccList;
+      const r = await apiFetch(
+        apiUrl(`/customers/${customerId}/documents/${report.id}/schedule-email`),
+        {
+          method: 'POST',
+          authUser: currentUser as never,
+          body: JSON.stringify({
+            // השעה נבחרת מקומית ונשלחת ב-UTC, כי השרת רץ ב-UTC.
+            sendAt: when.toISOString(),
+            documentName: report.name,
+            to: to[0],
+            toList: to,
+            cc,
+            bcc,
+            subject,
+            body,
+            customerName: customerName || '',
+            includeSignature,
+            signatureId: includeSignature ? signatureId : undefined,
+            requestReadReceipt,
+            requestDeliveryReceipt,
+          }),
+        },
+      );
+      if (r.ok) {
+        setStatus(`תוזמן ל-${fmtWhen(when)} ✓`);
+        setSchedulingOpen(false);
+        setSendAt('');
+        await loadScheduled();
+        onSent?.();
+      } else {
+        let msg = 'תזמון השליחה נכשל';
+        try {
+          const e = await r.json();
+          if (e?.message) msg = Array.isArray(e.message) ? e.message.join(', ') : e.message;
+        } catch {
+          /* ignore */
+        }
+        setErr(msg);
+        setStatus('');
+      }
+    } catch {
+      setErr('תזמון השליחה נכשל');
+      setStatus('');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const cancelScheduled = async (jobId: string) => {
+    try {
+      await apiFetch(apiUrl(`/customers/${customerId}/scheduled-emails/${jobId}`), {
+        method: 'DELETE',
+        authUser: currentUser as never,
+      });
+      await loadScheduled();
+    } catch {
+      setErr('ביטול התזמון נכשל');
     }
   };
 
@@ -288,11 +514,68 @@ export function CustomerReportEmailModal({
                 placeholder={toList.length ? 'נמען נוסף…' : 'customer@example.com'}
               />
             </div>
+            {/* בחירת נמען מתוך אנשי הקשר של הלקוח. הבחירה מוסיפה לרשימת הנמענים
+                ולא מחליפה אותה — דוח נשלח לא פעם לכמה אנשים באותה חברה. */}
+            {contactOptions.length > 0 && (
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) addRecipients(e.target.value, 'to');
+                }}
+                className="mt-1.5 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-blue-400"
+              >
+                <option value="">הוסף מאנשי הקשר של הלקוח…</option>
+                {contactOptions.map((c) => (
+                  <option key={c.id} value={c.email}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           {/* ── CC ── */}
           <div>
-            <label className="mb-1.5 block text-sm font-semibold text-gray-700">עותק (CC)</label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-700">עותק (CC)</label>
+              {!!employees.length && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setCcDropdownOpen((p) => !p)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                  >
+                    עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${ccDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {ccDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setCcDropdownOpen(false)} />
+                      <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                        {employees.map((u) => {
+                          const checked = ccList.includes(u.email);
+                          return (
+                            <button
+                              type="button"
+                              key={u.id}
+                              onClick={() => setCcList((p) => (checked ? p.filter((e) => e !== u.email) : Array.from(new Set([...p, u.email]))))}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                {checked && <Check className="h-3 w-3 text-white" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className={chipBox}>
               {ccList.map((em) => (
                 <span
@@ -325,6 +608,86 @@ export function CustomerReportEmailModal({
                 }}
                 onBlur={() => ccInput.includes('@') && addRecipients(ccInput, 'cc')}
                 placeholder="הוסף עותק…"
+              />
+            </div>
+          </div>
+
+          {/* ── BCC (עותק מוסתר) ── */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-sm font-semibold text-gray-700">
+                עותק מוסתר (BCC) <span className="font-normal text-gray-400">(הנמענים לא רואים זה את זה)</span>
+              </label>
+              {!!employees.length && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setBccDropdownOpen((p) => !p)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-bold text-gray-600 hover:bg-gray-100"
+                  >
+                    עובדי החברה <ChevronDown className={`h-3.5 w-3.5 transition-transform ${bccDropdownOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {bccDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setBccDropdownOpen(false)} />
+                      <div className="absolute left-0 z-20 mt-1 max-h-64 w-56 overflow-auto rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg">
+                        {employees.map((u) => {
+                          const checked = bccList.includes(u.email);
+                          return (
+                            <button
+                              type="button"
+                              key={u.id}
+                              onClick={() => setBccList((p) => (checked ? p.filter((e) => e !== u.email) : Array.from(new Set([...p, u.email]))))}
+                              className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-right transition-colors ${checked ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                            >
+                              <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${checked ? 'border-blue-600 bg-blue-600' : 'border-gray-300'}`}>
+                                {checked && <Check className="h-3 w-3 text-white" />}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[13px] font-bold text-gray-700">{u.name}</div>
+                                <div className="truncate text-[11px] text-gray-400" dir="ltr">{u.email}</div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className={chipBox}>
+              {bccList.map((em) => (
+                <span
+                  key={em}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-sm text-gray-700"
+                  dir="ltr"
+                >
+                  {em}
+                  <button
+                    type="button"
+                    className="text-base text-gray-400 hover:text-gray-600"
+                    onClick={() => removeRecipient(em, 'bcc')}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <input
+                dir="ltr"
+                className="min-w-[160px] flex-1 bg-transparent px-1 py-1 text-base outline-none text-right"
+                value={bccInput}
+                onChange={(e) => setBccInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    addRecipients(bccInput, 'bcc');
+                  } else if (e.key === 'Backspace' && !bccInput && bccList.length) {
+                    removeRecipient(bccList[bccList.length - 1], 'bcc');
+                  }
+                }}
+                onBlur={() => bccInput.includes('@') && addRecipients(bccInput, 'bcc')}
+                placeholder="הוסף עותק מוסתר…"
               />
             </div>
           </div>
@@ -454,8 +817,55 @@ export function CustomerReportEmailModal({
           </div>
         </div>
 
+        {/* ── שליחות שממתינות בתור ── */}
+        {scheduled.length > 0 && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-800">
+              <Clock className="h-4 w-4" />
+              ממתין לשליחה
+            </div>
+            <ul className="space-y-1">
+              {scheduled.map((job) => (
+                <li key={job.id} className="flex items-center gap-2 text-sm text-amber-900">
+                  <span className="font-medium">{fmtWhen(job.sendAt)}</span>
+                  <span className="text-amber-700">← {job.to}</span>
+                  <button
+                    type="button"
+                    className="ms-auto rounded-md px-2 py-0.5 text-xs font-medium text-amber-800 underline hover:bg-amber-100"
+                    onClick={() => void cancelScheduled(job.id)}
+                  >
+                    ביטול
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {err && <div className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{err}</div>}
         {status && !err && <div className="mt-4 text-sm font-medium text-emerald-600">{status}</div>}
+
+        {/* ── בחירת מועד — נפתחת רק כשמבקשים לתזמן ── */}
+        {schedulingOpen && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+            <label className="text-sm font-semibold text-gray-700">מועד השליחה</label>
+            <input
+              type="datetime-local"
+              value={sendAt}
+              onChange={(e) => setSendAt(e.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
+            />
+            {sendAt && <span className="text-sm text-gray-500">{fmtWhen(new Date(sendAt))}</span>}
+            <button
+              type="button"
+              disabled={!canSend || !sendAt}
+              className="ms-auto rounded-xl bg-amber-500 px-6 py-2.5 text-sm font-bold text-white hover:bg-amber-600 disabled:opacity-50"
+              onClick={() => void schedule()}
+            >
+              {sending ? 'מתזמן…' : 'אישור תזמון'}
+            </button>
+          </div>
+        )}
 
         <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-5">
           {allTo.length === 0 && <span className="me-auto text-sm text-gray-400">הזן נמען כדי לשלוח</span>}
@@ -466,6 +876,19 @@ export function CustomerReportEmailModal({
             onClick={onClose}
           >
             ביטול
+          </button>
+          {/* התזמון משתמש בטופס כפי שהוא ברגע האישור — אותו מייל, מועד אחר. */}
+          <button
+            type="button"
+            disabled={sending}
+            className="flex items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-6 py-3 text-base font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+            onClick={() => {
+              setErr('');
+              setSchedulingOpen((v) => !v);
+            }}
+          >
+            <Clock className="h-4 w-4" />
+            {schedulingOpen ? 'סגור תזמון' : 'תזמון שליחה'}
           </button>
           <button
             type="button"

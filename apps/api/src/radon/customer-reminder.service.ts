@@ -42,8 +42,13 @@ export class CustomerReminderService {
     return this.botBase() !== null && this.secret() !== null;
   }
 
-  /** קריאה גנרית לבוט, עם timeout והודעת שגיאה קריאה בעברית. */
-  private async call(
+  /**
+   * קריאה גנרית לבוט, עם timeout והודעת שגיאה קריאה בעברית.
+   *
+   * ציבורית כדי ש-RadonKitService יוכל לדבר עם הבוט דרך אותו גשר בדיוק —
+   * אותה כתובת, אותו סוד, אותו מיפוי שגיאות. גשר שני היה נסחף מזה עם הזמן.
+   */
+  async call(
     path: string,
     init: { method: string; body?: unknown },
   ): Promise<any> {
@@ -98,7 +103,7 @@ export class CustomerReminderService {
    * פרטי הלקוח מכרטיס הלקוח. אותו סדר עדיפויות שהבוט משתמש בו כשהוא מודיע
    * ללקוח שהבודק בדרך, כדי שהלקוח יקבל את ההודעה לאותו מספר בשני המקרים.
    */
-  private async resolveRecipient(taskId: string): Promise<{
+  async resolveRecipient(taskId: string): Promise<{
     phone: string | null;
     name: string | null;
     customerId: string | null;

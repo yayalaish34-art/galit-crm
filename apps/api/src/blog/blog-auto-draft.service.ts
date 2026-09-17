@@ -130,11 +130,18 @@ export class BlogAutoDraftService {
       topicIndex: idx + 1,
     });
 
+    // המחקר מופעל (ברירת המחדל של aiDraft) והאורך "ארוך": הטיוטה היומית היא
+    // המסלול שממנו מגיע רוב התוכן באתר, ובלוג של 250 מילה בלי מקור אחד הוא
+    // מה שהיה כאן קודם. אם המחקר נכשל, aiDraft ממשיך בלי מקורות ולא נופל.
+    //
+    // המודל כאן איטי בכוונה (~2 דקות מול ~15 שניות): אף אחד לא ממתין מול
+    // המסך בשעה 09:00, וההפרש בתוצאה הוא ~1300 מילים מול ~780.
     const drafted = await this.blog.aiDraft({
       topic,
+      model: process.env.BLOG_DRAFT_MODEL_AUTO || 'gpt-5',
       audience: 'בעלי דירות, ועדי בתים, קבלנים ומנהלי מבנים בישראל',
       tone: 'מקצועי, ענייני ונגיש',
-      length: 'medium',
+      length: 'long',
       notes: existingTitles.length
         ? `אל תחזור על בלוגים שכבר קיימים באתר: ${existingTitles.join(' | ')}`
         : '',
@@ -147,6 +154,10 @@ export class BlogAutoDraftService {
       status: 'draft', // לעולם לא 'publish' — הפרסום הוא החלטה של המנהל
       topicCategoryIds: categoryId ? [categoryId] : [],
     });
+
+    // תמונה ראשית — אחרי יצירת הפוסט, כדי שכישלון ביצירת התמונה לא יאבד את
+    // הבלוג שכבר נכתב. הפונקציה בולעת שגיאות ומחזירה null.
+    const image = await this.blog.attachGeneratedImage(created.id, { title: drafted.title, topic });
 
     const fresh = await this.blog.getAutoState();
     await this.blog.saveAutoState({
@@ -163,7 +174,18 @@ export class BlogAutoDraftService {
       ],
     });
 
-    this.logger.log(`daily blog draft created: post ${created.id} — "${drafted.title}"`);
-    return { ok: true, postId: created.id, message: `נוצרה טיוטה: ${drafted.title}` };
+    const cited = drafted.sources.length;
+    this.logger.log(
+      `daily blog draft created: post ${created.id} — "${drafted.title}" ` +
+        `(${cited} sources cited, image: ${image ? image.id : 'none'})`,
+    );
+    const parts = [cited ? `${cited} מקורות` : '', image ? 'עם תמונה' : ''].filter(Boolean);
+    return {
+      ok: true,
+      postId: created.id,
+      message: parts.length
+        ? `נוצרה טיוטה: ${drafted.title} — ${parts.join(', ')}`
+        : `נוצרה טיוטה: ${drafted.title}`,
+    };
   }
 }

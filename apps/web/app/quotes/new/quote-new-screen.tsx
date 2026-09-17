@@ -630,11 +630,23 @@ function ServiceTreePicker({
   value,
   onSelect,
   onAddMany,
+  autoOpen,
+  onAutoOpened,
+  initialSku,
 }: {
   value: string;
   onSelect: (item: { description: string; sku: string; price: string; categoryPath: string }) => void;
   /** מוסיף פריטים נוספים כשורות חדשות (מעבר לראשון שממלא את השורה הנוכחית). */
   onAddMany?: (items: PickedService[]) => void;
+  /** פותח את הקטלוג אוטומטית — לשורה שזה עתה נוספה ב"הוסף פריט". */
+  autoOpen?: boolean;
+  /** נקרא אחרי הפתיחה האוטומטית, כדי שההורה ינקה את הסימון (פתיחה חד-פעמית). */
+  onAutoOpened?: () => void;
+  /**
+   * מק"ט התת-שירות שכבר בהקשר (של השורה עצמה, או של ההצעה כולה) — הפאנל נפתח
+   * מנווט ישר אליו (קטגוריה + תת-קטגוריה) במקום לרשת המתחילה בגריד הקטגוריות.
+   */
+  initialSku?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [catId, setCatId] = useState<string | null>(null);
@@ -650,6 +662,37 @@ function ServiceTreePicker({
   const [dragOverSku, setDragOverSku] = useState<string | null>(null);
 
   const { serviceCategories, allServices, serviceBySku } = useServiceCatalog();
+
+  /** מזהי (catId, groupId) של initialSku בעץ הנוכחי — null/null אם אין הקשר או שהוא לא נמצא. */
+  const resolveInitialLocation = (): { catId: string | null; groupId: string | null } => {
+    const sku = (initialSku ?? '').trim();
+    if (!sku) return { catId: null, groupId: null };
+    for (const cat of serviceCategories) {
+      for (const svc of cat.services) {
+        if (svc.subServices?.length) {
+          if (svc.subServices.some((sub) => sub.sku === sku || sub.id === sku)) {
+            return { catId: cat.id, groupId: svc.id };
+          }
+        } else if (svc.sku === sku || svc.id === sku) {
+          return { catId: cat.id, groupId: null };
+        }
+      }
+    }
+    return { catId: null, groupId: null };
+  };
+
+  // פתיחה אוטומטית לשורה חדשה: "הוסף פריט" פותח את הקטלוג מיד, בלי לחיצה נוספת —
+  // ומנווט ישר לתת-השירות שכבר בהקשר (initialSku), במקום גריד הקטגוריות הריק.
+  // מסמנים כמטופל דרך onAutoOpened כדי שסגירת הפאנל לא תפתח אותו שוב.
+  useEffect(() => {
+    if (!autoOpen) return;
+    const loc = resolveInitialLocation();
+    setCatId(loc.catId);
+    setGroupId(loc.groupId);
+    setOpen(true);
+    onAutoOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
 
   // ── סדר מקומי של שורות השירותים ברשימת הקטלוג (Level 2/3) — ניתן לגרירה בלייב ──
   // מפתח = catId (רמה 2) או `${catId}/${groupId}` (רמה 3); ערך = מערך מזהי שירותים לפי הסדר.
@@ -762,7 +805,17 @@ function ServiceTreePicker({
       {/* Trigger button */}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setOpen((v) => {
+            const next = !v;
+            if (next) {
+              const loc = resolveInitialLocation();
+              setCatId(loc.catId);
+              setGroupId(loc.groupId);
+            }
+            return next;
+          });
+        }}
         className="h-11 w-full flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 text-base outline-none focus:border-blue-400 transition-colors hover:border-blue-300"
       >
         <span className={value ? 'text-gray-800 truncate text-right text-sm' : 'text-gray-400 text-sm'}>
@@ -1213,6 +1266,9 @@ export function QuoteNewScreen({
   const [quoteUserRows, setQuoteUserRows] = useState<QuoteUserRow[]>([]);
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [selectedLineIdx, setSelectedLineIdx] = useState<number | null>(null);
+  // id של שורה שזה עתה נוספה — הקטלוג שלה נפתח אוטומטית. מזוהה לפי id ולא לפי
+  // אינדקס, כדי שגרירה/מחיקה של שורה אחרת לא תפתח את הקטלוג בשורה הלא-נכונה.
+  const [autoOpenLineId, setAutoOpenLineId] = useState<string | null>(null);
   // גרירה לשינוי סדר הפריטים: dragIdx = השורה הנגררת, dragOverIdx = היעד (לסימון ויזואלי).
   // dragEnabledIdx = השורה שאחזו בידית שלה (mousedown) — רק היא draggable, כדי לא לשבש הקלדה.
   const [dragEnabledIdx, setDragEnabledIdx] = useState<number | null>(null);
@@ -1319,6 +1375,15 @@ export function QuoteNewScreen({
     });
   }, [prefillServiceName, draftReady]);
 
+  /**
+   * מק"ט תת-השירות של ההצעה (מ"התאמת הפתרון") — משמש כברירת מחדל להקשר-הפתיחה
+   * של בורר הקטלוג בשורות ריקות, ראו initialSku ב-ServiceTreePicker למטה.
+   */
+  const contextSku = useMemo(
+    () => allServices.find((s) => s.name === prefillServiceName)?.sku ?? '',
+    [allServices, prefillServiceName],
+  );
+
   /* ── Auto-calc: תאריך תוקף ההצעה = תאריך הצעה + ימי תוקף ──
    * ממלא את שדה "תאריך תוקף" (paymentDueDate — הוא זה שמוצג בטופס) וגם paymentValidityDate.
    * רץ רק אחרי סיום טעינת ההצעה (draftReady) וממלא *רק כשהשדה ריק* — כך:
@@ -1415,7 +1480,11 @@ export function QuoteNewScreen({
 
     // Override local draft ref with the server's true sequential number if available.
     // Non-200 responses must throw so the catch path is reached.
-    apiFetch(apiUrl('/quotes/next-reference'), { authUser: user })
+    // המשתמש המחובר נשלח כאן כדי שגם התצוגה המקדימה תשקף פורמט סימוכין אישי (ר'
+    // quotes.service.previewNextReference) — נציג המכירה עדיין לא בהכרח נבחר בפועל
+    // בשלב הזה, אך ברירת המחדל שלו היא תמיד המשתמש המחובר (ר' effect למעלה).
+    const refQuery = user?.id ? `?currentUserId=${encodeURIComponent(user.id)}` : '';
+    apiFetch(apiUrl(`/quotes/next-reference${refQuery}`), { authUser: user })
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then((d: { reference?: string }) => { if (d?.reference) setReference(d.reference); })
       .catch(() => { /* local ref from useState(genLocalRef) already shown — nothing to do */ });
@@ -4252,7 +4321,7 @@ export function QuoteNewScreen({
                   פירוט פריטים
                   <span className="text-xs font-normal text-gray-400 mr-1">({lineItems.length})</span>
                 </h3>
-                <button type="button" className="flex items-center gap-2 rounded-xl bg-green-500 px-6 py-2.5 text-base font-bold text-white hover:bg-green-600 shadow-md transition-colors" onClick={() => { const next = newLineItem(); setLineItems((prev) => [...prev, next]); setSelectedLineIdx(lineItems.length); }}>
+                <button type="button" className="flex items-center gap-2 rounded-xl bg-green-500 px-6 py-2.5 text-base font-bold text-white hover:bg-green-600 shadow-md transition-colors" onClick={() => { const next = newLineItem(); setLineItems((prev) => [...prev, next]); setSelectedLineIdx(lineItems.length); setAutoOpenLineId(next.id); }}>
                   <Plus size={20} />הוסף פריט
                 </button>
               </div>
@@ -4330,6 +4399,9 @@ export function QuoteNewScreen({
                             <div className="text-sm font-medium text-gray-400 mb-0.5">תיאור השירות / מוצר</div>
                             <ServiceTreePicker
                               value={item.description}
+                              autoOpen={autoOpenLineId === item.id}
+                              onAutoOpened={() => setAutoOpenLineId(null)}
+                              initialSku={item.sku.trim() || contextSku}
                               onSelect={({ description, sku, price, categoryPath }) => {
                                 setLineItems((prev) => prev.map((r, i) =>
                                   i === idx ? { ...r, description, sku, price, categoryPath } : r

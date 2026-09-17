@@ -15,6 +15,53 @@ const TRX_CODE_SALES = 3;
 const TRX_CODE_RECEIPT = 2;
 
 /**
+ * סטטוס מסמך בכספית — אומת מול ה-API ולא נלקח מתיעוד.
+ *
+ * 0 → "חדש": טיוטה. לא בספרים, לא מעדכנת יתרה, **וניתנת לעריכה ב-PUT**.
+ * 2 → "הודפס": הונפק וננעל. כל PUT מוחזר עם
+ *     "לא ניתן לעדכן את מסמך … משום שהסטטוס שלו: 'הודפס' שונה מ-'חדש'".
+ * 3 → מבוטל. זה מה ש-DELETE עושה: המסמך *לא* נמחק — הוא עובר ל-3 ונשאר ברשימה,
+ *     כי מספר מסמך שהוקצה אינו נמחק בספרים.
+ */
+const CASPIT_STATUS = { DRAFT: 0, ISSUED: 2, CANCELLED: 3 } as const;
+
+/** שורה בגוף המסמך, כפי שהיא נערכת במסך הגבייה. */
+export interface CaspitEditableLine {
+  name: string;
+  details?: string;
+  unitPrice: number;
+  qty: number;
+  chargeVat?: boolean;
+}
+
+/** מסמך כספית בצורה שהלקוח (הדפדפן) יודע להציג ולערוך. */
+export interface CaspitEditableDocument {
+  documentId: string;
+  number: string;
+  trxTypeId: number;
+  kindLabel: string;
+  status: number;
+  statusLabel: string;
+  /** true רק בסטטוס "חדש" — אחרת כספית תדחה כל שמירה. */
+  editable: boolean;
+  date: string | null;
+  dueDate: string | null;
+  comments: string;
+  customerBusinessName: string;
+  customerOsekMorshe: string;
+  customerContactName: string;
+  customerAddress1: string;
+  customerCity: string;
+  customerEmail: string;
+  lines: CaspitEditableLine[];
+  total: number;
+  vat: number;
+  totalBeforeVat: number;
+  linkToPdf: string;
+  viewUrl: string | null;
+}
+
+/**
  * ארבעת סוגי המסמכים שמונפקים משלב הגבייה. ה-TrxTypeId אומתו מול כספית ע"י חילוץ
  * כותרת ה-PDF של מסמכים קיימים (ולא ניחוש): 6="חשבונית עסקה", 1="חשבונית מס",
  * 7="חשבונית מס/קבלה", 2="קבלה".
@@ -489,6 +536,12 @@ export class CaspitService {
   async createInvoice(
     input: CreateInvoiceInput,
     kind: 'proforma' | 'invoice' | 'invoiceReceipt' = 'invoice',
+    /**
+     * finalize=false משאיר את המסמך כטיוטה (Status=0) כדי שאפשר יהיה לערוך אותו
+     * לפני ההנפקה. זהו המסלול של "ערוך לפני הנפקה" — ראו updateDocument.
+     * ברירת המחדל true משמרת את ההתנהגות הקיימת: הנפקה בלחיצה אחת.
+     */
+    opts?: { finalize?: boolean },
   ): Promise<CaspitInvoiceResult> {
     const spec = CASPIT_DOC_KINDS[kind];
     if (!input.lines?.length) throw new BadRequestException(`אין שורות ל${spec.label}`);
@@ -585,7 +638,12 @@ export class CaspitService {
     }
     const doc: any = await r.json();
     // סגירת המסמך — בלעדיה נשארת טיוטה שלא נכנסת לספרים ולא מעדכנת יתרה.
-    const finalized = await this.finalizeDocument(token, String(doc?.DocumentId || input.documentId));
+    // כשמבקשים טיוטה לעריכה מדלגים בכוונה: הסגירה היא פעולה חד-כיוונית,
+    // ואחריה כספית מסרבת לכל PUT ("הסטטוס שלו: 'הודפס' שונה מ-'חדש'").
+    const finalized =
+      opts?.finalize === false
+        ? false
+        : await this.finalizeDocument(token, String(doc?.DocumentId || input.documentId));
     const linkToPdf = String(doc?.LinkToPdf || '').replace('_REPLACE_WITH_YOUR_TOKEN_', token);
     return {
       documentId: String(doc?.DocumentId || input.documentId),
@@ -596,6 +654,236 @@ export class CaspitService {
       customerLinked: !!contactId,
       finalized,
     };
+  }
+
+  /**
+   * ── עריכה ידנית של מסמך לפני ההנפקה ──────────────────────────────────────
+   *
+   * כספית מאפשרת PUT על מסמך **רק בסטטוס "חדש"**. מרגע הסגירה (PrintDocument)
+   * המסמך נעול לתמיד — וזה נכון חשבונאית: חשבונית מס שהונפקה אינה ניתנת
+   * לתיקון, אלא לביטול והנפקה מחדש. לכן העריכה חייבת לקרות בחלון שבין היצירה
+   * לסגירה, וזה בדיוק מה ש-createInvoice(..., { finalize: false }) פותח.
+   */
+
+  /**
+   * מגביל את פעולות העריכה למסמכים שה-CRM עצמו יצר.
+   *
+   * ה-DocumentId מגיע מהדפדפן, ובלי הגבלה אפשר היה לשלוח מזהה של כל מסמך
+   * בחשבון הכספית ולערוך או לבטל אותו מתוך מסך הגבייה. כל המזהים שאנחנו יוצרים
+   * נושאים קידומת 'crm-' (ראו idPrefix ב-CASPIT_DOC_KINDS).
+   */
+  private static assertCrmDocument(documentId: string): void {
+    CaspitService.assertDocumentId(documentId);
+    if (!documentId.startsWith('crm-')) {
+      throw new BadRequestException('ניתן לערוך רק מסמכים שהונפקו מתוך ה-CRM');
+    }
+  }
+
+  /** תווית הסטטוס בעברית — מוצגת למשתמש במקום מספר. */
+  private static statusLabel(status: number): string {
+    if (status === CASPIT_STATUS.DRAFT) return 'טיוטה';
+    if (status === CASPIT_STATUS.ISSUED) return 'הונפק';
+    if (status === CASPIT_STATUS.CANCELLED) return 'מבוטל';
+    return `סטטוס ${status}`;
+  }
+
+  /** שם סוג המסמך לפי TrxTypeId; ריק כשאינו אחד מארבעת הסוגים שלנו. */
+  private static kindLabel(trxTypeId: number): string {
+    const hit = Object.values(CASPIT_DOC_KINDS).find((s) => s.trxTypeId === trxTypeId);
+    return hit?.label || 'מסמך';
+  }
+
+  /** ממיר מסמך גולמי של כספית לצורה שהמסך עורך. */
+  private static toEditable(doc: any, token: string): CaspitEditableDocument {
+    const status = Number(doc?.Status ?? 0);
+    return {
+      documentId: String(doc?.DocumentId || ''),
+      number: String(doc?.Number || ''),
+      trxTypeId: Number(doc?.TrxTypeId || 0),
+      kindLabel: CaspitService.kindLabel(Number(doc?.TrxTypeId || 0)),
+      status,
+      statusLabel: CaspitService.statusLabel(status),
+      editable: status === CASPIT_STATUS.DRAFT,
+      date: doc?.Date ? String(doc.Date).slice(0, 10) : null,
+      dueDate: doc?.DueDate ? String(doc.DueDate).slice(0, 10) : null,
+      comments: String(doc?.Comments || ''),
+      customerBusinessName: String(doc?.CustomerBusinessName || ''),
+      customerOsekMorshe: String(doc?.CustomerOsekMorshe || ''),
+      customerContactName: String(doc?.CustomerContactName || ''),
+      customerAddress1: String(doc?.CustomerAddress1 || ''),
+      customerCity: String(doc?.CustomerCity || ''),
+      customerEmail: String(doc?.CustomerEmail || ''),
+      lines: (Array.isArray(doc?.DocumentLines) ? doc.DocumentLines : []).map((l: any) => ({
+        name: String(l?.ProductName || ''),
+        details: String(l?.Details || ''),
+        unitPrice: Number(l?.UnitPrice || 0),
+        qty: Number(l?.Qty || 0),
+        chargeVat: l?.ChargeVAT !== false,
+      })),
+      total: Number(doc?.Total || 0),
+      vat: Number(doc?.Vat || 0),
+      totalBeforeVat: Number(doc?.TotalBeforeVAT || 0),
+      linkToPdf: String(doc?.LinkToPdf || '').replace('_REPLACE_WITH_YOUR_TOKEN_', token),
+      viewUrl: doc?.ViewUrl || null,
+    };
+  }
+
+  /** שולף מסמך גולמי מכספית. זורק בעברית כשאינו קיים. */
+  private async getRawDocument(token: string, documentId: string): Promise<any> {
+    const r = await fetch(`${CASPIT_BASE}/documents/${encodeURIComponent(documentId)}`, {
+      headers: { 'Caspit-Token': token },
+    });
+    if (!r.ok) throw new BadRequestException(`המסמך לא נמצא בכספית (${r.status})`);
+    return r.json();
+  }
+
+  /** המסמך כפי שהוא כרגע בכספית, בצורה הניתנת לעריכה במסך. */
+  async getDocument(documentId: string): Promise<CaspitEditableDocument> {
+    CaspitService.assertCrmDocument(documentId);
+    const token = await this.getToken();
+    return CaspitService.toEditable(await this.getRawDocument(token, documentId), token);
+  }
+
+  /**
+   * שומר עריכה ידנית של טיוטה. כל שדה שלא נשלח נשאר כפי שהוא — כך שמירה של
+   * הערה בלבד אינה מוחקת את השורות.
+   *
+   * המע"מ והסכומים מחושבים מחדש ע"י כספית ולא כאן; אנחנו שולחים מחיר וכמות
+   * בלבד ומחזירים את המסמך אחרי החישוב שלה, כדי שהמסך יציג את מה שבאמת נשמר.
+   */
+  async updateDocument(
+    documentId: string,
+    patch: {
+      lines?: CaspitEditableLine[];
+      comments?: string;
+      date?: string | null;
+      dueDate?: string | null;
+      customerBusinessName?: string;
+      customerOsekMorshe?: string;
+      customerContactName?: string;
+      customerAddress1?: string;
+      customerCity?: string;
+      customerEmail?: string;
+    },
+  ): Promise<CaspitEditableDocument> {
+    CaspitService.assertCrmDocument(documentId);
+    const token = await this.getToken();
+    const cur = await this.getRawDocument(token, documentId);
+    const status = Number(cur?.Status ?? 0);
+    if (status !== CASPIT_STATUS.DRAFT) {
+      throw new BadRequestException(
+        status === CASPIT_STATUS.ISSUED
+          ? 'המסמך כבר הונפק ולכן אינו ניתן לעריכה — יש לבטל אותו בכספית ולהנפיק מסמך חדש'
+          : `לא ניתן לערוך מסמך בסטטוס "${CaspitService.statusLabel(status)}"`,
+      );
+    }
+
+    if (patch.lines && !patch.lines.length) {
+      throw new BadRequestException('למסמך חייבת להיות לפחות שורה אחת');
+    }
+
+    const next = {
+      ...cur,
+      ...(patch.comments !== undefined ? { Comments: patch.comments } : {}),
+      ...(patch.customerBusinessName !== undefined ? { CustomerBusinessName: patch.customerBusinessName } : {}),
+      ...(patch.customerOsekMorshe !== undefined ? { CustomerOsekMorshe: patch.customerOsekMorshe } : {}),
+      ...(patch.customerContactName !== undefined ? { CustomerContactName: patch.customerContactName } : {}),
+      ...(patch.customerAddress1 !== undefined ? { CustomerAddress1: patch.customerAddress1 } : {}),
+      ...(patch.customerCity !== undefined ? { CustomerCity: patch.customerCity } : {}),
+      ...(patch.customerEmail !== undefined ? { CustomerEmail: patch.customerEmail } : {}),
+      ...(patch.date !== undefined ? { Date: patch.date ? `${patch.date}T00:00:00` : cur.Date } : {}),
+      ...(patch.dueDate !== undefined ? { DueDate: patch.dueDate ? `${patch.dueDate}T00:00:00` : null } : {}),
+      ...(patch.lines
+        ? {
+            // מספור רץ מחדש: כספית מזהה שורות לפי Number, ומחיקת שורה באמצע
+            // הייתה משאירה חור שמבלבל את התצוגה שלה.
+            DocumentLines: patch.lines.map((l, i) => ({
+              Number: i + 1,
+              ProductName: String(l.name || 'שירות').slice(0, 200),
+              Details: String(l.details || ''),
+              UnitPrice: Number(l.unitPrice) || 0,
+              Qty: Number(l.qty) || 0,
+              CurrencySymbol: '₪',
+              Rate: 1.0,
+              Rebate: 0.0,
+              ChargeVAT: l.chargeVat !== false,
+            })),
+          }
+        : {}),
+    };
+
+    const r = await fetch(`${CASPIT_BASE}/documents/${encodeURIComponent(documentId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Caspit-Token': token },
+      body: JSON.stringify(next),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      this.logger.error(`Caspit updateDocument failed (${r.status}): ${t.slice(0, 300)}`);
+      // כספית מחזירה הודעות בעברית ("Bad data: …") — מעבירים אותן כמו שהן,
+      // הן מדויקות יותר מכל ניסוח כללי שלנו.
+      const clean = t.replace(/^"|"$/g, '').replace(/^Bad data:\s*/i, '').trim();
+      throw new BadRequestException(clean || `שמירת השינויים בכספית נכשלה (${r.status})`);
+    }
+    this.logger.log(`Caspit: draft ${documentId} updated`);
+    return CaspitService.toEditable(await this.getRawDocument(token, documentId), token);
+  }
+
+  /**
+   * הנפקה סופית של טיוטה: סוגרת את המסמך, מכניסה אותו לספרים ומעדכנת את יתרת
+   * הלקוח. מרגע זה אין דרך חזרה — ולכן זו פעולה נפרדת ומכוונת, ולא תופעת לוואי
+   * של שמירה.
+   */
+  async issueDocument(documentId: string): Promise<CaspitEditableDocument> {
+    CaspitService.assertCrmDocument(documentId);
+    const token = await this.getToken();
+    const cur = await this.getRawDocument(token, documentId);
+    const status = Number(cur?.Status ?? 0);
+    if (status === CASPIT_STATUS.ISSUED) {
+      // כבר הונפק — מחזירים אותו כהצלחה במקום להיכשל על פעולה שכבר בוצעה.
+      return CaspitService.toEditable(cur, token);
+    }
+    if (status !== CASPIT_STATUS.DRAFT) {
+      throw new BadRequestException(`לא ניתן להנפיק מסמך בסטטוס "${CaspitService.statusLabel(status)}"`);
+    }
+    const ok = await this.finalizeDocument(token, documentId);
+    if (!ok) throw new BadRequestException('סגירת המסמך בכספית נכשלה — נסו שוב');
+    this.logger.log(`Caspit: draft ${documentId} issued`);
+    return CaspitService.toEditable(await this.getRawDocument(token, documentId), token);
+  }
+
+  /**
+   * ביטול טיוטה שלא הונפקה. בכספית DELETE אינו מוחק — הוא מעביר לסטטוס "מבוטל"
+   * (3) והמסמך נשאר ברשימה עם מספרו, כי מספר שהוקצה אינו נמחק בספרים.
+   *
+   * מסמך שכבר הונפק לא נשלח לכאן בכוונה: ביטול חשבונית מס הוא פעולה חשבונאית
+   * שדורשת שיקול דעת, ומקומה בכספית עצמה ולא בלחיצה מתוך מסך הגבייה.
+   */
+  async cancelDraft(documentId: string): Promise<{ ok: true; status: number; statusLabel: string }> {
+    CaspitService.assertCrmDocument(documentId);
+    const token = await this.getToken();
+    const cur = await this.getRawDocument(token, documentId);
+    const status = Number(cur?.Status ?? 0);
+    if (status !== CASPIT_STATUS.DRAFT) {
+      throw new BadRequestException(
+        status === CASPIT_STATUS.ISSUED
+          ? 'המסמך כבר הונפק — ביטול חשבונית שהונפקה מתבצע בכספית עצמה'
+          : `המסמך כבר בסטטוס "${CaspitService.statusLabel(status)}"`,
+      );
+    }
+    const r = await fetch(`${CASPIT_BASE}/documents/${encodeURIComponent(documentId)}`, {
+      method: 'DELETE',
+      headers: { 'Caspit-Token': token },
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      this.logger.error(`Caspit cancelDraft failed (${r.status}): ${t.slice(0, 200)}`);
+      throw new BadRequestException(`ביטול הטיוטה בכספית נכשל (${r.status})`);
+    }
+    const after = await this.getRawDocument(token, documentId).catch(() => null);
+    const finalStatus = Number(after?.Status ?? CASPIT_STATUS.CANCELLED);
+    this.logger.log(`Caspit: draft ${documentId} cancelled (status ${finalStatus})`);
+    return { ok: true, status: finalStatus, statusLabel: CaspitService.statusLabel(finalStatus) };
   }
 
   /**

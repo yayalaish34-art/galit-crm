@@ -1,7 +1,8 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, UseGuards } from '@nestjs/common';
 import { CustomersService } from './customers.service';
 import { ReportMailService } from '../quotes/report-mail.service';
-import { SendCustomerDocumentEmailDto } from './dto/update-customer.dto';
+import { ReportEmailScheduleService } from '../quotes/report-email-schedule.service';
+import { ScheduleCustomerDocumentEmailDto, SendCustomerDocumentEmailDto } from './dto/update-customer.dto';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CustomerPagedQueryDto } from './dto/customer-paged-query.dto';
@@ -27,6 +28,7 @@ export class CustomersController {
   constructor(
     private readonly customersService: CustomersService,
     private readonly reportMail: ReportMailService,
+    private readonly reportEmailSchedule: ReportEmailScheduleService,
   ) {}
 
   @Get()
@@ -163,6 +165,32 @@ export class CustomersController {
     return this.customersService.createCustomerDocument(id, body, req.user?.id);
   }
 
+  /**
+   * POST /customers/:id/documents/:documentId/onedrive-open
+   * מעלה את הדוח ל-OneDrive (אם עוד לא הועלה) ומחזיר כתובת פתיחה ב-Word.
+   * קריאה חוזרת מחזירה את הקובץ הקיים — לא דורסת עריכות שכבר נעשו.
+   */
+  @Post(':id/documents/:documentId/onedrive-open')
+  openDocumentInWord(
+    @Param('id') _id: string,
+    @Param('documentId') documentId: string,
+    @Req() req: any,
+  ) {
+    return this.customersService.openDocumentInWord(documentId, req.user?.id);
+  }
+
+  /**
+   * POST /customers/:id/documents/:documentId/onedrive-sync
+   * מושך את הגרסה הערוכה מ-OneDrive ושומר אותה על הדוח (חזרה מ-Word / כפתור ידני).
+   */
+  @Post(':id/documents/:documentId/onedrive-sync')
+  syncDocumentFromOneDrive(
+    @Param('id') _id: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.customersService.syncDocumentFromOneDrive(documentId);
+  }
+
   @Patch(':id/documents/:documentId')
   updateDocument(
     @Param('id') id: string,
@@ -194,6 +222,40 @@ export class CustomersController {
       documentId,
       userId: req.user?.id,
     });
+  }
+
+  /**
+   * POST /customers/:id/documents/:documentId/schedule-email
+   * אותה בקשה בדיוק כמו send-email, בתוספת sendAt — נשמרת בתור ונשלחת במועד.
+   */
+  @Post(':id/documents/:documentId/schedule-email')
+  scheduleDocumentEmail(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Body() body: ScheduleCustomerDocumentEmailDto,
+    @Req() req: any,
+  ) {
+    return this.reportEmailSchedule.schedule({
+      ...(body || {}),
+      to: body?.to || '',
+      sendAt: body?.sendAt,
+      documentId,
+      customerId: id,
+      userId: req.user?.id,
+      userName: req.user?.name,
+    });
+  }
+
+  /** GET /customers/:id/documents/:documentId/scheduled-emails — מה ממתין לשליחה. */
+  @Get(':id/documents/:documentId/scheduled-emails')
+  listScheduledDocumentEmails(@Param('documentId') documentId: string) {
+    return this.reportEmailSchedule.listForDocument(documentId);
+  }
+
+  /** DELETE /customers/:id/scheduled-emails/:jobId — ביטול שליחה שטרם יצאה. */
+  @Delete(':id/scheduled-emails/:jobId')
+  cancelScheduledDocumentEmail(@Param('jobId') jobId: string) {
+    return this.reportEmailSchedule.cancel(jobId);
   }
 
   /** חילוץ הסכום הסופי + מספר ההצעה מ-PDF של הצעה חתומה (לפני האישור). */

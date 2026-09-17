@@ -56,75 +56,22 @@ export class QuotesController {
     });
   }
 
-  @Get('next-reference')
-  nextReference() {
-    return this.quotesService.getNextReference();
-  }
-
-  /* ── עריכת טקסט בקבצים ממוזגים — מנהל/אדמין בלבד ──
-   * חייב להיות מוצהר *לפני* `@Get(':id')`, אחרת Nest מתאים את הנתיב ל-:id
-   * ו-"merged-docs" נקרא כמזהה הצעה. */
-
-  /** רשימת הקבצים הממוזגים (DOCX) לעריכה. ללא תוכן הקבצים. */
-  @Get('merged-docs')
-  @Roles('ADMIN', 'MANAGER')
-  listMergedDocs(@Query('q') q?: string, @Query('take') take?: string) {
-    return this.quotesService.listMergedDocs({ q, take: take ? Number(take) : undefined });
-  }
-
-  /** הפסקאות הניתנות לעריכה במסמך ממוזג. */
-  @Get('merged-docs/:docId/text')
-  @Roles('ADMIN', 'MANAGER')
-  async getMergedDocText(@Param('docId') docId: string) {
-    const doc = await this.quotesService.getMergedDocById(docId);
-    if (!/\.docx$/i.test(doc.fileName || '') && doc.mimeType === 'application/pdf') {
-      throw new BadRequestException('קובץ PDF אינו ניתן לעריכת טקסט — יש לערוך את גרסת ה-Word');
-    }
-    return {
-      id: doc.id,
-      quoteId: doc.quoteId,
-      fileName: doc.fileName,
-      paragraphs: this.docxTextEdit.extractParagraphs(doc.bytes),
-    };
-  }
-
-  /** הורדת המסמך הממוזג לבדיקה ב-Word. */
-  @Get('merged-docs/:docId/download')
-  @Roles('ADMIN', 'MANAGER')
-  async downloadMergedDoc(@Param('docId') docId: string, @Res() res: Response) {
-    const doc = await this.quotesService.getMergedDocById(docId);
-    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    res.setHeader('Content-Type', doc.mimeType || DOCX_MIME);
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(doc.fileName || 'quote.docx')}"`);
-    res.send(doc.bytes);
-  }
-
   /**
-   * POST /quotes/merged-docs/:docId/text  { paragraphs: [{ id, text }] }
-   * מחיל את העריכות ושומר גרסה חדשה. המקור נשמר כפי שהוא.
+   * תצוגה מקדימה של הסימוכין הבא, לפני שההצעה נשמרת. המסך שולח כאן את נציג
+   * המכירה/אחראי המעקב הידועים לו כרגע (עשוי עדיין להיות ריק בטעינה ראשונה —
+   * ר' quote-new-screen.tsx) כדי שגם התצוגה תשקף פורמט אישי כשרלוונטי.
    */
-  @Post('merged-docs/:docId/text')
-  @Roles('ADMIN', 'MANAGER')
-  async saveMergedDocText(
-    @Param('docId') docId: string,
-    @Body() body: { paragraphs?: Array<{ id: number; text: string }> },
-    @Req() req: any,
+  @Get('next-reference')
+  nextReference(
+    @Query('followUpResponsibleUserId') followUpResponsibleUserId?: string,
+    @Query('salesRepresentativeName') salesRepresentativeName?: string,
+    @Query('currentUserId') currentUserId?: string,
   ) {
-    const edits = (body?.paragraphs || []).filter(
-      (p) => p && Number.isInteger(Number(p.id)) && typeof p.text === 'string',
-    );
-    if (edits.length === 0) throw new BadRequestException('לא נשלחו פסקאות לעדכון');
-
-    const doc = await this.quotesService.getMergedDocById(docId);
-    const { buffer, changed } = this.docxTextEdit.applyParagraphEdits(
-      doc.bytes,
-      edits.map((p) => ({ id: Number(p.id), text: p.text })),
-    );
-    if (changed === 0) return { changed: 0, saved: false };
-
-    const created = await this.quotesService.saveEditedMergedDoc(docId, buffer, req.user?.id);
-    return { changed, saved: true, document: created };
+    return this.quotesService.previewNextReference({ followUpResponsibleUserId, salesRepresentativeName, currentUserId });
   }
+
+  /* עריכת התבניות עברה ל-`/quote-templates/docx-editor` — עורכים את **התבנית**
+   * שממנה נוצרות ההצעות, ולא קבצים ממוזגים של הצעות שכבר יצאו ללקוח. */
 
   @Get(':id')
   findOne(@Param('id') id: string) {

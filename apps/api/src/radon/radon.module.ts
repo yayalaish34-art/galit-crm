@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
-import { RadonController } from './radon.controller';
+import { RadonController, RadonInternalController } from './radon.controller';
 import { RadonJobsService } from './radon-jobs.service';
 import { RadonDetectorsService } from './radon-detectors.service';
 import { RadonAlertsService } from './radon-alerts.service';
 import { CustomerReminderService } from './customer-reminder.service';
+import { RadonKitService } from './radon-kit.service';
+import { RadonKitAutoSendService } from './radon-kit-autosend.service';
 
 /**
  * מודול שירות ראדון — עצמאי לחלוטין.
@@ -12,8 +14,15 @@ import { CustomerReminderService } from './customer-reminder.service';
  * וכל הנתיבים תחת /radon. PrismaService זמין גלובלית (PrismaModule הוא @Global).
  */
 @Module({
-  controllers: [RadonController],
-  providers: [RadonJobsService, RadonDetectorsService, RadonAlertsService, CustomerReminderService],
-  exports: [RadonJobsService, RadonDetectorsService, CustomerReminderService],
+  controllers: [RadonController, RadonInternalController],
+  providers: [
+    RadonJobsService,
+    RadonDetectorsService,
+    RadonAlertsService,
+    CustomerReminderService,
+    RadonKitService,
+    RadonKitAutoSendService,
+  ],
+  exports: [RadonJobsService, RadonDetectorsService, CustomerReminderService, RadonKitService],
 })
 export class RadonModule {}

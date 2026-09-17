@@ -15,6 +15,9 @@ const DAYS_QUOTE_UNAPPROVED = 3;
 const DAYS_NO_PLACEMENT_REPORT = 7;
 const DAYS_COLLECTION_OVERDUE = 2;
 
+/** ימים ללא אישור התקנה מהלקוח שאחריהם נפתחת התראה על ערכה שנשלחה. */
+const DAYS_KIT_NO_INSTALL_CONFIRM = 7;
+
 type AlertKind =
   | 'quote_not_approved'
   | 'approved_not_paid'
@@ -26,7 +29,11 @@ type AlertKind =
   | 'detector_missing'
   | 'detector_disqualified'
   | 'results_no_report'
-  | 'report_not_sent';
+  | 'report_not_sent'
+  /** ערכה נשלחה ללקוח והוא לא אישר בוואטסאפ מתי התקין — הספירה לא התחילה. */
+  | 'kit_no_install_confirm'
+  /** תקופת בדיקת הערכה הסתיימה — זו ההתראה שהעובד מחכה לה. */
+  | 'kit_test_period_ended';
 
 type Candidate = { jobId: string; kind: AlertKind; message: string; severity: 'info' | 'warning' | 'danger' };
 
@@ -113,10 +120,15 @@ export class RadonAlertsService {
       }
     }
 
+    // ערכה שנשלחה ללקוח (61 / 10000) מנוהלת בחוקים משלה, למטה. הדגל הזה מכבה
+    // את חוקי האיסוף הכלליים עבורה — הם מדברים על בודק שיוצא לשטח, ובמסלול
+    // הערכה אין כזה: הלקוח הוא שמחזיר, ובדואר.
+    const isKitJob = Boolean(job.kitSentAt);
+
     // ── גלאים נשלחו ללקוח ואין אישור הצבה (מסלול 4) ──
     const shipped = detectors.filter((a: any) =>
       ['SHIPPED_TO_CLIENT', 'WITH_CLIENT'].includes(a.detector.status));
-    if (shipped.length && !job.clientReportedAt) {
+    if (!isKitJob && shipped.length && !job.clientReportedAt) {
       const age = daysSince(job.updatedAt);
       if (age != null && age >= DAYS_NO_PLACEMENT_REPORT) {
         add('shipped_no_placement',
@@ -124,8 +136,38 @@ export class RadonAlertsService {
       }
     }
 
+    // ── ערכה אצל הלקוח (61 / 10000) ──
+    //
+    // שתי ההתראות היחידות שיש לנו על תקופה שאיננו רואים: שהלקוח לא אישר
+    // התקנה (ולכן הספירה בכלל לא התחילה), ושהתקופה נגמרה. השנייה היא ההתראה
+    // שהעובד מחכה לה — ההודעה ללקוח יוצאת אוטומטית באותו רגע דרך הבוט.
+    if (isKitJob) {
+      if (!job.clientReportedAt) {
+        const waiting = daysSince(job.kitSentAt);
+        if (waiting != null && waiting >= DAYS_KIT_NO_INSTALL_CONFIRM) {
+          add(
+            'kit_no_install_confirm',
+            `הערכה נשלחה ללקוח לפני ${waiting} ימים והוא טרם אישר בוואטסאפ מתי התקין — ` +
+              'תקופת הבדיקה עדיין לא התחילה.',
+            'danger',
+          );
+        }
+      } else if (job.expectedEndAt && !job.collectedAt) {
+        const endedDays = daysSince(job.expectedEndAt);
+        if (endedDays != null && endedDays >= 0) {
+          add(
+            'kit_test_period_ended',
+            endedDays === 0
+              ? 'תקופת בדיקת הראדון הסתיימה היום. ללקוח נשלחה בקשה להחזיר את הגלאים.'
+              : `תקופת בדיקת הראדון הסתיימה לפני ${endedDays} ימים והגלאים טרם התקבלו במשרד.`,
+            endedDays >= 7 ? 'danger' : 'warning',
+          );
+        }
+      }
+    }
+
     // ── מתקרב מועד איסוף / עבר מועד איסוף ──
-    if (job.expectedEndAt && !job.collectedAt) {
+    if (!isKitJob && job.expectedEndAt && !job.collectedAt) {
       const daysLeft = Math.ceil((new Date(job.expectedEndAt).getTime() - now.getTime()) / 86_400_000);
       if (daysLeft < 0) {
         const overdue = Math.abs(daysLeft);

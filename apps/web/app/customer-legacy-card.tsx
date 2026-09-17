@@ -11,6 +11,7 @@ import { SignedQuotesSection } from './signed-quotes-section';
 import { ManualIncomeSection } from './manual-income-section';
 import { ProducedReportsSection } from './produced-reports-section';
 import { CaspitDocumentsSection } from './caspit-documents-section';
+import { CallTranscriptsSection } from './call-transcripts-section';
 import { ServiceCategorySelector } from './components/ServiceCategorySelector';
 
 function cn(...classes: Array<string | false | null | undefined>) {
@@ -889,6 +890,7 @@ type LowerTabKey =
   | 'producedReports'
   | 'caspitDocuments'
   | 'requests'
+  | 'callTranscripts'
   | 'additionalData'
   | 'moreDetails'
   | 'externalData';
@@ -898,6 +900,7 @@ const LOWER_TABS: Array<{ key: LowerTabKey; label: string }> = [
   { key: 'notes', label: 'הערות' },
   { key: 'relations', label: 'קשרים' },
   { key: 'requests', label: 'מיילים' },
+  { key: 'callTranscripts', label: 'תמלולי שיחות' },
   // "פרטי דיוור" הוחזר לרשימה 2026-09-08. המסך שלו קיים בקוד מאז ומעולם
   // (activeLowerTab === 'mailing'), אבל הוא נשמט מרשימת הטאבים בעיצוב מחדש של
   // הכרטיס — כלומר לא היה שום כפתור שפותח אותו. בלעדיו אין דרך להגיע לסימון
@@ -3918,6 +3921,18 @@ export function CustomerLegacyCard({
               </div>,
               document.body,
             )}
+          </div>
+        )}
+
+        {activeLowerTab === 'callTranscripts' && (
+          <div className="space-y-2" dir="rtl">
+            <div className="rounded-lg border-2 border-blue-700 bg-white p-3 shadow-sm">
+              <p className="mb-3 rounded border border-blue-200 bg-blue-50/80 px-2 py-2 text-right text-[11px] text-slate-800">
+                הקלטות השיחות של הלקוח והתמלול שלהן. השיוך נעשה אוטומטית לפי מספר הטלפון — כולל
+                המספרים של אנשי הקשר. שיחה שלא זוהתה נשמרת בכל זאת וניתן לשייך אותה ידנית.
+              </p>
+              <CallTranscriptsSection customerId={customer?.id} currentUser={currentUser} />
+            </div>
           </div>
         )}
 

@@ -7,7 +7,7 @@
   xsi:type="MailApp">
 
   <Id>5c45d94e-cc6e-4e23-9a3e-532fded25b77</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>Galit CRM</ProviderName>
   <DefaultLocale>he-IL</DefaultLocale>
 
@@ -62,32 +62,13 @@
     <Hosts>
       <Host xsi:type="MailHost">
         <DesktopFormFactor>
-          <!-- הפעלת פונקציה ישירה (ExecuteFunction) — טעינת commands.html -->
-          <FunctionFile resid="Commands.Url" />
-
+          <!-- כפתור יחיד: "פתיחת My CRM" (ShowTaskpane). כל הפעולות — כולל
+               תיוק המייל — מתבצעות מתוך חלון הצד עצמו. -->
           <ExtensionPoint xsi:type="MessageReadCommandSurface">
             <OfficeTab id="TabDefault">
               <Group id="galitCrmGroup">
                 <Label resid="Group.Label" />
 
-                <!-- כפתור 1: הוספה ל-CRM (ExecuteFunction, בלי חלון צד) -->
-                <Control xsi:type="Button" id="addToCrmButton">
-                  <Label resid="AddToCrm.Label" />
-                  <Supertip>
-                    <Title resid="AddToCrm.Label" />
-                    <Description resid="AddToCrm.Tooltip" />
-                  </Supertip>
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16" />
-                    <bt:Image size="32" resid="Icon.32" />
-                    <bt:Image size="80" resid="Icon.80" />
-                  </Icon>
-                  <Action xsi:type="ExecuteFunction">
-                    <FunctionName>addCurrentEmailToCrm</FunctionName>
-                  </Action>
-                </Control>
-
-                <!-- כפתור 2: פתיחת My CRM (ShowTaskpane) -->
                 <Control xsi:type="Button" id="openCrmButton">
                   <Label resid="OpenCrm.Label" />
                   <Supertip>
@@ -106,32 +87,6 @@
               </Group>
             </OfficeTab>
           </ExtensionPoint>
-
-          <!-- ── בזמן כתיבת מייל — תיוק המייל היוצא לכרטיס הלקוח ──
-               השרת משייך אותו לפי הנמענים (direction=OUTGOING), כי השולח הוא
-               העובד שלנו ולא הלקוח. -->
-          <ExtensionPoint xsi:type="MessageComposeCommandSurface">
-            <OfficeTab id="TabDefault">
-              <Group id="galitCrmComposeGroup">
-                <Label resid="Group.Label" />
-                <Control xsi:type="Button" id="fileComposeButton">
-                  <Label resid="FileCompose.Label" />
-                  <Supertip>
-                    <Title resid="FileCompose.Label" />
-                    <Description resid="FileCompose.Tooltip" />
-                  </Supertip>
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16" />
-                    <bt:Image size="32" resid="Icon.32" />
-                    <bt:Image size="80" resid="Icon.80" />
-                  </Icon>
-                  <Action xsi:type="ExecuteFunction">
-                    <FunctionName>fileComposeEmailToCrm</FunctionName>
-                  </Action>
-                </Control>
-              </Group>
-            </OfficeTab>
-          </ExtensionPoint>
         </DesktopFormFactor>
       </Host>
     </Hosts>
@@ -143,19 +98,14 @@
         <bt:Image id="Icon.80" DefaultValue="https://crm.galit.co.il/outlook-addin/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://crm.galit.co.il/outlook-addin/commands.html" />
         <bt:Url id="Taskpane.Url" DefaultValue="https://crm.galit.co.il/outlook-addin/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Group.Label" DefaultValue="My CRM" />
-        <bt:String id="AddToCrm.Label" DefaultValue="הוספה ל-CRM" />
         <bt:String id="OpenCrm.Label" DefaultValue="פתיחת My CRM" />
-        <bt:String id="FileCompose.Label" DefaultValue="תייק לכרטיס לקוח" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="AddToCrm.Tooltip" DefaultValue="שמירת המייל הנוכחי כבקשה במערכת My CRM" />
         <bt:String id="OpenCrm.Tooltip" DefaultValue="פתיחת חלון My CRM לצד ההודעה" />
-        <bt:String id="FileCompose.Tooltip" DefaultValue="תיוק המייל היוצא לכרטיס הלקוח, תחת טאב הבקשות" />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

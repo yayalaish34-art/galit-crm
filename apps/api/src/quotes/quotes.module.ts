@@ -4,6 +4,7 @@ import { QuoteMailService } from './quote-mail.service';
 import { PdfConvertService } from './pdf-convert.service';
 import { QuoteSignatureService } from './quote-signature.service';
 import { ReportMailService } from './report-mail.service';
+import { ReportEmailScheduleService } from './report-email-schedule.service';
 import { CompanyProfileService } from './company-profile.service';
 import { DocxTextEditService } from './docx-text-edit.service';
 import { QuotesController } from './quotes.controller';
@@ -13,12 +14,13 @@ import { CompanyProfileController } from './company-profile.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { MicrosoftModule } from '../microsoft/microsoft.module';
 import { ReviewsModule } from '../reviews/reviews.module';
+import { ReferenceNumbersModule } from '../reference-numbers/reference-numbers.module';
 
 @Module({
-  imports: [PrismaModule, MicrosoftModule, ReviewsModule],
+  imports: [PrismaModule, MicrosoftModule, ReviewsModule, ReferenceNumbersModule],
   controllers: [QuotesController, QuoteSignatureController, ReportMailController, CompanyProfileController],
-  providers: [QuotesService, QuoteMailService, PdfConvertService, QuoteSignatureService, ReportMailService, CompanyProfileService, DocxTextEditService],
-  exports: [QuotesService, ReportMailService],
+  providers: [QuotesService, QuoteMailService, PdfConvertService, QuoteSignatureService, ReportMailService, ReportEmailScheduleService, CompanyProfileService, DocxTextEditService],
+  exports: [QuotesService, ReportMailService, ReportEmailScheduleService],
 })
 export class QuotesModule {}
 

@@ -101,6 +101,24 @@ model User {
   approvalRequests       ApprovalRequest[] @relation("ApprovalRequester")
   /// בקשות אישור מנהל שהמשתמש הזה אישר/דחה
   approvalDecisions      ApprovalRequest[] @relation("ApprovalDecider")
+  /// מונה סימוכין יומי אישי (ר' model UserDailyReference)
+  dailyReferences        UserDailyReference[]
+}
+
+/// מונה יומי אישי לסימוכין בפורמט SS+DDMMYY (לדוגמה 01160926 = סידורי 01, 16/09/26),
+/// מתאפס בכל יום לפי אזור זמן ישראל. כרגע רק ליורם — ר' ReferenceNumbersService.
+/// חוצה מערכות: גם הצעות מחיר כאן וגם דוחות reporttt (מודול עובש) קוראים לאותו מונה
+/// דרך /reference-numbers/internal/next, כדי שהמספור לא יתנגש בין שתי המערכות.
+model UserDailyReference {
+  id         String   @id @default(uuid())
+  userId     String
+  /// DDMMYY
+  dateKey    String
+  lastSerial Int      @default(0)
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
 }
 
 /// בקשת אישור מנהל — נוצרת כשעובד מבקש להמשיך בשלב שחסום לו.

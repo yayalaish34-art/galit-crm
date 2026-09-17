@@ -82,6 +82,28 @@ export class BlogController {
     return this.blog.uploadMedia(body?.dataUrl || '', body?.filename || 'blog-image');
   }
 
+  /**
+   * תמונה ראשית שנוצרת ב-AI מנושא הבלוג, ומועלית ישר לספריית המדיה של וורדפרס.
+   * מחזיר { id, url } — בדיוק כמו העלאה ידנית, כדי שהעורך לא יבחין ביניהן.
+   */
+  @Post('ai-image')
+  aiImage(@Body() body: { title?: string; topic?: string }) {
+    return this.blog.generateFeaturedImage({ title: body?.title, topic: body?.topic });
+  }
+
+  /**
+   * כמה חלופות תמונה לבחירת המנהל, **בלי העלאה** — הבחירה נשלחת אחר כך
+   * ל-`POST /blog/media` כמו כל העלאה ידנית. מחזיר { options: [...] }.
+   */
+  @Post('ai-image-options')
+  aiImageOptions(@Body() body: { title?: string; topic?: string; count?: number }) {
+    return this.blog.generateFeaturedImageOptions({
+      title: body?.title,
+      topic: body?.topic,
+      count: body?.count,
+    });
+  }
+
   // ── ניסוח יומי אוטומטי + תור אישורים ──────────────────────────────────────
 
   /** הטיוטות האוטומטיות שממתינות לאישור — מזין את הפופ-אפ בדשבורד. */
@@ -103,11 +125,15 @@ export class BlogController {
   }
 
   @Post('posts/:id/rewrite')
-  rewrite(@Param('id') _id: string, @Body() body: { title?: string; body?: string; instruction?: string }) {
+  rewrite(
+    @Param('id') _id: string,
+    @Body() body: { title?: string; body?: string; instruction?: string; research?: boolean },
+  ) {
     return this.blog.aiRewrite({
       title: body?.title || '',
       body: body?.body || '',
       instruction: body?.instruction,
+      research: body?.research,
     });
   }
 
@@ -120,6 +146,8 @@ export class BlogController {
       tone?: string;
       length?: 'short' | 'medium' | 'long';
       notes?: string;
+      /** false = ניסוח מהיר בלי חיפוש מקורות ברשת. ברירת מחדל: מחקר מופעל. */
+      research?: boolean;
     },
   ) {
     return this.blog.aiDraft({
@@ -128,6 +156,7 @@ export class BlogController {
       tone: body?.tone,
       length: body?.length,
       notes: body?.notes,
+      research: body?.research,
     });
   }
 }

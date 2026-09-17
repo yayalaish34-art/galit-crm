@@ -155,6 +155,17 @@ export class QuoteSignatureService {
         `quote ${quoteId}: signature secret rotated (digitalSignatureStatus=${quote.digitalSignatureStatus}) — previous link kept valid`,
       );
     }
+    // ── הרישום שמונע קישורים מתים ──
+    // נרשם *לפני* כתיבת ה-meta, כי זה הרישום שקובע תוקף. גם אם הכתיבה למטה
+    // תיכשל, או שכתיבה עתידית כלשהי תדרוס את ה-blob — הקישור שיצא ללקוח
+    // ימשיך להיפתח. ראה recordIssuedSecret ו-QuoteSignatureToken בסכימה.
+    await this.recordIssuedSecret(
+      quoteId,
+      secret,
+      userId ?? null,
+      opts?.markRequested === false ? 'send_pdf' : 'request_signature',
+    );
+
     const token = `${quoteId}~${secret}`;
     const baseName = fileName.replace(/\.(docx|pdf)$/i, '');
 
@@ -454,6 +465,32 @@ export class QuoteSignatureService {
   // עזרים פנימיים
   // ─────────────────────────────────────────────────────────────
 
+  /**
+   * רושם סוד שהונפק. append-only: אף פעם לא מעדכן שורה קיימת.
+   *
+   * best-effort במכוון — אם הרישום נכשל, עדיף שההצעה עדיין תישלח (הסוד יתקבל
+   * דרך ה-meta, כמו קודם) מאשר שהשליחה כולה תיפול. הכשל נרשם ברמת error כי
+   * הוא אומר שאיבדנו את רשת הביטחון עבור הקישור הזה.
+   */
+  private async recordIssuedSecret(
+    quoteId: string,
+    secret: string,
+    issuedById: string | null,
+    source: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.quoteSignatureToken.createMany({
+        data: [{ quoteId, secret, issuedById, source }],
+        // אותו סוד שנשלח שוב (reuse) הוא המקרה הרגיל, לא שגיאה.
+        skipDuplicates: true,
+      });
+    } catch (e: any) {
+      this.logger.error(
+        `quote ${quoteId}: failed to record signature token (${source}): ${e?.message || e}`,
+      );
+    }
+  }
+
   /** מפענח טוקן `<quoteId>~<secret>`, טוען את ההצעה ומאמת את הסוד. */
   private async loadByToken(token: string): Promise<{ quote: any; meta: SignatureMeta }> {
     const sep = (token || '').indexOf('~');
@@ -468,16 +505,54 @@ export class QuoteSignatureService {
         quoteItems: { orderBy: { rowOrder: 'asc' }, take: 1 },
       },
     });
+    if (!quote) throw new NotFoundException('קישור החתימה אינו תקף או שפג תוקפו');
+
     // linkedEntityId (מזהה המשימה שממנה נוצרה ההצעה) ו-customerId נטענים דרך include/scalar
     // ברירת-מחדל של findUnique — משמשים ב-advanceTaskToCoordination אחרי החתימה.
-    const meta = (quote?.digitalCertificateMeta as SignatureMeta | null) || null;
-    // מתקבל הסוד הנוכחי *או* כל סוד שהונפק קודם לאותה הצעה — קישור שכבר נשלח ללקוח
-    // לא מפסיק לעבוד רק מפני שההצעה נשלחה שוב מהמערכת.
-    const accepted = meta?.secret ? [meta.secret, ...(meta.previousSecrets ?? [])] : [];
-    if (!quote || !meta?.secret || !accepted.includes(secret)) {
+    const meta = (quote.digitalCertificateMeta as SignatureMeta | null) || null;
+
+    // מקור אמת ראשון: ה-blob. מהיר, בלי שאילתה נוספת, ומכסה את המקרה הרגיל.
+    const fromMeta = meta?.secret ? [meta.secret, ...(meta.previousSecrets ?? [])] : [];
+    if (fromMeta.includes(secret)) return { quote, meta: meta! };
+
+    // מקור אמת שני: הטבלה שרק מוסיפים לה. זו הרשת שתופסת כל מקרה שבו ה-blob
+    // נדרס — בין אם בגלגול סוד, בכתיבה מקבילה, או בנתיב עתידי שישכח למזג.
+    // נבדק רק כשה-blob לא זיהה, כדי לא להוסיף שאילתה למסלול הרגיל.
+    const issued = await this.prisma.quoteSignatureToken
+      .findFirst({ where: { quoteId, secret, revokedAt: null }, select: { id: true } })
+      .catch(() => null);
+
+    if (!issued || !meta) {
       throw new NotFoundException('קישור החתימה אינו תקף או שפג תוקפו');
     }
+
+    // הקישור תקף אבל ה-blob כבר לא מכיר אותו — מרפאים את ה-blob כדי שהבדיקה
+    // המהירה תתפוס בפעם הבאה, ומשאירים עקבה: זו ההוכחה שמשהו דרס סוד חי.
+    this.logger.warn(
+      `quote ${quoteId}: sign link resolved from QuoteSignatureToken — the meta blob no longer lists this secret (it was overwritten)`,
+    );
+    void this.healMetaSecret(quoteId, meta, secret);
+
     return { quote, meta };
+  }
+
+  /** מחזיר סוד תקף שנעלם מה-blob בחזרה ל-previousSecrets. best-effort. */
+  private async healMetaSecret(
+    quoteId: string,
+    meta: SignatureMeta,
+    secret: string,
+  ): Promise<void> {
+    try {
+      const previousSecrets = Array.from(
+        new Set([...(meta.previousSecrets ?? []), secret]),
+      ).slice(-10);
+      await this.prisma.quote.update({
+        where: { id: quoteId },
+        data: { digitalCertificateMeta: { ...meta, previousSecrets } as any },
+      });
+    } catch (e: any) {
+      this.logger.warn(`quote ${quoteId}: healMetaSecret failed: ${e?.message || e}`);
+    }
   }
 
   /** בוחר את מסמך ההצעה (DB bytes → disk) ומחזיר buffer + שם + האם כבר PDF. */

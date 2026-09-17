@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
+import { ReferenceNumbersService } from '../reference-numbers/reference-numbers.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import PDFDocument = require('pdfkit');
@@ -83,6 +84,7 @@ export class QuotesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly graphFiles: GraphFilesService,
+    private readonly referenceNumbers: ReferenceNumbersService,
   ) {}
 
   private sanitizeQuoteInput(data: any) {
@@ -269,8 +271,16 @@ export class QuotesService {
    * Next display reference for new quotes — a plain sequential number (e.g. 13763, 13764).
    * Continues from the highest existing plain-numeric quote number, or from QUOTE_NUMBER_START.
    * Legacy "Q-YYYYMM-NNNN" numbers are ignored when computing the max.
+   *
+   * `ownerUserId` — כשההצעה שייכת למשתמש עם מספור אישי (ר' resolvePersonalOwnerId /
+   * ReferenceNumbersService), מדלגים על המונה הגלובלי ומחזירים סימוכין בפורמט
+   * SS+DDMMYY במקום, ממונה יומי נפרד לאותו משתמש.
    */
-  async getNextReference(): Promise<{ reference: string }> {
+  async getNextReference(ownerUserId?: string | null): Promise<{ reference: string }> {
+    if (ownerUserId) {
+      return { reference: await this.referenceNumbers.getNextForUser(ownerUserId) };
+    }
+
     // המספר נשמר בשני השדות (quoteNumber = orderReferenceNumber, ראה create) — סורקים
     // את שניהם. Keep only pure-numeric values (the new format) and continue from the highest.
     const rows = await this.prisma.quote.findMany({
@@ -287,6 +297,51 @@ export class QuotesService {
       }
     }
     return { reference: String(maxNum + 1) };
+  }
+
+  /**
+   * גרסה ציבורית לתצוגה המקדימה (GET /quotes/next-reference), לפני שההצעה נשמרת.
+   * `currentUserId` — המשתמש המחובר שפותח את מסך ההצעה: בהצעה חדשה זה תמיד
+   * ברירת המחדל של נציג המכירה (ר' quote-new-screen.tsx), גם לפני שהשדה עצמו
+   * נטען/נבחר בפועל — כך שהתצוגה המקדימה תשקף פורמט אישי בלי לחכות לזה.
+   */
+  async previewNextReference(fields: {
+    followUpResponsibleUserId?: string | null;
+    salesRepresentativeName?: string | null;
+    currentUserId?: string | null;
+  }): Promise<{ reference: string }> {
+    const ownerUserId = await this.resolvePersonalOwnerId(fields);
+    return this.getNextReference(ownerUserId);
+  }
+
+  /**
+   * הבעלים של הצעה, לצורך בחירת פורמט הסימוכין (ר' getNextReference).
+   *
+   * "בעלים" נבדק בשני השדות היחידים שבאמת קיימים ב-DB היום: ה-FK
+   * followUpResponsibleUserId (אחראי מעקב), והשם החופשי salesRepresentativeName
+   * (נציג מכירה). salesRepresentativeId ו-performerUserId מוגדרים בסכמה
+   * אך מעולם לא הגיעו ל-DB האמיתי — ר' SCHEMA_DRIFT_OMIT למעלה — ולכן לא
+   * ניתן להסתמך עליהם. `currentUserId` משמש רק לתצוגה המקדימה (ר' previewNextReference).
+   */
+  private async resolvePersonalOwnerId(fields: {
+    followUpResponsibleUserId?: string | null;
+    salesRepresentativeName?: string | null;
+    currentUserId?: string | null;
+  }): Promise<string | null> {
+    const personalUsers = await this.referenceNumbers.getPersonalReferenceUsers();
+    if (!personalUsers.length) return null;
+
+    for (const id of [fields.followUpResponsibleUserId, fields.currentUserId]) {
+      if (!id) continue;
+      const byId = personalUsers.find((u) => u.id === id);
+      if (byId) return byId.id;
+    }
+    const repName = (fields.salesRepresentativeName || '').trim();
+    if (repName) {
+      const byName = personalUsers.find((u) => (u.name || '').trim() === repName);
+      if (byName) return byName.id;
+    }
+    return null;
   }
 
   async create(data: any, user?: { id?: string; role?: string }) {
@@ -315,8 +370,18 @@ export class QuotesService {
         if (taken) num = '';
       }
 
+      const ownerUserId = await this.resolvePersonalOwnerId({
+        followUpResponsibleUserId: (clean as any).followUpResponsibleUserId,
+        salesRepresentativeName: (clean as any).salesRepresentativeName,
+      });
+      // הצעה ששייכת למשתמש עם מספור אישי (ר' resolvePersonalOwnerId) חייבת לקבל
+      // סימוכין בפורמט SS+DDMMYY — גם אם המסך כבר שלח מספר מהמונה הגלובלי (התצוגה
+      // המקדימה ב-/quotes/next-reference רצה בטעינת המסך, לפני שנבחר נציג המכירה).
+      // מספר שכבר בפורמט האישי (8 ספרות) נשמר כפי שהוא ולא מוחלף.
+      if (ownerUserId && !/^\d{8}$/.test(num || '')) num = '';
+
       if (!num) {
-        num = (await this.getNextReference()).reference;
+        num = (await this.getNextReference(ownerUserId)).reference;
         (clean as any).orderReferenceNumber = num;
       } else {
         (clean as any).orderReferenceNumber = givenRef || num;
@@ -430,7 +495,16 @@ export class QuotesService {
       const no = patchNo || existingNo;
       const ref = patchRef || existingRef;
       if (!no) {
-        const num = ref || (await this.getNextReference()).reference;
+        let num = ref;
+        if (!num) {
+          const ownerUserId = await this.resolvePersonalOwnerId({
+            followUpResponsibleUserId:
+              'followUpResponsibleUserId' in next ? next.followUpResponsibleUserId : (existing as any).followUpResponsibleUserId,
+            salesRepresentativeName:
+              'salesRepresentativeName' in next ? next.salesRepresentativeName : (existing as any).salesRepresentativeName,
+          });
+          num = (await this.getNextReference(ownerUserId)).reference;
+        }
         next.quoteNumber = num;
         if (!ref) next.orderReferenceNumber = num;
       } else if (!ref) {
@@ -804,120 +878,8 @@ export class QuotesService {
     return updated;
   }
 
-  /* ══════════════════════════════════════════════════════════════
-   *  עריכת טקסט בקבצים ממוזגים (טאב מנהל)
-   * ══════════════════════════════════════════════════════════════ */
-
-  /**
-   * רשימת הקבצים הממוזגים לעריכה. **בלי עמודת `data`** — היא bytea של מסמך שלם,
-   * ורשימה שכוללת אותה מפילה את ה-endpoint ב-500 (RangeError: Invalid string length).
-   * מחזיר DOCX בלבד: PDF אינו ניתן לעריכת טקסט בשיטה הזו.
-   */
-  async listMergedDocs(opts: { q?: string; take?: number } = {}) {
-    const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    const take = Math.min(Math.max(Number(opts.take) || 100, 1), 300);
-    const term = (opts.q || '').trim();
-
-    const rows: any[] = await (this.prisma.quoteDocument as any).findMany({
-      where: {
-        OR: [{ mimeType: DOCX_MIME }, { fileName: { endsWith: '.docx', mode: 'insensitive' } }],
-        ...(term
-          ? {
-              quote: {
-                OR: [
-                  { customerName: { contains: term, mode: 'insensitive' } },
-                  { customer: { name: { contains: term, mode: 'insensitive' } } },
-                  { quoteNumber: { contains: term, mode: 'insensitive' } },
-                ],
-              },
-            }
-          : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take,
-      select: {
-        id: true,
-        quoteId: true,
-        fileName: true,
-        documentDescription: true,
-        createdAt: true,
-        quote: {
-          select: {
-            quoteNumber: true,
-            customerName: true,
-            customer: { select: { name: true } },
-          },
-        },
-      },
-    });
-
-    return rows.map((r) => ({
-      id: r.id,
-      quoteId: r.quoteId,
-      fileName: r.fileName || 'הצעת מחיר.docx',
-      description: r.documentDescription || null,
-      createdAt: r.createdAt,
-      quoteNumber: r.quote?.quoteNumber ?? null,
-      customerName: r.quote?.customerName || r.quote?.customer?.name || null,
-    }));
-  }
-
-  /** מסמך ממוזג בודד כולל הבייטים — לעריכה/הורדה. */
-  async getMergedDocById(docId: string) {
-    const doc: any = await (this.prisma.quoteDocument as any).findUnique({
-      where: { id: docId },
-      select: { id: true, quoteId: true, fileName: true, mimeType: true, data: true, filePath: true },
-    });
-    if (!doc) throw new NotFoundException('המסמך לא נמצא');
-    let bytes: Buffer | null = doc.data ? Buffer.from(doc.data) : null;
-    if (!bytes && doc.filePath) {
-      // רשומות ישנות שנשמרו לדיסק בלבד (לפני שהתוכן נשמר ב-DB).
-      const abs = path.resolve(process.cwd(), doc.filePath);
-      if (fs.existsSync(abs)) bytes = fs.readFileSync(abs);
-    }
-    if (!bytes) throw new BadRequestException('אין תוכן שמור למסמך הזה');
-    return { ...doc, bytes };
-  }
-
-  /**
-   * שומר גרסה ערוכה של מסמך ממוזג כ-**רשומה חדשה**, ולא דורס את המקור.
-   * זו הרשת ביטחון של הפיצ'ר: אם עריכה יצאה לא כמצופה, הגרסה הקודמת עדיין שם.
-   * הרשומה החדשה הופכת למסמך האחרון של ההצעה — ולכן היא זו שתישלח במייל.
-   */
-  async saveEditedMergedDoc(sourceDocId: string, bytes: Buffer, userId?: string) {
-    const source: any = await (this.prisma.quoteDocument as any).findUnique({
-      where: { id: sourceDocId },
-      select: { quoteId: true, fileName: true, mimeType: true, documentType: true },
-    });
-    if (!source) throw new NotFoundException('המסמך לא נמצא');
-
-    const created: any = await (this.prisma.quoteDocument as any).create({
-      data: {
-        quoteId: source.quoteId,
-        // שם הקובץ נשמר — כולל שם ידני שנקבע ב"קבצים שנוצרו".
-        fileName: source.fileName,
-        mimeType: source.mimeType,
-        documentType: source.documentType || 'MERGED_DOCX',
-        documentDescription: 'מסמך ממוזג (נערך ידנית)',
-        data: Uint8Array.from(bytes),
-        uploadedBy: userId || null,
-      },
-      select: { id: true, quoteId: true, fileName: true, createdAt: true },
-    });
-
-    // הגרסה הערוכה היא הקנונית מעכשיו → מנתקים קובץ OneDrive ישן, כדי ש"ערוך ב-Word"
-    // הבא יעלה את התוכן הערוך ולא גרסה שקדמה לעריכה. את נעילת השם *לא* משחררים —
-    // שם הקובץ לא השתנה כאן, רק התוכן.
-    try {
-      await (this.prisma.quote.update as any)({
-        where: { id: source.quoteId },
-        data: { onedriveItemId: null, onedriveWebUrl: null, onedriveOwnerId: null, onedriveAttachmentId: null },
-      });
-    } catch {
-      /* עמודות OneDrive עדיין לא הוגרו */
-    }
-    return created;
-  }
+  /* עריכת התבניות עברה ל-TemplateDocxStore (quote-templates/docx-editor): עורכים
+   * את **התבנית** שממנה נוצרות ההצעות, לא קבצים ממוזגים של הצעות שכבר יצאו. */
 
   /** Latest merged document for a quote (prefers DB-stored bytes). */
   async getLatestMergedDocument(
@@ -1222,7 +1184,13 @@ export class QuotesService {
       // העלאה ל-OneDrive נכשלה (הרשאות Files.ReadWrite / מכסה / Graph) — מציגים את הסיבה האמיתית
       // במקום "Internal server error", כדי שאפשר יהיה לאבחן.
       this.logger.error(`OneDrive upload failed (${id}): ${e?.message || e}`);
-      throw new BadRequestException(`העלאת המסמך ל-OneDrive נכשלה: ${e?.message || 'שגיאה לא ידועה'} — ייתכן שצריך לחבר מחדש את Outlook (הרשאת קבצים)`);
+      // רמז ההתחברות רלוונטי רק לכשל הרשאה. על קובץ נעול (423) הוא שולח את המשתמש
+      // לנתק ולחבר מחדש את החשבון — פעולה שלא קשורה לנעילה ולא פותרת אותה.
+      const raw = String(e?.message || '');
+      const isLock = /נעול|resourceLocked|\b423\b/.test(raw);
+      const isAuth = /\b40[13]\b|invalid_grant|token|unauthor/i.test(raw);
+      const hint = isLock ? '' : isAuth ? ' — ייתכן שצריך לחבר מחדש את Outlook (הרשאת קבצים)' : '';
+      throw new BadRequestException(`העלאת המסמך ל-OneDrive נכשלה: ${raw || 'שגיאה לא ידועה'}${hint}`);
     }
 
     // שמירת ההפניה (guarded — אם העמודות עדיין לא הוגרו, לא נפיל את הבקשה).

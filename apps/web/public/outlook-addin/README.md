@@ -8,7 +8,7 @@
 ```
 apps/web/public/outlook-addin/        ← מוגש סטטית ב-https://crm.galit.co.il/outlook-addin/
   manifest.xml            ← מניפסט התוסף (מאומת ✓)
-  commands.html/.js       ← כפתור "הוספה ל-CRM" (ExecuteFunction — בלי חלון צד)
+  commands.html/.js       ← לא בשימוש (הוסר מהמניפסט — נשמר לעתיד)
   taskpane.html/.js       ← חלון "פתיחת My CRM" (זיהוי, סטטוס, הוספה, קישור לבקשה)
   config.js               ← כתובות ה-CRM/API (ללא secrets)
   outlook-message.js      ← קריאת המייל + הפקת EML דרך Office.js
@@ -28,7 +28,7 @@ apps/api/src/integrations/outlook/
 
 ## זרימת עבודה
 
-1. העובד פותח מייל ב-Outlook ולוחץ **"הוספה ל-CRM"**.
+1. העובד פותח מייל ב-Outlook ולוחץ **"פתיחת My CRM"**, ובחלון הצד מתייק את המייל.
 2. התוסף קורא את המייל (Office.js), מפיק EML (אם נתמך), ומזהה את העובד דרך Office-SSO.
 3. השרת:
    - מזהה את העובד מה-JWT (לא מ-metadata),
@@ -48,8 +48,7 @@ apps/api/src/integrations/outlook/
 
 ## דרישות (Add-in only manifest)
 - Host: Mailbox · Permission: ReadWriteItem (נדרש ל-saveAsync בתיוק בזמן כתיבה) · DefaultLocale: he-IL (RTL).
-- שני כפתורים ב-`MessageReadCommandSurface`: "הוספה ל-CRM" (ExecuteFunction) + "פתיחת My CRM" (Taskpane),
-  וכפתור "תייק לכרטיס לקוח" ב-`MessageComposeCommandSurface` (תיוק מייל יוצא לפי הנמענים).
+- כפתור אחד ב-`MessageReadCommandSurface`: "פתיחת My CRM" (ShowTaskpane).
 - אימות מניפסט: `npx office-addin-manifest validate manifest.xml` → **The manifest is valid.**
 
 ## Sideload (התקנה ידנית ב-Outlook)

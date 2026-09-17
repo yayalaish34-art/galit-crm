@@ -41,6 +41,8 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/templates ./templates
+# לוגו החברה — נחתם על תמונות הבלוג שנוצרות ב-AI (BlogImageService.stampLogo)
+COPY --from=builder /app/assets ./assets
 
 # Railway injects PORT automatically; fallback to 3001
 EXPOSE 3001
