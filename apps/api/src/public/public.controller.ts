@@ -264,6 +264,9 @@ export class PublicController {
 
     const isUrl = (v: unknown): v is string => typeof v === 'string' && /^https?:\/\/\S+$/i.test(v.trim());
     const namedGuesses = [
+      // RecordFile: השם האמיתי שאושר בפרודקשן (BlueBe, 17.9) — ראשון ברשימה
+      // בכוונה, לא ניחוש כללי. שאר השמות נשארים כגיבוי לפורמטים אחרים.
+      params.RecordFile,
       params.recording_url,
       params.record_url,
       params.recording,

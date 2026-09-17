@@ -301,32 +301,46 @@ export class CallRecordingsService {
     const external = incoming ? rawSrc : rawDst;
     if (!external) throw new BadRequestException('חסר מספר טלפון');
 
-    const durationSec =
-      Number(
-        params.duration ||
-          params.billsec ||
-          params.BillableSeconds ||
-          params.Duration_in_sec ||
-          0,
-      ) || 0;
+    // שלב השיחה: תחילה (צלצול) או סוף (עם משך/הקלטה). ל-CloudPlus/BlueBe אין
+    // דרך מתועדת להבדיל בין השניים בעצמם — זה פרמטר שמוסיפים ידנית ב-URL של
+    // כל ALERT שמוגדר בפאנל (`&event=start` על ה-ALERT שמוגדר לירות בתחילת
+    // שיחה, ו-`&event=end` — או כלום, זו ברירת המחדל — על זה שבסוף). כל
+    // התעבורה האמיתית שנצפתה עד כה (17.9) היא event=end במובן הזה, גם בלי
+    // שהפרמטר הוגדר בפועל — לכן ברירת המחדל היא "end", לא "start".
+    const stage = (params.event || params.stage || params.call_stage || '').toLowerCase();
+    const isStart = /^(start|ring|begin|new)/.test(stage);
+
+    const durationSec = isStart
+      ? 0
+      : Number(
+          params.duration ||
+            params.billsec ||
+            params.BillableSeconds ||
+            params.Duration_in_sec ||
+            0,
+        ) || 0;
 
     // אצל BlueBe יש קישור הורדה ישיר (RecordFile) — עדיף על הכתובת שאנחנו
     // בונים בעצמנו, כי הוא ה-URL האמיתי מהם ולא ניחוש. שיחה שלא נענתה
-    // (CANCEL/BUSY/NOANSWER) אין לה הקלטה בכלל, גם אם המספר תפוס-נראה-כמו-URL.
+    // (CANCEL/BUSY/NOANSWER), וכמובן אירוע "תחילה", אין להם הקלטה בכלל.
     const answered = !params.phone_call_status || params.phone_call_status === 'ANSWER';
     const recordFile = (params.RecordFile || '').trim();
-    const audioUrl = !answered
-      ? null
-      : recordFile ||
-        (this.cloudplus.configured ? this.cloudplus.recordingUrl(callId) : null);
+    const audioUrl =
+      isStart || !answered
+        ? null
+        : recordFile ||
+          (this.cloudplus.configured ? this.cloudplus.recordingUrl(callId) : null);
 
     const record = await this.ingestOne({
       externalId: callId,
       phone: external,
       direction: incoming ? 'IN' : 'OUT',
-      // StartTime (BlueBe) מדויק בהרבה מרגע קליטת ה-webhook — הוא מגיע רק אחרי
-      // שהשיחה הסתיימה, לפעמים כמה דקות אחרי שהתחילה.
-      startedAt: CallRecordingsService.parseBlueBeStartTime(params.StartTime) || new Date(),
+      // באירוע תחילה, "עכשיו" הוא הזמן הכי מדויק שיש (השיחה ממש מתרחשת).
+      // באירוע סוף, StartTime (BlueBe) מדויק בהרבה מרגע קליטת ה-webhook —
+      // הוא מגיע רק אחרי שהשיחה הסתיימה, לפעמים כמה דקות אחרי שהתחילה.
+      startedAt: isStart
+        ? new Date()
+        : CallRecordingsService.parseBlueBeStartTime(params.StartTime) || new Date(),
       durationSec,
       audioUrl,
       agentName:
