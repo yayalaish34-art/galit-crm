@@ -26548,6 +26548,16 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
   // קצב פולינג מהיר יותר מהרגיל (5ש' ולא 20) כי צלצול טיפוסי קצר בהרבה מהחלון
   // הרגיל שמשמש לידים/אישורים.
   const [callToasts, setCallToasts] = useState<{ id: string; phone: string; customerId?: string | null; customerName?: string | null }[]>([]);
+  /* באג שדווח: הפופ-אפ קופץ שוב על אותה שיחה כל 5 שניות. הסיבה: סגירה
+     (X, או "פתח כרטיס לקוח") רק מסירה מה-state המקומי, אבל השיחה עצמה
+     נשארת בחלון ה"חי" בשרת עד 5 דקות — אז הפולינג הבא רואה אותה שוב, היא
+     כבר לא ב-prev (נסגרה), ולוגיקת המיזוג סופרת אותה כ"חדשה" ומוסיפה מחדש.
+     דרוך: לזכור ID-ים שנסגרו ולסנן אותם *מהמקור*, לא רק מה-state הנוכחי. */
+  const dismissedCallIdsRef = useRef<Set<string>>(new Set());
+  const dismissCallToast = useCallback((id: string) => {
+    dismissedCallIdsRef.current.add(id);
+    setCallToasts((prev) => prev.filter((x) => x.id !== id));
+  }, []);
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
@@ -26568,7 +26578,7 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
           const kept = prev.filter((x) => liveIds.has(x.id));
           const have = new Set(kept.map((x) => x.id));
           const fresh = (list as any[])
-            .filter((c) => !have.has(c.id))
+            .filter((c) => !have.has(c.id) && !dismissedCallIdsRef.current.has(c.id))
             .map((c) => ({ id: c.id, phone: c.phone, customerId: c.customerId ?? null, customerName: c.customer?.name ?? null }));
           if (kept.length === prev.length && fresh.length === 0) return prev;
           return [...kept, ...fresh];
@@ -26746,13 +26756,13 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
                 <div className="text-[12px] text-slate-600 truncate">{ct.customerName || ct.phone}</div>
                 {ct.customerName && <div className="text-[11px] text-slate-400 truncate">{ct.phone}</div>}
                 <button
-                  onClick={() => { if (ct.customerId) void openCallCustomer(ct.customerId); setCallToasts((prev) => prev.filter((x) => x.id !== ct.id)); }}
+                  onClick={() => { if (ct.customerId) void openCallCustomer(ct.customerId); dismissCallToast(ct.id); }}
                   className="mt-2 rounded-lg bg-green-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-green-700"
                 >
                   פתח כרטיס לקוח
                 </button>
               </div>
-              <button onClick={() => setCallToasts((prev) => prev.filter((x) => x.id !== ct.id))} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
+              <button onClick={() => dismissCallToast(ct.id)} className="text-slate-400 hover:text-slate-600"><X className="h-4 w-4" /></button>
             </div>
           ))}
         </div>
