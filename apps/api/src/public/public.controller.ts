@@ -205,11 +205,12 @@ export class PublicController {
    * שתי השיטות (GET ו-POST) כי מרכזיות שונות שולחות אחרת, והמסמך מתיר את שתיהן.
    */
   @Get('call-webhook')
-  async callWebhookGet(@Query() q: Record<string, string>) {
+  async callWebhookGet(@Query() q: Record<string, string>, @Req() req: any) {
+    const params = this.repairMangledQuery(req) ?? q;
     // קישור הקלטה יכול להגיע גם ב-GET (query) — ר' extractRecordingAudio; לא רק
     // ב-POST. בלי זה, ALERT עם קישור שמגיע כ-GET היה מתעלם לגמרי מההקלטה.
-    const audio = await this.extractRecordingAudio(q);
-    return this.handleCallWebhook(q, audio);
+    const audio = await this.extractRecordingAudio(params);
+    return this.handleCallWebhook(params, audio);
   }
 
   /**
@@ -224,12 +225,34 @@ export class PublicController {
   async callWebhookPost(
     @Query() q: Record<string, string>,
     @Body() body: Record<string, string>,
+    @Req() req: any,
     @UploadedFiles() files?: Array<{ buffer: Buffer; mimetype?: string }>,
   ) {
     // הפרמטרים עשויים להגיע ב-query או בגוף — ממזגים, גוף גובר.
-    const params = { ...q, ...(body || {}) };
+    const params = { ...(this.repairMangledQuery(req) ?? q), ...(body || {}) };
     const audio = await this.extractRecordingAudio(params, files);
     return this.handleCallWebhook(params, audio);
+  }
+
+  /**
+   * תיקון תקלה חוזרת מ-BlueBe/CloudPlus (נצפתה 16–17.9): הם בונים את ה-URL
+   * של ה-ALERT כאילו אין query string קודם, ומדביקים פרמטר נוסף עם `?` שני
+   * במקום `&` — למשל `?key=TOKEN?event=start&source_number=...`. פרסר
+   * ה-query הרגיל (Express, מאחורי `@Query()`) מזהה רק את ה-`?` הראשון, ולכן
+   * `event=start` נבלע לתוך הערך של `key` במקום להיות פרמטר עצמאי.
+   *
+   * הפתרון: לקרוא את ה-URL הגולמי (`req.url`), ולהחליף כל `?` אחרי הראשון
+   * ב-`&` לפני הפירוק — כך `?event=start` הופך ל-`&event=start` ומתפרק נכון.
+   * מחזיר `null` אם אין query string בכלל (הקורא נופל חזרה ל-`@Query()`).
+   */
+  private repairMangledQuery(req: any): Record<string, string> | null {
+    const url: string = req?.url || req?.originalUrl || '';
+    const qIndex = url.indexOf('?');
+    if (qIndex === -1) return null;
+    const fixedQuery = url.slice(qIndex + 1).replace(/\?/g, '&');
+    const params: Record<string, string> = {};
+    for (const [k, v] of new URLSearchParams(fixedQuery)) params[k] = v;
+    return params;
   }
 
   /**
