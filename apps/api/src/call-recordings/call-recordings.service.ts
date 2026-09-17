@@ -324,7 +324,7 @@ export class CallRecordingsService {
     // בונים בעצמנו, כי הוא ה-URL האמיתי מהם ולא ניחוש. שיחה שלא נענתה
     // (CANCEL/BUSY/NOANSWER), וכמובן אירוע "תחילה", אין להם הקלטה בכלל.
     const answered = !params.phone_call_status || params.phone_call_status === 'ANSWER';
-    const recordFile = (params.RecordFile || '').trim();
+    const recordFile = this.normalizeRecordingUrl((params.RecordFile || '').trim());
     const audioUrl =
       isStart || !answered
         ? null
@@ -725,12 +725,12 @@ export class CallRecordingsService {
   }
 
   /**
-   * מוריד את קובץ ההקלטה.
+   * מוריד את קובץ ההקלטה דרך `/API/download-file.php` של ה-PBX — בלי session.
    *
-   * שני מקורות: קישור ישיר שהמרכזייה שלחה ב-webhook (RecordFile של BlueBe,
-   * נשמר ב-audioUrl) — מורד כמו שהוא; ורק אם אין כזה, הכתובת שאנחנו בונים
-   * מול `/admin/` של ה-PBX, שדורשת session (מסמך §1.8) ולכן עוברת דרך
-   * CloudPlusClient. עד 17.9 גם קישור ישיר נשלח בטעות למסלול ה-session.
+   * הקישור נלקח מה-webhook (RecordFile, אחרי תיקון המארח — ראה
+   * CloudPlusClient.normalizeRecordFileUrl), ואם אין כזה — נבנה מתוך ה-CDR
+   * של השיחה. מסלול ה-`/admin/` הישן דורש session שנדחה מאיתנו תמיד, ולכן
+   * כבר לא בשימוש כאן.
    *
    * מוגבל ב-25MB, המגבלה של OpenAI.
    */
@@ -738,14 +738,21 @@ export class CallRecordingsService {
     externalId: string;
     audioUrl: string | null;
   }): Promise<{ bytes: Buffer; contentType: string }> {
-    const direct = call.audioUrl && !/\/admin\/\?menu=monitoring/.test(call.audioUrl);
-    const file = direct
-      ? await this.fetchDirectRecording(call.audioUrl!)
-      : await this.cloudplus.downloadRecording(call.externalId);
+    const url =
+      call.audioUrl && /download-file\.php/i.test(call.audioUrl)
+        ? this.cloudplus.normalizeRecordFileUrl(call.audioUrl)
+        : await this.cloudplus.recordingUrlFromCdr(call.externalId);
+    if (!url) throw new Error('לא נמצאה הקלטה לשיחה זו ב-CDR של המרכזייה');
+    const file = await this.fetchDirectRecording(url);
     if (file.bytes.length > 25 * 1024 * 1024) {
       throw new Error('קובץ ההקלטה גדול מ-25MB ואינו נתמך לתמלול');
     }
     return file;
+  }
+
+  /** קישור RecordFile → המארח שבו הקובץ באמת נמצא. ריק נשאר ריק. */
+  normalizeRecordingUrl(url: string): string {
+    return url ? this.cloudplus.normalizeRecordFileUrl(url) : url;
   }
 
   /** המרכזייה עונה 200 גם כשאין קובץ ("File Not Found") — לכן בודקים את התוכן. */

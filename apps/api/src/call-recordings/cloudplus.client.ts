@@ -556,74 +556,39 @@ export class CloudPlusClient {
     return `${this.baseUrl}${this.recordingPath}?${q}`;
   }
 
-  /**
-   * מוריד קובץ הקלטה, דרך אותה שכבת אימות גמישה.
-   *
-   * שונה מ-`get` הרגיל: `get` קורא את גוף התשובה כטקסט לצורך זיהוי שגיאה, וזה
-   * "צורך" את ה-stream — אי אפשר אחר-כך לקרוא אותו כבינארי. לכן ההורדה זקוקה
-   * לתשובה גולמית: קודם קובעים את אופן האימות דרך `resolveAuth`, ואז מבצעים
-   * fetch בודד וקוראים את הגוף פעם אחת בלבד — כטקסט אם זו שגיאה, כבינארי אם קובץ.
-   */
-  async downloadRecording(
-    uniqueId: string,
-  ): Promise<{ bytes: Buffer; contentType: string }> {
-    const auth = await this.resolveAuth();
-    const url = new URL(`${this.baseUrl}${this.recordingPath}`);
-    const headers: Record<string, string> = {};
+  // ── הורדת הקלטה בלי הזדהות (נמצא 17.9) ──
+  //
+  // `/API/download-file.php?fileid=<base64 של הנתיב>` מחזיר את קובץ ה-WAV בלי
+  // session — אבל רק על ה-PBX של הארגון (pbx.cloudplus.co.il). ה-webhook של
+  // BlueBe שולח את אותו קישור עם המארח drp3.bluebe.net, שם הקובץ לא קיים
+  // ("File Not Found"). ה-CDR של השיחה (`/API/cdr.php`, גם הוא בלי הזדהות)
+  // מחזיק את הנתיב המלא ב-userfield, כך שאפשר לבנות את הקישור גם בלי webhook.
 
-    if (auth === 'session') {
-      if (!this.session) this.session = await this.login();
-      headers.Cookie = this.session;
-    } else if (auth === 'token-query') {
-      url.searchParams.set(this.tokenParam, this.token);
-    } else {
-      headers.Authorization = `Bearer ${this.token}`;
-      headers['X-Api-Token'] = this.token;
-    }
-    for (const [k, v] of Object.entries({
-      menu: 'monitoring',
-      action: 'download',
-      id: uniqueId,
-      rawmode: 'yes',
-    })) {
-      url.searchParams.set(k, v);
-    }
-
-    const res = await fetch(url.toString(), { headers }).catch((e) => {
-      throw new Error(`הורדת ההקלטה נכשלה: ${e?.message || e}`);
-    });
-    const contentType = res.headers.get('content-type') || '';
-
-    // קובץ אמיתי מגיע כ-audio/binary; טקסט/HTML = שגיאה (למשל "file not found").
-    if (/text\/|json|html/i.test(contentType)) {
-      const body = await res.text();
-      if (CloudPlusClient.looksLikeError(body)) {
-        // ה-session אולי פג — מאפסים כדי שקריאה הבאה תזהה מחדש.
-        this.session = null;
-        this.resolvedAuth = null;
-      }
-      if (/file not found/i.test(body))
-        throw new Error('לא נמצאה הקלטה לשיחה זו');
-      throw new Error(body.slice(0, 200) || 'הורדת ההקלטה נכשלה');
-    }
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (bytes.length === 0) throw new Error('קובץ ההקלטה ריק');
-    return { bytes, contentType: contentType || 'audio/wav' };
+  private get pbxOrigin(): string {
+    return this.baseUrl || 'https://pbx.cloudplus.co.il';
   }
 
-  /**
-   * קובע (פעם אחת) איזה אופן אימות עובד, ומחזיר אותו.
-   *
-   * מריץ קריאת CDR קצרה כ"בדיקת חיים" דרך `get`, שכבר יודע לנסות את כל האופנים
-   * ולשמור את המנצח ב-`resolvedAuth`. משמש את ההורדה, שאינה יכולה לזהות בעצמה
-   * (התשובה שלה בינארית ולא JSON).
-   */
-  private async resolveAuth(): Promise<AuthMode> {
-    if (this.resolvedAuth) return this.resolvedAuth;
-    const forced = this.authOrder();
-    if (forced.length === 1) return forced[0];
-    const today = new Date().toISOString().slice(0, 10);
-    await this.fetchCdr(today, today).catch(() => undefined); // תופס resolvedAuth כתופעת-לוואי
-    return this.resolvedAuth ?? forced[0];
+  /** קישור RecordFile של BlueBe → אותו קישור על ה-PBX שבו הקובץ באמת נמצא. */
+  normalizeRecordFileUrl(url: string): string {
+    const m = String(url ?? '').match(/\/API\/download-file\.php\?(.+)$/i);
+    return m ? `${this.pbxOrigin}/API/download-file.php?${m[1]}` : url;
+  }
+
+  /** קישור הורדה מתוך ה-CDR של השיחה. null = אין הקלטה (או שהשיחה לא נמצאה). */
+  async recordingUrlFromCdr(uniqueId: string): Promise<string | null> {
+    const res = await fetch(
+      `${this.pbxOrigin}/API/cdr.php?id=${encodeURIComponent(uniqueId)}&Response=yes&RFormat=json`,
+    );
+    let rows: any;
+    try {
+      rows = JSON.parse(await res.text());
+    } catch {
+      return null;
+    }
+    const userfield = String((Array.isArray(rows) ? rows[0] : rows)?.userfield ?? '');
+    const m = userfield.match(/audio:(?:\/var\/spool\/asterisk\/monitor\/)?(.+\.\w+)/);
+    if (!m) return null;
+    const fileid = Buffer.from(m[1]).toString('base64');
+    return `${this.pbxOrigin}/API/download-file.php?fileid=${encodeURIComponent(fileid)}`;
   }
 }

@@ -327,7 +327,7 @@ export class PublicController {
 
     for (const url of namedGuesses) {
       try {
-        const res = await fetch(url.trim());
+        const res = await fetch(this.calls.normalizeRecordingUrl(url.trim()));
         const contentType = res.headers.get('content-type') || '';
         // המרכזייה עונה 200 גם על שגיאה ("File Not Found" / "bad request") —
         // בלי הבדיקה הזו טקסט השגיאה נשלח ל-OpenAI כאילו היה אודיו (17.9).
