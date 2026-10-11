@@ -111,26 +111,48 @@ export class BlogImageService {
    * וכשאין בכלל קריאה למודל (נפילה-חזרה), אותו שילוב בונה את המשפט בעצמו.
    */
   private readonly SUBJECTS = [
-    'a young woman technician',
-    'a young man technician',
-    'a middle-aged woman inspector',
-    'a middle-aged man inspector',
-    'an experienced older male technician',
-    'an experienced older female technician',
+    'a young woman technician with a neat ponytail',
+    'a young man technician, clean-shaven',
+    'a middle-aged woman inspector with glasses',
+    'a middle-aged man inspector with a short beard',
+    'an experienced older male technician with gray hair',
+    'an experienced older female technician with short gray hair',
+    'a woman inspector in her thirties with curly dark hair',
+    'a man technician in his thirties with short dark hair',
+    'a female engineer in her forties, pragmatic look',
+    'a male engineer in his forties with a focused expression',
   ];
   private readonly SETTINGS = [
     'a bright modern Israeli apartment living room',
     'a home kitchen near the counter',
     'a stairwell of a residential apartment building',
     'a garden or backyard next to an irrigation line',
-    'a small office space',
-    'a basement utility or boiler room',
+    'a small office space with glass partitions',
+    'a basement utility or boiler room with exposed pipes',
     'a sunlit rooftop with a water tank in the background',
-    'an underground parking garage',
-    'a school or public-building corridor',
+    'an underground parking garage with concrete columns',
+    'a school or public-building corridor with lockers',
     'a bathroom near the water pipes',
-    'a bedroom near a wall socket',
-    'a building entrance lobby',
+    'a bedroom near a wall socket, bed partially visible',
+    'a building entrance lobby with mailboxes',
+    'a clinic or small medical office waiting area',
+    'a shared mamad / safe room in a residential building',
+    'a renovated top-floor apartment with wooden floors',
+    'a construction site office container, maps on wall',
+    'a small industrial warehouse interior',
+    'a dedicated building electrical cabinet room',
+    'a child\'s bedroom (child not present) near a window',
+    'a kindergarten playroom with small chairs stacked away',
+    'a nursery or small school classroom (no children)',
+    'a modern co-working floor with desks in background',
+    'a residential garage used also for storage',
+    'a hotel-style corridor with carpet',
+    'a shaded building courtyard between two wings',
+    'the back of a restaurant kitchen near the exhaust hood',
+    'a hallway next to an elevator machine room door',
+    'a quiet reading room in a public building',
+    'an attic storage space with sloped ceiling',
+    'a sunroom extension of an Israeli villa',
   ];
   private readonly ANGLES = [
     'a wide shot showing the full room',
@@ -139,14 +161,35 @@ export class BlogImageService {
     'a shot from behind the technician, who faces a wall or fixture',
     'a medium shot at eye level, technician centered',
     'a three-quarter angle shot from one side',
+    'a high angle from a corner of the ceiling, looking down',
+    'a tight waist-up portrait with the room softly out of focus',
+    'a profile shot (side view) of the technician mid-action',
+    'a shallow-focus shot with the instrument in sharp focus and the technician slightly soft',
+  ];
+  /**
+   * ציר-גיוון נוסף: שעה-ביום / איכות אור / פלטת צבעים. בלי זה כל התמונות של
+   * גלית נראות באותה פלטת-צהרים-אפורה גם כשהנושא/המקום/הזווית שונים — מה שגרם
+   * לרצף הבלוגים להרגיש מונוטוני ויזואלית למרות הרנדום.
+   */
+  private readonly ATMOSPHERE = [
+    'warm morning light coming through a window',
+    'soft late-afternoon golden light',
+    'bright balanced midday daylight',
+    'cool neutral indoor daylight with sheer curtains',
+    'overcast soft diffused daylight',
+    'warm interior lamp light mixing with daylight',
+    'crisp winter morning light, slightly cool palette',
+    'end-of-day amber light hitting the back wall',
   ];
 
   private pick<T>(arr: readonly T[]): T {
     return arr[Math.floor(Math.random() * arr.length)];
   }
 
-  /** `count` שילובי דמות/מקום/זווית, בלי חזרה על עצמם בתוך אותה קבוצה. */
-  private randomDirectives(count: number): { subject: string; setting: string; angle: string }[] {
+  /** `count` שילובי דמות/מקום/זווית/אווירה, בלי חזרה על עצמם בתוך אותה קבוצה. */
+  private randomDirectives(
+    count: number,
+  ): { subject: string; setting: string; angle: string; atmosphere: string }[] {
     const shuffle = <T>(arr: readonly T[]): T[] => {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
@@ -158,18 +201,20 @@ export class BlogImageService {
     const subjects = shuffle(this.SUBJECTS);
     const settings = shuffle(this.SETTINGS);
     const angles = shuffle(this.ANGLES);
+    const atmospheres = shuffle(this.ATMOSPHERE);
     return Array.from({ length: count }, (_, i) => ({
       subject: subjects[i % subjects.length],
       setting: settings[i % settings.length],
       angle: angles[i % angles.length],
+      atmosphere: atmospheres[i % atmospheres.length],
     }));
   }
 
   private fallbackScenes(count: number): string[] {
     return this.randomDirectives(count).map(
-      ({ subject, setting, angle }) =>
+      ({ subject, setting, angle, atmosphere }) =>
         `${angle[0].toUpperCase()}${angle.slice(1)} of ${subject} holding a handheld ` +
-        `monitoring instrument and reading its small display, in ${setting}, calm natural lighting.`,
+        `monitoring instrument and reading its small display, in ${setting}, with ${atmosphere}.`,
     );
   }
 
@@ -191,7 +236,8 @@ export class BlogImageService {
     const directiveLines = directives
       .map(
         (d, i) =>
-          `Scene ${i + 1} MUST feature ${d.subject}, in ${d.setting}, shown as ${d.angle}. ` +
+          `Scene ${i + 1} MUST feature ${d.subject}, in ${d.setting}, shown as ${d.angle}, ` +
+          `lit by ${d.atmosphere}. ` +
           `Do not reuse this exact combination in any other scene.`,
       )
       .join('\n');
