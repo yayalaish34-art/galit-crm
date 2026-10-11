@@ -20,8 +20,8 @@ export const GOOGLE_REVIEW_URL_KEY = 'googleReviewUrl';
 
 /**
  * תור בקשות הדירוג המתוזמנות — נשמר ב-SystemSetting כמערך JSON, נשלח ע"י ה-cron
- * (dispatcher) כשמגיע dueAt. בקשת דירוג אחרי דוח מתוזמנת ל-09:00 של יום המחרת
- * (Asia/Jerusalem) במקום להישלח מיד. אותה תבנית כמו feedback.scheduled.
+ * (dispatcher) כשמגיע dueAt. בקשת דירוג מתוזמנת ל-24 שעות בדיוק מרגע שהדוח נשלח
+ * ללקוח, במקום להישלח מיד. אותה תבנית כמו feedback.scheduled.
  */
 export const SCHEDULED_REVIEWS_KEY = 'reviews.scheduled';
 
@@ -35,7 +35,7 @@ export interface ScheduledReviewJob {
   userId: string;
   /** host הבקשה המקורית — לבניית קישור ה-API הציבורי במייל. */
   requestHost?: string | null;
-  /** ISO — מתי לשלוח (09:00 למחרת). */
+  /** ISO — מתי לשלוח (24 שעות מרגע שליחת הדוח). */
   dueAt: string;
   /** מספר ניסיונות שליחה שנכשלו (נופל מהתור אחרי MAX_ATTEMPTS). */
   attempts?: number;
@@ -163,7 +163,7 @@ export class ReviewRequestService {
     }
   }
 
-  // ── תור בקשות דירוג מתוזמנות (09:00 למחרת) ──────────────────────────────────
+  // ── תור בקשות דירוג מתוזמנות (24 שעות מרגע שליחת הדוח) ───────────────────────
 
   /** התור הנוכחי של בקשות הדירוג המתוזמנות. */
   async getScheduledReviews(): Promise<ScheduledReviewJob[]> {
@@ -183,48 +183,25 @@ export class ReviewRequestService {
     });
   }
 
-  /**
-   * מחזיר את ה-timestamp של 09:00 למחרת בשעון ישראל (Asia/Jerusalem), כ-ISO.
-   * מחושב בלי תלות באזור-הזמן של השרת: נגזר ה-offset של ישראל מ-Intl ומורכב UTC.
-   */
-  static nextMorning9IsraelIso(from: Date = new Date()): string {
-    // התאריך המקומי (ישראל) של "מחר".
-    const fmt = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit',
-    });
-    const todayIl = fmt.format(from); // YYYY-MM-DD בישראל
-    const [y, m, d] = todayIl.split('-').map(Number);
-    const tomorrow = new Date(Date.UTC(y, m - 1, d + 1, 9, 0, 0)); // 09:00 "נאיבי" כ-UTC
-    // כמה ישראל מקדימה את UTC באותו יום (2 בחורף / 3 בקיץ) — מתקנים לאותה שעת-קיר.
-    const offsetMin = ReviewRequestService.israelOffsetMinutes(tomorrow);
-    return new Date(tomorrow.getTime() - offsetMin * 60000).toISOString();
-  }
-
-  /** דקות ה-offset של Asia/Jerusalem מ-UTC בזמן נתון (120 בחורף, 180 בקיץ). */
-  private static israelOffsetMinutes(at: Date): number {
-    const dtf = new Intl.DateTimeFormat('en-US', {
-      timeZone: 'Asia/Jerusalem', hour12: false, year: 'numeric', month: '2-digit',
-      day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
-    });
-    const parts = dtf.formatToParts(at);
-    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
-    const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
-    return Math.round((asUtc - at.getTime()) / 60000);
+  /** מחזיר את ה-timestamp של 24 שעות מהרגע הנתון (ברירת מחדל: עכשיו), כ-ISO. */
+  static twentyFourHoursFromNowIso(from: Date = new Date()): string {
+    return new Date(from.getTime() + 24 * 60 * 60 * 1000).toISOString();
   }
 
   /**
-   * הטריגר האוטומטי של בקשת הדירוג: **סיום משימה** (מעבר הסטטוס ל-DONE), מכל מקום —
-   * "סמן הושלם" בדשבורד, סגירה דרך הבוט, או סימון DONE שמתלווה לשליחת דוח.
-   * נקרא מ-TasksService.update ומ-ReportMailService.sendReportEmail.
+   * הטריגר האוטומטי של בקשת הדירוג: **דוח נשלח בפועל ללקוח**
+   * (ReportMailService.sendReportEmail, אחרי שהשליחה הצליחה). מתוזמן ל-24 שעות
+   * בדיוק מרגע השליחה — לא כל מעבר DONE אחר (למשל "סמן הושלם" בדשבורד בלי דוח,
+   * או סגירה דרך הבוט) מפעיל בקשת דירוג.
    *
    * חוקים:
    * - בקשה אחת לכל משימה: אם כבר נשלחה בקשה למשימה הזו (רשומת ReviewRequest) או
-   *   שכבר יש עבודה בתור — לא מתזמנים שוב (גם אם המשימה נפתחה ונסגרה מחדש).
-   * - הנמען: toEmail שנמסר במפורש (למשל נמען הדוח), אחרת מייל הלקוח בכרטיס,
+   *   שכבר יש עבודה בתור — לא מתזמנים שוב (גם אם דוח נוסף נשלח לאותה משימה).
+   * - הנמען: toEmail שנמסר במפורש (נמען הדוח בפועל), אחרת מייל הלקוח בכרטיס,
    *   אחרת מייל איש הקשר הראשי. בלי מייל תקין — לא נשלח כלום.
-   * - השולח: מי שסגר את המשימה (actorUserId), אחרת בעל המשימה. המייל יוצא מה-Outlook שלו.
+   * - השולח: מי ששלח את הדוח (actorUserId), אחרת בעל המשימה. המייל יוצא מה-Outlook שלו.
    * - לקוח שסימן allowEmail=false לא מקבל בקשת דירוג.
-   * best-effort: לא זורק, כדי לא להפיל את עדכון המשימה.
+   * best-effort: לא זורק, כדי לא להפיל את שליחת הדוח.
    */
   async enqueueForCompletedTask(
     taskId: string,
@@ -291,8 +268,8 @@ export class ReviewRequestService {
   }
 
   /**
-   * מתזמן בקשת דירוג ל-09:00 למחרת (במקום שליחה מיידית). דדופ לפי taskId — אם
-   * כבר יש עבודה מתוזמנת לאותה משימה, לא מוסיפים כפילות. לא זורק.
+   * מתזמן בקשת דירוג ל-24 שעות בדיוק מעכשיו (במקום שליחה מיידית). דדופ לפי
+   * taskId — אם כבר יש עבודה מתוזמנת לאותה משימה, לא מוסיפים כפילות. לא זורק.
    */
   async enqueueReviewRequest(opts: SendReviewRequestOpts): Promise<{ scheduled: boolean; dueAt?: string }> {
     const toEmail = (opts.toEmail || '').trim();
@@ -305,7 +282,7 @@ export class ReviewRequestService {
       if (opts.taskId && jobs.some((j) => j.taskId && j.taskId === opts.taskId)) {
         return { scheduled: false }; // כבר מתוזמן לאותה משימה
       }
-      const dueAt = ReviewRequestService.nextMorning9IsraelIso();
+      const dueAt = ReviewRequestService.twentyFourHoursFromNowIso();
       jobs.push({
         toEmail,
         customerName: opts.customerName || null,

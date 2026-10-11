@@ -225,6 +225,36 @@ export class UsersService {
     return this.prisma.user.update({ where: { id }, data: normalized, omit: OMIT_SENSITIVE });
   }
 
+  /**
+   * תפיסת שלוחת מרכזייה על ידי העובד המחובר. כל עובד יכול לעבור לכל עמדה פיזית
+   * שהוא רוצה (יורם עובר ל-205 כשהוא יושב שם) — אם משתמש אחר כבר רשום על אותה
+   * שלוחה, הוא נמחק משם באותה טרנזקציה, כדי שלא נקבל שני עובדים על אותה שלוחה.
+   * ערך ריק מנקה את השלוחה של המשתמש המחובר. אימות בסיסי: ספרות בלבד (או רשימה
+   * מופרדת בפסיקים — model התומך בכמה שלוחות שנשמר מהתקופה הקודמת).
+   */
+  async claimPbxExtension(userId: string | undefined, raw: string | null | undefined) {
+    if (!userId) throw new UnauthorizedException('Missing user id');
+    const ext = (raw ?? '').toString().trim();
+    if (ext && !/^\d{2,6}(\s*,\s*\d{2,6})*$/.test(ext)) {
+      throw new BadRequestException('שלוחה חייבת להיות ספרות בלבד');
+    }
+    const normalized = ext || null;
+    const result = await this.prisma.$transaction(async (tx) => {
+      if (normalized) {
+        await tx.user.updateMany({
+          where: { pbxExtension: normalized, NOT: { id: userId } },
+          data: { pbxExtension: null },
+        });
+      }
+      return tx.user.update({
+        where: { id: userId },
+        data: { pbxExtension: normalized },
+        select: { id: true, pbxExtension: true },
+      });
+    });
+    return { id: result.id, pbxExtension: result.pbxExtension };
+  }
+
   /** Set or clear the user's signature image (base64 in, stored as bytes). */
   async setSignatureImage(
     id: string,

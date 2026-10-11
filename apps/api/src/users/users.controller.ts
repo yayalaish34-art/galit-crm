@@ -22,6 +22,18 @@ export class UsersController {
     return this.usersService.changeOwnPassword(req.user?.id, body?.currentPassword, body?.newPassword);
   }
 
+  /**
+   * תפיסת שלוחת מרכזייה עצמית — העובד המחובר עובר לעמדה פיזית אחרת (למשל יורם
+   * ל-205). אם משתמש אחר רשום על אותה שלוחה הוא נמחק משם אוטומטית. ערך ריק =
+   * ניקוי השלוחה שלי. פתוח לכל התפקידים (self-only — ה-userId מגיע מה-JWT).
+   */
+  @Post('me/claim-extension')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
+  claimExtension(@Body() body: any, @Req() req: any) {
+    return this.usersService.claimPbxExtension(req.user?.id, body?.extension);
+  }
+
   @Post('transfer-data')
   @UseGuards(RolesGuard)
   @Roles('ADMIN', 'MANAGER')

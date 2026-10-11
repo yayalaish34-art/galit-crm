@@ -8,6 +8,7 @@ import { CallTranscriptsSection } from '../call-transcripts-section';
 import { dialCustomer } from '../lib/pbx-dial';
 import { SignedQuotesSection } from '../signed-quotes-section';
 import { AffiliatesAdminPage } from '../affiliates-admin-section';
+import { MyB2BSalesPage } from '../my-b2b-sales-section';
 import { SendReportModal } from '../send-report-modal';
 import { MarkReportSentModal } from '../mark-report-sent-modal';
 import { QuoteNewScreen } from '../quotes/new/quote-new-screen';
@@ -25,7 +26,6 @@ import { buildQuoteDocxMergeBody } from '../lib/docx-merge-payload';
 import { SERVICE_CATEGORIES, getSubgroupIdForSku, getCategoryForSku, getCategoryName, getSubgroupNameForSku, mergeCatalogIntoCategories, type CatalogRow } from '../lib/service-categories';
 import { isRadonTestSku, isRadonKitSku } from '../lib/radon-tracks';
 import { formatIsraeliPhoneDisplay } from '../lib/phone-format';
-import { RadonFlowPanel } from '../radon/radon-flow-panel';
 import { RadonKitTracker } from '../radon/radon-kit-tracker';
 import { CollectionPaymentTermsModal } from '../collection-payment-terms-modal';
 import { CaspitDocumentEditorModal, type CaspitDocument } from '../caspit-document-editor-modal';
@@ -835,6 +835,33 @@ const timelineSeed: TimelineEvent[] = [
     description: 'נקבע ביקור בית לשבוע הבא.',
   },
 ];
+
+/**
+ * בחירת איש הקשר "האמיתי" של לקוח עסקי מתוך רשימת אנשי הקשר של המשימה.
+ * בייבוא הלגסי נוצרו רשומות CustomerContact שהן בעצם החברה עצמה (שם החברה + הטלפון
+ * הכללי), ולכן מסננים לפי שמות החברה. סדר עדיפות: זה שנבחר בכרטיס → ראשי-עם-נייד →
+ * נייד → ראשי → הראשון.
+ */
+function pickRealTaskContact<C extends { id: string; fullName: string; phone: string; isPrimary: boolean }>(
+  contacts: C[],
+  companyNames: Array<string | null | undefined>,
+  selectedId?: string | null,
+): C | null {
+  const norm = (s?: string | null) => (s || '').toString().replace(/[^0-9א-תA-Za-z]/g, '');
+  const aliases = new Set(companyNames.map(norm).filter(Boolean));
+  const isCompanyItself = (name?: string | null) => {
+    const n = norm(name);
+    return !!n && aliases.has(n);
+  };
+  const isMobile = (p?: string | null) => /^(972|0)?5\d{8}$/.test((p || '').replace(/\D/g, ''));
+  const real = contacts.filter((c) => (c.fullName?.trim() || c.phone?.trim()) && !isCompanyItself(c.fullName));
+  return real.find((c) => c.id && c.id === selectedId)
+    || real.find((c) => c.isPrimary && isMobile(c.phone))
+    || real.find((c) => isMobile(c.phone))
+    || real.find((c) => c.isPrimary)
+    || real[0]
+    || null;
+}
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
@@ -2282,7 +2309,7 @@ function canAccess(role: AppUserRole, key: string) {
   if (key === 'users' || key === 'feedback') return role === 'admin';
   // סקשן "לקוחות שסווגו כלא רלוונטי" — אדמין ומנהל (כרגע מוסתר לגמרי).
   if (key === 'not-relevant') return SHOW_NOT_RELEVANT_CUSTOMERS && (role === 'admin' || role === 'manager');
-  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'quote-new', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new', 'affiliates'];
+  const FULL = ['dashboard', 'leads', 'pipeline', 'customers', 'quotes', 'quote-new', 'opportunities', 'projects', 'reports', 'documents', 'lab', 'tests', 'tasks', 'alerts', 'settings', 'fieldSchedule', 'interaction-new', 'order-new', 'affiliates', 'my-b2b-sales'];
   return FULL.includes(key);
 }
 
@@ -4912,6 +4939,9 @@ function ManagerDashboard({
   const [data, setData] = useState<ManagerDashboardPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // שלוחת מרכזייה של המנהל/אדמין המחובר — נטען פעם אחת מ-/dashboard/me ומתעדכן
+  // בכל פעם שהוא תופס שלוחה אחרת ב-PbxExtensionPicker.
+  const [myExtension, setMyExtension] = useState<string | null>(null);
   // פתיחת רשימת הביקורות (לחיצה על כרטיס "שביעות רצון") — מציג את הלקוחות עם הדירוג והסיבה.
   const [reviewsOpen, setReviewsOpen] = useState(false);
   // עריכת יעד המכירות השנתי (כרטיס "עמידה ביעד מכירות שנתי").
@@ -5091,6 +5121,23 @@ function ManagerDashboard({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.id, currentUser.role]);
+
+  // טעינת שלוחת המרכזייה של המחובר — כדי שה-PbxExtensionPicker ידע מה
+  // להציג כברירת מחדל (האדמין רואה את המנהל של עצמו, לא את "אין שלוחה").
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await apiFetch(apiUrl('/dashboard/me'), { authUser: currentUser });
+        if (!res.ok || !alive) return;
+        const payload = (await res.json()) as { user?: { pbxExtension?: string | null } };
+        setMyExtension((payload?.user?.pbxExtension || '').trim() || null);
+      } catch {
+        /* ignore — the picker still works without a prefilled value */
+      }
+    })();
+    return () => { alive = false; };
+  }, [currentUser]);
 
   // פותח את מודל עריכת היעד החודשי, מאותחל ליעד הנוכחי.
   const openTargetModal = () => {
@@ -5289,6 +5336,17 @@ function ManagerDashboard({
   return (
     <div className="rounded-[30px] bg-[#f5faf6] p-4 md:p-4" dir="rtl">
       <div className="space-y-4">
+        {/* שורה עליונה: בורר שלוחת מרכזייה — כל מנהל/אדמין רואה את השלוחה שלו
+            וכפתור להחליפה (לדריסת שלוחה של עובד אחר יש אישור). */}
+        <div className="flex flex-wrap items-center justify-end gap-2 rounded-xl bg-white px-3 py-2 shadow-[0_6px_18px_rgba(15,23,42,0.05)]">
+          <span className="text-xs text-slate-500">שלוחת מרכזייה שלי:</span>
+          <PbxExtensionPicker
+            currentUser={currentUser}
+            currentExtension={myExtension}
+            onSaved={setMyExtension}
+            variant="light"
+          />
+        </div>
         {/* 6 קוביות → שתי שורות של 3 ב-xl (במקום 4+2 עקום) */}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {kpiCards.map((kpi) => {
@@ -6407,6 +6465,186 @@ type MeDashboardPayload = {
   } | null;
 };
 
+/**
+ * בורר שלוחת מרכזייה — מופיע למעלה בדשבורד של *כל* עובד, כדי שהעובד יוכל לעבור
+ * בעצמו לעמדה פיזית אחרת (יורם ל-205) בלי להמתין למנהל שיעדכן. בחירת שלוחה
+ * שתפוסה בידי עובד אחר מציגה אישור ואז "דורסת" אותו (השלוחה שלו מתנקה).
+ *
+ * רשימת השלוחות = 201–220 (טווח המרכזייה הסטנדרטי) + כל שלוחה שכבר בשימוש בפועל
+ * גם מחוץ לטווח, כדי שעובד שלו שלוחה חריגה (למשל 300) יראה אותה בכל זאת.
+ */
+function PbxExtensionPicker({
+  currentUser,
+  currentExtension,
+  onSaved,
+  variant,
+}: {
+  currentUser: AppUser;
+  currentExtension: string | null | undefined;
+  onSaved: (next: string | null) => void;
+  variant: 'hero' | 'light';
+}) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const [owners, setOwners] = useState<Map<string, string>>(new Map());
+  const current = (currentExtension || '').trim();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiFetch(apiUrl('/users'), { authUser: currentUser });
+        if (!res.ok) return;
+        const list = (await res.json()) as Array<{ name: string; pbxExtension?: string | null; status?: string }>;
+        const m = new Map<string, string>();
+        for (const u of list) {
+          if (((u.status || '') as string).includes('לא פעיל')) continue;
+          const raw = (u.pbxExtension || '').trim();
+          if (!raw) continue;
+          for (const part of raw.split(',')) {
+            const ext = part.trim();
+            if (ext) m.set(ext, u.name);
+          }
+        }
+        setOwners(m);
+      } catch {
+        /* ignore — the dropdown still works without owner labels */
+      }
+    })();
+  }, [currentUser]);
+
+  const options = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 201; i <= 220; i += 1) set.add(String(i));
+    for (const k of owners.keys()) set.add(k);
+    if (current) set.add(current);
+    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  }, [owners, current]);
+
+  const pick = async (next: string) => {
+    const value = next.trim();
+    if (value === current) {
+      setOpen(false);
+      return;
+    }
+    const owner = value ? owners.get(value) : '';
+    if (owner && owner !== currentUser.name) {
+      const ok = typeof window !== 'undefined'
+        ? window.confirm(`שלוחה ${value} מוקצית כרגע ל-${owner}. להעביר אותה אליך? ${owner} יישאר ללא שלוחה.`)
+        : true;
+      if (!ok) {
+        setOpen(false);
+        return;
+      }
+    }
+    setSaving(true);
+    setErr('');
+    try {
+      const res = await apiFetch(apiUrl('/users/me/claim-extension'), {
+        method: 'POST',
+        authUser: currentUser,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ extension: value }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null as any);
+        throw new Error(data?.message || `השרת החזיר ${res.status}`);
+      }
+      const data = (await res.json()) as { pbxExtension?: string | null };
+      const saved = (data?.pbxExtension || '').trim() || null;
+      setOwners((prev) => {
+        const m = new Map(prev);
+        for (const [k, v] of Array.from(m.entries())) {
+          if (v === currentUser.name) m.delete(k);
+        }
+        if (value) {
+          for (const [k] of Array.from(m.entries())) {
+            if (k === value) m.delete(k);
+          }
+          m.set(value, currentUser.name);
+        }
+        return m;
+      });
+      onSaved(saved);
+      setOpen(false);
+    } catch (e: any) {
+      setErr(e?.message || 'שמירת השלוחה נכשלה');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const label = current ? `שלוחה ${current}` : 'בחר שלוחה';
+  const btnClass = variant === 'hero'
+    ? 'inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white hover:bg-white/30'
+    : 'inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50';
+
+  return (
+    <div className="relative inline-flex">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={btnClass}
+        disabled={saving}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <PhoneCall className="h-3.5 w-3.5" />
+        <span>{label}</span>
+        <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+      </button>
+      {open && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="absolute right-0 top-full z-50 mt-1 max-h-80 w-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 text-right text-sm text-slate-900 shadow-xl"
+            role="listbox"
+          >
+            {err && <div className="rounded px-2 py-1 text-xs text-rose-600">{err}</div>}
+            <button
+              type="button"
+              onClick={() => { void pick(''); }}
+              className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-100"
+              disabled={saving}
+            >
+              <span className="text-slate-500">— ללא שלוחה —</span>
+              {!current && <Check className="h-4 w-4 text-emerald-600" />}
+            </button>
+            <div className="my-1 h-px bg-slate-100" />
+            {options.map((ext) => {
+              const owner = owners.get(ext);
+              const isMine = ext === current;
+              return (
+                <button
+                  key={ext}
+                  type="button"
+                  onClick={() => { void pick(ext); }}
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 hover:bg-slate-100"
+                  disabled={saving}
+                >
+                  <span className="flex items-baseline gap-2">
+                    <span className="font-semibold">{ext}</span>
+                    {owner && (
+                      <span className={cn('text-xs', isMine ? 'text-emerald-700' : 'text-slate-500')}>
+                        {isMine ? '(אני)' : owner}
+                      </span>
+                    )}
+                  </span>
+                  {isMine && <Check className="h-4 w-4 text-emerald-600" />}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** כרטיס מדד אישי — אייקון צבעוני, מספר גדול, תווית והערה. */
 function EmployeeStatCard({
   title,
@@ -6716,6 +6954,9 @@ function DashboardPage({
   const todayLabel = new Date().toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const pbxExtension = (me?.user.pbxExtension || '').trim();
   const pbxExtensionLabel = pbxExtension.includes(',') ? 'שלוחות מרכזייה' : 'שלוחת מרכזייה';
+  const onExtensionSaved = useCallback((next: string | null) => {
+    setMe((prev) => (prev ? { ...prev, user: { ...prev.user, pbxExtension: next } } : prev));
+  }, []);
 
   const myTasks = useMemo(
     () =>
@@ -6752,9 +6993,15 @@ function DashboardPage({
               {greeting}{firstName ? `, ${firstName}` : ''}
             </h1>
             <p className="mt-1 text-sm text-white/85">סקירת הביצועים האישית שלך — הנתונים מתעדכנים ישירות ממסד הנתונים.</p>
-            {pbxExtension && (
-              <p className="mt-1 text-xs text-white/70">{pbxExtensionLabel}: {pbxExtension}</p>
-            )}
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-white/80">
+              <span>{pbxExtensionLabel}:</span>
+              <PbxExtensionPicker
+                currentUser={currentUser}
+                currentExtension={pbxExtension}
+                onSaved={onExtensionSaved}
+                variant="hero"
+              />
+            </div>
           </div>
           <div className="flex flex-wrap gap-3">
             <div className="rounded-xl bg-white/15 px-4 py-2 backdrop-blur-sm">
@@ -17442,8 +17689,6 @@ function TasksPage({
     }
   };
 
-  /* זרימת ראדון: המשימה שעבורה פתוח פאנל הראדון (רק לקודי בדיקות ראדון) */
-  const [radonPanelTask, setRadonPanelTask] = useState<{ taskId: string; sku: string; customerId: string | null } | null>(null);
   /* ערכת ראדון: אין state כאן — כל מחזור החיים (שליחה, אישור הלקוח, ספירה
    * לאחור, סיום) חי ב-<RadonKitTracker /> בסרגל הימני, והמצב מגיע מהשרת. */
   /* authUser יציב לרכיבי הראדון.
@@ -20555,6 +20800,19 @@ function TasksPage({
                               closed: `הטיפול ב${bnContact}${bnFromCo} הושלם`,
                             };
                             const bnText = bnTexts[stageKey] || t.title;
+                            /* "התקשר עכשיו" מחייג לאיש הקשר של החברה, לא לטלפון הכללי שלה.
+                               ללקוח עסקי בוחרים את איש הקשר האמיתי (כמו בפולואפ); ללקוח פרטי / ליד —
+                               הטלפון של האדם עצמו. נופלים לטלפון החברה רק כשאין לאיש הקשר מספר. */
+                            if (!isPrivateGate && t.customerId && ccContactsGate.length === 0) void hydrateTaskContacts(t.id, t.customerId);
+                            const bnDialContact = isPrivateGate ? null : pickRealTaskContact(
+                              ccContactsGate,
+                              [fdGate.company, linkedCustomerForGate?.name, (linkedCustomerForGate as any)?.companyname, t.leadCompany, t.customerName],
+                              (fdGate as any).contactId,
+                            );
+                            const bnDialPhone = bnDialContact?.phone || contactPhone;
+                            const bnDialTitle = bnDialContact?.phone
+                              ? `חיוג אל ${bnDialContact.fullName || 'איש הקשר'} · ${bnDialContact.phone}`
+                              : bnDialPhone;
                             return (
                               <div className="flex-shrink-0 flex items-center gap-3 px-4" style={{ height: 56, background: `linear-gradient(135deg, ${stageColor} 0%, ${stageColor}cc 100%)`, direction: 'rtl' }}>
                                 <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
@@ -20562,12 +20820,13 @@ function TasksPage({
                                   <div style={{ fontSize: 14, fontWeight: 800, color: '#fff', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bnText}</div>
                                   <span style={{ display: 'inline-flex', alignItems: 'center', marginTop: 3, borderRadius: 20, padding: '1px 8px', fontSize: 10, fontWeight: 700, background: 'rgba(255,255,255,0.2)', color: '#fff' }}>{taskTypeLabel(t.type || 'GENERAL')}</span>
                                 </div>
-                                {contactPhone && stageKey !== 'closed' && (
+                                {bnDialPhone && stageKey !== 'closed' && (
                                   <button
                                     type="button"
+                                    title={bnDialTitle}
                                     onClick={async () => {
                                       // חיוג דרך המרכזייה (מוקלט + מתומלל); נפילה ל-tel: כשאין מרכזייה/שלוחה.
-                                      const r = await dialCustomer(contactPhone, currentUser);
+                                      const r = await dialCustomer(bnDialPhone, currentUser);
                                       if (r.via === 'pbx' && r.message) alert(r.message);
                                       // הנפילה ל-tel: פותחת חייגן ולכן *נראית* כמו הצלחה — אבל השיחה
                                       // לא עוברת במרכזייה ולא תוקלט. אומרים את זה במפורש.
@@ -21700,12 +21959,6 @@ function TasksPage({
                                           // כי detectStep מחזיר אז שלב 2 והמשתמש היה "נזרק" מבחירת השירות מיד.
                                           // ההתקדמות נעשית ידנית בכפתור "מעבר לשיחת מכירה" (מופעל כשיש productName).
                                           updateTaskField(t.id, { productName: svcId });
-                                          // בחירת שירות ראדון פותחת מיד את זרימת הראדון (שאלון → מסלול → גלאים),
-                                          // במקום לחכות לשלב "תיאום". הפאנל עדיין זמין גם שם.
-                                          // לערכות אין זרימה — שם הפעולה היחידה היא תזכורת בשלב הביצוע.
-                                          if (isRadonTestSku(svcId) && !isRadonKitSku(svcId)) {
-                                            setRadonPanelTask({ taskId: t.id, sku: String(svcId).trim(), customerId: t.customerId ?? null });
-                                          }
                                           const custObj = customers.find((c) => c.id === t.customerId);
                                           const custName = t.leadName || t.customerName || custObj?.name || 'הלקוח';
                                           const fixedServiceInfo = getServiceInfo(svcId, activeCat.id);
@@ -22248,18 +22501,12 @@ function TasksPage({
                               const n = normNameGate(name);
                               return !!n && companyAliasesGate.has(n);
                             };
-                            const isMobileGate = (p?: string | null) => /^(972|0)?5\d{8}$/.test((p || '').replace(/\D/g, ''));
-                            // אנשי קשר "אמיתיים" = לא החברה עצמה, ויש להם שם או טלפון.
-                            const realContactsGate = ccContactsGate.filter(
-                              (c) => (c.fullName?.trim() || c.phone?.trim()) && !isCompanyItselfGate(c.fullName),
-                            );
                             // איש הקשר: קודם זה שנבחר בכרטיס; אחרת ראשי-עם-נייד → נייד → ראשי → הראשון.
-                            const fu3PrimaryContact = realContactsGate.find((c) => c.id && c.id === (fdGate as any).contactId)
-                              || realContactsGate.find((c) => c.isPrimary && isMobileGate(c.phone))
-                              || realContactsGate.find((c) => isMobileGate(c.phone))
-                              || realContactsGate.find((c) => c.isPrimary)
-                              || realContactsGate[0]
-                              || null;
+                            const fu3PrimaryContact = pickRealTaskContact(
+                              ccContactsGate,
+                              [fu3CompanyName, linkedCustomerForGate?.name, (linkedCustomerForGate as any)?.companyname, t.leadCompany, t.customerName],
+                              (fdGate as any).contactId,
+                            );
                             // שם איש הקשר — רק ממקורות של איש קשר אמיתי. לא נופלים ל-followupCustomerName
                             // ולא ל-contactName שהוא שם החברה, כדי לא להציג את שם החברה כאיש קשר.
                             const fu3ContactName = (
@@ -23188,29 +23435,6 @@ function TasksPage({
                                       ואין לה שלב תיאום, אבל יש לה 90 יום שצריך לראות לאורכם.
                                       ראה <RadonKitTracker /> בסרגל הימני. ── */}
 
-                                  {/* ── זרימת ראדון — רק לבדיקות ראדון שאינן ערכה (10044 / 10017) ── */}
-                                  {isRadonTestSku(t.productName) && !isRadonKitSku(t.productName) && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setRadonPanelTask({
-                                        taskId: t.id,
-                                        sku: String(t.productName ?? '').trim(),
-                                        customerId: t.customerId ?? null,
-                                      })}
-                                      className="flex w-full items-center gap-2 rounded-xl border border-violet-200 bg-violet-50/70 p-3.5 text-right transition hover:border-violet-300 hover:bg-violet-100/70"
-                                    >
-                                      <ClipboardList className="h-4 w-4 shrink-0 text-violet-700" />
-                                      <span className="min-w-0">
-                                        <span className="block text-[13px] font-bold text-violet-800">
-                                          פתח זרימת בדיקת ראדון
-                                        </span>
-                                        <span className="mt-0.5 block text-[11px] font-semibold text-violet-700">
-                                          שאלון פתיחה, קביעת מסלול, וניהול גלאים
-                                        </span>
-                                      </span>
-                                    </button>
-                                  )}
-
                                   {/* ── צ'קליסט הנחיות ללקוח — רק לבדיקות איכות אוויר שיש להן נוסח הנחיות ── */}
                                   {preVisitTest && (() => {
                                     // התזמון מוצג רק אחרי שנבחר תאריך; המייל נשלח 09:00 ביום שלפני.
@@ -23741,26 +23965,8 @@ function TasksPage({
 
                           </div>{/* end 3-col panel */}
 
-                          {/* ── מודאלי הראדון ──
-                              חייבים לשבת כאן, מחוץ לשרשרת התנאים של currentStep.
-                              הכפתורים שפותחים אותם ("תזכורת החזרת ערכה", "זרימת ראדון")
-                              מרונדרים בשלב 4 (תיאום), בעוד שהמודאלים ישבו קודם בתוך ענף
-                              שלב 5 (ביצוע) — ולכן לחיצה על הכפתור עדכנה את ה-state אבל
-                              שום דבר לא נפתח, כי המודאל כלל לא היה מורכב באותו שלב.
-                              שניהם overlay עם position:fixed, ולכן מיקומם ב-DOM לא משנה. */}
-                          {radonPanelTask?.taskId === t.id && (
-                            <RadonFlowPanel
-                              taskId={radonPanelTask.taskId}
-                              sku={radonPanelTask.sku}
-                              customerId={radonPanelTask.customerId}
-                              authUser={radonAuthUser}
-                              onClose={() => setRadonPanelTask(null)}
-                            />
-                          )}
-
-                          {/* המודאל של "תזכורת החזרת ערכה" הוסר יחד עם הכפתור שפתח אותו:
-                              תזכורת ההחזרה כבר לא נדרכת ידנית אלא נקבעת אוטומטית ל-90 יום
-                              מתאריך ההתקנה שהלקוח מאשר, ונוסחה מוצג ב-<RadonKitTracker />. */}
+                          {/* זרימת שאלון ראדון הוסרה — אין צורך בטופס הזה; מעקב הערכה
+                              ומסלול הראדון מתנהלים דרך <RadonKitTracker /> בסרגל הימני. */}
 
                         </div>
                       </td>
@@ -27608,6 +27814,9 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
           {current === 'tests' && canAccess(currentUser.role, 'tests') && <EnvironmentalTestsPage />}
           {current === 'affiliates' && canAccess(currentUser.role, 'affiliates') && (
             <AffiliatesAdminPage currentUser={currentUser} />
+          )}
+          {current === 'my-b2b-sales' && canAccess(currentUser.role, 'my-b2b-sales') && (
+            <MyB2BSalesPage currentUser={currentUser} />
           )}
           {current === 'tasks' && canAccess(currentUser.role, 'tasks') && (
             <TasksPage

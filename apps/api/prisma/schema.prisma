@@ -1848,12 +1848,19 @@ model Affiliate {
   email         String?
   phone         String?
   isActive      Boolean  @default(true)
+  /// איש המכירות הפנימי שגייס את החברה (קישור רופף ל-User, בלי FK).
+  recruitedByUserId String?
+  /// הערות מעקב פנימיות של איש המכירות (מופיעות רק בדשבורד הפנימי).
+  salesNotes        String?
+  /// תזכורת לפולו-אפ הבא עם החברה.
+  nextFollowupAt    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   referrals AffiliateReferral[]
 
   @@index([isActive])
+  @@index([recruitedByUserId])
 }
 
 /// סטטוס ההפניה לאורך המשפך.

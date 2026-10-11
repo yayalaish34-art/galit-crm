@@ -3408,6 +3408,32 @@ export function QuoteNewScreen({
     setMergeTemplateOpen(true);
   }
 
+  /**
+   * מגשר בין בורר התבניות (רב-בחירה) לבין מסלול המיזוג.
+   * - תבנית אחת → המסלול הרגיל (handleTemplateSelected) — בדיוק כמו קודם.
+   * - כמה תבניות → מיזוג משולב דרך /quote-templates/merge-docx-combined, כאשר rows[0] היא
+   *   תבנית הבסיס (הפורמט שלה נשמר) והשאר נשזרות אליה דרך GPT.
+   */
+  async function handleTemplatesConfirmed(rows: QuoteLookupRow[]) {
+    if (!rows.length) return;
+    if (rows.length === 1) {
+      await handleTemplateSelected(rows[0]);
+      return;
+    }
+    const user = getSessionUser();
+    if (!user) {
+      alert('אין משתמש מחובר');
+      return;
+    }
+    // מיזוג משולב דורש DOCX בכל אחת מהתבניות — ה-filter מראש בבורר כבר אמור להבטיח זאת
+    // (רק תבניות עם docxTemplatePath או עם HTML content מוצגות), אבל נבדוק דקה פה כדי להימנע
+    // משגיאה סתומה מהשרת לגבי התבנית הראשונה דווקא.
+    const base = rows[0];
+    setQuoteTemplateId(base.id);
+    setStatusMsg(`מיזוג משולב (${rows.length} תבניות) — תבנית בסיס: ${base.label}…`);
+    await handleDocxMerge(base.id, user, rows.map((r) => r.id));
+  }
+
   async function handleTemplateSelected(row: QuoteLookupRow) {
     const user = getSessionUser();
     if (!user) {
@@ -3511,8 +3537,16 @@ export function QuoteNewScreen({
   /**
    * מסלול מיזוג DOCX אמיתי: שולח בקשה ל-API שמבצע מיזוג בצד השרת
    * ומחזיר קובץ Word (.docx) אמיתי להורדה ישירה.
+   *
+   * `combineTemplateIds` (אופציונלי) — כאשר המשתמש סימן יותר מתבנית אחת: הראשון הוא
+   * תבנית הבסיס (הפורמט שלה נשמר) והשאר ממוזגים דרך GPT לפסקאות הנרטיביות של
+   * תבנית הבסיס. אם לא ניתן — זה מיזוג רגיל של תבנית אחת.
    */
-  async function handleDocxMerge(templateId: string, user: { id: string; role: string }) {
+  async function handleDocxMerge(
+    templateId: string,
+    user: { id: string; role: string },
+    combineTemplateIds?: string[],
+  ) {
     // Ensure the draft is saved first so the generated DOCX can be linked to a quote record
     if (!quoteIdRef.current && customerId) {
       await silentSaveDraft();
@@ -3608,8 +3642,19 @@ export function QuoteNewScreen({
       items: mappedItems,
     };
 
+    // מיזוג משולב (כמה תבניות) מופעל כש-combineTemplateIds מכיל יותר מ-id אחד.
+    // ה-API הנפרד (merge-docx-combined) מצפה ל-templateIds כחלק מה-body.
+    const isCombined = (combineTemplateIds?.length ?? 0) > 1;
+    if (isCombined) {
+      (mergeData as Record<string, unknown>).templateIds = combineTemplateIds;
+    }
+
     try {
-      const res = await apiFetch(apiUrl(`/quote-templates/${templateId}/merge-docx`), {
+      // מיזוג רגיל: /quote-templates/:id/merge-docx. מיזוג משולב: /quote-templates/merge-docx-combined.
+      const mergeUrl = isCombined
+        ? apiUrl('/quote-templates/merge-docx-combined')
+        : apiUrl(`/quote-templates/${templateId}/merge-docx`);
+      const res = await apiFetch(mergeUrl, {
         authUser: user,
         method: 'POST',
         body: JSON.stringify(mergeData),
@@ -4815,12 +4860,16 @@ export function QuoteNewScreen({
       {mergeTemplateOpen && (
         <QuoteLookupModal
           open={mergeTemplateOpen}
-          title="בחירת תבנית להצעת מחיר"
+          title="בחירת תבניות למיזוג"
           rows={mergeTemplateRows}
           onClose={() => setMergeTemplateOpen(false)}
-          onSelect={(row) => {
+          /* onSelect לא נקרא במצב multiSelect — נדרש רק לחתימת הפרופס. */
+          onSelect={() => {}}
+          multiSelect
+          onConfirmMulti={(rows) => {
             setMergeTemplateOpen(false);
-            if (row) handleTemplateSelected(row);
+            if (!rows.length) return;
+            handleTemplatesConfirmed(rows);
           }}
           allowClear={false}
           emptyMessage={mergeTemplateLoading ? 'טוען תבניות...' : 'אין תבניות פעילות'}

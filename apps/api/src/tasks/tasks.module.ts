@@ -6,10 +6,9 @@ import { QuotesModule } from '../quotes/quotes.module';
 import { MicrosoftModule } from '../microsoft/microsoft.module';
 import { AffiliateModule } from '../affiliate/affiliate.module';
 import { PreVisitEmailService } from './pre-visit-email.service';
-import { ReviewsModule } from '../reviews/reviews.module';
 
 @Module({
-  imports: [PrismaModule, QuotesModule, MicrosoftModule, AffiliateModule, ReviewsModule],
+  imports: [PrismaModule, QuotesModule, MicrosoftModule, AffiliateModule],
   controllers: [TasksController],
   providers: [TasksService, PreVisitEmailService],
 })

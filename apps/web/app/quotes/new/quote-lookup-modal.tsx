@@ -15,11 +15,23 @@ type Props = {
   title: string;
   rows: QuoteLookupRow[];
   onClose: () => void;
-  /** `null` = clear selection */
+  /**
+   * מצב בחירה בודד: `null` = ניקוי בחירה.
+   * במצב בחירה-מרובה (`multiSelect`) הקולבק הזה *לא נקרא* — הקומפוננטה מחזיקה את
+   * מצב הסימון מקומית ועוברת ל-`onConfirmMulti` רק כאשר המשתמש לחץ "המשך".
+   */
   onSelect: (row: QuoteLookupRow | null) => void;
   allowClear?: boolean;
   clearLabel?: string;
   emptyMessage?: string;
+  /**
+   * כשמופעל (true), כל שורה מציגה צ'קבוקס. השורה הראשונה שסומנה היא "תבנית הבסיס"
+   * והפורמט שלה נשמר במיזוג המשולב. סדר הסימון נשמר (לא סדר ההצגה).
+   * ברירת מחדל: false — ההתנהגות הישנה (לחיצה בוחרת ובמידי סוגרת).
+   */
+  multiSelect?: boolean;
+  /** נקרא כש-`multiSelect`=true והמשתמש לחץ על "המשך" עם רשומות מסומנות. */
+  onConfirmMulti?: (rows: QuoteLookupRow[]) => void;
 };
 
 const OVERLAY: React.CSSProperties = {
@@ -77,17 +89,39 @@ export function QuoteLookupModal({
   allowClear = true,
   clearLabel = '— ללא בחירה —',
   emptyMessage = 'אין רשומות להצגה',
+  multiSelect = false,
+  onConfirmMulti,
 }: Props) {
   const [q, setQ] = useState('');
+  // רשימת ה-ids של השורות שסומנו, בסדר הסימון (הראשון = תבנית בסיס).
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
     setQ('');
+    setSelectedIds([]);
   }, [open]);
 
   const filtered = useMemo(() => rows.filter((r) => rowMatches(r, q)), [rows, q]);
 
   if (!open) return null;
+
+  function toggleId(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function handleConfirm() {
+    if (!onConfirmMulti) return;
+    const byId = new Map(rows.map((r) => [r.id, r] as const));
+    const ordered = selectedIds
+      .map((id) => byId.get(id))
+      .filter((r): r is QuoteLookupRow => !!r);
+    if (!ordered.length) return;
+    onConfirmMulti(ordered);
+    onClose();
+  }
 
   return (
     <div
@@ -165,8 +199,22 @@ export function QuoteLookupModal({
           </div>
         </div>
 
+        {multiSelect ? (
+          <div
+            style={{
+              padding: '6px 10px',
+              borderBottom: '1px solid #e8e8e8',
+              background: '#fafafa',
+              fontSize: 11,
+              color: '#555',
+            }}
+          >
+            סמן תבנית אחת או יותר. הראשונה שתסומן תהיה <strong>תבנית הבסיס</strong> — הפורמט שלה נשמר, והטקסטים ממוזגים אליה.
+          </div>
+        ) : null}
+
         <div style={{ overflowY: 'auto', flex: 1, minHeight: 120 }}>
-          {allowClear ? (
+          {!multiSelect && allowClear ? (
             <button
               type="button"
               onClick={() => {
@@ -193,32 +241,138 @@ export function QuoteLookupModal({
           ) : filtered.length === 0 ? (
             <div style={{ padding: 16, fontSize: 12, color: '#666', textAlign: 'center' }}>לא נמצאו תוצאות</div>
           ) : (
-            filtered.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => {
-                  onSelect(r);
-                  onClose();
-                }}
-                style={{
-                  width: '100%',
-                  textAlign: 'right',
-                  padding: '8px 12px',
-                  border: 'none',
-                  borderBottom: '1px solid #eee',
-                  background: '#fff',
-                  fontSize: 12,
-                  cursor: 'pointer',
-                  display: 'block',
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>{r.label}</div>
-                {r.subLabel ? <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{r.subLabel}</div> : null}
-              </button>
-            ))
+            filtered.map((r) => {
+              const selectedOrder = selectedIds.indexOf(r.id); // -1 אם לא נבחר, 0 = בסיס, 1+ = נוסף
+              const isBase = selectedOrder === 0;
+              const isPicked = selectedOrder >= 0;
+              if (multiSelect) {
+                return (
+                  <label
+                    key={r.id}
+                    style={{
+                      width: '100%',
+                      textAlign: 'right',
+                      padding: '8px 12px',
+                      borderBottom: '1px solid #eee',
+                      background: isPicked ? (isBase ? '#eef5ff' : '#f6faff') : '#fff',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                      display: 'grid',
+                      gridTemplateColumns: '22px 1fr auto',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isPicked}
+                      onChange={() => toggleId(r.id)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{r.label}</div>
+                      {r.subLabel ? (
+                        <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{r.subLabel}</div>
+                      ) : null}
+                    </div>
+                    {isPicked ? (
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: isBase ? '#1d4ed8' : '#555',
+                          fontWeight: isBase ? 700 : 400,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {isBase ? 'תבנית בסיס' : `#${selectedOrder + 1}`}
+                      </div>
+                    ) : null}
+                  </label>
+                );
+              }
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => {
+                    onSelect(r);
+                    onClose();
+                  }}
+                  style={{
+                    width: '100%',
+                    textAlign: 'right',
+                    padding: '8px 12px',
+                    border: 'none',
+                    borderBottom: '1px solid #eee',
+                    background: '#fff',
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    display: 'block',
+                  }}
+                >
+                  <div style={{ fontWeight: 600 }}>{r.label}</div>
+                  {r.subLabel ? <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>{r.subLabel}</div> : null}
+                </button>
+              );
+            })
           )}
         </div>
+
+        {multiSelect ? (
+          <div
+            style={{
+              padding: '8px 10px',
+              borderTop: '1px solid #d4d4d4',
+              display: 'flex',
+              gap: 6,
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#fafafa',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ fontSize: 11, color: '#555' }}>
+              {selectedIds.length === 0
+                ? 'לא סומנה אף תבנית'
+                : selectedIds.length === 1
+                  ? 'תבנית אחת סומנה — מיזוג רגיל'
+                  : `${selectedIds.length} תבניות סומנו — מיזוג משולב`}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={onClose}
+                style={{
+                  padding: '5px 12px',
+                  border: '1px solid #c0c0c0',
+                  background: '#fff',
+                  borderRadius: 2,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  color: '#333',
+                }}
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirm}
+                disabled={selectedIds.length === 0}
+                style={{
+                  padding: '5px 12px',
+                  border: '1px solid #1d4ed8',
+                  background: selectedIds.length === 0 ? '#9db9f5' : '#2563eb',
+                  color: '#fff',
+                  borderRadius: 2,
+                  fontSize: 12,
+                  cursor: selectedIds.length === 0 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                המשך
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

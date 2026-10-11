@@ -434,6 +434,116 @@ export class QuoteTemplatesController {
   }
 
   /**
+   * POST /quote-templates/merge-docx-combined
+   * מיזוג מרובה-תבניות: ה-body מכיל templateIds (לפחות אחד; הראשון הוא "תבנית הבסיס"
+   * שהפורמט שלה משומר), ושאר נתוני ההצעה כמו ב-/merge-docx הרגיל.
+   * השרת מריץ GPT כדי לשזור את הטקסטים הנרטיביים של כל התבניות בפסקאות של הראשית,
+   * ואז ממזג placeholders על הקובץ הממוזג. התוצאה: קובץ Word יחיד עם טבלת מחיר אחת
+   * (של התבנית הראשונה) וטקסטי כותרת/גוף משולבים.
+   */
+  @Post('merge-docx-combined')
+  @Roles('ADMIN', 'MANAGER', 'SALES', 'EXPERT', 'TECHNICIAN', 'BILLING')
+  async mergeDocxCombined(
+    @Body() body: Record<string, unknown>,
+    @Res() res: Response,
+  ) {
+    const idsRaw = body.templateIds;
+    const ids = Array.isArray(idsRaw) ? idsRaw.map((x) => String(x)).filter(Boolean) : [];
+    if (!ids.length) {
+      return res.status(400).json({ message: 'templateIds is required and must contain at least one template id' });
+    }
+
+    // טוענים את כל התבניות שסומנו, לפי הסדר שהמשתמש סימן. הראשונה היא תבנית הבסיס.
+    const templates: Array<{ id: string; name: string; bytes: Buffer }> = [];
+    for (const id of ids) {
+      const t = await this.quoteTemplatesService.findOne(id);
+      if (!t) {
+        return res.status(404).json({ message: `Template not found: ${id}` });
+      }
+      if (!t.docxTemplatePath) {
+        return res.status(400).json({ message: `Template has no DOCX file: ${t.name || id}` });
+      }
+      if (!(await this.docxStore.has(id, t.docxTemplatePath))) {
+        return res.status(404).json({ message: `DOCX template file missing: ${t.docxTemplatePath}` });
+      }
+      const { bytes } = await this.docxStore.getBytes(id, t.docxTemplatePath);
+      templates.push({ id, name: t.name || id, bytes });
+    }
+
+    // ── מספר הצעת המחיר מהמקור-אמת (אותה לוגיקה כמו ב-/merge-docx רגיל) ──
+    const isEmptyNum = (v: unknown) => {
+      const s = String(v ?? '').trim();
+      return !s || s === 'חדש' || s === '—' || s === '-';
+    };
+    const quoteIdForNum = body.quoteId as string | undefined;
+    if (quoteIdForNum && (isEmptyNum(body.contractSurveyNumber) || isEmptyNum(body.quoteNumber))) {
+      try {
+        const q: any = await (this.prisma.quote.findUnique as any)({
+          where: { id: quoteIdForNum },
+          select: { quoteNumber: true, orderReferenceNumber: true },
+        });
+        const realNum = String(q?.quoteNumber ?? '').trim() || String(q?.orderReferenceNumber ?? '').trim();
+        if (realNum) {
+          if (isEmptyNum(body.contractSurveyNumber)) body.contractSurveyNumber = realNum;
+          if (isEmptyNum(body.quoteNumber)) body.quoteNumber = realNum;
+        }
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    const primary = templates[0];
+    const secondaries = templates.slice(1).map((t) => ({ bytes: t.bytes, title: t.name }));
+
+    const buffer = await this.docxMergeService.mergeMultipleTemplatesBytes(
+      primary.bytes,
+      secondaries,
+      body,
+    );
+
+    // ── שמירת הקובץ הממוזג וקישורו ל-Quote אם ניתן quoteId (אותה לוגיקה כמו ב-/merge-docx) ──
+    const quoteId = body.quoteId as string | undefined;
+    if (quoteId) {
+      try {
+        const mergedDir = path.resolve(process.cwd(), 'storage', 'merged-quotes');
+        if (!fs.existsSync(mergedDir)) fs.mkdirSync(mergedDir, { recursive: true });
+        const safeNum = String(body.quoteNumber || 'draft').replace(/[^a-zA-Z0-9֐-׿_-]/g, '-');
+        const ts = Date.now();
+        const savedName = `quote-${safeNum}-combined-${ts}.docx`;
+        const fullPath = path.join(mergedDir, savedName);
+        fs.writeFileSync(fullPath, buffer);
+        const relPath = `storage/merged-quotes/${savedName}`;
+
+        await (this.prisma.quote.update as any)({
+          where: { id: quoteId },
+          data: { lastMergedDocPath: relPath },
+        });
+
+        await (this.prisma.quoteDocument.create as any)({
+          data: {
+            quoteId,
+            fileName: savedName,
+            filePath: relPath,
+            data: Uint8Array.from(buffer),
+            mimeType: DOCX_MIME,
+            documentType: 'MERGED_DOCX',
+            documentDescription: `מיזוג משולב (${templates.length} תבניות) — הצעה ${body.quoteNumber || 'טיוטה'}`,
+          },
+        });
+      } catch (e) {
+        console.error('Failed to save combined merged doc to quote:', e);
+        // לא מכשילים את התגובה — הקובץ מוחזר ללקוח גם ללא שמירה.
+      }
+    }
+
+    const filename = `quote-${body.quoteNumber || 'draft'}-combined.docx`;
+    res.setHeader('Content-Type', DOCX_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader('Content-Length', buffer.length);
+    res.send(buffer);
+  }
+
+  /**
    * POST /quote-templates/:id/upload-docx
    * העלאת קובץ Word כתבנית מיזוג — שומר את הקובץ ומעדכן את הרשומה ב-DB
    */

@@ -139,10 +139,10 @@ export class ReportMailService {
       this.logger.warn(`mark task ${taskId} DONE failed: ${e?.message || e}`);
     }
 
-    // ── בקשת דירוג: הטריגר הוא סיום המשימה (ה-DONE שסומן למעלה), דרך אותו הוק
-    // כמו "סמן הושלם" (ReviewRequestService.enqueueForCompletedTask). כאן מוסרים
-    // גם את נמען הדוח כדי שהבקשה תגיע למי שקיבל את הדוח בפועל. בקשה אחת למשימה,
-    // נשלחת ב-09:00 למחרת מה-Outlook של שולח הדוח. כישלון לא מפיל את שליחת הדוח.
+    // ── בקשת דירוג: הטריגר היחיד הוא שליחת הדוח שהצליחה כרגע (לא כל מעבר ל-DONE
+    // — ראו ReviewRequestService.enqueueForCompletedTask). מוסרים כאן את נמען
+    // הדוח בפועל כדי שהבקשה תגיע למי שקיבל אותו. בקשה אחת למשימה, נשלחת 24 שעות
+    // בדיוק מרגע זה, מה-Outlook של שולח הדוח. כישלון לא מפיל את שליחת הדוח.
     if (opts.sendReviewRequest !== false) {
       try {
         await this.reviewRequest.enqueueForCompletedTask(taskId, {

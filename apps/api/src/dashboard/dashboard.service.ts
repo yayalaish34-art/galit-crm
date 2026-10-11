@@ -771,7 +771,7 @@ export class DashboardService {
       const som = startOfMonth(now);
 
       const [me, leads, opportunities, quotes, tasks] = await Promise.all([
-        this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true, email: true } }),
+        this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, name: true, role: true, email: true, pbxExtension: true } }),
         this.prisma.incomingLead.findMany({
           where: { ownerId: userId },
           orderBy: [{ createdAt: 'desc' }],
@@ -878,7 +878,7 @@ export class DashboardService {
 
       return {
         updatedAt: now.toISOString(),
-        user: { id: me?.id || userId, name: me?.name || '', role: me?.role || role },
+        user: { id: me?.id || userId, name: me?.name || '', role: me?.role || role, pbxExtension: me?.pbxExtension || null },
         kpis: {
           leadsNew,
           leadsInTreatment,
@@ -910,7 +910,7 @@ export class DashboardService {
   private meEmptyPayload(userId: string, role: string) {
     return {
       updatedAt: new Date().toISOString(),
-      user: { id: userId, name: '', role },
+      user: { id: userId, name: '', role, pbxExtension: null },
       kpis: {
         leadsNew: 0,
         leadsInTreatment: 0,

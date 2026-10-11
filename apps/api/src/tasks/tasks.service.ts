@@ -2,7 +2,6 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { PrismaService } from '../prisma/prisma.service';
 import { QuotesService } from '../quotes/quotes.service';
 import { AffiliateService } from '../affiliate/affiliate.service';
-import { ReviewRequestService } from '../reviews/review-request.service';
 import { getPreVisitGuideline } from './pre-visit-guidelines';
 
 /**
@@ -55,7 +54,6 @@ export class TasksService {
     private readonly prisma: PrismaService,
     private readonly quotesService: QuotesService,
     private readonly affiliate: AffiliateService,
-    private readonly reviewRequest: ReviewRequestService,
   ) {}
 
   async findAll({
@@ -414,14 +412,9 @@ export class TasksService {
         this.logger.warn(`affiliate commission hook failed for task ${id}: ${e?.message || e}`),
       );
     }
-    // ── הוק בקשת דירוג: סיום משימה (מעבר ל-DONE) מתזמן ללקוח מייל "5 פרצופים"
-    //    ל-09:00 למחרת, מה-Outlook של מי שסגר. בקשה אחת למשימה; best-effort. ──
-    const becameDone = String(data?.status || '') === 'DONE' && existing?.status !== 'DONE';
-    if (becameDone) {
-      this.reviewRequest
-        .enqueueForCompletedTask(id, { actorUserId: user?.id, requestHost: ctx?.requestHost })
-        .catch((e) => this.logger.warn(`review request hook failed for task ${id}: ${e?.message || e}`));
-    }
+    // בקשת הדירוג כבר לא מוזנקת מכאן — הטריגר היחיד הוא דוח שנשלח בפועל ללקוח
+    // (ReportMailService.sendReportEmail), לא כל מעבר סטטוס ל-DONE. ראו
+    // ReviewRequestService.enqueueForCompletedTask.
     return updated;
   }
 

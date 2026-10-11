@@ -1047,6 +1047,206 @@ function ensureContentTypesFirst(zip: any): void {
 }
 
 /* ══════════════════════════════════════════════════════════════
+ *  Multi-template merge: AI combining narrative text across templates
+ * ══════════════════════════════════════════════════════════════
+ *
+ * כאשר המשתמש בוחר כמה תבניות ב-"מיזוג", הפורמט (DOCX skeleton — פונטים, מסגרות,
+ * טבלאות מחיר, גריד) נלקח מהתבנית **הראשונה**. הטקסט הנרטיבי (כותרות + פסקאות
+ * מחוץ לטבלאות ובלי placeholders) ממוזג על ידי GPT כבלוק אחד, מתוך כל התבניות
+ * שנבחרו, ואז מוזרק בחזרה אל פסקאות התבנית הראשונה — פסקה-פסקה, לפי ה-id שהוקצה
+ * לפני השליחה ל-GPT.
+ *
+ * הגישה שומרת את המבנה בדיוק: פסקאות עם {placeholders} / בתוך <w:tbl> / fields
+ * (INCLUDEPICTURE, HYPERLINK וכו') לעולם לא נגעות — הן ממזגות באותו mergeTemplateBytes
+ * הקיים אחרי שרירת הטקסט הנרטיבי מוחלפת. התוצאה: פסקת "הנדון" במסמך הראשון
+ * כתובה מחדש כך שהיא כוללת גם את הנדון של האחרות ("הצעת מחיר משולבת ..."),
+ * אבל טבלת המחיר, שם הלקוח והחתימה נשארים זהים לתהליך הרגיל.
+ */
+
+/** פסקה נרטיבית שראויה למיזוג AI — טקסט מלא בלבד, בלי placeholders ובלי שדות. */
+type NarrativeParagraph = {
+  /** מזהה פסקה שנשלח ל-GPT ("P1", "P2"...) כדי לחבר את הטקסט הממוזג לפסקה הנכונה. */
+  id: string;
+  /** אינדקס תחילת ה-<w:p> במחרוזת ה-XML. לא חשוף ל-GPT. */
+  xmlStart: number;
+  /** אינדקס סוף ה-<w:p> במחרוזת ה-XML. */
+  xmlEnd: number;
+  /** הטקסט המקורי של הפסקה (אחרי קונקטנציה של כל <w:t>). */
+  text: string;
+};
+
+/** True אם ל-xml של פסקה אין placeholder {xxx}, אין INCLUDEPICTURE / fields, ואין טבלה מקוננת. */
+function paragraphIsNarrative(paragraphXml: string): boolean {
+  if (/\{[a-zA-Z][a-zA-Z0-9_]*\}/.test(paragraphXml)) return false;
+  if (/<w:instrText\b/.test(paragraphXml)) return false;
+  if (/<w:fldChar\b/.test(paragraphXml)) return false;
+  if (/<w:tbl\b/.test(paragraphXml)) return false;
+  // תוכן תמונה בלבד — לא מילים
+  if (/<w:drawing\b/.test(paragraphXml) && !/<w:t[ >]/.test(paragraphXml)) return false;
+  return true;
+}
+
+/** מחלץ טקסט מצטבר של פסקה — שרשור כל <w:t> שלה. */
+function paragraphPlainText(paragraphXml: string): string {
+  const parts: string[] = [];
+  const re = /<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(paragraphXml)) !== null) {
+    parts.push(
+      m[1]
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&amp;/g, '&'),
+    );
+  }
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * כל פסקאות ה-document.xml שעונות על ההגדרה הנרטיבית ובהן טקסט בעל-ערך (>= 2 תווים לא-רווח).
+ * ה-id הוא "P1", "P2", ... לפי סדר ההופעה.
+ */
+export function extractNarrativeParagraphs(documentXml: string): NarrativeParagraph[] {
+  const paras: NarrativeParagraph[] = [];
+  const pRe = /<w:p(?:\s[^>]*)?>[\s\S]*?<\/w:p>/g;
+  let m: RegExpExecArray | null;
+  let seq = 0;
+  while ((m = pRe.exec(documentXml)) !== null) {
+    const para = m[0];
+    if (!paragraphIsNarrative(para)) continue;
+    const text = paragraphPlainText(para);
+    if (text.replace(/\s+/g, '').length < 2) continue;
+    seq++;
+    paras.push({
+      id: `P${seq}`,
+      xmlStart: m.index,
+      xmlEnd: m.index + para.length,
+      text,
+    });
+  }
+  return paras;
+}
+
+/**
+ * מחליף את הטקסט של פסקה: הראשון <w:t> מקבל את כל הטקסט החדש, השאר מתרוקנים.
+ * כך העיצוב של הריצה הראשונה (<w:rPr>) נשמר, פונט/גודל/יישור של הפסקה (<w:pPr>) לא נגעים,
+ * וסימניות/pBdr/shd של הפסקה נשמרות.
+ */
+export function replaceParagraphText(paragraphXml: string, newText: string): string {
+  const escaped = newText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  let replacedFirst = false;
+  return paragraphXml.replace(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g, (match, open, _txt, close) => {
+    if (!replacedFirst) {
+      replacedFirst = true;
+      const openTag = open.includes('xml:space') ? open : open.replace('>', ' xml:space="preserve">');
+      return `${openTag}${escaped}${close}`;
+    }
+    // ריצות נוספות באותה פסקה — מתרוקנות (מונע כפילות של הטקסט).
+    return `${open}${close}`;
+  });
+}
+
+/** החלפה של כל הפסקאות הנרטיביות בבת אחת — עובד מהסוף להתחלה כדי לא לשבש היסטים. */
+export function applyNarrativeReplacements(
+  documentXml: string,
+  paragraphs: NarrativeParagraph[],
+  mergedById: Map<string, string>,
+): string {
+  const edits = [...paragraphs]
+    .filter((p) => mergedById.has(p.id))
+    .sort((a, b) => b.xmlStart - a.xmlStart);
+  let out = documentXml;
+  for (const p of edits) {
+    const originalPara = out.slice(p.xmlStart, p.xmlEnd);
+    const merged = mergedById.get(p.id) ?? '';
+    if (!merged.trim()) continue; // GPT החזיר ריק — לא נוגעים (שומרים את הטקסט המקורי)
+    const patched = replaceParagraphText(originalPara, merged);
+    out = out.slice(0, p.xmlStart) + patched + out.slice(p.xmlEnd);
+  }
+  return out;
+}
+
+/**
+ * שולח ל-GPT את הפסקאות הנרטיביות של התבנית הראשית + הטקסט המלא של התבניות המשניות,
+ * ומבקש גרסה ממוזגת לכל פסקה בראשית. בפלט: Map מ-id → טקסט ממוזג.
+ *
+ * אם אין OPENAI_API_KEY או שהקריאה נכשלה — זורק, כי בלי GPT אין משמעות למיזוג מרובה
+ * (הפורמט של הראשית לבדה כבר נשמר ממילא במסלול הרגיל).
+ */
+export async function requestMergedParagraphsFromAi(
+  primaryParagraphs: NarrativeParagraph[],
+  secondaryTexts: Array<{ title: string; fullText: string }>,
+  openaiApiKey: string,
+): Promise<Map<string, string>> {
+  const primaryBlock = primaryParagraphs
+    .map((p) => `[${p.id}] ${p.text}`)
+    .join('\n');
+  const secondariesBlock = secondaryTexts
+    .map((s, i) => `--- תבנית נוספת ${i + 1} (${s.title}) ---\n${s.fullText}`)
+    .join('\n\n');
+
+  const system = [
+    'אתה כותב מקצועי של הצעות מחיר בעברית לחברת גלית.',
+    'מטרתך: למזג כמה הצעות מחיר למסמך אחד שמוצג כהצעה *משולבת* הכוללת את כל התחומים.',
+    'שמור על המבנה המדויק של ההצעה הראשית: אותה כמות פסקאות, אותו סדר, אותו רישום רשמי/לא-רשמי.',
+    'עבור כל פסקה [Pk] בהצעה הראשית, החזר גרסה *אחת* שבה הטקסט של הפסקה הזו מורחב כך שישתלב בה גם התוכן המקביל מההצעות הנוספות (לדוגמה: אם [P1] הוא "הנדון: הצעת מחיר לבדיקת RF" וההצעה האחרת מדברת על "מיגון קרינה", החזר "הנדון: הצעת מחיר משולבת לבדיקת RF ומיגון קרינה").',
+    'אם לפסקה אין מקבילה בהצעות הנוספות — החזר אותה כמעט כפי שהיא, אולי בשינוי קל שמשקף שההצעה כוללת כעת כמה שירותים.',
+    'אל תמציא שירותים/מחירים/מספרים/תאריכים/שמות. אל תגע ב-placeholders או ב-{xxx}.',
+    'החזר JSON בלבד בפורמט: {"paragraphs":[{"id":"P1","merged":"..."},...]}. כל פסקה שקיימת בראשית חייבת להופיע ב-paragraphs.',
+  ].join('\n');
+
+  const user = [
+    '# ההצעה הראשית — פסקאות ממוספרות (שמור על המבנה):',
+    primaryBlock,
+    '',
+    '# הצעות נוספות למיזוג:',
+    secondariesBlock,
+  ].join('\n');
+
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${openaiApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: process.env.OPENAI_QUOTE_MERGE_MODEL || 'gpt-4o',
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new BadRequestException(`AI merge failed (${res.status}): ${detail.slice(0, 400)}`);
+  }
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const raw = data.choices?.[0]?.message?.content || '';
+  let parsed: { paragraphs?: Array<{ id?: string; merged?: string }> } = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new BadRequestException('AI merge returned invalid JSON');
+  }
+  const map = new Map<string, string>();
+  for (const row of parsed.paragraphs ?? []) {
+    const id = String(row?.id || '').trim();
+    const merged = String(row?.merged || '');
+    if (!id) continue;
+    map.set(id, merged);
+  }
+  return map;
+}
+
+/* ══════════════════════════════════════════════════════════════
  *  Injectable service — used by QuoteTemplatesController
  * ══════════════════════════════════════════════════════════════ */
 
@@ -1168,6 +1368,87 @@ export class DocxMergeService {
       type: 'nodebuffer',
       compression: 'DEFLATE',
     });
+  }
+
+  /**
+   * מיזוג מרובה-תבניות: הפורמט מהתבנית הראשית, הטקסט הנרטיבי ממוזג ע"י GPT מכל התבניות.
+   * מחזיר Buffer של DOCX מוכן (אחרי מילוי placeholders של נתוני ההצעה — פריטים, סכומים, לקוח).
+   *
+   * - `primaryBytes` = בייטים של התבנית הראשונה שהמשתמש סימן (זה ה-skeleton).
+   * - `secondaryBytes` = בייטים של כל התבניות הנוספות שסומנו, לפי סדר הסימון.
+   * - `data` = אותם נתוני הצעה כמו ב-mergeTemplateBytes.
+   *
+   * אם secondaryBytes ריק — זו למעשה בחירה בודדת, מחזירים את התוצאה של mergeTemplateBytes ללא GPT.
+   */
+  async mergeMultipleTemplatesBytes(
+    primaryBytes: Buffer,
+    secondaryBytes: Array<{ bytes: Buffer; title: string }>,
+    data: Record<string, unknown>,
+  ): Promise<Buffer> {
+    ensureDeps();
+
+    // ללא תבניות משניות — זהה למיזוג רגיל.
+    if (!secondaryBytes.length) {
+      return this.mergeTemplateBytes(primaryBytes, data);
+    }
+
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      throw new BadRequestException(
+        'מיזוג מרובה-תבניות דורש OPENAI_API_KEY — ב-ENV של השרת. בלעדיו ה-GPT לא יכול למזג את הטקסטים.',
+      );
+    }
+
+    // 1) פותחים את התבנית הראשית ושולפים את ה-XML של המסמך.
+    const primaryZip = new PizZip(primaryBytes);
+    const docFile = primaryZip.file('word/document.xml');
+    if (!docFile) {
+      throw new BadRequestException('Primary template has no word/document.xml');
+    }
+    const primaryXml: string = docFile.asText();
+
+    // 2) מוציאים פסקאות נרטיביות מהתבנית הראשית.
+    const primaryParas = extractNarrativeParagraphs(primaryXml);
+    if (!primaryParas.length) {
+      // התבנית הראשונה היא "placeholder-only" (למשל טבלה בלבד) — אין מה לשנות, חזרה למיזוג רגיל.
+      return this.mergeTemplateBytes(primaryBytes, data);
+    }
+
+    // 3) שולפים טקסט נרטיבי מלא מכל תבנית משנית (כבלוק אחד).
+    const secondaryTexts = secondaryBytes.map((s) => {
+      let fullText = '';
+      try {
+        const z = new PizZip(s.bytes);
+        const xml = z.file('word/document.xml')?.asText() || '';
+        const paras = extractNarrativeParagraphs(xml);
+        fullText = paras.map((p) => p.text).join('\n');
+      } catch {
+        fullText = '';
+      }
+      return { title: s.title, fullText };
+    }).filter((s) => s.fullText.trim().length > 0);
+
+    if (!secondaryTexts.length) {
+      // כל התבניות המשניות היו ריקות או כולן טבלאות — חזרה למיזוג רגיל.
+      return this.mergeTemplateBytes(primaryBytes, data);
+    }
+
+    // 4) GPT ממזג — ממפה id פסקה → טקסט ממוזג.
+    const mergedById = await requestMergedParagraphsFromAi(primaryParas, secondaryTexts, openaiApiKey);
+    if (!mergedById.size) {
+      throw new BadRequestException('AI merge returned no paragraphs');
+    }
+
+    // 5) מחליפים את הטקסט בפסקאות הנרטיביות של התבנית הראשית.
+    const newPrimaryXml = applyNarrativeReplacements(primaryXml, primaryParas, mergedById);
+    primaryZip.file('word/document.xml', newPrimaryXml);
+
+    // 6) סדר ZIP: [Content_Types].xml חייב להישאר ראשון גם אחרי החלפת document.xml.
+    ensureContentTypesFirst(primaryZip);
+    const patchedPrimaryBytes: Buffer = primaryZip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+    // 7) ממזגים placeholders בדיוק כמו במסלול הרגיל (פריטים, סכומים, לקוח, סניטציה, חתימה).
+    return this.mergeTemplateBytes(patchedPrimaryBytes, data);
   }
 
   /** בודק אם קיים קובץ תבנית DOCX */

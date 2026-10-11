@@ -31,6 +31,7 @@ import {
   Mic,
   Bell,
   Handshake,
+  Briefcase,
   Newspaper,
 } from 'lucide-react';
 import { isManagerRole } from './lib/roles';
@@ -842,6 +843,15 @@ export function CrmLegacyTopNav({
                   title={!canAccess(role, 'affiliates') ? 'אין הרשאה' : 'שותפים — הפניות ועמלות'}
                   active={current === 'affiliates'}
                   onClick={() => go('affiliates')}
+                />
+                <Sep />
+                <NavBtn
+                  label="המכירות שלי"
+                  Icon={Briefcase}
+                  disabled={!canAccess(role, 'my-b2b-sales')}
+                  title={!canAccess(role, 'my-b2b-sales') ? 'אין הרשאה' : 'חברות שגייסתי לתוכנית השותפים'}
+                  active={current === 'my-b2b-sales'}
+                  onClick={() => go('my-b2b-sales')}
                 />
                 <Sep />
                 <NavBtn

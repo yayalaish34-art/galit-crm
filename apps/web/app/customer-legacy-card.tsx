@@ -1185,6 +1185,9 @@ export function CustomerLegacyCard({
   /** Pending contacts for new (unsaved) customers — stored locally until customer is created */
   const [pendingContacts, setPendingContacts] = useState<CustomerLegacyContact[]>([]);
   const pendingIdCounter = useRef(0);
+  // Tracks last-seen customer type for the auto-prefill effect. Declared here (not inline near
+  // its effect) so the per-customer reset below can clear it too.
+  const prevTypeRef = useRef<string | null>(null);
   const [legacyMsg, setLegacyMsg] = useState('');
 
 
@@ -1348,6 +1351,15 @@ export function CustomerLegacyCard({
     })();
     return () => { cancelled = true; };
   }, [customer?.id, currentUser, contactsKey, isNewMode]);
+
+  // Reset the add/edit contact draft and any unsaved pending contacts when the active customer
+  // changes. Without this, the previously viewed customer's draft (name/phone/email) would stay
+  // in the inline form and get POSTed to the new customer's /contacts endpoint.
+  useEffect(() => {
+    setContactEdit(null);
+    setPendingContacts([]);
+    prevTypeRef.current = null;
+  }, [customer?.id]);
 
   const loadCustomerQuotes = useCallback(async () => {
     if (!customer?.id || isNewMode || customer.id === '__new__') {
@@ -2260,7 +2272,6 @@ export function CustomerLegacyCard({
      Applies to companies as well as private customers — the only difference is
      whose name it is: the customer's own for private, the named contact person
      for a company. */
-  const prevTypeRef = useRef<string | null>(null);
   useEffect(() => {
     if (isNewMode) return;
     const type = customerForm.type;

@@ -1,48 +1,37 @@
 import { ReviewRequestService } from './review-request.service';
 
 /**
- * הבדיקה מתמקדת בלוגיקת התזמון (nextMorning9IsraelIso) — החלק הרגיש: החישוב חייב
- * להחזיר את הרגע המדויק של 09:00 בשעון ישראל למחרת, גם בקיץ (UTC+3) וגם בחורף
- * (UTC+2), בלי תלות באזור-הזמן של השרת.
+ * בקשת דירוג מתוזמנת ל-24 שעות בדיוק מרגע שהדוח נשלח ללקוח — לא ל-09:00 למחרת
+ * ולא תלוית אזור-זמן. הבדיקה מוודאת שההפרש הוא תמיד בדיוק 24 שעות, מכל נקודת
+ * זמן שממנה מתחילים לספור.
  */
-describe('ReviewRequestService.nextMorning9IsraelIso', () => {
-  /** ה-timestamp שהוחזר, כשמתורגם חזרה לשעון ישראל, חייב להיות 09:00:00 למחרת. */
-  function assertIsNextDay9Israel(fromIso: string) {
-    const iso = ReviewRequestService.nextMorning9IsraelIso(new Date(fromIso));
-    const at = new Date(iso);
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Jerusalem',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-    }).formatToParts(at);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value;
-    return { hour: get('hour'), minute: get('minute'), second: get('second'), date: `${get('year')}-${get('month')}-${get('day')}` };
-  }
-
-  it('summer (UTC+3): report sent 2026-07-15 → next day 09:00 Israel', () => {
-    const r = assertIsNextDay9Israel('2026-07-15T12:00:00Z');
-    expect(r.hour).toBe('09');
-    expect(r.minute).toBe('00');
-    expect(r.date).toBe('2026-07-16');
+describe('ReviewRequestService.twentyFourHoursFromNowIso', () => {
+  it('returns exactly 24 hours after the given instant', () => {
+    const from = new Date('2026-07-15T12:00:00Z');
+    const iso = ReviewRequestService.twentyFourHoursFromNowIso(from);
+    expect(new Date(iso).getTime() - from.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 
-  it('winter (UTC+2): report sent 2026-01-15 → next day 09:00 Israel', () => {
-    const r = assertIsNextDay9Israel('2026-01-15T12:00:00Z');
-    expect(r.hour).toBe('09');
-    expect(r.minute).toBe('00');
-    expect(r.date).toBe('2026-01-16');
-  });
-
-  it('late-night in Israel still rolls to the NEXT calendar day 09:00', () => {
-    // 2026-07-15 22:30 UTC = 2026-07-16 01:30 Israel (קיץ) → מחר = 2026-07-17.
-    const r = assertIsNextDay9Israel('2026-07-15T22:30:00Z');
-    expect(r.hour).toBe('09');
-    expect(r.date).toBe('2026-07-17');
+  it('is unaffected by a DST boundary (Israel summer/winter clock change)', () => {
+    // 2026-10-24 22:00 UTC — סביב מעבר לשעון חורף בישראל (2026-10-25).
+    const from = new Date('2026-10-24T22:00:00Z');
+    const iso = ReviewRequestService.twentyFourHoursFromNowIso(from);
+    expect(new Date(iso).getTime() - from.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 
   it('returns a valid ISO string in the future', () => {
-    const iso = ReviewRequestService.nextMorning9IsraelIso(new Date('2026-07-15T12:00:00Z'));
+    const from = new Date('2026-07-15T12:00:00Z');
+    const iso = ReviewRequestService.twentyFourHoursFromNowIso(from);
     expect(new Date(iso).toISOString()).toBe(iso);
-    expect(new Date(iso).getTime()).toBeGreaterThan(new Date('2026-07-15T12:00:00Z').getTime());
+    expect(new Date(iso).getTime()).toBeGreaterThan(from.getTime());
+  });
+
+  it('defaults to now when no instant is given', () => {
+    const before = Date.now();
+    const iso = ReviewRequestService.twentyFourHoursFromNowIso();
+    const after = Date.now();
+    const delta = new Date(iso).getTime();
+    expect(delta).toBeGreaterThanOrEqual(before + 24 * 60 * 60 * 1000);
+    expect(delta).toBeLessThanOrEqual(after + 24 * 60 * 60 * 1000);
   });
 });

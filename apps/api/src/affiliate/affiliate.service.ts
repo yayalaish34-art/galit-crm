@@ -7,6 +7,13 @@ import { formatIsraeliPhone } from '../common/phone.util';
 const BCRYPT_ROUNDS = 12;
 const USERNAME_RE = /^[A-Za-z0-9._-]{3,64}$/;
 
+/** המרה סובלנית של קלט תאריך (ISO/Date/null/undefined/ריק) ל-Date או null. */
+function parseDateMaybe(v: unknown): Date | null {
+  if (v == null || v === '') return null;
+  const d = v instanceof Date ? v : new Date(String(v));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
 // שלבי צינור הזרימה — תואם ל-progressSteps בדשבורד. אינדקס = currentStage של המשימה.
 const PIPELINE_STAGES = [
   'פתיחת פנייה', 'התאמת הפתרון', 'שיחת מכירה', 'פולואפ', 'תיאום',
@@ -28,6 +35,8 @@ export class AffiliateService {
   async createAffiliate(input: {
     name: string; username: string; password: string;
     commissionPct?: number; contactName?: string; email?: string; phone?: string;
+    salesNotes?: string; nextFollowupAt?: string | Date | null;
+    recruitedByUserId?: string | null;
   }) {
     const name = (input.name || '').trim();
     const username = (input.username || '').trim();
@@ -46,31 +55,129 @@ export class AffiliateService {
         contactName: input.contactName?.trim() || null,
         email: input.email?.trim() || null,
         phone: formatIsraeliPhone(input.phone) || null,
+        salesNotes: input.salesNotes?.trim() || null,
+        nextFollowupAt: parseDateMaybe(input.nextFollowupAt),
+        recruitedByUserId: input.recruitedByUserId || null,
       },
-      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true, isActive: true, createdAt: true },
+      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true, isActive: true, createdAt: true, salesNotes: true, nextFollowupAt: true, recruitedByUserId: true },
     });
-    this.logger.log(`affiliate created: ${a.username}`);
+    this.logger.log(`affiliate created: ${a.username} (recruitedBy=${a.recruitedByUserId || '—'})`);
+    return a;
+  }
+
+  /** עדכון פרטי שותף קיים (לא כולל סיסמה — זה נפרד). */
+  async updateAffiliate(
+    id: string,
+    patch: {
+      name?: string; commissionPct?: number;
+      contactName?: string | null; email?: string | null; phone?: string | null;
+      isActive?: boolean;
+      salesNotes?: string | null; nextFollowupAt?: string | Date | null;
+    },
+    opts: { onlyIfRecruitedBy?: string } = {},
+  ) {
+    const existing = await this.prisma.affiliate.findUnique({
+      where: { id },
+      select: { id: true, recruitedByUserId: true },
+    });
+    if (!existing) throw new BadRequestException('השותף לא נמצא');
+    if (opts.onlyIfRecruitedBy && existing.recruitedByUserId !== opts.onlyIfRecruitedBy) {
+      throw new BadRequestException('אין הרשאה לעדכן שותף שלא גויס על ידך');
+    }
+
+    const data: any = {};
+    if (patch.name != null) {
+      const n = patch.name.trim();
+      if (!n) throw new BadRequestException('שם השותף חסר');
+      data.name = n;
+    }
+    if (patch.commissionPct != null && Number.isFinite(Number(patch.commissionPct))) {
+      data.commissionPct = Number(patch.commissionPct);
+    }
+    if ('contactName' in patch) data.contactName = patch.contactName?.toString().trim() || null;
+    if ('email' in patch) data.email = patch.email?.toString().trim() || null;
+    if ('phone' in patch) data.phone = formatIsraeliPhone(patch.phone || '') || null;
+    if (typeof patch.isActive === 'boolean') data.isActive = patch.isActive;
+    if ('salesNotes' in patch) data.salesNotes = patch.salesNotes?.toString().trim() || null;
+    if ('nextFollowupAt' in patch) data.nextFollowupAt = parseDateMaybe(patch.nextFollowupAt);
+
+    const a = await this.prisma.affiliate.update({
+      where: { id },
+      data,
+      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true, isActive: true, createdAt: true, salesNotes: true, nextFollowupAt: true, recruitedByUserId: true },
+    });
     return a;
   }
 
   /** קביעה/החלפת סיסמה לשותף קיים (לפי id או username). */
-  async setPassword(idOrUsername: string, password: string) {
+  async setPassword(idOrUsername: string, password: string, opts: { onlyIfRecruitedBy?: string } = {}) {
     if (!password || password.length < 6) throw new BadRequestException('סיסמה חייבת לפחות 6 תווים');
     const a = await this.prisma.affiliate.findFirst({
       where: { OR: [{ id: idOrUsername }, { username: { equals: idOrUsername, mode: 'insensitive' } }] },
-      select: { id: true },
+      select: { id: true, recruitedByUserId: true },
     });
     if (!a) throw new BadRequestException('השותף לא נמצא');
+    if (opts.onlyIfRecruitedBy && a.recruitedByUserId !== opts.onlyIfRecruitedBy) {
+      throw new BadRequestException('אין הרשאה לשנות סיסמה לשותף שלא גויס על ידך');
+    }
     const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
     await this.prisma.affiliate.update({ where: { id: a.id }, data: { passwordHash } });
     return { ok: true };
   }
 
-  /** רשימת כל השותפים (לצוות). */
-  listAffiliates() {
-    return this.prisma.affiliate.findMany({
-      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true, isActive: true, createdAt: true, _count: { select: { referrals: true } } },
+  /**
+   * רשימת שותפים (לצוות) עם סטטיסטיקות עמלה פר-שורה.
+   * filter.recruitedByUserId — להציג רק שותפים שגויסו ע"י יוזר ספציפי (דשבורד "המכירות שלי").
+   */
+  async listAffiliates(filter?: { recruitedByUserId?: string }) {
+    const where: any = {};
+    if (filter?.recruitedByUserId) where.recruitedByUserId = filter.recruitedByUserId;
+
+    const rows = await this.prisma.affiliate.findMany({
+      where,
+      select: {
+        id: true, name: true, username: true, commissionPct: true,
+        contactName: true, email: true, phone: true, isActive: true, createdAt: true,
+        salesNotes: true, nextFollowupAt: true, recruitedByUserId: true,
+        referrals: {
+          select: { id: true, status: true, commissionAmount: true, commissionSettledAt: true, paidAt: true, createdAt: true },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+    });
+
+    // חישוב סטטיסטיקות (totalReferrals / won / commission owed/paid / last activity) לפי מערך ה-referrals.
+    return rows.map((a) => {
+      const refs = a.referrals;
+      const won = refs.filter((r) => r.status === 'WON').length;
+      const totalCommission = refs.reduce((s, r) => s + (r.commissionAmount || 0), 0);
+      const paidCommission = refs.filter((r) => r.commissionSettledAt).reduce((s, r) => s + (r.commissionAmount || 0), 0);
+      const owedCommission = totalCommission - paidCommission;
+      const lastReferralAt = refs.length
+        ? refs.map((r) => r.createdAt).sort((x, y) => (y as any) - (x as any))[0]
+        : null;
+      return {
+        id: a.id,
+        name: a.name,
+        username: a.username,
+        commissionPct: a.commissionPct,
+        contactName: a.contactName,
+        email: a.email,
+        phone: a.phone,
+        isActive: a.isActive,
+        createdAt: a.createdAt.toISOString(),
+        salesNotes: a.salesNotes,
+        nextFollowupAt: a.nextFollowupAt ? a.nextFollowupAt.toISOString() : null,
+        recruitedByUserId: a.recruitedByUserId,
+        stats: {
+          totalReferrals: refs.length,
+          won,
+          totalCommission: Math.round(totalCommission * 100) / 100,
+          owedCommission: Math.round(owedCommission * 100) / 100,
+          paidCommission: Math.round(paidCommission * 100) / 100,
+          lastReferralAt: lastReferralAt ? (lastReferralAt as Date).toISOString() : null,
+        },
+      };
     });
   }
 
