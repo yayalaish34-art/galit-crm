@@ -73,6 +73,21 @@ export class QuotesController {
   /* עריכת התבניות עברה ל-`/quote-templates/docx-editor` — עורכים את **התבנית**
    * שממנה נוצרות ההצעות, ולא קבצים ממוזגים של הצעות שכבר יצאו ללקוח. */
 
+  /**
+   * הצעות שנחתמו לאחרונה — מזין את ההתראה הצידית בדשבורד ("הצעה נחתמה"), באותו
+   * דגם של /blog/pending. חייב להיות **לפני** `@Get(':id')` אחרת NestJS יתפוס
+   * את "signed/pending" כ-id ויחזיר 404.
+   */
+  @Get('signed/pending')
+  pendingSigned(@Req() req: any) {
+    return this.quotesService.listPendingSignedQuotes(req.user);
+  }
+
+  @Post('signed/pending/:id/dismiss')
+  dismissPendingSigned(@Param('id') id: string, @Req() req: any) {
+    return this.quotesService.dismissSignedQuote(req.user, id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.quotesService.findOne(id);

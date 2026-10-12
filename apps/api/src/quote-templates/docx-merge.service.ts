@@ -1075,12 +1075,36 @@ type NarrativeParagraph = {
   text: string;
 };
 
-/** True אם ל-xml של פסקה אין placeholder {xxx}, אין INCLUDEPICTURE / fields, ואין טבלה מקוננת. */
-function paragraphIsNarrative(paragraphXml: string): boolean {
+/**
+ * אורך מינימלי (בתווים) של פסקה כדי שה-AI *יורשה* לגעת בה. פסקאות קצרות מכך הן
+ * כמעט תמיד מבנה: כותרות ("מטרה", "תיאור מקום"), כותרת-ההצעה, שם השירות, "לכבוד",
+ * ברכות, הפניות ("ראה נספח מס' 1."). AI שמחליף אותן מעוות את המסמך — הוא גם מרחיב
+ * אותן לפסקאות ארוכות, גם משנה את שם ההצעה, וגם יוצר כפילויות עם פסקאות אחיות שלא
+ * הוחלפו. ברירת מחדל 120 מספיקה כדי שרק פסקאות גוף רציניות (פתיח / תוצרים) נכנסות
+ * ל-AI, וכל השאר נשמר verbatim כמו במיזוג רגיל.
+ */
+const MIN_PARA_LEN_FOR_AI_MERGE = Math.max(
+  40,
+  Number(process.env.QUOTE_MERGE_MIN_PARA_LEN) || 120,
+);
+
+/**
+ * True אם מותר לשלוח את הפסקה ל-GPT כפסקה נרטיבית למיזוג מרובה-תבניות. לא: פסקה עם
+ * `{placeholder}`, שדה (`<w:instrText>`/`<w:fldChar>`), טבלה מקוננת, פריט ברשימה
+ * (`<w:numPr>` — כל פריט ב-DOCX הוא פסקה בפני עצמה, ומיזוג "של רשימה שלמה" לפסקה
+ * אחת משאיר את יתר הפריטים ממש מתחת לבלוק הממוזג), פסקה קצרה (כותרת/שם שירות/
+ * ברכה/הפניה — ר' MIN_PARA_LEN_FOR_AI_MERGE), או פסקה שהיא תמונה בלבד.
+ */
+function paragraphIsNarrative(paragraphXml: string, plainText: string): boolean {
   if (/\{[a-zA-Z][a-zA-Z0-9_]*\}/.test(paragraphXml)) return false;
   if (/<w:instrText\b/.test(paragraphXml)) return false;
   if (/<w:fldChar\b/.test(paragraphXml)) return false;
   if (/<w:tbl\b/.test(paragraphXml)) return false;
+  // פריט ברשימה — AI שמעבד אותו ייצור כפילות עם האחים (שהרי הפסקה מוחלפת, אך הפסקה
+  // הבאה — פריט נוסף באותה רשימה — נשארת כמות שהיא). עדיף להשאיר רשימות בשלמותן.
+  if (/<w:numPr\b/.test(paragraphXml)) return false;
+  // כותרת/שם/ברכה/הפניה — ר' MIN_PARA_LEN_FOR_AI_MERGE.
+  if (plainText.length < MIN_PARA_LEN_FOR_AI_MERGE) return false;
   // תוכן תמונה בלבד — לא מילים
   if (/<w:drawing\b/.test(paragraphXml) && !/<w:t[ >]/.test(paragraphXml)) return false;
   return true;
@@ -1115,9 +1139,9 @@ export function extractNarrativeParagraphs(documentXml: string): NarrativeParagr
   let seq = 0;
   while ((m = pRe.exec(documentXml)) !== null) {
     const para = m[0];
-    if (!paragraphIsNarrative(para)) continue;
     const text = paragraphPlainText(para);
     if (text.replace(/\s+/g, '').length < 2) continue;
+    if (!paragraphIsNarrative(para, text)) continue;
     seq++;
     paras.push({
       id: `P${seq}`,
@@ -1185,6 +1209,81 @@ export function replaceParagraphText(paragraphXml: string, newText: string): str
   });
 }
 
+/**
+ * סף הרחבה מקסימלי: הפסקה הממוזגת לא תהיה ארוכה מפי X מהמקור. ברירת מחדל 1.6.
+ * מעבר לכך = GPT עיבה / הוסיף תוכן שלא היה. ההודעה נדחית בשקט.
+ */
+const MAX_EXPANSION_RATIO = Math.max(
+  1.2,
+  Number(process.env.QUOTE_MERGE_MAX_EXPANSION) || 1.6,
+);
+const MIN_SHRINK_RATIO = 0.6;
+
+/**
+ * אחוז מינימלי של מילים בפסקה הממוזגת שחייבות להופיע באחת מהתבניות המקוריות
+ * (ראשית או משנית). מילים חדשות = הזיה. ברירת מחדל 0.80.
+ */
+const MIN_SOURCE_TOKEN_COVERAGE = Math.max(
+  0.5,
+  Math.min(1, Number(process.env.QUOTE_MERGE_MIN_COVERAGE) || 0.8),
+);
+
+/** נירמול לצורך השוואת מילים — מורידים ניקוד, רווחים כפולים, סוגריים וסימני פיסוק. */
+function tokenizeForComparison(s: string): string[] {
+  const cleaned = s
+    .replace(/[֑-ׇ]/g, '') // ניקוד
+    .replace(/[^\p{L}\p{N}]+/gu, ' ') // כל מה שלא אות/ספרה → רווח
+    .toLowerCase()
+    .trim();
+  if (!cleaned) return [];
+  return cleaned.split(/\s+/).filter((t) => t.length >= 2);
+}
+
+/**
+ * האם הפסקה הממוזגת בטוחה להחלפה? בודק אורך (לא התפוצץ), תוכן (רוב המילים מגיעות
+ * באמת מהמקורות ולא הומצאו), וסימני אזהרה (מספרים/שמות עצם ספציפיים חדשים). פסקה
+ * שלא עוברת → נדחית, והפסקה המקורית נשארת. "לא נגעתי" הוא תמיד פלט לגיטימי.
+ */
+export function evaluateMergedParagraph(
+  original: string,
+  merged: string,
+  sourcesText: string,
+): { safe: true } | { safe: false; reason: string } {
+  const o = original.trim();
+  const m = merged.trim();
+  if (!m) return { safe: false, reason: 'empty' };
+  if (m === o) return { safe: true };
+
+  // 1) אורך — לא יותר מפי X, לא פחות מ-Y.
+  const expansion = m.length / Math.max(1, o.length);
+  if (expansion > MAX_EXPANSION_RATIO) {
+    return { safe: false, reason: `expanded ${expansion.toFixed(2)}x (max ${MAX_EXPANSION_RATIO}x)` };
+  }
+  if (o.length >= 60 && expansion < MIN_SHRINK_RATIO) {
+    return { safe: false, reason: `shrunk ${expansion.toFixed(2)}x (min ${MIN_SHRINK_RATIO}x)` };
+  }
+
+  // 2) כיסוי מילים — כמה מהמילים של הפלט מופיעות באחת מהתבניות המקוריות.
+  const sourceTokens = new Set(tokenizeForComparison(sourcesText));
+  const mergedTokens = tokenizeForComparison(m);
+  if (!mergedTokens.length) return { safe: false, reason: 'no tokens' };
+  let covered = 0;
+  const novel: string[] = [];
+  for (const t of mergedTokens) {
+    if (sourceTokens.has(t)) covered++;
+    else novel.push(t);
+  }
+  const coverage = covered / mergedTokens.length;
+  if (coverage < MIN_SOURCE_TOKEN_COVERAGE) {
+    return {
+      safe: false,
+      reason: `low source coverage ${(coverage * 100).toFixed(0)}% — novel tokens: ${novel.slice(0, 8).join(', ')}`,
+    };
+  }
+
+  return { safe: true };
+}
+
 /** החלפה של כל הפסקאות הנרטיביות בבת אחת — עובד מהסוף להתחלה כדי לא לשבש היסטים. */
 export function applyNarrativeReplacements(
   documentXml: string,
@@ -1230,34 +1329,30 @@ export async function requestMergedParagraphsFromAi(
     : 'כל השירותים של התבניות שסומנו';
 
   const system = [
-    'אתה כותב מקצועי של הצעות מחיר בעברית לחברת גלית — הצעות עשירות, מפורטות ומוחשיות.',
-    `מטרתך: למזג את התבניות שהועברו למסמך אחד שמוצג כהצעה *משולבת* הכוללת את כל התחומים (${servicesList}), ולהעשיר את התוכן כך שהלקוח יבין בבירור מה כל בדיקה כוללת.`,
+    'אתה עורך של הצעות מחיר בעברית. המטרה שלך צרה: לקבל פסקאות גוף של ההצעה הראשית',
+    'ולהרכיב מהן גרסה שמשלבת את השירותים הנוספים — בעריכה מינימלית, בלי להמציא כלום.',
+    `השירותים הנוספים: ${servicesList}.`,
     '',
-    '## מבנה',
-    'שמור על אותה כמות פסקאות ואותו סדר כמו בהצעה הראשית. לכל [Pk] החזר פסקה אחת.',
+    '## כללי זהב (מחייבים — הפרה פוסלת את הפלט)',
+    '1. **אין להמציא**: לא ציוד, לא תקנים, לא זמנים ("24 שעות", "חצי שעה"), לא כמויות, לא מיקומים,',
+    '   לא שמות מכשירים, לא קיצורים טכניים ("TVOC", "RF" וכו\'). אם לא כתוב באחת מהתבניות המצורפות —',
+    '   לא קיים.',
+    '2. **אין לשנות שמות / כותרות / כתובות**. אם פסקה היא כותרת, שם שירות, שלום/ברכה, "לכבוד",',
+    '   כתובת, או הפניה — החזר אותה *בדיוק כפי שהגיעה*. (לא אמור להגיע כזה סוג, המערכת מסננת;',
+    '   אם בכל זאת הגיע — אל תגע.)',
+    '3. **אין להוסיף מיקום**. אל תוסיף שם עיר, אתר, או כתובת שלא מופיעים במפורש בפסקה המקורית.',
+    '4. **אורך**: הפסקה הממוזגת חייבת להיות באורך סביר ביחס למקור — בין 0.8 ל-1.5 מאורך המקור',
+    '   (ספירת תווים). אל תעבה. אל תחסיר. אם אין מה להוסיף, החזר את המקור כמות שהוא.',
+    '5. **מה *כן* מותר**: אם פסקה בראשית מזכירה "בדיקה X" ובתבנית נוספת מופיעה גם "בדיקה Y",',
+    '   מותר להוסיף הפניה קצרה: "...וכן בדיקה Y, בהתאם למפרט המצורף." זהו. אין תיאור טכני חדש.',
+    '6. **placeholders**: אם פסקה מכילה `{שם_שדה}`, הפסקה *לא* נשלחת אליך. אל תמציא placeholders.',
+    '7. **מספר פסקאות קבוע**: לכל [Pk] שאני נותן, החזר *פסקה אחת*. בלי לפצל, בלי לחבר, בלי להוסיף.',
     '',
-    '## אורך ועומק — ההוראה החשובה ביותר',
-    'אל תחזיר גרסאות קצרות או "משורשרות" של הטקסט הישן. ההצעה המקורית *דקה מדי* — צריך לעבות אותה.',
-    '- פסקאות קצרות שהן ברור כותרת/תאריך/שם ("הנדון:...", "תאריך:...", שם לקוח, רף) — נשארות קצרות, רק נותנות משפט אחד שמשלב את כל התחומים.',
-    '- כל פסקה אחרת (גוף ההצעה — פתיח, רקע, היקף העבודה, תהליך, תוצרים, סיום) — להרחיב פי 2 עד פי 4. לפרט בבירור. להימנע מניסוח כללי מעורפל ("נבצע את הבדיקות הנדרשות") לטובת ניסוח מוחשי ("נבצע סקר RF עם מד שדות ברברופיל, בכל חלל רלוונטי בבית, במשך 15–30 דקות; תוצר: דוח עם מיפוי קווי עוצמה והשוואה לסף הבטיחות התקני").',
-    '',
-    '## פירוט מה כל בדיקה כוללת (קריטי לזרימה המשולבת)',
-    'חייב להיות באחד מפסקאות הגוף (זה שמתאר את היקף העבודה / תהליך / "מה נעשה") — או מפוזר בכמה אם סביר — תיאור ייעודי לכל שירות שסומן:',
-    '• **מה בודקים**: לדוגמה "קרינת RF" / "מיגון קרינה" / "אסבסט" — תחום הבדיקה בשם מלא.',
-    '• **איך בודקים**: ציוד / מכשירים / שיטת מדידה / תקנים רלוונטיים.',
-    '• **מה הלקוח מקבל**: תוצר קונקרטי — דוח? המלצות? תעודה? מסמך לרשויות?',
-    '• **היקף/משך**: כמה זמן ייקח, כמה פאות / חדרים / נק\' מדידה (אם רלוונטי).',
-    'סדר את התיאורים כרשימת-תת-שורות קריאה — השתמש ב-\\n כדי לפצל לשורות קצרות בתוך אותה פסקה (לא פסקאות חדשות — אני לא יכול להוסיף פסקאות ב-DOCX).',
-    '',
-    '## כללים מחייבים',
-    '- אל תמציא: אין להמציא ציוד שלא נזכר, מספרים/תאריכים/שמות/מחירים/תעריפים/משכי זמן ספציפיים שלא מופיעים באחת מהתבניות המקוריות. אם המקור אומר "דיגום", תגיד "דיגום" ולא "דיגום של 5 נקודות".',
-    '- אל תגע ב-placeholders מסוג {xxx} — אם ראית בתבנית, השאר אותם כמות שהם.',
-    '- אל תזכיר מחיר מספרי בטקסט (יש טבלת מחיר נפרדת שתופיע ממילא).',
-    '- כתוב בעברית מקצועית, ברור, תמציתי *בעומק* (לא מילולי מיותר).',
-    '- לכל שירות הקצה לפחות 3–5 שורות קצרות של תיאור. אם המקור כבר נותן את התיאור הזה, שפר/מוודא שהוא ברור ומלא; אל תחסיר פרטים שהמקור נתן.',
+    '## אם אתה בספק',
+    'החזר את הפסקה המקורית verbatim. "לא נגעתי" הוא פלט לגיטימי לחלוטין וטוב מההמצאה.',
     '',
     '## פורמט פלט',
-    'JSON בלבד: {"paragraphs":[{"id":"P1","merged":"..."},...]}. כל פסקה שקיימת בראשית חייבת להופיע. השתמש ב-\\n כדי לציין שורות חדשות בתוך פסקה.',
+    'JSON בלבד: {"paragraphs":[{"id":"P1","merged":"..."},...]}. כל id שקיבלת חייב להופיע.',
   ].join('\n');
 
   const user = [
@@ -1276,7 +1371,8 @@ export async function requestMergedParagraphsFromAi(
     },
     body: JSON.stringify({
       model: process.env.OPENAI_QUOTE_MERGE_MODEL || 'gpt-4o',
-      temperature: 0.2,
+      // 0 כדי לדכא דגימה יצירתית — המטרה היא לערוך מינימלית, לא לכתוב מחדש.
+      temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: system },
@@ -1494,9 +1590,31 @@ export class DocxMergeService {
     }
 
     // 4) GPT ממזג — ממפה id פסקה → טקסט ממוזג.
-    const mergedById = await requestMergedParagraphsFromAi(primaryParas, secondaryTexts, openaiApiKey);
-    if (!mergedById.size) {
+    const rawMergedById = await requestMergedParagraphsFromAi(primaryParas, secondaryTexts, openaiApiKey);
+    if (!rawMergedById.size) {
       throw new BadRequestException('AI merge returned no paragraphs');
+    }
+
+    // 4.5) Guard-rail: AI נוטה להמציא (הזיה) ולהרחיב מעבר למקור. מסננים כל פסקה
+    //      ממוזגת שלא עוברת סף — מחליפים אותה בשקט בטקסט המקורי. ר' isSafeMergedParagraph.
+    const sourcesText = primaryParas.map((p) => p.text).join('\n') +
+      '\n' + secondaryTexts.map((s) => s.fullText).join('\n');
+    const mergedById = new Map<string, string>();
+    const rejects: string[] = [];
+    for (const p of primaryParas) {
+      const merged = rawMergedById.get(p.id);
+      if (!merged) continue;
+      const verdict = evaluateMergedParagraph(p.text, merged, sourcesText);
+      if (verdict.safe === true) {
+        mergedById.set(p.id, merged);
+      } else {
+        rejects.push(`${p.id}: ${verdict.reason}`);
+      }
+    }
+    if (rejects.length) {
+      // לוג בלבד — לא מפיל את המיזוג. פסקה שנדחתה פשוט תישאר כמות שהייתה.
+      // eslint-disable-next-line no-console
+      console.warn('[docx-merge] rejected AI paragraphs:\n  ' + rejects.join('\n  '));
     }
 
     // 5) מחליפים את הטקסט בפסקאות הנרטיביות של התבנית הראשית.

@@ -941,6 +941,8 @@ type CustomerQuoteListRow = {
   contactEmail?: string | null;
   latestDocFileName?: string | null;
   latestDocAt?: string | null;
+  service?: string | null;
+  salesRepresentativeName?: string | null;
 };
 
 export function CustomerLegacyCard({
@@ -1415,6 +1417,8 @@ export function CustomerLegacyCard({
             if (docs && docs.length > 0) return ((docs[0].updatedAt as string | null) ?? (docs[0].createdAt as string | null)) ?? null;
             return null;
           })(),
+          service: (q.service as string | null | undefined) ?? null,
+          salesRepresentativeName: (q.salesRepresentativeName as string | null | undefined) ?? null,
         })),
       );
     } catch {
@@ -4253,6 +4257,8 @@ export function CustomerLegacyCard({
                     <tr>
                       <th className="px-3 py-2.5 whitespace-nowrap">מספר הצעה</th>
                       <th className="px-3 py-2.5 whitespace-nowrap">תאריך הצעה</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">שירות</th>
+                      <th className="px-3 py-2.5 whitespace-nowrap">נציג</th>
                       <th className="px-3 py-2.5 whitespace-nowrap">סטטוס</th>
                       <th className="px-3 py-2.5 whitespace-nowrap">סכום כולל</th>
                       <th className="px-3 py-2.5 whitespace-nowrap">תוקף הצעה</th>
@@ -4263,7 +4269,7 @@ export function CustomerLegacyCard({
                   <tbody>
                     {customerQuotes.length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                        <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                           אין הצעות מחיר ללקוח זה
                         </td>
                       </tr>
@@ -4290,6 +4296,8 @@ export function CustomerLegacyCard({
                           <tr key={row.id} className="border-b border-slate-100 text-right hover:bg-slate-50/80">
                             <td className="px-3 py-2 whitespace-nowrap">{row.quoteNumber || row.id.slice(0, 8)}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{quoteWhenDisp}</td>
+                            <td className="px-3 py-2 max-w-[14rem] truncate" title={row.service || ''}>{row.service || '—'}</td>
+                            <td className="px-3 py-2 whitespace-nowrap">{row.salesRepresentativeName || '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{row.status || '—'}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{totalDisp}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{validDisp}</td>

@@ -627,6 +627,8 @@ type Task = {
   leadPhone?: string;
   leadEmail?: string;
   leadCompany?: string;
+  /** שירות שהתבקש בליד — מקור ל"קשור ל" במסך המשימות */
+  leadService?: string | null;
   dueDate?: string | null;
   due: string;
   priority: string;
@@ -20552,7 +20554,8 @@ function TasksPage({
               // מעוצב לתצוגה: מספרים שהגיעו מפענוח מייל הליד / ייבוא נשמרים לרוב בלי מקף.
               // קישורי tel:/וואטסאפ עוברים דרך phoneClean ולכן לא מושפעים מהעיצוב.
               const contactPhone = formatIsraeliPhoneDisplay(t.leadPhone || leadParsed?.phone || t.customerPhone || '');
-              const relatedTo = t.projectName || taskTypeLabel(t.type || 'GENERAL');
+              // "קשור ל" = שם השירות (מהליד), עם projectName כגיבוי. השלב כבר מוצג כסאב-תייטל של התא "משימה".
+              const relatedTo = t.leadService || t.projectName || '—';
               const dueDisplay = t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '-';
               const dueTime = t.dueDate ? new Date(t.dueDate).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) : '';
 
@@ -25604,6 +25607,7 @@ export default function GalitCRMPrototype() {
         leadPhone: t.lead?.phone ?? undefined,
         leadEmail: t.lead?.email ?? undefined,
         leadCompany: t.lead?.company ?? undefined,
+        leadService: t.lead?.service ?? t.lead?.serviceType ?? null,
         dueDate: t.dueDate ?? undefined,
         due: t.dueDate ? new Date(t.dueDate).toLocaleDateString('he-IL') : '',
         priority: t.priority || 'MEDIUM',
@@ -26840,6 +26844,63 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
     } catch { /* ignore */ }
   };
 
+  // ── התראה צידית: הצעת מחיר שנחתמה (גלובלי, בכל עמוד) ──
+  // אותה חוויה/מיקום כמו "בלוג ממתין לאישורך": הצעה שהלקוח חתם עליה (דיגיטלית או
+  // ששונתה ידנית לסטטוס SIGNED) מופיעה כפופ-אפ ב-14 הימים הראשונים, עם כפתור
+  // שפותח את ההצעה במסך ההצעות. הסגירה היא פר-משתמש (SystemSetting בשרת).
+  type SignedQuoteToast = {
+    quoteId: string;
+    quoteNumber: string | null;
+    customerName: string | null;
+    signedAt: string | null;
+    amount: number | null;
+  };
+  const [signedQuoteToasts, setSignedQuoteToasts] = useState<SignedQuoteToast[]>([]);
+  const chimedSignedQuoteIdsRef = useRef<Set<string>>(new Set());
+  const dismissSignedQuoteToast = (quoteId: string) => {
+    setSignedQuoteToasts((prev) => prev.filter((x) => x.quoteId !== quoteId));
+    apiFetch(apiUrl(`/quotes/signed/pending/${quoteId}/dismiss`), { method: 'POST', authUser: currentUser }).catch(() => {});
+  };
+  const openSignedQuoteToast = (toast: SignedQuoteToast) => {
+    setOpenQuoteId(toast.quoteId);
+    navigateSafely('quotes');
+    dismissSignedQuoteToast(toast.quoteId);
+  };
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await apiFetch(apiUrl('/quotes/signed/pending'), { authUser: currentUser });
+        if (!r.ok) return;
+        const list = await r.json();
+        if (cancelled || !Array.isArray(list)) return;
+        setSignedQuoteToasts((prev) => {
+          const next: SignedQuoteToast[] = list.map((p: any) => ({
+            quoteId: String(p.quoteId),
+            quoteNumber: p.quoteNumber ?? null,
+            customerName: p.customerName ?? null,
+            signedAt: p.signedAt ?? null,
+            amount: typeof p.amount === 'number' ? p.amount : (p.amount != null ? Number(p.amount) : null),
+          }));
+          const same =
+            prev.length === next.length && prev.every((x, i) => x.quoteId === next[i].quoteId);
+          return same ? prev : next;
+        });
+      } catch { /* ignore */ }
+    };
+    void check();
+    // קצב בינוני — חתימת לקוח היא אירוע נדיר יחסית.
+    const t = window.setInterval(check, 60_000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [currentUser?.id, currentUser?.role]);
+  useEffect(() => {
+    const hasNew = signedQuoteToasts.some((x) => !chimedSignedQuoteIdsRef.current.has(x.quoteId));
+    if (!hasNew) return;
+    for (const x of signedQuoteToasts) chimedSignedQuoteIdsRef.current.add(x.quoteId);
+    playNotifyChime();
+  }, [signedQuoteToasts]);
+
   // ── התראה צידית: בלוג שנוסח אוטומטית וממתין לאישור המנהל (גלובלי, בכל עמוד) ──
   // אותה חוויה כמו "ליד חדש נכנס": פופ-אפ משמאל למעלה, צליל, וכפתור שפותח את
   // המסך הרלוונטי. הטיוטה יושבת בוורדפרס כ-draft ולא נראית באתר עד שיפורסם.
@@ -27033,6 +27094,39 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
                 <button onClick={() => { window.location.href = `/blogs?post=${bt.postId}`; }} className="mt-2 rounded-lg bg-violet-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-violet-700">ערוך ופרסם</button>
               </div>
               <button onClick={() => dismissBlogToast(bt.postId)} className="text-slate-400 hover:text-slate-600" title="לא עכשיו"><X className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── התראות צידיות: הצעות מחיר שנחתמו (גלובלי, בכל עמוד) ── */}
+      {signedQuoteToasts.length > 0 && (
+        <div
+          className="fixed z-[9999] flex flex-col gap-2"
+          style={{ top: 72 + (dueTaskToasts.length + callToasts.length + leadToasts.length + blogToasts.length) * 132, left: 16 }}
+          dir="rtl"
+        >
+          {signedQuoteToasts.map((sq) => (
+            <div key={sq.quoteId} className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-white p-4 shadow-xl" style={{ width: 320, animation: 'fadeSlideIn 0.3s ease-out both' }}>
+              <span className="inline-flex items-center justify-center rounded-xl flex-shrink-0" style={{ width: 38, height: 38, background: '#d1fae5' }}><FileCheck className="h-5 w-5 text-emerald-600" /></span>
+              <div className="flex-1 min-w-0">
+                <div className="text-[13px] font-extrabold text-emerald-900">הצעת מחיר נחתמה</div>
+                <div className="text-[12px] font-semibold text-slate-700 truncate">
+                  {sq.customerName || 'לקוח'}{sq.quoteNumber ? ` · הצעה ${sq.quoteNumber}` : ''}
+                </div>
+                {typeof sq.amount === 'number' && sq.amount > 0 && (
+                  <div className="text-[11px] text-slate-500">
+                    סכום: {sq.amount.toLocaleString('he-IL', { maximumFractionDigits: 0 })} ₪
+                  </div>
+                )}
+                <button
+                  onClick={() => openSignedQuoteToast(sq)}
+                  className="mt-2 rounded-lg bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-700"
+                >
+                  פתח הצעה
+                </button>
+              </div>
+              <button onClick={() => dismissSignedQuoteToast(sq.quoteId)} className="text-slate-400 hover:text-slate-600" title="סגור"><X className="h-4 w-4" /></button>
             </div>
           ))}
         </div>

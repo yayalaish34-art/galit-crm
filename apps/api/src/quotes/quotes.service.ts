@@ -1213,4 +1213,104 @@ export class QuotesService {
 
     return { webUrl: uploaded.webUrl, webDavUrl: uploaded.webDavUrl, itemId: uploaded.itemId, reused: false };
   }
+
+  // ── התראת "הצעה נחתמה" ─────────────────────────────────────────────────────
+  // אותו דגם של בלוג-ממתין-לאישור: רשימת הצעות שנחתמו לאחרונה שהמשתמש עדיין לא
+  // סגר את ההתראה עליהן. הסגירה נשמרת פר-משתמש ב-SystemSetting (אין טבלה חדשה),
+  // כדי שגם המנהל וגם איש המכירות יוכלו לסגור בנפרד.
+
+  private static readonly SIGNED_DISMISS_KEY = 'signed_quote_dismissed_by_user';
+  private static readonly SIGNED_WINDOW_DAYS = 14;
+
+  private async getSignedDismissedByUser(): Promise<Record<string, string[]>> {
+    const row: any = await this.prisma.systemSetting
+      .findUnique({ where: { key: QuotesService.SIGNED_DISMISS_KEY } })
+      .catch(() => null);
+    const v = row?.value;
+    if (!v || typeof v !== 'object') return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, arr] of Object.entries(v as Record<string, unknown>)) {
+      if (Array.isArray(arr)) out[k] = arr.map(String);
+    }
+    return out;
+  }
+
+  /** הצעות שנחתמו לאחרונה וטרם נסגרה עליהן ההתראה — מזין את הפופ-אפ בדשבורד. */
+  async listPendingSignedQuotes(user?: { id?: string; role?: string }): Promise<
+    Array<{
+      quoteId: string;
+      quoteNumber: string | null;
+      customerName: string | null;
+      signedAt: string | null;
+      amount: number | null;
+    }>
+  > {
+    const userId = user?.id;
+    if (!userId) return [];
+    const role = String(user?.role || '').toUpperCase();
+    if (!QUOTE_ALLOWED_ROLES.has(role)) return [];
+
+    const since = new Date(Date.now() - QuotesService.SIGNED_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const isManager = role === 'ADMIN' || role === 'MANAGER';
+
+    const where: Prisma.QuoteWhereInput = {
+      status: 'SIGNED',
+      signedAt: { gte: since },
+    };
+    // עובד שאינו מנהל רואה רק הצעות שהוא אחראי המעקב שלהן. salesRepresentativeId
+    // לא קיים ב-DB האמיתי (ר' SCHEMA_DRIFT_OMIT) — לכן לא מסננים לפיו.
+    if (!isManager) {
+      where.followUpResponsibleUserId = userId;
+    }
+
+    const rows = await this.prisma.quote.findMany({
+      where,
+      orderBy: { signedAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        quoteNumber: true,
+        customerName: true,
+        signedAt: true,
+        totalAmount: true,
+        amount: true,
+        customer: { select: { name: true, companyname: true } },
+      },
+    });
+
+    const dismissed = new Set((await this.getSignedDismissedByUser())[userId] || []);
+    return rows
+      .filter((q) => !dismissed.has(q.id))
+      .map((q) => ({
+        quoteId: q.id,
+        quoteNumber: q.quoteNumber ?? null,
+        customerName:
+          q.customerName ||
+          (q as any).customer?.companyname ||
+          (q as any).customer?.name ||
+          null,
+        signedAt: q.signedAt ? q.signedAt.toISOString() : null,
+        amount:
+          q.totalAmount !== null && q.totalAmount !== undefined
+            ? Number(q.totalAmount)
+            : q.amount ?? null,
+      }));
+  }
+
+  /** המשתמש סגר את ההתראה — ההצעה עצמה לא משתנה, רק מפסיקה לקפוץ *לאותו משתמש*. */
+  async dismissSignedQuote(user: { id?: string } | undefined, quoteId: string): Promise<{ ok: true }> {
+    const userId = user?.id;
+    if (!userId || !quoteId) return { ok: true };
+    const map = await this.getSignedDismissedByUser();
+    const list = Array.isArray(map[userId]) ? map[userId] : [];
+    if (!list.includes(quoteId)) list.push(quoteId);
+    // גזימת ההיסטוריה פר-משתמש — השורה לא תתפח בלי גבול.
+    map[userId] = list.slice(-500);
+    await this.prisma.systemSetting.upsert({
+      where: { key: QuotesService.SIGNED_DISMISS_KEY },
+      create: { key: QuotesService.SIGNED_DISMISS_KEY, value: map as any },
+      update: { value: map as any },
+    });
+    return { ok: true };
+  }
 }
