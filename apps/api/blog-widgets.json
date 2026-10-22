@@ -1,0 +1,2462 @@
+{
+  "categoryIdInSettings": 226,
+  "wpCategories": [
+    {
+      "id": 98,
+      "name": "הכל על הדברת מזיקים",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%94%d7%93%d7%91%d7%a8%d7%aa-%d7%9e%d7%96%d7%99%d7%a7%d7%99%d7%9d",
+      "count": 35,
+      "parent": 87
+    },
+    {
+      "id": 83,
+      "name": "בדיקות קרינה",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a7%d7%a8%d7%99%d7%a0%d7%94",
+      "count": 15,
+      "parent": 86
+    },
+    {
+      "id": 85,
+      "name": "הכל על קרינה",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a7%d7%a8%d7%99%d7%a0%d7%94",
+      "count": 14,
+      "parent": 87
+    },
+    {
+      "id": 124,
+      "name": "בדיקות רעש",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a8%d7%a2%d7%a9",
+      "count": 13,
+      "parent": 123
+    },
+    {
+      "id": 87,
+      "name": "מאמרים",
+      "slug": "%d7%9e%d7%90%d7%9e%d7%a8%d7%99%d7%9d",
+      "count": 12,
+      "parent": 0
+    },
+    {
+      "id": 134,
+      "name": "בדיקת איכות אוויר",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%aa-%d7%90%d7%99%d7%9b%d7%95%d7%aa-%d7%90%d7%95%d7%95%d7%99%d7%a8",
+      "count": 10,
+      "parent": 133
+    },
+    {
+      "id": 133,
+      "name": "אוויר",
+      "slug": "%d7%90%d7%95%d7%95%d7%99%d7%a8",
+      "count": 9,
+      "parent": 0
+    },
+    {
+      "id": 1,
+      "name": "ללא קטגוריה",
+      "slug": "%d7%9c%d7%9c%d7%90-%d7%a7%d7%98%d7%92%d7%95%d7%a8%d7%99%d7%94",
+      "count": 9,
+      "parent": 0
+    },
+    {
+      "id": 99,
+      "name": "הכל על ראדון",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a8%d7%90%d7%93%d7%95%d7%9f",
+      "count": 7,
+      "parent": 87
+    },
+    {
+      "id": 131,
+      "name": "בדיקות איכות מים",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%90%d7%99%d7%9b%d7%95%d7%aa-%d7%9e%d7%99%d7%9d",
+      "count": 7,
+      "parent": 130
+    },
+    {
+      "id": 188,
+      "name": "דף הבית",
+      "slug": "home",
+      "count": 7,
+      "parent": 0
+    },
+    {
+      "id": 127,
+      "name": "בדיקות קרקע",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a7%d7%a8%d7%a7%d7%a2",
+      "count": 6,
+      "parent": 126
+    },
+    {
+      "id": 92,
+      "name": "פתרונות קרינה",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%a7%d7%a8%d7%99%d7%a0%d7%94",
+      "count": 6,
+      "parent": 86
+    },
+    {
+      "id": 167,
+      "name": "בדיקות יעוץ ופתרונות למגזר העסקי",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%99%d7%a2%d7%95%d7%a5-%d7%95%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%9e%d7%92%d7%96%d7%a8-%d7%94%d7%a2%d7%a1%d7%a7%d7%99",
+      "count": 6,
+      "parent": 0
+    },
+    {
+      "id": 121,
+      "name": "בדיקות ראדון",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a8%d7%90%d7%93%d7%95%d7%9f",
+      "count": 6,
+      "parent": 120
+    },
+    {
+      "id": 97,
+      "name": "הכל על ריח",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a8%d7%99%d7%97",
+      "count": 5,
+      "parent": 87
+    },
+    {
+      "id": 130,
+      "name": "מים",
+      "slug": "%d7%9e%d7%99%d7%9d",
+      "count": 5,
+      "parent": 0
+    },
+    {
+      "id": 123,
+      "name": "רעש",
+      "slug": "%d7%a8%d7%a2%d7%a9",
+      "count": 5,
+      "parent": 0
+    },
+    {
+      "id": 103,
+      "name": "הכל על איכות אוויר",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%90%d7%99%d7%9b%d7%95%d7%aa-%d7%90%d7%95%d7%95%d7%99%d7%a8",
+      "count": 5,
+      "parent": 87
+    },
+    {
+      "id": 164,
+      "name": "בנייה ירוקה",
+      "slug": "%d7%91%d7%a0%d7%99%d7%99%d7%94-%d7%99%d7%a8%d7%95%d7%a7%d7%94",
+      "count": 4,
+      "parent": 0
+    },
+    {
+      "id": 158,
+      "name": "שירותים למגזר הפרטי",
+      "slug": "%d7%a9%d7%99%d7%a8%d7%95%d7%aa%d7%99%d7%9d-%d7%9c%d7%9e%d7%92%d7%96%d7%a8-%d7%94%d7%a4%d7%a8%d7%98%d7%99",
+      "count": 4,
+      "parent": 0
+    },
+    {
+      "id": 86,
+      "name": "קרינה",
+      "slug": "%d7%a7%d7%a8%d7%99%d7%a0%d7%94",
+      "count": 4,
+      "parent": 0
+    },
+    {
+      "id": 166,
+      "name": "התעדה לבנייה ירוקה",
+      "slug": "%d7%94%d7%aa%d7%a2%d7%93%d7%94-%d7%9c%d7%91%d7%a0%d7%99%d7%99%d7%94-%d7%99%d7%a8%d7%95%d7%a7%d7%94",
+      "count": 4,
+      "parent": 164
+    },
+    {
+      "id": 168,
+      "name": "בדיקות למגזר הפרטי",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%9c%d7%9e%d7%92%d7%96%d7%a8-%d7%94%d7%a4%d7%a8%d7%98%d7%99",
+      "count": 4,
+      "parent": 0
+    },
+    {
+      "id": 189,
+      "name": "אודותינו",
+      "slug": "about",
+      "count": 4,
+      "parent": 188
+    },
+    {
+      "id": 192,
+      "name": "חדר שקט אקוסטי",
+      "slug": "%d7%97%d7%93%d7%a8-%d7%a9%d7%a7%d7%98-%d7%90%d7%a7%d7%95%d7%a1%d7%98%d7%99",
+      "count": 4,
+      "parent": 0
+    },
+    {
+      "id": 128,
+      "name": "פתרונות קרקע",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%a7%d7%a8%d7%a7%d7%a2",
+      "count": 4,
+      "parent": 126
+    },
+    {
+      "id": 138,
+      "name": "בדיקות אסבסט",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%90%d7%a1%d7%91%d7%a1%d7%98",
+      "count": 4,
+      "parent": 137
+    },
+    {
+      "id": 95,
+      "name": "בדיקות ריח",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a8%d7%99%d7%97",
+      "count": 4,
+      "parent": 94
+    },
+    {
+      "id": 100,
+      "name": "הכל על רעש",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a8%d7%a2%d7%a9",
+      "count": 4,
+      "parent": 87
+    },
+    {
+      "id": 186,
+      "name": "בדיקות קורונה",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a7%d7%95%d7%a8%d7%95%d7%a0%d7%94",
+      "count": 3,
+      "parent": 174
+    },
+    {
+      "id": 104,
+      "name": "הכל על אסבסט",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%90%d7%a1%d7%91%d7%a1%d7%98",
+      "count": 3,
+      "parent": 87
+    },
+    {
+      "id": 173,
+      "name": "ייעוץ וליווי משפטי",
+      "slug": "%d7%99%d7%99%d7%a2%d7%95%d7%a5-%d7%95%d7%9c%d7%99%d7%95%d7%95%d7%99-%d7%9e%d7%a9%d7%a4%d7%98%d7%99",
+      "count": 3,
+      "parent": 0
+    },
+    {
+      "id": 174,
+      "name": "בריאות",
+      "slug": "%d7%91%d7%a8%d7%99%d7%90%d7%95%d7%aa",
+      "count": 3,
+      "parent": 0
+    },
+    {
+      "id": 159,
+      "name": "בדיקות ופתרונות למגזר העסקי",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%95%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%9e%d7%92%d7%96%d7%a8-%d7%94%d7%a2%d7%a1%d7%a7%d7%99",
+      "count": 3,
+      "parent": 138
+    },
+    {
+      "id": 118,
+      "name": "פתרונות הדברה",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%94%d7%93%d7%91%d7%a8%d7%94",
+      "count": 3,
+      "parent": 117
+    },
+    {
+      "id": 101,
+      "name": "הכל על קרקעות מזוהמות",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a7%d7%a8%d7%a7%d7%a2%d7%95%d7%aa-%d7%9e%d7%96%d7%95%d7%94%d7%9e%d7%95%d7%aa",
+      "count": 3,
+      "parent": 87
+    },
+    {
+      "id": 190,
+      "name": "קישורים שימושיים",
+      "slug": "%d7%a7%d7%99%d7%a9%d7%95%d7%a8%d7%99%d7%9d-%d7%a9%d7%99%d7%9e%d7%95%d7%a9%d7%99%d7%99%d7%9d",
+      "count": 3,
+      "parent": 188
+    },
+    {
+      "id": 135,
+      "name": "פתרונות לשיפור איכות אוויר",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%a9%d7%99%d7%a4%d7%95%d7%a8-%d7%90%d7%99%d7%9b%d7%95%d7%aa-%d7%90%d7%95%d7%95%d7%99%d7%a8",
+      "count": 3,
+      "parent": 133
+    },
+    {
+      "id": 126,
+      "name": "קרקע",
+      "slug": "%d7%a7%d7%a8%d7%a7%d7%a2",
+      "count": 3,
+      "parent": 0
+    },
+    {
+      "id": 125,
+      "name": "פתרונות רעש",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%a8%d7%a2%d7%a9",
+      "count": 3,
+      "parent": 123
+    },
+    {
+      "id": 147,
+      "name": "שירותים נוספים",
+      "slug": "%d7%a9%d7%99%d7%a8%d7%95%d7%aa%d7%99%d7%9d-%d7%a0%d7%95%d7%a1%d7%a4%d7%99%d7%9d",
+      "count": 2,
+      "parent": 0
+    },
+    {
+      "id": 137,
+      "name": "אסבסט",
+      "slug": "%d7%90%d7%a1%d7%91%d7%a1%d7%98",
+      "count": 2,
+      "parent": 0
+    },
+    {
+      "id": 94,
+      "name": "ריח",
+      "slug": "%d7%a8%d7%99%d7%97",
+      "count": 2,
+      "parent": 0
+    },
+    {
+      "id": 172,
+      "name": "מתן רשיונות והתרים לבניה",
+      "slug": "%d7%9e%d7%aa%d7%9f-%d7%a8%d7%a9%d7%99%d7%95%d7%a0%d7%95%d7%aa-%d7%95%d7%94%d7%aa%d7%a8%d7%99%d7%9d-%d7%9c%d7%91%d7%a0%d7%99%d7%94",
+      "count": 2,
+      "parent": 0
+    },
+    {
+      "id": 169,
+      "name": "פתרונות מים",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9e%d7%99%d7%9d",
+      "count": 2,
+      "parent": 130
+    },
+    {
+      "id": 102,
+      "name": "הכל על איכות מים",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%90%d7%99%d7%9b%d7%95%d7%aa-%d7%9e%d7%99%d7%9d",
+      "count": 2,
+      "parent": 87
+    },
+    {
+      "id": 226,
+      "name": "בלוגים",
+      "slug": "blog",
+      "count": 1,
+      "parent": 0
+    },
+    {
+      "id": 175,
+      "name": "שירותי המשרד המשפטי",
+      "slug": "%d7%a9%d7%99%d7%a8%d7%95%d7%aa%d7%99-%d7%94%d7%9e%d7%a9%d7%a8%d7%93-%d7%94%d7%9e%d7%a9%d7%a4%d7%98%d7%99",
+      "count": 1,
+      "parent": 173
+    },
+    {
+      "id": 105,
+      "name": "הכל על שפכים",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%a9%d7%a4%d7%9b%d7%99%d7%9d",
+      "count": 1,
+      "parent": 87
+    },
+    {
+      "id": 160,
+      "name": "פתרונות למפגעים סביבתיים",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%9e%d7%a4%d7%92%d7%a2%d7%99%d7%9d-%d7%a1%d7%91%d7%99%d7%91%d7%aa%d7%99%d7%99%d7%9d",
+      "count": 1,
+      "parent": 0
+    },
+    {
+      "id": 139,
+      "name": "פתרונות לאסבסט",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%90%d7%a1%d7%91%d7%a1%d7%98",
+      "count": 1,
+      "parent": 137
+    },
+    {
+      "id": 96,
+      "name": "פתרונות ריח",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%a8%d7%99%d7%97",
+      "count": 1,
+      "parent": 94
+    },
+    {
+      "id": 122,
+      "name": "פתרונות ראדון",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%a8%d7%90%d7%93%d7%95%d7%9f",
+      "count": 1,
+      "parent": 120
+    },
+    {
+      "id": 165,
+      "name": "פתרונות לבנייה ירוקה",
+      "slug": "%d7%a9%d7%99%d7%a8%d7%95%d7%aa%d7%99%d7%9d-%d7%9c%d7%91%d7%a0%d7%99%d7%99%d7%94-%d7%99%d7%a8%d7%95%d7%a7%d7%94",
+      "count": 0,
+      "parent": 164
+    },
+    {
+      "id": 170,
+      "name": "הכל על בנייה ירוקה",
+      "slug": "%d7%94%d7%9b%d7%9c-%d7%a2%d7%9c-%d7%91%d7%a0%d7%99%d7%99%d7%94-%d7%99%d7%a8%d7%95%d7%a7%d7%94",
+      "count": 0,
+      "parent": 87
+    },
+    {
+      "id": 117,
+      "name": "הדברה",
+      "slug": "%d7%94%d7%93%d7%91%d7%a8%d7%94",
+      "count": 0,
+      "parent": 0
+    },
+    {
+      "id": 161,
+      "name": "שירותים אחרים",
+      "slug": "%d7%a9%d7%99%d7%a8%d7%95%d7%aa%d7%99%d7%9d-%d7%90%d7%97%d7%a8%d7%99%d7%9d",
+      "count": 0,
+      "parent": 0
+    },
+    {
+      "id": 143,
+      "name": "פתרונות לשפכים",
+      "slug": "%d7%a4%d7%aa%d7%a8%d7%95%d7%a0%d7%95%d7%aa-%d7%9c%d7%a9%d7%a4%d7%9b%d7%99%d7%9d",
+      "count": 0,
+      "parent": 141
+    },
+    {
+      "id": 142,
+      "name": "בדיקות שפכים",
+      "slug": "%d7%91%d7%93%d7%99%d7%a7%d7%95%d7%aa-%d7%a9%d7%a4%d7%9b%d7%99%d7%9d",
+      "count": 0,
+      "parent": 141
+    },
+    {
+      "id": 141,
+      "name": "שפכים",
+      "slug": "%d7%a9%d7%a4%d7%9b%d7%99%d7%9d",
+      "count": 0,
+      "parent": 0
+    },
+    {
+      "id": 120,
+      "name": "ראדון",
+      "slug": "%d7%a8%d7%90%d7%93%d7%95%d7%9f",
+      "count": 0,
+      "parent": 0
+    }
+  ],
+  "pages": [
+    {
+      "id": 3727,
+      "label": "קרינה",
+      "topLevelCount": 11,
+      "topLevelSections": [
+        {
+          "index": 0,
+          "id": "a742423",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 1,
+          "id": "da3deec",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 2,
+          "id": "1b34e18",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 3,
+          "id": "766efca",
+          "anchor": "tests",
+          "firstHeading": "בדיקת קרינה",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 4,
+          "id": "6ae86ea",
+          "anchor": "solutions",
+          "firstHeading": "<b style=\"\">פתרונות מיגון ומיסוך קרינה אלקטרומגנטית</b>",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 5,
+          "id": "5ffaca9",
+          "anchor": "shop",
+          "firstHeading": "חנות",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 6,
+          "id": "bbf56ff",
+          "anchor": "asq",
+          "firstHeading": "שאלות ותשובות בנושא קרינה אלקטרומגנטית",
+          "hasPosts": 2,
+          "hasHtml": 0
+        },
+        {
+          "index": 7,
+          "id": "d7ec2dd",
+          "anchor": "blog",
+          "firstHeading": "בלוג קרינה",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 8,
+          "id": "d0991c6",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 1
+        },
+        {
+          "index": 9,
+          "id": "9838113",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 10,
+          "id": "e23542f",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        }
+      ],
+      "postWidgets": [
+        {
+          "path": "3.elements.0.elements.1",
+          "id": "8bbda9e",
+          "settings": {
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_item_ratio": {
+              "unit": "px",
+              "size": 0.67,
+              "sizes": []
+            },
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "full_content_meta_separator": "///",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              "83"
+            ],
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "אין יותר פוסטים להציג",
+            "posts_post_type": "page",
+            "_skin": "cards",
+            "cards_columns": "4",
+            "cards_posts_per_page": 8,
+            "cards_excerpt_length": 12,
+            "cards_meta_data": [],
+            "cards_show_avatar": "",
+            "posts_orderby": "menu_order",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30,
+              "sizes": []
+            },
+            "cards_card_bg_color": "#00000000",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0,
+              "sizes": []
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74A42E",
+            "cards_title_color": "#4D4D4D",
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_family": "Assistant",
+            "cards_excerpt_typography_font_weight": "400",
+            "cards_read_more_color": "#74A42E",
+            "pagination_color": "#C5C5C5",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14,
+              "sizes": []
+            },
+            "background_color": "#6C9745"
+          }
+        },
+        {
+          "path": "4.elements.0.elements.1",
+          "id": "5fb770a",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": 4,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "92"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              92
+            ],
+            "posts_include_term_ids_backup": [
+              "92"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "posts_order": "asc",
+            "pagination_type": "numbers",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "6.elements.0.elements.1",
+          "id": "80f1357",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": 8,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "83"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74A52C",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              83
+            ],
+            "posts_include_term_ids_backup": [
+              "83"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "posts_order": "asc",
+            "pagination_type": "numbers",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip",
+            "__globals__": {
+              "cards_read_more_typography_typography": "globals/typography?id=fb2ebc2"
+            }
+          }
+        },
+        {
+          "path": "6.elements.0.elements.3",
+          "id": "e006d7e",
+          "settings": {
+            "classic_columns": "1",
+            "classic_posts_per_page": 1,
+            "classic_meta_data": [],
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "לכל השאלות והתשובות »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "classic_excerpt_length": 38,
+            "posts_post_tag_ids": [
+              "148"
+            ],
+            "classic_title_color": "#4d4d4d",
+            "classic_excerpt_color": "#4d4d4d",
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_read_more_color": "#74a42e",
+            "classic_read_more_typography_typography": "custom",
+            "classic_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_read_more_spacing": {
+              "unit": "px",
+              "size": 17
+            },
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              148
+            ],
+            "posts_include_term_ids_backup": [
+              "148"
+            ],
+            "classic_show_title": "",
+            "classic_show_excerpt": "",
+            "classic_alignment": "left",
+            "full_content_meta_separator": "///",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "7.elements.0.elements.1",
+          "id": "45aeeb0",
+          "settings": {
+            "classic_posts_per_page": -1,
+            "classic_meta_data": [
+              "date",
+              "time"
+            ],
+            "classic_meta_separator": "///",
+            "classic_show_read_more": "",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_category_ids": [
+              "85"
+            ],
+            "exclude": [
+              "manual_selection"
+            ],
+            "exclude_ids": [
+              "4208"
+            ],
+            "classic_alignment": "center",
+            "classic_box_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "0",
+              "bottom": "10",
+              "left": "0",
+              "isLinked": false
+            },
+            "classic_box_bg_color": "#ECECEB",
+            "classic_box_border_color": "#D6D5D4",
+            "classic_title_color": "#4d4d4d",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "40",
+              "left": "0",
+              "isLinked": false
+            },
+            "posts_exclude": [
+              "manual_selection"
+            ],
+            "posts_exclude_ids": [
+              "4208"
+            ],
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              85
+            ],
+            "posts_include_term_ids_backup": [
+              "85"
+            ],
+            "classic_title_typography_typography": "custom",
+            "classic_title_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "classic_masonry": "yes",
+            "classic_row_gap": {
+              "unit": "px",
+              "size": 20,
+              "sizes": []
+            },
+            "classic_box_border_width": {
+              "unit": "px",
+              "top": "1",
+              "right": "1",
+              "bottom": "1",
+              "left": "1",
+              "isLinked": true
+            },
+            "classic_box_border_radius": {
+              "unit": "px",
+              "size": 15,
+              "sizes": []
+            },
+            "classic_content_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "20",
+              "bottom": "0",
+              "left": "20",
+              "isLinked": false
+            },
+            "classic_image_spacing": {
+              "unit": "px",
+              "size": 21,
+              "sizes": []
+            },
+            "classic_thumbnail_hover_filters_css_filter": "custom",
+            "classic_thumbnail_hover_filters_brightness": {
+              "unit": "px",
+              "size": 125,
+              "sizes": []
+            },
+            "classic_title_spacing": {
+              "unit": "px",
+              "size": 10,
+              "sizes": []
+            },
+            "classic_meta_color": "#4D4D4D",
+            "classic_meta_spacing": {
+              "unit": "px",
+              "size": 11,
+              "sizes": []
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 5,
+              "sizes": []
+            },
+            "posts_orderby": "post_title",
+            "posts_order": "asc",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        }
+      ],
+      "htmlWidgets": [
+        {
+          "path": "8.elements.0.elements.0",
+          "id": "d42ef26",
+          "htmlLength": 16703,
+          "htmlHead": "\n<section class=\"galit-gloss\" dir=\"rtl\"><style>\n.galit-gloss{--g:#74a42e;--gd:#438223;--gl:#f1f7e8;margin:2.5rem 0;font-family:Assistant,'Heebo',Arial,sans-serif}\n.galit-gloss *{box-sizing:border-box}\n.galit-gloss__head{margin-bottom:1.25rem}\n.galit-gloss__head h2{margin:0 0 .35rem;font-size:1.65rem;font-weight:800;color:#25301c;line-height:1.25}\n.galit-gloss__head h2::after{content:\"\";display:blo",
+          "isGlossary": true
+        }
+      ],
+      "headings": [
+        {
+          "id": "1cbcca4",
+          "title": "בדיקת קרינה"
+        },
+        {
+          "id": "cc93345",
+          "title": "<b style=\"\">פתרונות מיגון ומיסוך קרינה אלקטרומגנטית</b>"
+        },
+        {
+          "id": "3dab254",
+          "title": "חנות"
+        },
+        {
+          "id": "413cb64",
+          "title": "שאלות ותשובות בנושא קרינה אלקטרומגנטית"
+        },
+        {
+          "id": "1cf7631",
+          "title": "בלוג קרינה"
+        }
+      ]
+    },
+    {
+      "id": 3731,
+      "label": "ראדון",
+      "topLevelCount": 9,
+      "topLevelSections": [
+        {
+          "index": 0,
+          "id": "eb32ed5",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 1,
+          "id": "a9f1c01",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 2,
+          "id": "78e4e83",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 3,
+          "id": "e530878",
+          "anchor": "tests",
+          "firstHeading": "בדיקות גז ראדון",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 4,
+          "id": "7b4972a4",
+          "anchor": "solutions",
+          "firstHeading": "פתרונות לגז ראדון ",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 5,
+          "id": "2b5db2b",
+          "anchor": null,
+          "firstHeading": "חנות",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 6,
+          "id": "db00f9d",
+          "anchor": null,
+          "firstHeading": "שאלות ותשובות בנושא קרינה אלקטרומגנטית",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 7,
+          "id": "b197b0f",
+          "anchor": null,
+          "firstHeading": "בלוג קרינה",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 8,
+          "id": "b8d3f8c",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 1
+        }
+      ],
+      "postWidgets": [
+        {
+          "path": "3.elements.0.elements.1",
+          "id": "bf527cc",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": -1,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "121"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "menu_order",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              121
+            ],
+            "posts_include_term_ids_backup": [
+              "121"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///"
+          }
+        },
+        {
+          "path": "4.elements.0.elements.1",
+          "id": "603a6d8e",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": 4,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "122"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "rand",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              122
+            ],
+            "posts_include_term_ids_backup": [
+              "122"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "hide_mobile": "hidden-phone"
+          }
+        },
+        {
+          "path": "6.elements.0.elements.2",
+          "id": "184b619",
+          "settings": {
+            "classic_columns": "1",
+            "classic_posts_per_page": 1,
+            "classic_meta_data": [],
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "לכל השאלות והתשובות »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "classic_excerpt_length": 38,
+            "posts_post_tag_ids": [
+              "148"
+            ],
+            "classic_title_color": "#4d4d4d",
+            "classic_excerpt_color": "#4d4d4d",
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_read_more_color": "#74a42e",
+            "classic_read_more_typography_typography": "custom",
+            "classic_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16
+            },
+            "classic_read_more_spacing": {
+              "unit": "px",
+              "size": 17
+            },
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              "152"
+            ],
+            "posts_include_term_ids_backup": [
+              "148"
+            ],
+            "classic_show_title": "",
+            "classic_show_excerpt": "",
+            "classic_alignment": "left",
+            "full_content_meta_separator": "///"
+          }
+        },
+        {
+          "path": "7.elements.0.elements.1",
+          "id": "e886faa",
+          "settings": {
+            "classic_posts_per_page": -1,
+            "classic_meta_data": [],
+            "classic_meta_separator": "///",
+            "classic_show_read_more": "",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_category_ids": [
+              "99"
+            ],
+            "exclude": [
+              "manual_selection"
+            ],
+            "exclude_ids": [
+              "4738"
+            ],
+            "classic_alignment": "center",
+            "classic_box_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "0",
+              "bottom": "10",
+              "left": "0",
+              "isLinked": false
+            },
+            "classic_box_bg_color": "#ECECEB",
+            "classic_box_border_color": "#D6D5D4",
+            "classic_title_color": "#4d4d4d",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "40",
+              "left": "0",
+              "isLinked": false
+            },
+            "posts_exclude": [
+              "manual_selection"
+            ],
+            "posts_exclude_ids": [
+              "4738"
+            ],
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              99
+            ],
+            "posts_include_term_ids_backup": [
+              "99"
+            ],
+            "classic_title_typography_typography": "custom",
+            "classic_title_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "classic_row_gap": {
+              "unit": "px",
+              "size": 20,
+              "sizes": []
+            },
+            "classic_box_border_width": {
+              "unit": "px",
+              "top": "1",
+              "right": "1",
+              "bottom": "1",
+              "left": "1",
+              "isLinked": true
+            },
+            "classic_box_border_radius": {
+              "unit": "px",
+              "size": 15,
+              "sizes": []
+            },
+            "classic_content_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "20",
+              "bottom": "0",
+              "left": "20",
+              "isLinked": false
+            },
+            "classic_image_spacing": {
+              "unit": "px",
+              "size": 21,
+              "sizes": []
+            },
+            "classic_thumbnail_hover_filters_css_filter": "custom",
+            "classic_thumbnail_hover_filters_brightness": {
+              "unit": "px",
+              "size": 125,
+              "sizes": []
+            },
+            "classic_title_spacing": {
+              "unit": "px",
+              "size": 10,
+              "sizes": []
+            },
+            "classic_meta_color": "#4D4D4D",
+            "classic_meta_spacing": {
+              "unit": "px",
+              "size": 11,
+              "sizes": []
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 5,
+              "sizes": []
+            }
+          }
+        }
+      ],
+      "htmlWidgets": [
+        {
+          "path": "8.elements.0.elements.0",
+          "id": "cb5991d",
+          "htmlLength": 16364,
+          "htmlHead": "\n<section class=\"galit-gloss\" dir=\"rtl\"><style>\n.galit-gloss{--g:#74a42e;--gd:#438223;--gl:#f1f7e8;margin:2.5rem 0;font-family:Assistant,'Heebo',Arial,sans-serif}\n.galit-gloss *{box-sizing:border-box}\n.galit-gloss__head{margin-bottom:1.25rem}\n.galit-gloss__head h2{margin:0 0 .35rem;font-size:1.65rem;font-weight:800;color:#25301c;line-height:1.25}\n.galit-gloss__head h2::after{content:\"\";display:blo",
+          "isGlossary": true
+        }
+      ],
+      "headings": [
+        {
+          "id": "5a5774b",
+          "title": "בדיקות גז ראדון"
+        },
+        {
+          "id": "20642ef8",
+          "title": "פתרונות לגז ראדון "
+        },
+        {
+          "id": "544a06f",
+          "title": "חנות"
+        },
+        {
+          "id": "1f9640a",
+          "title": "שאלות ותשובות בנושא קרינה אלקטרומגנטית"
+        },
+        {
+          "id": "68193c6",
+          "title": "בלוג קרינה"
+        }
+      ]
+    },
+    {
+      "id": 3735,
+      "label": "קרקע",
+      "topLevelCount": 9,
+      "topLevelSections": [
+        {
+          "index": 0,
+          "id": "d289c7e",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 1,
+          "id": "1ba1de4",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 2,
+          "id": "17388fa",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 3,
+          "id": "2d23637e",
+          "anchor": "tests",
+          "firstHeading": "בדיקות קרקע",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 4,
+          "id": "7db0f07d",
+          "anchor": "solutions",
+          "firstHeading": null,
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 5,
+          "id": "5f5e782",
+          "anchor": null,
+          "firstHeading": "חנות",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 6,
+          "id": "ccc8f71",
+          "anchor": null,
+          "firstHeading": "שאלות ותשובות בנושא קרינה אלקטרומגנטית",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 7,
+          "id": "56426c0",
+          "anchor": null,
+          "firstHeading": "בלוג קרינה",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 8,
+          "id": "8f9d6db",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 1
+        }
+      ],
+      "postWidgets": [
+        {
+          "path": "3.elements.0.elements.1",
+          "id": "5f9ea9e0",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": -1,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "127"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "menu_order",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              127
+            ],
+            "posts_include_term_ids_backup": [
+              "127"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "4.elements.0.elements.1",
+          "id": "4492c264",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": 4,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "128"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "rand",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              128
+            ],
+            "posts_include_term_ids_backup": [
+              "128"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "7.elements.0.elements.1",
+          "id": "43ddab5",
+          "settings": {
+            "classic_posts_per_page": -1,
+            "classic_meta_data": [],
+            "classic_meta_separator": "///",
+            "classic_show_read_more": "",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_category_ids": [
+              "101"
+            ],
+            "exclude": [
+              "manual_selection"
+            ],
+            "exclude_ids": [
+              "4808"
+            ],
+            "classic_alignment": "center",
+            "classic_box_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "0",
+              "bottom": "10",
+              "left": "0",
+              "isLinked": false
+            },
+            "classic_box_bg_color": "#ECECEB",
+            "classic_box_border_color": "#D6D5D4",
+            "classic_title_color": "#4d4d4d",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "40",
+              "left": "0",
+              "isLinked": false
+            },
+            "posts_exclude": [
+              "manual_selection"
+            ],
+            "posts_exclude_ids": [
+              "4808"
+            ],
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              101
+            ],
+            "posts_include_term_ids_backup": [
+              "101"
+            ],
+            "classic_title_typography_typography": "custom",
+            "classic_title_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "classic_row_gap": {
+              "unit": "px",
+              "size": 20,
+              "sizes": []
+            },
+            "classic_box_border_width": {
+              "unit": "px",
+              "top": "1",
+              "right": "1",
+              "bottom": "1",
+              "left": "1",
+              "isLinked": true
+            },
+            "classic_box_border_radius": {
+              "unit": "px",
+              "size": 15,
+              "sizes": []
+            },
+            "classic_content_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "20",
+              "bottom": "0",
+              "left": "20",
+              "isLinked": false
+            },
+            "classic_image_spacing": {
+              "unit": "px",
+              "size": 21,
+              "sizes": []
+            },
+            "classic_thumbnail_hover_filters_css_filter": "custom",
+            "classic_thumbnail_hover_filters_brightness": {
+              "unit": "px",
+              "size": 125,
+              "sizes": []
+            },
+            "classic_title_spacing": {
+              "unit": "px",
+              "size": 10,
+              "sizes": []
+            },
+            "classic_meta_color": "#4D4D4D",
+            "classic_meta_spacing": {
+              "unit": "px",
+              "size": 11,
+              "sizes": []
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 5,
+              "sizes": []
+            },
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        }
+      ],
+      "htmlWidgets": [
+        {
+          "path": "8.elements.0.elements.0",
+          "id": "2e94cc9",
+          "htmlLength": 16428,
+          "htmlHead": "\n<section class=\"galit-gloss\" dir=\"rtl\"><style>\n.galit-gloss{--g:#74a42e;--gd:#438223;--gl:#f1f7e8;margin:2.5rem 0;font-family:Assistant,'Heebo',Arial,sans-serif}\n.galit-gloss *{box-sizing:border-box}\n.galit-gloss__head{margin-bottom:1.25rem}\n.galit-gloss__head h2{margin:0 0 .35rem;font-size:1.65rem;font-weight:800;color:#25301c;line-height:1.25}\n.galit-gloss__head h2::after{content:\"\";display:blo",
+          "isGlossary": true
+        }
+      ],
+      "headings": [
+        {
+          "id": "440195f",
+          "title": "בדיקות קרקע"
+        },
+        {
+          "id": "28a21fec",
+          "title": ""
+        },
+        {
+          "id": "bd2db90",
+          "title": "חנות"
+        },
+        {
+          "id": "dcc8e48",
+          "title": "שאלות ותשובות בנושא קרינה אלקטרומגנטית"
+        },
+        {
+          "id": "80d0ee4",
+          "title": "בלוג קרינה"
+        }
+      ]
+    },
+    {
+      "id": 3737,
+      "label": "מים",
+      "topLevelCount": 9,
+      "topLevelSections": [
+        {
+          "index": 0,
+          "id": "4661f56",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 1,
+          "id": "ad6e269",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 2,
+          "id": "3562156",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 3,
+          "id": "277d9eea",
+          "anchor": "tests",
+          "firstHeading": "בדיקות איכות מים",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 4,
+          "id": "a39dbb2",
+          "anchor": "solutions",
+          "firstHeading": "פתרונות לאיכות מים ",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 5,
+          "id": "731bf8b",
+          "anchor": null,
+          "firstHeading": "חנות<b></b>",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 6,
+          "id": "e7fdbec",
+          "anchor": null,
+          "firstHeading": "שאלות ותשובות בנושא קרינה אלקטרומגנטית",
+          "hasPosts": 0,
+          "hasHtml": 0
+        },
+        {
+          "index": 7,
+          "id": "a4e74f1",
+          "anchor": null,
+          "firstHeading": "בלוג קרינה",
+          "hasPosts": 1,
+          "hasHtml": 0
+        },
+        {
+          "index": 8,
+          "id": "3d7290e",
+          "anchor": null,
+          "firstHeading": null,
+          "hasPosts": 0,
+          "hasHtml": 1
+        }
+      ],
+      "postWidgets": [
+        {
+          "path": "3.elements.0.elements.1",
+          "id": "7ef89594",
+          "settings": {
+            "_skin": "cards",
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "4",
+            "cards_posts_per_page": -1,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "131"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "040",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "menu_order",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              131
+            ],
+            "posts_include_term_ids_backup": [
+              "131"
+            ],
+            "cards_excerpt_typography_typography": "custom",
+            "cards_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "cards_read_more_typography_typography": "custom",
+            "cards_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "cards_badge_size": {
+              "unit": "px",
+              "size": 11,
+              "sizes": []
+            },
+            "cards_badge_margin": {
+              "unit": "px",
+              "size": 14,
+              "sizes": []
+            },
+            "cards_badge_typography_typography": "custom",
+            "cards_badge_typography_font_family": "Assistant",
+            "cards_badge_typography_font_weight": "600",
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "4.elements.0.elements.1",
+          "id": "25fa442",
+          "settings": {
+            "classic_meta_separator": "///",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_columns": "1",
+            "cards_posts_per_page": 4,
+            "cards_meta_data": [],
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_post_type": "page",
+            "posts_category_ids": [
+              "96"
+            ],
+            "orderby": "rand",
+            "cards_row_gap": {
+              "unit": "px",
+              "size": 30
+            },
+            "cards_card_bg_color": "rgba(255,255,255,0.8)",
+            "cards_title_color": "#4d4d4d",
+            "cards_read_more_color": "#74a42e",
+            "pagination_type": "numbers_and_prev_next",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "pagination_typography_typography": "custom",
+            "pagination_typography_line_height": {
+              "unit": "em",
+              "size": 3.2
+            },
+            "pagination_color": "#4d4d4d",
+            "pagination_hover_color": "#74a42e",
+            "pagination_active_color": "#74a42e",
+            "pagination_spacing": {
+              "unit": "px",
+              "size": 14
+            },
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "0",
+              "left": "0",
+              "isLinked": false
+            },
+            "cards_excerpt_length": 12,
+            "cards_show_avatar": "",
+            "cards_alignment": "right",
+            "cards_image_spacing": {
+              "unit": "px",
+              "size": 0
+            },
+            "cards_badge_position": "left",
+            "cards_badge_bg_color": "#74a42e",
+            "posts_orderby": "rand",
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              "169"
+            ],
+            "posts_include_term_ids_backup": [
+              "96"
+            ],
+            "full_content_meta_separator": "///",
+            "classic_columns": "1",
+            "classic_posts_per_page": 1,
+            "classic_thumbnail": "right",
+            "classic_item_ratio": {
+              "unit": "px",
+              "size": 0.79,
+              "sizes": []
+            },
+            "classic_image_width": {
+              "unit": "%",
+              "size": 41,
+              "sizes": []
+            },
+            "classic_excerpt_length": 35,
+            "classic_meta_data": [],
+            "classic_content_padding": {
+              "unit": "px",
+              "top": "25",
+              "right": "25",
+              "bottom": "25",
+              "left": "25",
+              "isLinked": true
+            },
+            "classic_box_shadow_box_shadow_type": "yes",
+            "classic_box_shadow_box_shadow": {
+              "horizontal": 0,
+              "vertical": 0,
+              "blur": 17,
+              "spread": -3,
+              "color": "rgba(0, 0, 0, 0.34)"
+            },
+            "classic_title_typography_typography": "custom",
+            "classic_title_typography_font_family": "Assistant",
+            "classic_title_typography_font_size": {
+              "unit": "px",
+              "size": 30,
+              "sizes": []
+            },
+            "classic_title_typography_font_weight": "700",
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_family": "Assistant",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_excerpt_typography_font_weight": "400",
+            "classic_read_more_typography_typography": "custom",
+            "classic_read_more_typography_font_family": "Assistant",
+            "classic_read_more_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_read_more_typography_font_weight": "600",
+            "__globals__": {
+              "classic_title_color": "globals/colors?id=6ae413d3",
+              "classic_read_more_color": "globals/colors?id=40bf8c38"
+            },
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        },
+        {
+          "path": "7.elements.0.elements.1",
+          "id": "6377fa5",
+          "settings": {
+            "classic_posts_per_page": -1,
+            "classic_meta_data": [],
+            "classic_meta_separator": "///",
+            "classic_show_read_more": "",
+            "classic_read_more_text": "קרא עוד »",
+            "cards_meta_separator": "•",
+            "cards_read_more_text": "קרא עוד »",
+            "posts_category_ids": [
+              "102"
+            ],
+            "exclude": [
+              "manual_selection"
+            ],
+            "exclude_ids": [
+              "4833"
+            ],
+            "classic_alignment": "center",
+            "classic_box_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "0",
+              "bottom": "10",
+              "left": "0",
+              "isLinked": false
+            },
+            "classic_box_bg_color": "#ECECEB",
+            "classic_box_border_color": "#D6D5D4",
+            "classic_title_color": "#4d4d4d",
+            "pagination_page_limit": "5",
+            "pagination_prev_label": "&laquo; הקודם",
+            "pagination_next_label": "הבא &raquo;",
+            "_margin": {
+              "unit": "px",
+              "top": "40",
+              "right": "0",
+              "bottom": "40",
+              "left": "0",
+              "isLinked": false
+            },
+            "posts_exclude": [
+              "manual_selection"
+            ],
+            "posts_exclude_ids": [
+              "4833"
+            ],
+            "posts_include": [
+              "terms"
+            ],
+            "posts_include_term_ids": [
+              102
+            ],
+            "posts_include_term_ids_backup": [
+              "102"
+            ],
+            "classic_title_typography_typography": "custom",
+            "classic_title_typography_font_size": {
+              "unit": "px",
+              "size": 18,
+              "sizes": []
+            },
+            "classic_excerpt_typography_typography": "custom",
+            "classic_excerpt_typography_font_size": {
+              "unit": "px",
+              "size": 16,
+              "sizes": []
+            },
+            "full_content_meta_separator": "///",
+            "classic_row_gap": {
+              "unit": "px",
+              "size": 20,
+              "sizes": []
+            },
+            "classic_box_border_width": {
+              "unit": "px",
+              "top": "1",
+              "right": "1",
+              "bottom": "1",
+              "left": "1",
+              "isLinked": true
+            },
+            "classic_box_border_radius": {
+              "unit": "px",
+              "size": 15,
+              "sizes": []
+            },
+            "classic_content_padding": {
+              "unit": "px",
+              "top": "0",
+              "right": "20",
+              "bottom": "0",
+              "left": "20",
+              "isLinked": false
+            },
+            "classic_image_spacing": {
+              "unit": "px",
+              "size": 21,
+              "sizes": []
+            },
+            "classic_thumbnail_hover_filters_css_filter": "custom",
+            "classic_thumbnail_hover_filters_brightness": {
+              "unit": "px",
+              "size": 125,
+              "sizes": []
+            },
+            "classic_title_spacing": {
+              "unit": "px",
+              "size": 10,
+              "sizes": []
+            },
+            "classic_meta_color": "#4D4D4D",
+            "classic_meta_spacing": {
+              "unit": "px",
+              "size": 11,
+              "sizes": []
+            },
+            "classic_excerpt_spacing": {
+              "unit": "px",
+              "size": 5,
+              "sizes": []
+            },
+            "text": "טען עוד",
+            "load_more_no_posts_custom_message": "No more posts to show",
+            "tooltip_content": "I am a tooltip"
+          }
+        }
+      ],
+      "htmlWidgets": [
+        {
+          "path": "8.elements.0.elements.0",
+          "id": "fe6db18",
+          "htmlLength": 16752,
+          "htmlHead": "\n<section class=\"galit-gloss\" dir=\"rtl\"><style>\n.galit-gloss{--g:#74a42e;--gd:#438223;--gl:#f1f7e8;margin:2.5rem 0;font-family:Assistant,'Heebo',Arial,sans-serif}\n.galit-gloss *{box-sizing:border-box}\n.galit-gloss__head{margin-bottom:1.25rem}\n.galit-gloss__head h2{margin:0 0 .35rem;font-size:1.65rem;font-weight:800;color:#25301c;line-height:1.25}\n.galit-gloss__head h2::after{content:\"\";display:blo",
+          "isGlossary": true
+        }
+      ],
+      "headings": [
+        {
+          "id": "7493f9d",
+          "title": "בדיקות איכות מים"
+        },
+        {
+          "id": "efa0f12",
+          "title": "פתרונות לאיכות מים "
+        },
+        {
+          "id": "22355e2",
+          "title": "חנות<b></b>"
+        },
+        {
+          "id": "6ce7238",
+          "title": "שאלות ותשובות בנושא קרינה אלקטרומגנטית"
+        },
+        {
+          "id": "98dddb9",
+          "title": "בלוג קרינה"
+        }
+      ]
+    }
+  ],
+  "recentPosts": [
+    {
+      "id": 16048,
+      "date": "2026-08-12T10:10:39",
+      "title": "בדיקת ראדון בבית פרטי: מתי, איך ומה עושים",
+      "categories": [
+        226,
+        99
+      ],
+      "link": "https://galit.co.il/בדיקת-ראדון-בבית-פרטי-מתי-איך-ומה-עושי/"
+    },
+    {
+      "id": 14478,
+      "date": "2024-11-05T15:05:07",
+      "title": "ייעוץ אקוסטי למתן היתר בנייה",
+      "categories": [
+        100
+      ],
+      "link": "https://galit.co.il/ייעוץ-אקוסטי-למתן-היתר-בנייה/"
+    },
+    {
+      "id": 13971,
+      "date": "2024-03-21T10:01:09",
+      "title": "למה יזמים לא יכולים לוותר על יועץ בנייה ירוקה בפרויקט הבנייה שלהם ?",
+      "categories": [
+        1
+      ],
+      "link": "https://galit.co.il/למה-יזמים-לא-יכולים-לוותר-על-יועץ-בנייה/"
+    },
+    {
+      "id": 11982,
+      "date": "2022-07-28T08:03:44",
+      "title": "תפריט חנות",
+      "categories": [
+        1
+      ],
+      "link": "https://galit.co.il/תפריט-חנות/"
+    },
+    {
+      "id": 11832,
+      "date": "2022-07-27T12:00:55",
+      "title": "חדר שקט אקוסטי &#8211; Extra Large",
+      "categories": [
+        192,
+        1
+      ],
+      "link": "https://galit.co.il/חדר-שקט-אקוסטי-xl/"
+    },
+    {
+      "id": 11827,
+      "date": "2022-07-27T11:59:58",
+      "title": "חדר שקט אקוסטי &#8211; Large",
+      "categories": [
+        192,
+        1
+      ],
+      "link": "https://galit.co.il/חדר-שקט-אקוסטי-l/"
+    },
+    {
+      "id": 11822,
+      "date": "2022-07-27T11:58:33",
+      "title": "חדר שקט אקוסטי &#8211; Medium",
+      "categories": [
+        192,
+        1
+      ],
+      "link": "https://galit.co.il/חדר-שקט-אקוסטי-m/"
+    },
+    {
+      "id": 11812,
+      "date": "2022-07-27T11:58:16",
+      "title": "חדר שקט אקוסטי &#8211; Small",
+      "categories": [
+        192,
+        1
+      ],
+      "link": "https://galit.co.il/חדר-שקט-אקוסטי-s/"
+    },
+    {
+      "id": 8286,
+      "date": "2020-05-07T08:14:14",
+      "title": "התקנות למניעת מפגעים (מניעת רעש), תשנ&quot;ג-1992",
+      "categories": [
+        100,
+        123
+      ],
+      "link": "https://galit.co.il/התקנות-למניעת-מפגעים-מניעת-רעש-תשנג-1992/"
+    },
+    {
+      "id": 8241,
+      "date": "2020-05-04T12:59:19",
+      "title": "דור חמישי G5 לאנטנות הסלולאריות, האם זה מסוכן ?",
+      "categories": [
+        85
+      ],
+      "link": "https://galit.co.il/בדיקה/"
+    },
+    {
+      "id": 8235,
+      "date": "2020-05-04T12:48:40",
+      "title": "ייעוץ לבתי משפט",
+      "categories": [
+        173
+      ],
+      "link": "https://galit.co.il/ייעוץ-לבתי-משפט/"
+    },
+    {
+      "id": 8220,
+      "date": "2020-05-04T09:56:01",
+      "title": "פרעה מורית",
+      "categories": [
+        98
+      ],
+      "link": "https://galit.co.il/נמלה-פרעה-מורית/"
+    },
+    {
+      "id": 8188,
+      "date": "2020-05-03T12:02:24",
+      "title": "דג הכסף",
+      "categories": [
+        98
+      ],
+      "link": "https://galit.co.il/דגי-הכסף/"
+    },
+    {
+      "id": 8113,
+      "date": "2020-04-29T10:09:28",
+      "title": "שאלות ותשובות על פורמלדהיד",
+      "categories": [
+        103
+      ],
+      "link": "https://galit.co.il/שאלות-ותשובות-על-פורמלדהיד/"
+    },
+    {
+      "id": 8106,
+      "date": "2020-04-29T06:50:10",
+      "title": "עש הבגדים",
+      "categories": [
+        98
+      ],
+      "link": "https://galit.co.il/עש-הבגדים/"
+    }
+  ]
+}

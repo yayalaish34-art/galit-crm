@@ -232,33 +232,63 @@ export class AffiliateService {
   }
 
   /**
-   * מסע לקוח בן 4 שלבים (סגנון וולט) לכל הפניה — נגזר מה-CRM. מחזיר:
-   *  - step: 1..4 (השלב הנוכחי), title/message ידידותיים, done (הושלם/שולם), lost (לא רלוונטי) + reason.
-   * מקורות: משימה מקושרת (taskId) → לקוח (notRelevant) → הצעת מחיר (status SENT/SIGNED/APPROVED), ו-paidAt של ההפניה.
+   * מסע לקוח בן 11 שלבים (סגנון וולט) לכל הפניה — נגזר אוטומטית מה-CRM.
+   * מחזיר: step 1..11, title/message ידידותיים, done (שולם לשותף), lost + reason.
    *
-   * השלבים:
-   *  1) התקבל  — תמיד (ההפניה נוצרה).
-   *  2) בטיפול / הצעת מחיר הוגשה — כשמתחילים לטפל / כשנשלחה הצעה.
-   *  3) הצעה חתומה / הזמנה — כשההצעה נחתמה (SIGNED/APPROVED).
-   *  4) שולם — כשהתקבל תשלום (paidAt) → מציגים עמלה.
-   * מצב חריג: "לא רלוונטי" — כשהלקוח סומן לא-רלוונטי ב-CRM / ההפניה LOST (עם סיבה).
+   * השלבים (totalSteps = 11):
+   *  1) הפנייה התקבלה — ההפניה נוצרה; אף אחד עוד לא נגע.
+   *  2) נציג גלית צפה בפנייה — IncomingLead != NEW או status=IN_PROGRESS.
+   *  3) התחלנו לטפל בפנייה — Task נוצרה (עובד "התחיל לטפל").
+   *  4) שוחחנו עם הלקוח — currentStage≥2 (שיחת מכירה) או processNotes.
+   *  5) הצעת מחיר נשלחה — Quote.status = SENT.
+   *  6) העסקה נסגרה בהצלחה! — Quote.status in (SIGNED, APPROVED).
+   *  7) תואם מועד לביצוע — currentStage≥4 (תיאום).
+   *  8) השירות בוצע — currentStage≥5 (ביצוע).
+   *  9) הטיפול בלקוח הושלם — currentStage≥6 (דוח) או task.status=DONE.
+   *  10) העמלה אושרה — paidAt של ההפניה (הלקוח שילם, העמלה חושבה).
+   *  11) העמלה שולמה — commissionSettledAt (אנחנו העברנו תשלום לשותף).
+   *
+   * מצב חריג: "לא רלוונטי" — הלקוח סומן לא-רלוונטי ב-CRM / ההפניה LOST (עם סיבה).
+   *
+   * מקורות:
+   *   AffiliateReferral.leadId ("affiliate-referral:<id>") → IncomingLead.messageId → status + taskId.
+   *   משם: Task (status, currentStage, processNotes) → Customer (notRelevant) → Quote (status) + paidAt/commissionSettledAt.
    */
   private async resolveJourney(
-    refs: Array<{ id: string; taskId: string | null; status: string; paidAt: Date | null; commissionAmount: number | null; createdAt: Date }>,
+    refs: Array<{ id: string; taskId: string | null; leadId?: string | null; status: string; paidAt: Date | null; commissionSettledAt: Date | null; commissionAmount: number | null; createdAt: Date }>,
   ): Promise<Map<string, {
-    step: number; title: string; message: string; done: boolean; lost: boolean; reason: string | null;
+    step: number; totalSteps: number; title: string; message: string; done: boolean; lost: boolean; reason: string | null;
   }>> {
     const out = new Map<string, any>();
+    const TOTAL = 11;
 
-    // ── שליפת המשימות המקושרות + הלקוחות + ההצעות (ב-batch) ──
-    const taskIds = refs.map((r) => (r.taskId || '').trim()).filter(Boolean);
-    const tasks = taskIds.length
+    // ── 1) ה-IncomingLeads המקושרים (לפי ה-messageId הסינתטי שנצרב ב-createIncomingLeadForReferral) ──
+    const leadKeys = refs.map((r) => (r.leadId || '').trim()).filter(Boolean);
+    const incomingLeads = leadKeys.length
+      ? await this.prisma.incomingLead
+          .findMany({ where: { messageId: { in: leadKeys } }, select: { messageId: true, status: true, taskId: true } })
+          .catch(() => [] as any[])
+      : [];
+    const leadByKey = new Map<string, any>(incomingLeads.map((l: any) => [l.messageId, l]));
+
+    // ── 2) ה-Tasks (גם מ-referral.taskId וגם מ-IncomingLead.taskId; בד"כ זה אותו דבר) ──
+    const taskIds = new Set<string>();
+    for (const r of refs) if (r.taskId) taskIds.add(r.taskId.trim());
+    for (const l of incomingLeads as any[]) if (l.taskId) taskIds.add(String(l.taskId).trim());
+    const tasks = taskIds.size
       ? await this.prisma.task
-          .findMany({ where: { id: { in: taskIds } }, select: { id: true, status: true, customerId: true, leadId: true } })
+          .findMany({
+            where: { id: { in: Array.from(taskIds) } },
+            select: {
+              id: true, status: true, customerId: true, leadId: true,
+              currentStage: true, processNotes: true,
+            },
+          })
           .catch(() => [] as any[])
       : [];
     const taskById = new Map<string, any>(tasks.map((t: any) => [t.id, t]));
 
+    // ── 3) לקוחות (לסטטוס "לא רלוונטי") ──
     const customerIds = Array.from(new Set(tasks.map((t: any) => t.customerId).filter(Boolean)));
     const customers = customerIds.length
       ? await this.prisma.customer
@@ -267,27 +297,38 @@ export class AffiliateService {
       : [];
     const custById = new Map<string, any>(customers.map((c: any) => [c.id, c]));
 
-    // הצעות מחיר לפי משימה מקושרת (linkedEntityId=taskId) — לסטטוס הצעה/חתימה.
-    const quotes = taskIds.length
+    // ── 4) הצעות מחיר לפי משימה (linkedEntityId=taskId) — לסטטוס הצעה/חתימה ──
+    const quotes = taskIds.size
       ? await this.prisma.quote
-          .findMany({ where: { linkedEntityId: { in: taskIds } } as any, select: { linkedEntityId: true, status: true, updatedAt: true }, orderBy: { updatedAt: 'desc' } })
+          .findMany({
+            where: { linkedEntityId: { in: Array.from(taskIds) } } as any,
+            select: { linkedEntityId: true, status: true, updatedAt: true },
+            orderBy: { updatedAt: 'desc' },
+          })
           .catch(() => [] as any[])
       : [];
     const quoteByTask = new Map<string, any>();
-    for (const q of quotes as any[]) { if (q.linkedEntityId && !quoteByTask.has(q.linkedEntityId)) quoteByTask.set(q.linkedEntityId, q); }
+    for (const q of quotes as any[]) {
+      if (q.linkedEntityId && !quoteByTask.has(q.linkedEntityId)) quoteByTask.set(q.linkedEntityId, q);
+    }
 
     for (const r of refs) {
-      const t: any = r.taskId ? taskById.get(r.taskId.trim()) : null;
+      const il: any = r.leadId ? leadByKey.get(r.leadId.trim()) : null;
+      const taskId = (r.taskId || '').trim() || (il?.taskId ? String(il.taskId).trim() : '');
+      const t: any = taskId ? taskById.get(taskId) : null;
       const cust: any = t?.customerId ? custById.get(t.customerId) : null;
-      const quote: any = r.taskId ? quoteByTask.get(r.taskId.trim()) : null;
+      const quote: any = taskId ? quoteByTask.get(taskId) : null;
       const qStatus = String(quote?.status || '').toUpperCase();
+      const tStatus = String(t?.status || '').toUpperCase();
+      const currentStage = Number.isFinite(t?.currentStage) ? Number(t?.currentStage) : -1;
+      const hasNotes = typeof t?.processNotes === 'string' && t.processNotes.trim().length > 0;
 
       // ── לא רלוונטי? (הלקוח סומן ב-CRM, או ההפניה LOST) ──
       const isLost = r.status === 'LOST' || !!cust?.notRelevantAt;
       if (isLost) {
         const reason = (cust?.notRelevantReason || cust?.notRelevantNote || '').trim() || null;
         out.set(r.id, {
-          step: 2, lost: true, done: false, reason,
+          step: 2, totalSteps: TOTAL, lost: true, done: false, reason,
           title: 'הפנייה נסגרה',
           message: reason
             ? `בדקנו את הפנייה ולצערנו היא לא התאימה כרגע — הסיבה: ${reason}. תודה רבה על ההפניה, נשמח להמשך שיתוף הפעולה!`
@@ -296,51 +337,243 @@ export class AffiliateService {
         continue;
       }
 
-      // ── שולם? (שלב 4) ──
+      // ── 11) העמלה שולמה (אנחנו העברנו לשותף) ──
+      if (r.commissionSettledAt) {
+        const comm = r.commissionAmount != null ? `₪${Number(r.commissionAmount).toLocaleString('he-IL')}` : '';
+        out.set(r.id, {
+          step: 11, totalSteps: TOTAL, done: true, lost: false, reason: null,
+          title: 'העמלה שולמה 🎉',
+          message: comm
+            ? `העמלה שלך על ההפניה (${comm}) שולמה. תודה ענקית על שיתוף הפעולה — מחכים ללקוח הבא!`
+            : 'העמלה שלך הועברה. תודה ענקית על שיתוף הפעולה!',
+        });
+        continue;
+      }
+
+      // ── 10) העמלה אושרה — הלקוח שילם לנו, העמלה חושבה (ממתינה לתשלום לשותף) ──
       if (r.paidAt) {
         const comm = r.commissionAmount != null ? `₪${Number(r.commissionAmount).toLocaleString('he-IL')}` : '';
         out.set(r.id, {
-          step: 4, done: true, lost: false, reason: null,
-          title: 'העסקה נסגרה — התקבל תשלום 🎉',
+          step: 10, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'העמלה אושרה 💸',
           message: comm
-            ? `הלקוח שילם והעסקה נסגרה בהצלחה! העמלה שלך על ההפניה: ${comm}. תודה ענקית — מחכים ללקוח הבא שלך!`
-            : 'הלקוח שילם והעסקה נסגרה בהצלחה! העמלה שלך עודכנה. תודה ענקית על ההפניה!',
+            ? `הלקוח שילם, והעמלה שלך (${comm}) אושרה לתשלום. נעדכן אותך ברגע שהתשלום יצא בפועל.`
+            : 'הלקוח שילם, והעמלה שלך אושרה לתשלום. נעדכן אותך ברגע שהתשלום יצא בפועל.',
         });
         continue;
       }
 
-      // ── הצעה חתומה / הזמנה (שלב 3) ──
+      // ── 9) הטיפול בלקוח הושלם — currentStage≥6 (דוח) או task.status=DONE ──
+      if (t && (tStatus === 'DONE' || currentStage >= 6)) {
+        out.set(r.id, {
+          step: 9, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'הטיפול בלקוח הושלם 📘',
+          message: 'הדוח או תוצר השירות נמסר ללקוח. אנחנו ממתינים לתשלום כדי לסגור את ההפניה ולאשר את העמלה.',
+        });
+        continue;
+      }
+
+      // ── 8) השירות בוצע — currentStage≥5 (ביצוע) ──
+      if (t && currentStage >= 5) {
+        out.set(r.id, {
+          step: 8, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'השירות בוצע ✅',
+          message: 'צוות גלית ביצע את העבודה בשטח. ברגעים אלו מכינים את הדוח / תוצר השירות ללקוח.',
+        });
+        continue;
+      }
+
+      // ── 7) תואם מועד לביצוע — currentStage≥4 (תיאום) ──
+      if (t && currentStage >= 4) {
+        out.set(r.id, {
+          step: 7, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'תואם מועד לביצוע 🗓️',
+          message: 'תיאמנו מועד להגעת צוות גלית לביצוע השירות.',
+        });
+        continue;
+      }
+
+      // ── 6) העסקה נסגרה בהצלחה! — הצעה חתומה / אושרה ──
       if (qStatus === 'SIGNED' || qStatus === 'APPROVED') {
         out.set(r.id, {
-          step: 3, done: false, lost: false, reason: null,
-          title: 'ההצעה אושרה — יוצאים לדרך! ✍️',
-          message: 'הלקוח אישר את הצעת המחיר וחתם — אנחנו כבר בתהליך ביצוע. עוד רגע נסגור, והעמלה שלך בדרך!',
+          step: 6, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'העסקה נסגרה בהצלחה! ✍️',
+          message: 'הלקוח אישר את הצעת המחיר וחתם — אנחנו כבר בתהליך הכנה לביצוע.',
         });
         continue;
       }
 
-      // ── הצעת מחיר הוגשה (שלב 2) ──
+      // ── 5) הצעת מחיר נשלחה ──
       if (qStatus === 'SENT') {
         out.set(r.id, {
-          step: 2, done: false, lost: false, reason: null,
-          title: 'הצעת מחיר הוגשה ללקוח 📄',
-          message: 'הכנו והגשנו ללקוח הצעת מחיר מותאמת. מחכים לתשובתו — נעדכן אותך בכל התקדמות!',
+          step: 5, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'הצעת מחיר נשלחה ללקוח 📄',
+          message: 'הכנו ושלחנו ללקוח הצעת מחיר מותאמת. מחכים לתשובתו — נעדכן אותך בכל התקדמות.',
         });
         continue;
       }
 
-      // ── בטיפול / התקבל (שלב 1–2) ──
-      const inProgress = r.status === 'IN_PROGRESS' || !!t;
+      // ── 4) שוחחנו עם הלקוח — שלב "שיחת מכירה" או מעבר (currentStage≥2), או processNotes קיימות ──
+      if (t && (currentStage >= 2 || hasNotes)) {
+        out.set(r.id, {
+          step: 4, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'שוחחנו עם הלקוח 📞',
+          message: 'יצרנו קשר עם הלקוח, ביררנו את הצורך והותאם לו השירות המתאים. בקרוב נשלח הצעת מחיר.',
+        });
+        continue;
+      }
+
+      // ── 3) התחלנו לטפל — Task קיימת (עובד "התחיל לטפל") אבל עוד בלי שיחה ──
+      if (t) {
+        out.set(r.id, {
+          step: 3, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'התחלנו לטפל בפנייה ✉️',
+          message: 'פתחנו משימה אצל הצוות המתאים — יוצרים קשר עם הלקוח ומתחילים לבדוק את הצרכים שלו.',
+        });
+        continue;
+      }
+
+      // ── 2) נציג ראה — IncomingLead כבר לא NEW (צפו/קלטו, גם אם לא פתחו משימה) ──
+      const seen =
+        r.status === 'IN_PROGRESS' ||
+        (!!il && String(il.status || '').toUpperCase() !== 'NEW');
+      if (seen) {
+        out.set(r.id, {
+          step: 2, totalSteps: TOTAL, done: false, lost: false, reason: null,
+          title: 'נציג גלית ראה את הפנייה 👀',
+          message: 'ההפניה שלך הגיעה לידי נציג אצלנו, שעוד רגע יתחיל לטפל בלקוח. נעדכן אותך בכל התקדמות.',
+        });
+        continue;
+      }
+
+      // ── 1) הפנייה התקבלה (ברירת מחדל) ──
       out.set(r.id, {
-        step: inProgress ? 2 : 1,
-        done: false, lost: false, reason: null,
-        title: inProgress ? 'הלקוח בטיפול אצלנו 🤝' : 'הפנייה התקבלה בהצלחה ✅',
-        message: inProgress
-          ? 'צוות המומחים שלנו כבר בקשר עם הלקוח ובוחן את הצרכים שלו. נעדכן אותך ברגע שנתקדם!'
-          : 'קיבלנו את הלקוח שהפנית — תודה רבה! אנחנו מתחילים איתו תהליך ונעדכן אותך בכל שלב.',
+        step: 1, totalSteps: TOTAL, done: false, lost: false, reason: null,
+        title: 'הפנייה התקבלה בהצלחה ✅',
+        message: 'קיבלנו את הלקוח שהפנית — תודה רבה! הוא יועבר בקרוב לנציג המתאים, ונעדכן אותך בכל שלב.',
       });
     }
     return out;
+  }
+
+  /**
+   * שדאוג טקסט חופשי של השותף (למשל הודעת וואטסאפ מועתקת) לשדות הטופס המובנים.
+   * שימושי במיוחד לשותפים שמעדיפים להעתיק הודעה אחת ולא לעבור שדה-שדה.
+   *
+   * מחזיר שדות שה-UI יודע למלא בטופס. ערכים שלא נמצאו — ריקים. ה-AI מקבל הנחיה
+   * מדויקת לנרמל מספרי טלפון, לזהות עיר/כתובת, ולסווג לסוג שירות (אחת מתוך
+   * רשימת הקטגוריות של השותפים). כולל response_format=json_object כדי שהתשובה
+   * תהיה JSON בטוח לפענוח.
+   */
+  async parseFreeText(affiliateId: string, rawText: string): Promise<{
+    classification: 'PRIVATE' | 'COMPANY';
+    customerName: string;
+    companyName: string;
+    customerPhone: string;
+    customerEmail: string;
+    serviceType: string;
+    address: string;
+    city: string;
+    note: string;
+  }> {
+    const text = (rawText || '').trim();
+    if (!text) throw new BadRequestException('טקסט ריק');
+    if (text.length > 4000) throw new BadRequestException('הטקסט ארוך מדי');
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) throw new BadRequestException('שירות ה-AI אינו מוגדר בשרת');
+
+    const SERVICE_OPTIONS = [
+      'בדיקת קרינה',
+      'מיגון קרינה',
+      'בדיקת ראדון',
+      'בדיקת אסבסט / סקר אסבסט',
+      'בדיקת רעש / אקוסטיקה',
+      'איכות אוויר / עובש',
+      'בדיקת מים',
+      'בדיקת ריח',
+      'בדיקה תרמית / דוח אנרגטי',
+      'קרקע / גז קרקע',
+      'גהות ורעש תעסוקתי',
+      'בנייה ירוקה',
+      'חוות דעת סביבתית',
+      'אחר',
+    ];
+
+    const systemPrompt =
+      `אתה עוזר הזנה בפורטל שותפים של גלית — החברה לאיכות הסביבה. ` +
+      `המשתמש מדביק הודעה חופשית (למשל וואטסאפ) שמתארת לקוח, ואתה מחלץ ממנה שדות מובנים. ` +
+      `ענה **אך ורק** באובייקט JSON יחיד, בלי טקסט לפני/אחרי, בלי code fences. ` +
+      `החזר את המפתחות הבאים (ריק אם לא ברור): classification ('PRIVATE' או 'COMPANY'), ` +
+      `customerName (שם איש הקשר), companyName (שם החברה — רק אם classification=COMPANY), ` +
+      `customerPhone (מספר ישראלי בפורמט 05X-XXXXXXX או 0X-XXXXXXX; רק הספרות + מקף), ` +
+      `customerEmail, serviceType (אחד מהערכים הבאים בדיוק: ${SERVICE_OPTIONS.join(' / ')}; ` +
+      `אם לא ברור בחר 'אחר'), address (רחוב+מספר), city (עיר), ` +
+      `note (סיכום צורך הלקוח במשפט או שניים, בלי לחזור על טלפון/מייל/שם).\n` +
+      `כללים: ` +
+      `(1) אל תמציא מידע שלא קיים בטקסט — ערך לא ברור יישאר ריק. ` +
+      `(2) אם רואים "עסק/חברה/בעמ/בע״מ/ח.פ" או שם של חברה → classification=COMPANY. ` +
+      `(3) טלפון: נרמל ל-05x-xxxxxxx; קידומת 0 חוזרת גם אם המשתמש כתב 972.`;
+
+    let res: Response;
+    try {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: text },
+          ],
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+        }),
+      });
+    } catch (e: any) {
+      this.logger.error(`parseFreeText OpenAI fetch failed: ${e?.message}`);
+      throw new BadRequestException('פענוח AI נכשל — נסה שוב');
+    }
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      this.logger.error(`parseFreeText OpenAI ${res.status}: ${detail}`);
+      throw new BadRequestException('פענוח ה-AI נכשל');
+    }
+
+    const data = (await res.json()) as any;
+    const content = data?.choices?.[0]?.message?.content;
+    if (!content) throw new BadRequestException('לא התקבל פענוח מה-AI');
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      throw new BadRequestException('ה-AI החזיר תשובה שלא ניתנת לפענוח');
+    }
+
+    const classification =
+      String(parsed.classification || '').toUpperCase() === 'COMPANY' ? 'COMPANY' : 'PRIVATE';
+    const serviceRaw = String(parsed.serviceType || '').trim();
+    // גילוי-גרידא: GPT עלול להחזיר ווריאציה — אם לא התאמה מדויקת, 'אחר'.
+    const serviceType = SERVICE_OPTIONS.includes(serviceRaw) ? serviceRaw : 'אחר';
+
+    const phoneRaw = String(parsed.customerPhone || '').trim();
+    const phoneNorm = phoneRaw ? formatIsraeliPhone(phoneRaw) || phoneRaw : '';
+
+    this.logger.log(`parseFreeText for affiliate ${affiliateId}: ok (len=${text.length})`);
+
+    return {
+      classification,
+      customerName: String(parsed.customerName || '').trim(),
+      companyName: classification === 'COMPANY' ? String(parsed.companyName || '').trim() : '',
+      customerPhone: phoneNorm,
+      customerEmail: String(parsed.customerEmail || '').trim(),
+      serviceType,
+      address: String(parsed.address || '').trim(),
+      city: String(parsed.city || '').trim(),
+      note: String(parsed.note || '').trim(),
+    };
   }
 
   /** השותף שולח לנו לקוח חדש. */

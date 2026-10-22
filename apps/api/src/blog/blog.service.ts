@@ -303,6 +303,13 @@ export class BlogService {
     const url = `${creds.siteUrl}/wp-json${path}`;
     const auth = Buffer.from(`${creds.username}:${creds.appPassword}`).toString('base64');
 
+    // Timeout של 90 שניות על קריאות ל-WordPress. בלי זה: בלוג כבד תוקע את ה-fetch
+    // ל-5 דקות, Railway/Vercel edge מנתקים את הברווזר באמצע, והלקוח רואה "Failed to fetch"
+    // ללא יכולת לדעת מה קרה. עם ה-timeout — אנחנו מחזירים שגיאה ברורה הרבה לפני ה-edge.
+    const WP_TIMEOUT_MS = 90_000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WP_TIMEOUT_MS);
+
     let res: Response;
     try {
       res = await fetch(url, {
@@ -312,10 +319,20 @@ export class BlogService {
           'Content-Type': 'application/json; charset=utf-8',
           ...(init?.headers || {}),
         },
+        signal: controller.signal,
       });
     } catch (e: any) {
+      // AbortError = חרגנו מ-timeout. ממפים להודעה ידידותית בעברית במקום "Failed to fetch".
+      if (e?.name === 'AbortError') {
+        this.logger.error(`WP request timed out: ${path} after ${WP_TIMEOUT_MS}ms`);
+        throw new BadRequestException(
+          'הפרסום לוקח יותר זמן מהרגיל (כנראה בלוג כבד או וורדפרס עמוס) — נסה שוב בעוד רגע או שמור כטיוטה',
+        );
+      }
       this.logger.error(`WP request failed: ${path} — ${e?.message}`);
       throw new BadRequestException('לא ניתן להתחבר לאתר וורדפרס');
+    } finally {
+      clearTimeout(timer);
     }
 
     const text = await res.text();

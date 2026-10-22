@@ -6,6 +6,7 @@ import { formatIsraeliPhone, formatPhoneFields } from '../common/phone.util';
 import { ensurePrimaryContact } from '../common/primary-contact.util';
 import { GraphMailService } from '../microsoft/graph-mail.service';
 import { GraphFilesService } from '../microsoft/graph-files.service';
+import { AffiliateNotifierService } from '../affiliate/affiliate-notifier.service';
 import { extractSignedQuoteInfo } from './signed-quote-total.util';
 import type {
   CreateCustomerDocumentDto,
@@ -113,6 +114,7 @@ export class CustomersService {
     private readonly prisma: PrismaService,
     private readonly graphMail: GraphMailService,
     private readonly graphFiles: GraphFilesService,
+    private readonly affiliateNotifier: AffiliateNotifierService,
   ) {}
 
   private static readonly PRESET_CLASSIFICATION_CODES = new Set(['POTENTIAL', 'COMPANY', 'PUBLIC', 'PRIVATE']);
@@ -915,7 +917,36 @@ export class CustomersService {
     if (Object.keys(data).length === 0) {
       return this.prisma.customer.findUniqueOrThrow({ where: { id } });
     }
-    return this.prisma.customer.update({ where: { id }, data });
+
+    // האם ה-patch מסמן "לא רלוונטי"? לפני ה-update צריך לדעת את ה"לפני" כדי לא
+    // להתריע שוב על אותו סיווג (סימון חוזר באותה סיבה = no-op לשותף).
+    const marksNotRelevant =
+      data.notRelevantReason !== undefined && String(data.notRelevantReason ?? '').trim() !== '';
+    let previousReason: string | null = null;
+    if (marksNotRelevant) {
+      const prev = await this.prisma.customer.findUnique({
+        where: { id },
+        select: { notRelevantReason: true },
+      });
+      previousReason = (prev?.notRelevantReason ?? '').trim() || null;
+    }
+
+    const result = await this.prisma.customer.update({ where: { id }, data });
+
+    // הפניה מתוכנית השותפים → שליחת הסיבה לשותף (אם הסיווג שונה / חדש).
+    // best-effort: לא זורק החוצה — תקלת הודעה לא תפיל שמירת לקוח.
+    if (marksNotRelevant) {
+      const newReason = String(data.notRelevantReason ?? '').trim();
+      if (newReason && newReason !== previousReason) {
+        const note =
+          data.notRelevantNote === undefined
+            ? null
+            : String(data.notRelevantNote ?? '').trim() || null;
+        this.affiliateNotifier.onCustomerMarkedNotRelevant(id, newReason, note).catch(() => {});
+      }
+    }
+
+    return result;
   }
 
   async replaceReferralSources(customerId: string, body: ReplaceReferralSourcesDto) {

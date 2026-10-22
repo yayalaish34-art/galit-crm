@@ -167,7 +167,16 @@ export default function BlogsPage() {
         }
         return data;
       } catch (e: any) {
-        setErr(e?.message || 'שגיאת רשת');
+        // "Failed to fetch" הוא הודעה גנרית של הדפדפן כשהחיבור נופל (edge timeout / רשת).
+        // במסך הבלוגים זה קורה כשהשמירה לוורדפרס לוקחת יותר מכמה דקות (בלוג כבד / cache
+        // של Elementor שצריך רענון / תוסף איטי) — ה-API לא מספיק להחזיר תשובה בזמן.
+        const raw = e?.message || '';
+        const isNetwork = /failed to fetch|network|load failed/i.test(raw);
+        setErr(
+          isNetwork
+            ? 'הפרסום לקח יותר זמן מהרגיל והחיבור נפל. הפוסט עשוי להישמר בכל זאת בוורדפרס — טען מחדש כדי לבדוק, או נסה שוב בעוד רגע (אפשר גם לשמור כטיוטה).'
+            : raw || 'שגיאת רשת',
+        );
         return null;
       }
     },

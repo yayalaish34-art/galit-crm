@@ -7187,7 +7187,7 @@ type FeedbackCustomer = {
 /** סיבות הסיווג "לא רלוונטי" — משותף לפופאפ המשימה ולסקשן "לקוחות שסווגו כלא רלוונטי". */
 // 'אחר' חייב להישאר אחרון — הוא גם ברירת המחדל שאליה נופלת כל סיבה שאינה
 // ברשימה (ראה קיבוץ הסיבות בסקשן "לא רלוונטי"), ולכן סיבה חדשה נוספת לפניו.
-const NOT_RELEVANT_REASONS = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'טעות', 'אחר'] as const;
+const NOT_RELEVANT_REASONS = ['יקר מדי', 'אי-התאמה בשירות', 'לא מעוניין', 'זמן לא טוב', 'לא ניתן ליצור קשר', 'טעות', 'ליד שהתקבל כבר אצלנו', 'אחר'] as const;
 
 /** קישור הדירוג של גלית בגוגל (כפי שנמסר). */
 const GOOGLE_REVIEW_URL =
@@ -7886,6 +7886,7 @@ const NOT_RELEVANT_META: Record<string, { color: string; bg: string; border: str
   'לא מעוניין': { color: 'text-slate-600', bg: 'bg-slate-100', border: 'border-slate-200', icon: <X className="h-5 w-5" /> },
   'זמן לא טוב': { color: 'text-blue-700', bg: 'bg-blue-50', border: 'border-blue-200', icon: <Clock3 className="h-5 w-5" /> },
   'לא ניתן ליצור קשר': { color: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200', icon: <PhoneCall className="h-5 w-5" /> },
+  'ליד שהתקבל כבר אצלנו': { color: 'text-teal-700', bg: 'bg-teal-50', border: 'border-teal-200', icon: <Copy className="h-5 w-5" /> },
   'אחר': { color: 'text-gray-600', bg: 'bg-gray-50', border: 'border-gray-200', icon: <HelpCircle className="h-5 w-5" /> },
 };
 

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "project": {
+    "name": "galit-crm",
+    "productType": null,
+    "stack": []
+  },
+  "sources": {
+    "tokens": [],
+    "components": [],
+    "assets": [],
+    "instructions": []
+  },
+  "design": {
+    "colorMode": "unknown",
+    "colors": {},
+    "typography": {},
+    "spacing": {},
+    "radius": {},
+    "shadows": {},
+    "motion": {},
+    "density": "unknown"
+  },
+  "components": {
+    "installed": [],
+    "preferredPrimitives": [],
+    "patterns": []
+  },
+  "constraints": {
+    "must": [],
+    "avoid": []
+  },
+  "decisions": [],
+  "evidence": [],
+  "generatedAt": "2026-09-17T09:08:53.193Z"
+}

@@ -11,7 +11,7 @@ import * as path from 'path';
  *
  * **ארבעה שלבים בכוונה:**
  *  1. מודל טקסט זול הופך את נושא הבלוג (עברית) לתיאורי סצנה באנגלית;
- *  2. מודל תמונה זול מצייר כל סצנה — הטכנאי/ית תמיד במדים: חולצה לבנה אחידה;
+ *  2. מודל תמונה זול מצייר סצנות מגוונות — סביבה, פרטים, חומרים ולעיתים איש מקצוע;
  *  3. הלוגו האמיתי נחתם על התמונה בקוד (sharp) — לא מצויר ע"י המודל — בפינה השמאלית-עליונה;
  *  4. ניסיון נוסף, best-effort, לחתום את אותו לוגו גם על החזה של החולצה: מודל
  *     ראייה מאתר האם יש אזור חזה פנוי (לא מוסתר ע"י יד/מכשיר/זווית גב), ורק
@@ -48,18 +48,18 @@ const DEFAULT_OPTION_COUNT = 3;
  */
 const SCENE_RULES = [
   'Photorealistic editorial photograph, as for a professional environmental-services company blog.',
-  'A single professional technician or inspector is actively performing the measurement or inspection,',
-  'holding or operating a handheld instrument, looking at what they are testing.',
-  'Adult, neutral professional appearance, wearing a company uniform: a plain, solid WHITE shirt',
-  '(collared polo or button-up work shirt), clean and well-fitted, no other clothing colors visible on top.',
-  'Natural posture, anatomically correct hands, hands clearly holding the instrument.',
+  'Follow the assigned visual concept: a place, material, object or environmental detail can be the entire subject.',
+  'Only include a person when the assigned composition explicitly calls for one.',
+  'If a professional appears, they are an adult wearing a plain WHITE polo or button-up work shirt,',
+  'with natural posture and anatomically correct hands. Appropriate protective equipment may be worn when needed.',
+  'Do not add a detector, meter or testing instrument unless the assigned composition specifically calls for it.',
   'Israeli / Mediterranean setting where a location is implied.',
   'Calm, neutral, well-lit. Never alarming, dramatic, apocalyptic or frightening.',
   'Absolutely no text, letters, words, numbers, captions, labels, signage, logos or watermarks anywhere in the image.',
   'No branded equipment and no invented company marks of any kind.',
   'Keep the upper-left corner of the frame visually quiet and uncluttered — plain wall, sky or background,',
   'with no face, hand or instrument in it.',
-  'Natural colors, shallow depth of field, no heavy filters, no illustration or 3D-render look.',
+  'Natural colors, depth of field appropriate to the composition, no heavy filters, no illustration or 3D-render look.',
 ].join(' ');
 
 /** גיאומטריית חותמת הלוגו, כשבר מרוחב התמונה — כדי שתיראה זהה בכל גודל. */
@@ -69,6 +69,10 @@ const BADGE_PAD_RATIO = 0.14;
 const BADGE_RADIUS_RATIO = 0.16;
 
 export type BlogImageOption = { dataUrl: string; prompt: string; scene: string };
+
+type SceneConcept = { instructions: string; fallback: string; hasPerson: boolean };
+type SceneDirective = SceneConcept & { atmosphere: string };
+type PlannedScene = { scene: string; directive: SceneDirective };
 
 @Injectable()
 export class BlogImageService {
@@ -103,68 +107,76 @@ export class BlogImageService {
   /* ── שלב 1: תיאורי סצנה ──────────────────────────────────────────────── */
 
   /**
-   * מאגרי גיוון אקראיים. הבעיה שהם פותרים: גם ב-temperature גבוה, מודל טקסט
-   * מתכנס לאותה קומפוזיציה סטריאוטיפית ("טכנאי מול קיר עם מכשיר") כי זה
-   * *הפתרון הסביר* לפרומפט צר כמו שלנו — הטמפרטורה משנה ניסוח, לא קומפוזיציה.
-   * לכן האקראיות כאן היא שלנו (Math.random), לא של המודל: לכל סצנה נבחר
-   * שילוב קונקרטי של דמות/מקום/זווית *לפני* הקריאה למודל, ומכתיבים לו אותו —
-   * וכשאין בכלל קריאה למודל (נפילה-חזרה), אותו שילוב בונה את המשפט בעצמו.
+   * בוחרים רעיונות חזותיים שונים, ולא רק אנשים וזוויות שונות לאותה בדיקה.
+   * רק רעיון אחד כולל אדם, ולכן בכל שלישייה לפחות שתי סצנות ללא אנשים.
+   * אותה הנחיה נשמרת לתיאור, לנפילה-חזרה ולציור עצמו.
    */
-  private readonly SUBJECTS = [
-    'a young woman technician with a neat ponytail',
-    'a young man technician, clean-shaven',
-    'a middle-aged woman inspector with glasses',
-    'a middle-aged man inspector with a short beard',
-    'an experienced older male technician with gray hair',
-    'an experienced older female technician with short gray hair',
-    'a woman inspector in her thirties with curly dark hair',
-    'a man technician in his thirties with short dark hair',
-    'a female engineer in her forties, pragmatic look',
-    'a male engineer in his forties with a focused expression',
-  ];
-  private readonly SETTINGS = [
-    'a bright modern Israeli apartment living room',
-    'a home kitchen near the counter',
-    'a stairwell of a residential apartment building',
-    'a garden or backyard next to an irrigation line',
-    'a small office space with glass partitions',
-    'a basement utility or boiler room with exposed pipes',
-    'a sunlit rooftop with a water tank in the background',
-    'an underground parking garage with concrete columns',
-    'a school or public-building corridor with lockers',
-    'a bathroom near the water pipes',
-    'a bedroom near a wall socket, bed partially visible',
-    'a building entrance lobby with mailboxes',
-    'a clinic or small medical office waiting area',
-    'a shared mamad / safe room in a residential building',
-    'a renovated top-floor apartment with wooden floors',
-    'a construction site office container, maps on wall',
-    'a small industrial warehouse interior',
-    'a dedicated building electrical cabinet room',
-    'a child\'s bedroom (child not present) near a window',
-    'a kindergarten playroom with small chairs stacked away',
-    'a nursery or small school classroom (no children)',
-    'a modern co-working floor with desks in background',
-    'a residential garage used also for storage',
-    'a hotel-style corridor with carpet',
-    'a shaded building courtyard between two wings',
-    'the back of a restaurant kitchen near the exhaust hood',
-    'a hallway next to an elevator machine room door',
-    'a quiet reading room in a public building',
-    'an attic storage space with sloped ceiling',
-    'a sunroom extension of an Israeli villa',
-  ];
-  private readonly ANGLES = [
-    'a wide shot showing the full room',
-    'a close-up over-the-shoulder shot focused on the instrument display',
-    'a low camera angle looking slightly upward',
-    'a shot from behind the technician, who faces a wall or fixture',
-    'a medium shot at eye level, technician centered',
-    'a three-quarter angle shot from one side',
-    'a high angle from a corner of the ceiling, looking down',
-    'a tight waist-up portrait with the room softly out of focus',
-    'a profile shot (side view) of the technician mid-action',
-    'a shallow-focus shot with the instrument in sharp focus and the technician slightly soft',
+  private readonly CONCEPTS: readonly SceneConcept[] = [
+    {
+      instructions:
+        'ENVIRONMENT: a wide establishing photograph of a real place affected by the article topic. ' +
+        'Let the space and its everyday surroundings tell the story; choose a topic-relevant interior or landscape. ' +
+        'No people, hands, detectors, meters or testing equipment.',
+      fallback:
+        'A wide photograph of an airy Mediterranean apartment living room with an open window, ' +
+        'natural materials and a shaded courtyard visible outside',
+      hasPerson: false,
+    },
+    {
+      instructions:
+        'MATERIAL DETAIL: a macro or tight close-up of a physical material, surface, texture or visible sign ' +
+        'directly relevant to the article, such as condensation, soil layers, water or building material. ' +
+        'Do not invent visible radiation, gas clouds or other invisible hazards. ' +
+        'No people, hands, detectors, meters or testing equipment.',
+      fallback:
+        'A macro photograph of fine condensation droplets on a window, with the glass texture in sharp focus ' +
+        'and a softly blurred garden behind it',
+      hasPerson: false,
+    },
+    {
+      instructions:
+        'STILL LIFE: an overhead or carefully composed tabletop photograph of a few topic-relevant ' +
+        'physical samples, materials or everyday objects, with varied textures and negative space. ' +
+        'The objects themselves are the subject. No people, hands, detectors, meters or electronic displays.',
+      fallback:
+        'An overhead still life of an unlabelled glass water sample, a soil sample in a shallow dish ' +
+        'and a natural stone on a clean neutral work surface',
+      hasPerson: false,
+    },
+    {
+      instructions:
+        'BUILDING OR INFRASTRUCTURE: an exterior architectural photograph of a topic-relevant building ' +
+        'element or infrastructure, emphasizing geometry and its surroundings. ' +
+        'Choose a concrete feature related to the article, such as a roof, facade, pipework or acoustic barrier. ' +
+        'No people, hands, detectors, meters or testing equipment.',
+      fallback:
+        'An architectural photograph of a Mediterranean residential facade with shaded balconies, ' +
+        'rooftop ventilation outlets and trees along the building',
+      hasPerson: false,
+    },
+    {
+      instructions:
+        'PRACTICAL SOLUTION: a medium photograph focused on a tangible prevention or remediation feature ' +
+        'relevant to the article, such as ventilation, sealing, filtration, drainage or acoustic treatment. ' +
+        'Show the installed feature in use in its real setting, without presenting it as a guaranteed cure. ' +
+        'No people, hands, detectors, meters or testing equipment.',
+      fallback:
+        'A medium photograph of a clean ventilation grille beside an open window in a well-kept room, ' +
+        'with soft curtains and a clear view of the airflow opening',
+      hasPerson: false,
+    },
+    {
+      instructions:
+        'PROFESSIONAL AT WORK: one adult environmental professional in a plain white work shirt, ' +
+        'with protective equipment if appropriate, carrying out a task relevant to the article. ' +
+        'Vary the action: a visual inspection, collecting a sample, examining a material or checking an installation. ' +
+        'A handheld detector is optional and only appropriate if the topic specifically requires it. ' +
+        'Use a candid medium shot with the relevant surroundings visible.',
+      fallback:
+        'A medium photograph of an environmental professional in a plain white work shirt visually inspecting ' +
+        'a window seal in a bright apartment, with relaxed hands and no handheld instrument',
+      hasPerson: true,
+    },
   ];
   /**
    * ציר-גיוון נוסף: שעה-ביום / איכות אור / פלטת צבעים. בלי זה כל התמונות של
@@ -172,24 +184,18 @@ export class BlogImageService {
    * לרצף הבלוגים להרגיש מונוטוני ויזואלית למרות הרנדום.
    */
   private readonly ATMOSPHERE = [
-    'warm morning light coming through a window',
+    'warm morning light',
     'soft late-afternoon golden light',
     'bright balanced midday daylight',
-    'cool neutral indoor daylight with sheer curtains',
+    'cool neutral daylight',
     'overcast soft diffused daylight',
-    'warm interior lamp light mixing with daylight',
+    'soft reflected daylight with gentle shadows',
     'crisp winter morning light, slightly cool palette',
-    'end-of-day amber light hitting the back wall',
+    'end-of-day amber light',
   ];
 
-  private pick<T>(arr: readonly T[]): T {
-    return arr[Math.floor(Math.random() * arr.length)];
-  }
-
-  /** `count` שילובי דמות/מקום/זווית/אווירה, בלי חזרה על עצמם בתוך אותה קבוצה. */
-  private randomDirectives(
-    count: number,
-  ): { subject: string; setting: string; angle: string; atmosphere: string }[] {
+  /** רעיונות ללא חזרות בתוך הקבוצה; גם התמונה הראשונה משתנה בין בקשות. */
+  private randomDirectives(count: number): SceneDirective[] {
     const shuffle = <T>(arr: readonly T[]): T[] => {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
@@ -198,24 +204,19 @@ export class BlogImageService {
       }
       return a;
     };
-    const subjects = shuffle(this.SUBJECTS);
-    const settings = shuffle(this.SETTINGS);
-    const angles = shuffle(this.ANGLES);
+    const concepts = shuffle(this.CONCEPTS);
     const atmospheres = shuffle(this.ATMOSPHERE);
     return Array.from({ length: count }, (_, i) => ({
-      subject: subjects[i % subjects.length],
-      setting: settings[i % settings.length],
-      angle: angles[i % angles.length],
+      ...concepts[i % concepts.length],
       atmosphere: atmospheres[i % atmospheres.length],
     }));
   }
 
-  private fallbackScenes(count: number): string[] {
-    return this.randomDirectives(count).map(
-      ({ subject, setting, angle, atmosphere }) =>
-        `${angle[0].toUpperCase()}${angle.slice(1)} of ${subject} holding a handheld ` +
-        `monitoring instrument and reading its small display, in ${setting}, with ${atmosphere}.`,
-    );
+  private fallbackScenes(directives: SceneDirective[]): PlannedScene[] {
+    return directives.map((directive) => ({
+      scene: `${directive.fallback}, lit by ${directive.atmosphere}.`,
+      directive,
+    }));
   }
 
   /**
@@ -227,18 +228,16 @@ export class BlogImageService {
     topic: string,
     count: number,
     apiKey: string,
-  ): Promise<string[]> {
-    const fallback = this.fallbackScenes(count);
+  ): Promise<PlannedScene[]> {
+    const directives = this.randomDirectives(count);
+    const fallback = this.fallbackScenes(directives);
     const subject = [title, topic].map((s) => (s || '').trim()).filter(Boolean).join(' — ');
     if (!subject) return fallback;
 
-    const directives = this.randomDirectives(count);
     const directiveLines = directives
       .map(
         (d, i) =>
-          `Scene ${i + 1} MUST feature ${d.subject}, in ${d.setting}, shown as ${d.angle}, ` +
-          `lit by ${d.atmosphere}. ` +
-          `Do not reuse this exact combination in any other scene.`,
+          `Scene ${i + 1}: ${d.instructions} Light: ${d.atmosphere}.`,
       )
       .join('\n');
 
@@ -258,11 +257,12 @@ export class BlogImageService {
                 'company (radon, asbestos, air, water, soil, noise, odour, radiation).',
                 `Return JSON: {"scenes": [...]} with exactly ${count} English sentences,`,
                 'each 25-45 words, describing only what is visible: place, objects, light, angle.',
-                'In EVERY scene one professional technician is actively performing the test with a',
-                'handheld instrument — that person is the subject of the photo.',
-                'Each scene MUST follow the mandatory subject/setting/angle instruction given for',
-                'its number below — do not substitute a generic default instead. The scenes must',
-                'read as genuinely different photographs, not the same photo reworded.',
+                'Each scene MUST follow the assigned visual concept for its number below, in that order.',
+                'Choose specific subjects and locations that directly relate to this article, rather than generic testing imagery.',
+                'The photographs must differ in their main subject, scale and composition, not just camera angle or person.',
+                'Most scenes have no people or testing equipment; only the PROFESSIONAL AT WORK concept permits a person.',
+                'Do not turn places, materials or objects into photographs of someone inspecting them.',
+                'For invisible hazards such as radon or radiation, show relevant real surroundings or materials, never visible rays or gas.',
                 'Describe concrete scenes, never abstract concepts.',
                 'Never mention text, signs, letters, numbers or brands — they are forbidden in the photo.',
                 'Keep the upper-left corner of every frame empty and plain.',
@@ -276,14 +276,18 @@ export class BlogImageService {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: any = await res.json();
       const parsed = JSON.parse(String(data?.choices?.[0]?.message?.content || '{}'));
-      const scenes: string[] = (Array.isArray(parsed?.scenes) ? parsed.scenes : [])
-        .map((s: unknown) => String(s || '').trim().replace(/^["']|["']$/g, ''))
-        .filter(Boolean);
+      const scenes: unknown[] = Array.isArray(parsed?.scenes) ? parsed.scenes : [];
       if (!scenes.length) throw new Error('no scenes in response');
-      // המודל עלול להחזיר פחות מהמבוקש — משלימים מהנפילה-חזרה כדי שהמנהל
-      // תמיד יקבל את מספר החלופות שביקש.
-      while (scenes.length < count) scenes.push(fallback[scenes.length % fallback.length]);
-      return scenes.slice(0, count);
+      const seen = new Set<string>();
+      // שומרים על המיקום: תשובה חסרה/פגומה לא מזיזה סצנה לרעיון של תמונה אחרת.
+      return directives.map((directive, i) => {
+        const value = scenes[i];
+        const scene = typeof value === 'string' ? value.trim().replace(/^["']|["']$/g, '').trim() : '';
+        const key = scene.toLowerCase().replace(/\s+/g, ' ');
+        if (!scene || seen.has(key)) return fallback[i];
+        seen.add(key);
+        return { scene, directive };
+      });
     } catch (e: any) {
       this.logger.warn(`image scene prompt failed (${e?.message}) — using the generic scenes`);
       return fallback;
@@ -445,8 +449,10 @@ export class BlogImageService {
   /* ── שלב 2 + הרכבה ──────────────────────────────────────────────────── */
 
   /** מייצר תמונה בודדת מתיאור סצנה. `null` = נכשל, והמתאם מדלג עליה. */
-  private async renderScene(scene: string, apiKey: string): Promise<BlogImageOption | null> {
-    const prompt = `${scene}\n\n${SCENE_RULES}`;
+  private async renderScene(planned: PlannedScene, apiKey: string): Promise<BlogImageOption | null> {
+    const { scene, directive } = planned;
+    const prompt = `${scene}\n\n${SCENE_RULES}\n\n` +
+      `Mandatory composition (takes precedence over conflicting scene details): ${directive.instructions}`;
     try {
       const res = await this.fetchWithTimeout('https://api.openai.com/v1/images/generations', {
         method: 'POST',
@@ -475,7 +481,7 @@ export class BlogImageService {
         return null;
       }
       const raw = Buffer.from(b64, 'base64');
-      const chest = await this.detectChestRegion(raw, apiKey);
+      const chest = directive.hasPerson ? await this.detectChestRegion(raw, apiKey) : null;
       const stamped = await this.stampLogo(raw, chest);
       return { dataUrl: `data:image/webp;base64,${stamped.toString('base64')}`, prompt, scene };
     } catch (e: any) {

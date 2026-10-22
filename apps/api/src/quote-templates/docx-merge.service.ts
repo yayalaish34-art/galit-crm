@@ -613,6 +613,62 @@ export function ensureCityPlaceholderInBookmark(documentXml: string): string {
 }
 
 /**
+ * מקבילה ל-ensureCityPlaceholderInBookmark עבור "סקר חוזה מס'": בחלק גדול מהתבניות
+ * (64 מתוך 86 בפריסה שנסרקה — אקוסטיקה, אוויר, אסבסט, קרקע, מים, קרינה, ראדון, ריח
+ * והרעש הישן) סימניית fldCode שאחרי התווית "סקר חוזה מס':" ריקה — אין בה
+ * {contractSurveyNumber} ואין טקסט, לכן מספר ההצעה לא מודפס במסמך הממוזג.
+ * (רק 20 תבניות מהסדרה החדשה ע-/פ- מכילות את ה-placeholder מראש.)
+ *
+ * אם סימניית fldCode ריקה (אין בה {contractSurveyNumber} ואין טקסט), ואין
+ * {contractSurveyNumber} במקום אחר בתבנית — מזריקים ריצה עם ה-placeholder בתוך
+ * הסימנייה. normalizeDocxMergePayload כבר נופל חזרה מ-contractSurveyNumber ל-quoteNumber
+ * כשהראשון חסר, לכן מספר ההצעה ייכנס אוטומטית.
+ *
+ * עיצוב הריצה נלקח מריצת ה-label שלפני הסימנייה (אותה תווית "סקר חוזה מס'" —
+ * David, מודגש, גודל 48, קו-תחתון, RTL בברוב התבניות), כדי שהמספר ייראה חזותית
+ * כמו שאר הכותרת. אם לא ניתן לחלץ — ברירת מחדל זהה.
+ */
+export function ensureContractSurveyPlaceholderInBookmark(documentXml: string): string {
+  // כבר קיים placeholder בתבנית — אין מה לעשות
+  if (documentXml.includes('{contractSurveyNumber}')) return documentXml;
+
+  const startRe = /<w:bookmarkStart\b[^>]*\bw:name="fldCode"[^>]*\/>/;
+  const sm = startRe.exec(documentXml);
+  if (!sm) return documentXml;
+  const startEnd = sm.index + sm[0].length;
+
+  const endRe = /<w:bookmarkEnd\b[^>]*\/>/g;
+  endRe.lastIndex = startEnd;
+  const em = endRe.exec(documentXml);
+  if (!em) return documentXml;
+
+  // הסימנייה כבר מכילה טקסט/ריצה — לא מזריקים (יש מספר צרוב ידנית)
+  const inner = documentXml.slice(startEnd, em.index);
+  if (/<w:t[ >]/.test(inner)) return documentXml;
+
+  // עיצוב הריצה: נלקח מריצת ה-label בפסקה (לרוב התווית "סקר חוזה מס'").
+  // ברירת מחדל זהה לזו שנמצאה בפועל בתבניות שעובדות (David 48 מודגש קו-תחתון RTL).
+  let rPr =
+    '<w:rPr><w:rFonts w:cs="David" w:hint="cs"/><w:b/><w:bCs/><w:sz w:val="48"/><w:szCs w:val="48"/><w:u w:val="single"/><w:rtl/></w:rPr>';
+  const pStart = Math.max(
+    documentXml.lastIndexOf('<w:p ', sm.index),
+    documentXml.lastIndexOf('<w:p>', sm.index),
+  );
+  if (pStart !== -1) {
+    const scope = documentXml.slice(pStart, sm.index);
+    const runs = scope.match(/<w:r\b[^>]*>[\s\S]*?<\/w:r>/g);
+    if (runs && runs.length) {
+      // ה-rPr של הריצה האחרונה שלפני הסימנייה — זו ריצת התווית עצמה.
+      const rPrM = runs[runs.length - 1].match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
+      if (rPrM) rPr = rPrM[0];
+    }
+  }
+
+  const run = `<w:r>${rPr}<w:t xml:space="preserve">{contractSurveyNumber}</w:t></w:r>`;
+  return documentXml.slice(0, startEnd) + run + documentXml.slice(startEnd);
+}
+
+/**
  * מבטל הדגשה (bold) **וקו תחתון** מריצת הכתובת {customerAddress}. בכ-43 מתוך התבניות ריצת
  * הכתובת הוגדרה מודגשת (<w:b/><w:bCs/>) ועם קו תחתון (<w:u/>) — לבקשת המשתמש הכתובת לא
  * צריכה להיות מודגשת ולא צריך קו מתחתיה. מסירים רק את <w:b/>/<w:bCs/>/<w:u/> מ-rPr של
@@ -1451,6 +1507,10 @@ export class DocxMergeService {
         pre = stripFaxParagraphsFromDocXml(pre);
         // הזרקת {customerCity} לסימניית fldCity הריקה (תבניות שבהן העיר חסרה placeholder)
         pre = ensureCityPlaceholderInBookmark(pre);
+        // הזרקת {contractSurveyNumber} לסימניית fldCode הריקה — "סקר חוזה מס'" ללא מספר
+        // (64 תבניות ישנות; normalize נופל חזרה ל-quoteNumber כש-contractSurveyNumber ריק,
+        // לכן מספר ההצעה ייכנס שם אוטומטית)
+        pre = ensureContractSurveyPlaceholderInBookmark(pre);
         // ביטול הדגשה + קו-תחתון מהכתובת, והסרת שורת הרווח בין הכתובת לעיר (בקשת המשתמש)
         pre = unboldAddressRun(pre);
         pre = removeBlankLineBetweenAddressAndCity(pre);

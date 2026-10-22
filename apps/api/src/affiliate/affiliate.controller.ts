@@ -30,4 +30,11 @@ export class AffiliateController {
   submit(@Req() req: any, @Body() body: any) {
     return this.affiliate.submitReferral(req.affiliate.id, body || {});
   }
+
+  /** פענוח AI של טקסט חופשי לשדות מובנים — ממלא אוטומטית טופס הגשת ליד. */
+  @Post('me/parse-text')
+  @UseGuards(AffiliateGuard)
+  parseText(@Req() req: any, @Body() body: { text?: string }) {
+    return this.affiliate.parseFreeText(req.affiliate.id, body?.text || '');
+  }
 }
