@@ -68,28 +68,117 @@ export function BackupReminderPopup({ currentUser }: { currentUser: AppUser | nu
   const [meta, setMeta] = useState<Meta | null>(null);
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const [triggerPrompt, setTriggerPrompt] = useState(false);
 
   const isAdmin = (currentUser?.role || '').toUpperCase() === 'ADMIN';
 
+  const refetch = async () => {
+    try {
+      const r = await apiFetch(apiUrl('/backup/customer/latest'), { authUser: toAuth(currentUser) });
+      if (r?.ok) {
+        const j = (await r.json().catch(() => null)) as Meta | null;
+        setMeta(j);
+      }
+    } catch {
+      /* silent */
+    }
+  };
+
   useEffect(() => {
     if (!isAdmin) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await apiFetch(apiUrl('/backup/customer/latest'), { authUser: toAuth(currentUser) });
-        if (cancelled) return;
-        if (r?.ok) {
-          const j = (await r.json().catch(() => null)) as Meta | null;
-          setMeta(j);
-        }
-      } catch {
-        /* silent */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    void refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, currentUser]);
+
+  // "הפעל גיבוי ראשון" — ל-ADMIN כשאין עדיין מטא בכלל (למשל אחרי התקנה).
+  // מוצג פעם אחת: לאחר סגירה (triggerPrompt=false), לא חוזר אוטומטית.
+  const showFirstRunPrompt = isAdmin && !meta && !hidden && !isSnoozed() && triggerPrompt;
+
+  // טריגר מופעל אוטומטית לאחר הטענה הראשונה של הקומפוננטה אם אין מטא כלל.
+  // משתמש ב-ref כדי לא להידלק מחדש פעמיים.
+  useEffect(() => {
+    if (!isAdmin) return;
+    // מופעל רק אחרי שה-refetch הראשון סיים — אם meta נשאר null, מציגים כפתור ראשון.
+    const t = setTimeout(() => {
+      setMeta((m) => {
+        if (m == null) setTriggerPrompt(true);
+        return m;
+      });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [isAdmin]);
+
+  const runNow = async () => {
+    setBusy(true);
+    try {
+      const r = await apiFetch(apiUrl('/backup/customer/run'), {
+        method: 'POST',
+        authUser: toAuth(currentUser),
+      });
+      if (!r?.ok) throw new Error(`run failed: ${r?.status}`);
+      await refetch();
+      setTriggerPrompt(false);
+    } catch (e) {
+      alert(`לא ניתן להפעיל גיבוי: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (showFirstRunPrompt) {
+    return (
+      <div
+        role="dialog"
+        aria-modal="true"
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(15,23,42,.55)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10100, padding: 16,
+        }}
+      >
+        <div
+          dir="rtl"
+          style={{
+            background: '#fff', borderRadius: 18, padding: '24px 24px 20px',
+            maxWidth: 460, width: '100%',
+            boxShadow: '0 20px 60px rgba(15,23,42,.3)', border: '2px solid #1d7a3d',
+          }}
+        >
+          <div style={{ fontSize: 36, textAlign: 'center', marginBottom: 6 }}>🚀</div>
+          <h3 style={{ textAlign: 'center', fontSize: 18, fontWeight: 900, color: '#15532a', margin: '2px 0 6px' }}>
+            להפעיל גיבוי ראשון של טבלת הלקוחות?
+          </h3>
+          <p style={{ textAlign: 'center', fontSize: 13.5, color: '#334155', lineHeight: 1.6, margin: '6px 0 14px' }}>
+            הגיבוי יעלה ל-OneDrive בתיקיית <strong>CRM-Backups/</strong>.<br />
+            החל מהחודש הבא זה יקרה אוטומטית ב-1 לחודש.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <button
+              onClick={runNow}
+              disabled={busy}
+              style={{
+                background: 'linear-gradient(135deg,#1d7a3d,#8cc63f)', color: '#fff', border: 0,
+                padding: '12px 14px', borderRadius: 10, fontSize: 14, fontWeight: 800,
+                cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.7 : 1,
+                boxShadow: '0 6px 18px rgba(29,122,61,.3)',
+              }}
+            >
+              {busy ? 'מגבה…' : '✨ הפעל גיבוי עכשיו'}
+            </button>
+            <button
+              onClick={() => setTriggerPrompt(false)}
+              style={{
+                background: 'transparent', border: 0, color: '#64748b',
+                padding: '6px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                textDecoration: 'underline',
+              }}
+            >
+              לא עכשיו
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAdmin || !meta || hidden) return null;
   if (meta.acknowledgedAt) return null;
