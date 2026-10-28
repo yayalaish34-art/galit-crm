@@ -491,56 +491,21 @@ export class BackupService {
   }
 
   /**
-   * גיבוי מלא בלחיצה אחת: ZIP שמכיל (א) דאמפ SQL של טבלת Customer, (ב) כל קבצי
-   * הדוחות (REPORT), (ג) כל הצעות המחיר (QUOTE), (ד) הצעות המחיר החתומות
-   * (SIGNED_QUOTE). _INDEX.csv ב-root מרכז את כל הקבצים שנכללו עם ה-type שלהם.
-   *
-   * ZIP נבנה ב-memory. ל-tenants גדולים (מאות MB) אפשר להחליף PizZip בסטרימינג
-   * של archiver, אבל זה לא נדרש בנפח נתוני גלית.
+   * ZIP של כל קבצי הדוחות (Document.documentType='REPORT' עם dataBase64).
+   * מקובץ לתיקיות משנה פר-לקוח, עם _INDEX.csv ב-root שמסכם כל קובץ שנכלל.
    */
-  async exportFullBackupAsZip(): Promise<{
+  async exportReportsAsZip(): Promise<{
     zip: Buffer;
-    stats: {
-      customers: { rows: number; bytes: number };
-      reports: { docs: number; included: number; customers: number; bytes: number };
-      quotes: { docs: number; included: number; customers: number; bytes: number };
-      signedQuotes: { docs: number; included: number; customers: number; bytes: number };
-      totalBytes: number;
-    };
+    stats: { docs: number; included: number; customers: number; bytes: number };
   }> {
     const PizZip = require('pizzip');
     const zip = new PizZip();
 
-    // (א) קובץ SQL של Customer ב-root — אותו דאמפ שה-cron החודשי מייצר.
-    const { sql, rowCount } = await this.exportCustomerTableAsSql();
-    const customersSql = Buffer.from(sql, 'utf-8');
-    zip.file('customers.sql', customersSql);
-
-    // (ב-ד) שלושת סוגי המסמכים — תיקיות נפרדות, _INDEX.csv משותף.
     const indexRows: string[] = [
       ['type', 'customer', 'file_name', 'document_date', 'created_at', 'mime_type', 'bytes', 'document_id'].join(','),
     ];
-    const reports = await this.addDocumentsOfTypeToZip({ zip, rootFolder: 'reports', documentType: 'REPORT', indexRows });
-    const quotes = await this.addDocumentsOfTypeToZip({ zip, rootFolder: 'quotes', documentType: 'QUOTE', indexRows });
-    const signedQuotes = await this.addDocumentsOfTypeToZip({ zip, rootFolder: 'signed-quotes', documentType: 'SIGNED_QUOTE', indexRows });
-
+    const stats = await this.addDocumentsOfTypeToZip({ zip, rootFolder: 'reports', documentType: 'REPORT', indexRows });
     zip.file('_INDEX.csv', '﻿' + indexRows.join('\n'));
-
-    // README בעברית ב-root מסביר מה בפנים.
-    const readme = [
-      'גיבוי מלא — גלית CRM',
-      `נוצר: ${new Date().toISOString()}`,
-      '',
-      'תוכן:',
-      `• customers.sql — דאמפ SQL של טבלת Customer (${rowCount.toLocaleString('he-IL')} רשומות). לרסטור: psql < customers.sql`,
-      `• reports/ — ${reports.included} דוחות (${reports.customers} לקוחות)`,
-      `• quotes/ — ${quotes.included} הצעות מחיר (${quotes.customers} לקוחות)`,
-      `• signed-quotes/ — ${signedQuotes.included} הצעות חתומות (${signedQuotes.customers} לקוחות)`,
-      `• _INDEX.csv — מפת כל המסמכים (סוג / לקוח / שם קובץ / תאריך / גודל)`,
-      '',
-      'כל תיקייה מכילה תיקיית משנה לכל לקוח. שם קובץ מתחיל בתאריך כדי לשמור על סדר כרונולוגי.',
-    ].join('\n');
-    zip.file('README.txt', Buffer.from('﻿' + readme, 'utf-8'));
 
     const buf: Buffer = zip.generate({
       type: 'nodebuffer',
@@ -548,21 +513,13 @@ export class BackupService {
       compressionOptions: { level: 6 },
     });
 
-    const totalBytes = customersSql.byteLength + reports.bytes + quotes.bytes + signedQuotes.bytes;
-
     this.logger.log(
-      `full backup: customers=${rowCount}/${customersSql.byteLength}b reports=${reports.included}/${reports.bytes}b quotes=${quotes.included}/${quotes.bytes}b signed=${signedQuotes.included}/${signedQuotes.bytes}b zip=${buf.byteLength}b`,
+      `reports export: docs=${stats.docs} included=${stats.included} customers=${stats.customers} bytes=${stats.bytes} zip=${buf.byteLength}`,
     );
 
     return {
       zip: buf,
-      stats: {
-        customers: { rows: rowCount, bytes: customersSql.byteLength },
-        reports: { docs: reports.docs, included: reports.included, customers: reports.customers, bytes: reports.bytes },
-        quotes: { docs: quotes.docs, included: quotes.included, customers: quotes.customers, bytes: quotes.bytes },
-        signedQuotes: { docs: signedQuotes.docs, included: signedQuotes.included, customers: signedQuotes.customers, bytes: signedQuotes.bytes },
-        totalBytes,
-      },
+      stats: { docs: stats.docs, included: stats.included, customers: stats.customers, bytes: stats.bytes },
     };
   }
 }

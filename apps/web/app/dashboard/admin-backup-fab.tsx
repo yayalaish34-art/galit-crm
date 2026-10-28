@@ -23,9 +23,9 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
   const isAdmin = (currentUser?.role || '').toUpperCase() === 'ADMIN';
   if (!isAdmin) return null;
 
-  async function downloadFullBackup() {
+  async function downloadReports() {
     setBusy('reports');
-    setMsg('מכין גיבוי מלא (לקוחות + דוחות + הצעות + הצעות חתומות)…');
+    setMsg('מכין ZIP של כל הדוחות — זה יכול לקחת כמה דקות לפי כמות הדוחות…');
     try {
       const r = await apiFetch(apiUrl('/backup/reports/export-all'), { authUser: toAuth(currentUser) });
       if (!r?.ok) throw new Error(`בקשה נכשלה (${r?.status ?? '?'})`);
@@ -36,14 +36,12 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `galit-full-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `galit-reports-${new Date().toISOString().slice(0, 10)}.zip`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
       if (stats) {
-        const mb = Math.round((stats.totalBytes || 0) / (1024 * 1024));
-        setMsg(
-          `הורדה החלה (${mb} MB) · לקוחות: ${stats.customers?.rows?.toLocaleString('he-IL') ?? '?'} שורות · דוחות: ${stats.reports?.included ?? 0} · הצעות: ${stats.quotes?.included ?? 0} · חתומות: ${stats.signedQuotes?.included ?? 0}`,
-        );
+        const mb = Math.round((stats.bytes || 0) / (1024 * 1024));
+        setMsg(`הורדה החלה · ${stats.included} דוחות · ${stats.customers} לקוחות · ${mb} MB`);
       } else {
         setMsg('ההורדה החלה');
       }
@@ -145,7 +143,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <button
                 type="button"
-                onClick={downloadFullBackup}
+                onClick={downloadReports}
                 disabled={busy !== null}
                 style={{
                   background: 'linear-gradient(135deg,#1d7a3d,#8cc63f)',
@@ -161,7 +159,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
                   textAlign: 'start',
                 }}
               >
-                {busy === 'reports' ? '📦 מכין ZIP…' : '📦 ייצוא גיבוי מלא (לקוחות + דוחות + הצעות)'}
+                {busy === 'reports' ? '📦 מכין ZIP…' : '📦 ייצוא כל הדוחות (ZIP)'}
               </button>
 
               <button
@@ -203,8 +201,8 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
             )}
 
             <div style={{ marginTop: 12, fontSize: 11, color: '#64748b', lineHeight: 1.55 }}>
-              <strong>גיבוי מלא (ZIP):</strong> customers.sql + reports/ + quotes/ + signed-quotes/ (קבצים גולמיים מ-Document.dataBase64), עם README + _INDEX.csv בשורש.<br />
-              <strong>גיבוי לקוחות ל-OneDrive:</strong> אותו דאמפ SQL של Customer, אבל נשלח ל-CRM-Backups/ ב-OneDrive (אותה פעולה שהקרון החודשי עושה אוטומטית ב-1 לחודש).
+              <strong>ZIP דוחות:</strong> כל קבצי ה-DOCX/PDF של דוחות (Document.documentType='REPORT'), מקובצים לתיקייה פר-לקוח, עם _INDEX.csv בשורש.<br />
+              <strong>גיבוי לקוחות:</strong> דאמפ SQL של כל טבלת Customer ל-OneDrive בתיקיית CRM-Backups/.
             </div>
           </div>
         </div>
