@@ -227,4 +227,43 @@ export class GraphFilesService {
     const t = await res.text().catch(() => '');
     throw new Error(`OneDrive download failed: ${res.status} ${t.slice(0, 200)}`);
   }
+
+  /**
+   * העלאת קובץ גנרי ל-OneDrive לתיקייה שרירותית — לא כבול ל-DOCX או ל-CRM-Quotes.
+   * שימושי לגיבויים חודשיים (CRM-Backups/customers-YYYY-MM.sql וכד').
+   * דורס אם כבר קיים באותו נתיב. שם הקובץ מנוקה (safeName) כדי לא ליפול על 423
+   * מ-SharePoint על שמות ארוכים / תווים לא חוקיים.
+   */
+  async uploadRaw(
+    userId: string,
+    folder: string,
+    fileName: string,
+    content: Buffer,
+    mime: string = 'application/octet-stream',
+  ): Promise<{ itemId: string; webUrl: string; name: string }> {
+    const token = await this.auth.getFilesAccessToken(userId);
+    const safeFolder = (folder || 'CRM-Backups').replace(/[^A-Za-z0-9._\-א-ת ]+/g, '_').slice(0, 60) || 'CRM-Backups';
+    // שומרים את הסיומת כפי שהוזנה — safeName מקצץ אותה בכוונה (בשביל DOCX), כאן זה לא רצוי.
+    const ext = (fileName.match(/\.[A-Za-z0-9]{1,8}$/)?.[0] ?? '').toLowerCase();
+    const base = GraphFilesService.safeName(fileName.replace(/\.[A-Za-z0-9]{1,8}$/, ''));
+    const finalName = `${base}${ext}`;
+    const relPath = `${safeFolder}/${finalName}`;
+
+    const res = await fetch(`${GRAPH}/me/drive/root:/${encodeURI(relPath)}:/content`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': mime },
+      body: new Uint8Array(content),
+    });
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      throw new Error(`OneDrive uploadRaw failed (${res.status}): ${t.slice(0, 250)}`);
+    }
+    const item: any = await res.json();
+    return {
+      itemId: String(item.id),
+      webUrl: String(item.webUrl || ''),
+      name: String(item.name || finalName),
+    };
+  }
 }

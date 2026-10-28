@@ -1,13 +1,45 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { GraphFilesService } from '../microsoft/graph-files.service';
+
+/** SystemSetting key — מטא-דאטה של גיבוי טבלת הלקוחות האחרון (JSON). */
+const CUSTOMER_BACKUP_KEY = 'backup.customer.latest';
+/** SystemSetting key — מזהה המשתמש שה-OneDrive שלו משמש לגיבוי (אופציונלי; ברירת מחדל: אדמין פעיל). */
+const BACKUP_OWNER_KEY = 'backup.ownerUserId';
+
+export type CustomerBackupMeta = {
+  createdAt: string;
+  fileName: string;
+  rowCount: number;
+  byteSize: number;
+  oneDriveWebUrl: string;
+  oneDriveItemId: string;
+  ownerUserId: string;
+  /** תאריך ISO של "הורדתי לדיסקאון קי"; `null` = עדיין לא אישר. */
+  acknowledgedAt: string | null;
+  /** משתמש שאישר. */
+  acknowledgedByUserId: string | null;
+  /** כשל אחרון (אם הגיבוי האחרון נכשל). */
+  error?: string | null;
+};
 
 /**
  * דשבורד בקרה/גיבוי למנהל — snapshot מלא של נתוני ה-CRM + בדיקת "סימני חיים" למסד.
  * נועד לתת בקרה: לראות שכל הנתונים קיימים, ולזהות מיד אם המסד נפל / התרוקן.
+ *
+ * גיבוי חודשי אוטומטי (CustomerBackupScheduler ב-1 לחודש):
+ * runCustomerBackup() → exportCustomerTableAsSql() → uploadRaw ל-OneDrive →
+ * שומר מטא ב-SystemSetting(CUSTOMER_BACKUP_KEY). הדשבורד מציג פופ-אפ
+ * "להוריד לדיסקאון קי" עד שהמשתמשת מאשרת acknowledgeCustomerBackup().
  */
 @Injectable()
 export class BackupService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(BackupService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly graphFiles: GraphFilesService,
+  ) {}
 
   /** ספירת כל הטבלאות + בדיקת חיבור למסד. מהיר — לרענון תכוף. */
   async health() {
@@ -105,5 +137,224 @@ export class BackupService {
         נוצרעי: r.createdBy?.name ?? '', תאריך: r.reportDate ?? '', נשלח: r.sentAt ?? '', נוצר: r.createdAt,
       })),
     };
+  }
+
+  // ─── גיבוי חודשי של טבלת Customer ל-OneDrive ───────────────────────────────
+
+  /**
+   * מייצר דאמפ SQL מלא של טבלת Customer כסטרינג. שולף עמודות מ-information_schema
+   * כדי לכסות כל שינוי סכמה עתידי בלי לעדכן את הקוד. כל שורה הופכת ל-INSERT
+   * אחד — בטוח לרסטור חלקי (אפשר להריץ שורה אחת), ועם header + BEGIN/COMMIT
+   * לרסטור מלא.
+   */
+  async exportCustomerTableAsSql(): Promise<{ sql: string; rowCount: number }> {
+    const colsResult: Array<{ column_name: string }> = await this.prisma.$queryRawUnsafe(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'Customer' AND table_schema = 'public'
+       ORDER BY ordinal_position`,
+    );
+    const columns = colsResult.map((c) => c.column_name);
+    if (columns.length === 0) {
+      throw new BadRequestException('טבלת Customer לא נמצאה במסד — אין מה לגבות');
+    }
+    const colList = columns.map((c) => `"${c}"`).join(', ');
+    const rows: any[] = await this.prisma.$queryRawUnsafe(`SELECT ${colList} FROM "Customer"`);
+
+    const header = [
+      `-- Galit CRM — Customer table backup`,
+      `-- Generated: ${new Date().toISOString()}`,
+      `-- Row count: ${rows.length}`,
+      `-- Columns: ${columns.length}`,
+      ``,
+      `SET search_path TO public;`,
+      `BEGIN;`,
+      ``,
+      `-- לרסטור נקי: בטל את ההערה בשורה הבאה (ימחק את הטבלה לפני הטענה):`,
+      `-- TRUNCATE "Customer" RESTART IDENTITY CASCADE;`,
+      ``,
+    ].join('\n');
+
+    const inserts = rows
+      .map((row) => {
+        const vals = columns.map((c) => this.formatSqlValue(row[c]));
+        return `INSERT INTO "Customer" (${colList}) VALUES (${vals.join(', ')});`;
+      })
+      .join('\n');
+
+    const footer = `\n\nCOMMIT;\n`;
+    return { sql: header + inserts + footer, rowCount: rows.length };
+  }
+
+  private formatSqlValue(v: unknown): string {
+    if (v === null || v === undefined) return 'NULL';
+    if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+    if (typeof v === 'bigint') return v.toString();
+    if (v instanceof Date) {
+      const t = v.getTime();
+      return Number.isFinite(t) ? `'${v.toISOString()}'::timestamptz` : 'NULL';
+    }
+    if (Array.isArray(v)) {
+      // PostgreSQL array literal: '{item1,item2}' — items with special chars quoted with "
+      const items = v.map((x) => {
+        if (x === null || x === undefined) return 'NULL';
+        const s = String(x);
+        // escape backslash + double-quote, then wrap in "
+        return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      });
+      return `'{${items.join(',')}}'`;
+    }
+    if (v instanceof Uint8Array || (v && typeof (v as Buffer).toString === 'function' && Buffer.isBuffer(v))) {
+      const b = Buffer.isBuffer(v) ? v : Buffer.from(v as Uint8Array);
+      return `'\\x${b.toString('hex')}'`;
+    }
+    if (typeof v === 'object') {
+      // JSON column — serialize + cast
+      return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
+    }
+    return `'${String(v).replace(/'/g, "''")}'`;
+  }
+
+  /** בוחר משתמש-בעלים לגיבוי: קודם מה-SystemSetting, אחרת ADMIN פעיל ראשון עם MS connection. */
+  private async resolveBackupOwner(): Promise<{ id: string; email: string | null } | null> {
+    const setting = await this.prisma.systemSetting
+      .findUnique({ where: { key: BACKUP_OWNER_KEY } })
+      .catch(() => null);
+    const explicit = setting?.value && typeof setting.value === 'object' ? (setting.value as any).userId : null;
+    if (typeof explicit === 'string' && explicit) {
+      const u = await this.prisma.user.findUnique({ where: { id: explicit }, select: { id: true, email: true } });
+      if (u) return u;
+    }
+    // Fallback: אדמין פעיל ראשון עם חיבור Microsoft (odRefreshToken או msRefreshToken).
+    const admin = await this.prisma.user.findFirst({
+      where: {
+        status: 'ACTIVE' as any,
+        role: 'ADMIN' as any,
+        OR: [{ odRefreshToken: { not: null } }, { msRefreshToken: { not: null } }],
+      },
+      select: { id: true, email: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return admin;
+  }
+
+  /**
+   * מריץ את הגיבוי: מייצר SQL, מעלה ל-OneDrive, שומר מטא ב-SystemSetting.
+   * אידמפוטנטי לחודש הנוכחי — אם שם הקובץ כבר קיים ב-OneDrive, הוא נדרס
+   * (אותה חודש = אותו שם: `customers-YYYY-MM.sql`).
+   *
+   * errorOnFail=false (ברירת מחדל) → שומר את השגיאה במטא ולא זורק; שימושי ל-cron
+   * כדי שלא נפיל את ה-process על כשל גיבוי. errorOnFail=true → זורק (לאנדפוינט ידני).
+   */
+  async runCustomerBackup(opts: { triggeredByUserId?: string; errorOnFail?: boolean } = {}): Promise<CustomerBackupMeta> {
+    const now = new Date();
+    const yyyyMm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const fileName = `customers-${yyyyMm}.sql`;
+
+    try {
+      const owner = await this.resolveBackupOwner();
+      if (!owner) {
+        throw new BadRequestException(
+          'אין משתמש-אדמין עם חיבור OneDrive — חברי Microsoft לפחות למשתמש אחד או קבע ownerUserId בהגדרות הגיבוי.',
+        );
+      }
+
+      const { sql, rowCount } = await this.exportCustomerTableAsSql();
+      const content = Buffer.from(sql, 'utf-8');
+
+      const upload = await this.graphFiles.uploadRaw(
+        owner.id,
+        'CRM-Backups',
+        fileName,
+        content,
+        'application/sql',
+      );
+
+      const meta: CustomerBackupMeta = {
+        createdAt: now.toISOString(),
+        fileName: upload.name,
+        rowCount,
+        byteSize: content.byteLength,
+        oneDriveWebUrl: upload.webUrl,
+        oneDriveItemId: upload.itemId,
+        ownerUserId: owner.id,
+        acknowledgedAt: null,
+        acknowledgedByUserId: null,
+        error: null,
+      };
+
+      await this.prisma.systemSetting.upsert({
+        where: { key: CUSTOMER_BACKUP_KEY },
+        create: { key: CUSTOMER_BACKUP_KEY, value: meta as any },
+        update: { value: meta as any },
+      });
+
+      this.logger.log(
+        `customer backup ok · rows=${rowCount} · bytes=${content.byteLength} · file=${upload.name} · owner=${owner.email || owner.id}`,
+      );
+      return meta;
+    } catch (e: any) {
+      const errorMsg = e?.message || String(e);
+      this.logger.error(`customer backup FAILED: ${errorMsg}`);
+
+      // שמירת שגיאה במטא כדי שהפופ-אפ יראה "הגיבוי האחרון נכשל"
+      const errorMeta: CustomerBackupMeta = {
+        createdAt: now.toISOString(),
+        fileName,
+        rowCount: 0,
+        byteSize: 0,
+        oneDriveWebUrl: '',
+        oneDriveItemId: '',
+        ownerUserId: '',
+        acknowledgedAt: null,
+        acknowledgedByUserId: null,
+        error: errorMsg,
+      };
+      await this.prisma.systemSetting
+        .upsert({
+          where: { key: CUSTOMER_BACKUP_KEY },
+          create: { key: CUSTOMER_BACKUP_KEY, value: errorMeta as any },
+          update: { value: errorMeta as any },
+        })
+        .catch(() => undefined);
+
+      if (opts.errorOnFail) throw e;
+      return errorMeta;
+    }
+  }
+
+  /** המטא של הגיבוי האחרון (או null אם מעולם לא רץ). */
+  async getLatestCustomerBackup(): Promise<CustomerBackupMeta | null> {
+    const row = await this.prisma.systemSetting
+      .findUnique({ where: { key: CUSTOMER_BACKUP_KEY } })
+      .catch(() => null);
+    if (!row?.value) return null;
+    return row.value as unknown as CustomerBackupMeta;
+  }
+
+  /** אישור "הורדתי לדיסקאון קי" — מכבה את הפופ-אפ עד הגיבוי הבא. */
+  async acknowledgeCustomerBackup(userId: string): Promise<CustomerBackupMeta> {
+    const current = await this.getLatestCustomerBackup();
+    if (!current) throw new NotFoundException('אין גיבוי לקוחות — הרץ קודם runCustomerBackup');
+    const updated: CustomerBackupMeta = {
+      ...current,
+      acknowledgedAt: new Date().toISOString(),
+      acknowledgedByUserId: userId,
+    };
+    await this.prisma.systemSetting.update({
+      where: { key: CUSTOMER_BACKUP_KEY },
+      data: { value: updated as any },
+    });
+    return updated;
+  }
+
+  /** מוריד את תוכן הקובץ העדכני ישר מ-OneDrive (לשרשור ללקוח כקובץ להורדה). */
+  async downloadLatestCustomerBackup(): Promise<{ fileName: string; content: Buffer }> {
+    const meta = await this.getLatestCustomerBackup();
+    if (!meta || !meta.oneDriveItemId || !meta.ownerUserId) {
+      throw new NotFoundException('אין גיבוי לקוחות זמין ב-OneDrive');
+    }
+    const content = await this.graphFiles.downloadContent(meta.ownerUserId, meta.oneDriveItemId);
+    return { fileName: meta.fileName, content };
   }
 }

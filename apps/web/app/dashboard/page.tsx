@@ -121,6 +121,7 @@ import { DataImportWizard } from '../data-import-wizard';
 import { FollowupImportPanel } from '../followup-import-panel';
 import { ChangePasswordSection } from '../change-password-section';
 import { isAdminRole, isManagerRole } from '../lib/roles';
+import { BackupReminderPopup } from './backup-reminder';
 import { playNotifyChime, primeNotifySound } from '../lib/notify-sound';
 import {
   CrmLegacyTopNav,
@@ -6977,6 +6978,7 @@ function DashboardPage({
 
   return (
     <div className="space-y-4" dir="rtl">
+      <BackupReminderPopup currentUser={currentUser} />
       {isGalit && <ReportsPaymentsSection currentUser={currentUser} />}
 
       {/* ── Hero ── */}
