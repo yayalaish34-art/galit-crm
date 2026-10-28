@@ -158,7 +158,22 @@ export class BackupService {
       throw new BadRequestException('טבלת Customer לא נמצאה במסד — אין מה לגבות');
     }
     const colList = columns.map((c) => `"${c}"`).join(', ');
-    const rows: any[] = await this.prisma.$queryRawUnsafe(`SELECT ${colList} FROM "Customer"`);
+
+    // שליפה מדורגת לפי id — SELECT בודד על 30k שורות עלול להידחף ל-statement_timeout
+    // במחיצות עמוסות; עמוד של 500 שורות הוא בהחלט בטוח.
+    const PAGE = 500;
+    const rows: any[] = [];
+    let cursor = '';
+    while (true) {
+      const whereClause = cursor ? `WHERE "id" > '${cursor.replace(/'/g, "''")}'` : '';
+      const page: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT ${colList} FROM "Customer" ${whereClause} ORDER BY "id" LIMIT ${PAGE}`,
+      );
+      if (page.length === 0) break;
+      rows.push(...page);
+      cursor = String((page[page.length - 1] as any).id || '');
+      if (page.length < PAGE) break;
+    }
 
     const header = [
       `-- Galit CRM — Customer table backup`,
@@ -386,23 +401,25 @@ export class BackupService {
 
   /**
    * ממלא תיקייה ב-ZIP בכל מסמכי Document מסוג מסוים (REPORT / QUOTE / SIGNED_QUOTE),
-   * מקובצים לתיקיות משנה פר-לקוח. מחזיר סטטיסטיקה (לקוחות / קבצים / בייטים),
-   * ומוסיף שורות ל-indexRows (סיכום לכל קובץ, לקובץ _INDEX.csv מרכזי).
+   * מקובצים לתיקיות משנה פר-לקוח. מחזיר סטטיסטיקה ומעדכן indexRows.
    *
-   * דחוס לפעולה אחת כי כל שלוש הקטגוריות (דוחות, הצעות, הצעות חתומות) חולקות
-   * בדיוק את אותה סכמה — Document עם dataBase64 + customer.
+   * שליפה מדורגת: קודם רק מטא-דאטה (ids + שמות + לקוחות) בשאילתה אחת קלה,
+   * אח"כ dataBase64 מסמך-מסמך (findUnique קטן). שאילתה בודדת שמושכת 100MB
+   * של base64 הורגת את ה-DB ב-statement_timeout; זה הסיבה שהניסיון הקודם נכשל ב-500.
    */
   private async addDocumentsOfTypeToZip(opts: {
-    zip: any; // PizZip
+    zip: any;
     rootFolder: string;
     documentType: 'REPORT' | 'QUOTE' | 'SIGNED_QUOTE';
     indexRows: string[];
   }): Promise<{ docs: number; included: number; skipped: number; customers: number; bytes: number }> {
     const { zip, rootFolder, documentType, indexRows } = opts;
-    const docs = await this.prisma.document.findMany({
+
+    // שלב 1 — רק מטא-דאטה (בלי dataBase64). שאילתה קלה וזריזה גם במיליוני שורות.
+    const metas = await this.prisma.document.findMany({
       where: { documentType: documentType as any, dataBase64: { not: null } },
       select: {
-        id: true, name: true, mimeType: true, dataBase64: true,
+        id: true, name: true, mimeType: true,
         documentDate: true, createdAt: true, customerId: true,
         customer: { select: { name: true } },
       },
@@ -415,11 +432,25 @@ export class BackupService {
     let bytes = 0;
     const customers = new Set<string>();
 
-    for (const d of docs) {
-      if (!d.dataBase64) continue;
+    // שלב 2 — שליפה פר-מסמך של ה-base64 (findUnique זול, לא ייגרף ל-timeout).
+    for (const d of metas) {
+      let b64: string | null = null;
+      try {
+        const row = await this.prisma.document.findUnique({
+          where: { id: d.id },
+          select: { dataBase64: true },
+        });
+        b64 = row?.dataBase64 ?? null;
+      } catch (e: any) {
+        this.logger.warn(`document ${d.id} fetch failed: ${e?.message || e}`);
+        skipped++;
+        continue;
+      }
+      if (!b64) { skipped++; continue; }
+
       let buf: Buffer;
       try {
-        buf = Buffer.from(d.dataBase64, 'base64');
+        buf = Buffer.from(b64, 'base64');
       } catch {
         skipped++;
         continue;
@@ -456,7 +487,7 @@ export class BackupService {
       );
     }
 
-    return { docs: docs.length, included, skipped, customers: customers.size, bytes };
+    return { docs: metas.length, included, skipped, customers: customers.size, bytes };
   }
 
   /**
