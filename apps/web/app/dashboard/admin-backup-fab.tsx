@@ -25,7 +25,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
 
   async function downloadReports() {
     setBusy('reports');
-    setMsg('מכין ZIP של כל הדוחות — זה יכול לקחת כמה דקות לפי כמות הדוחות…');
+    setMsg('מכין ZIP של כל הדוחות — זה יכול לקחת זמן לפי כמות הדוחות…');
     try {
       const r = await apiFetch(apiUrl('/backup/reports/export-all'), { authUser: toAuth(currentUser) });
       if (!r?.ok) throw new Error(`בקשה נכשלה (${r?.status ?? '?'})`);
@@ -40,8 +40,10 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
       if (stats) {
-        const mb = Math.round((stats.bytes || 0) / (1024 * 1024));
-        setMsg(`הורדה החלה · ${stats.included} דוחות · ${stats.customers} לקוחות · ${mb} MB`);
+        const mb = Math.round((stats.totalBytes || 0) / (1024 * 1024));
+        setMsg(
+          `הורדה החלה · ${stats.filesIncluded} דוחות · ${stats.customersWithReports} לקוחות · ${mb} MB`,
+        );
       } else {
         setMsg('ההורדה החלה');
       }
@@ -201,7 +203,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
             )}
 
             <div style={{ marginTop: 12, fontSize: 11, color: '#64748b', lineHeight: 1.55 }}>
-              <strong>ZIP דוחות:</strong> כל קבצי ה-DOCX/PDF של דוחות (Document.documentType='REPORT'), מקובצים לתיקייה פר-לקוח, עם _INDEX.csv בשורש.<br />
+              <strong>ZIP דוחות:</strong> כל קבצי ה-DOCX/PDF שמצורפים לדוחות ב-Document.dataBase64, עם _INDEX.csv בשורש.<br />
               <strong>גיבוי לקוחות:</strong> דאמפ SQL של כל טבלת Customer ל-OneDrive בתיקיית CRM-Backups/.
             </div>
           </div>

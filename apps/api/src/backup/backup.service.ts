@@ -158,22 +158,7 @@ export class BackupService {
       throw new BadRequestException('טבלת Customer לא נמצאה במסד — אין מה לגבות');
     }
     const colList = columns.map((c) => `"${c}"`).join(', ');
-
-    // שליפה מדורגת לפי id — SELECT בודד על 30k שורות עלול להידחף ל-statement_timeout
-    // במחיצות עמוסות; עמוד של 500 שורות הוא בהחלט בטוח.
-    const PAGE = 500;
-    const rows: any[] = [];
-    let cursor = '';
-    while (true) {
-      const whereClause = cursor ? `WHERE "id" > '${cursor.replace(/'/g, "''")}'` : '';
-      const page: any[] = await this.prisma.$queryRawUnsafe(
-        `SELECT ${colList} FROM "Customer" ${whereClause} ORDER BY "id" LIMIT ${PAGE}`,
-      );
-      if (page.length === 0) break;
-      rows.push(...page);
-      cursor = String((page[page.length - 1] as any).id || '');
-      if (page.length < PAGE) break;
-    }
+    const rows: any[] = await this.prisma.$queryRawUnsafe(`SELECT ${colList} FROM "Customer"`);
 
     const header = [
       `-- Galit CRM — Customer table backup`,
@@ -375,136 +360,126 @@ export class BackupService {
 
   // ─── ייצוא ZIP של כל קבצי הדוחות ──────────────────────────────────────────
 
-  /** helpers לבניית ZIP: ניקוי שם קובץ, זיהוי סיומת מ-MIME. */
-  private static sanitizeName(s: string, maxLen = 80): string {
-    return (
-      (s || '')
-        .replace(/[\u0000-\u001f/\\?%*:|"<>]/g, '_')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, maxLen) || 'untitled'
-    );
-  }
-
-  private static extFromMime(mime: string | null | undefined): string | null {
-    if (!mime) return null;
-    const m = mime.toLowerCase();
-    if (m.includes('wordprocessingml')) return 'docx';
-    if (m.includes('msword')) return 'doc';
-    if (m === 'application/pdf') return 'pdf';
-    if (m.includes('spreadsheetml')) return 'xlsx';
-    if (m === 'application/vnd.ms-excel') return 'xls';
-    if (m.includes('image/jpeg')) return 'jpg';
-    if (m.includes('image/png')) return 'png';
-    return null;
-  }
-
   /**
-   * ממלא תיקייה ב-ZIP בכל מסמכי Document מסוג מסוים (REPORT / QUOTE / SIGNED_QUOTE),
-   * מקובצים לתיקיות משנה פר-לקוח. מחזיר סטטיסטיקה ומעדכן indexRows.
+   * מייצא ZIP שמכיל את כל קבצי הדוחות — Document.documentType='REPORT' עם
+   * dataBase64 שאינו null. בפועל הדוחות של גלית נשמרים ישירות בטבלת Document
+   * (לרוב מקושרים ל-Customer, לפעמים גם ל-Report), ולכן השאילתה כאן על
+   * documentType ולא על ה-relation של Report.
    *
-   * שליפה מדורגת: קודם רק מטא-דאטה (ids + שמות + לקוחות) בשאילתה אחת קלה,
-   * אח"כ dataBase64 מסמך-מסמך (findUnique קטן). שאילתה בודדת שמושכת 100MB
-   * של base64 הורגת את ה-DB ב-statement_timeout; זה הסיבה שהניסיון הקודם נכשל ב-500.
+   * מבנה ה-ZIP: תיקייה פר-לקוח, ובתוכה הקבצים (עם תאריך בשם לצורך סדר).
+   * קובץ _INDEX.csv ב-root מסכם כל קובץ שנכלל (לקוח, שם, תאריך, גודל, mime).
+   *
+   * שימוש: ה-controller קורא לזה, מחזיר כ-attachment. ZIP נבנה ב-memory —
+   * ל-DB עם >100k מסמכים עדיף להפנות כאן ל-archiver סטרימינג; לנפח גלית סביר.
    */
-  private async addDocumentsOfTypeToZip(opts: {
-    zip: any;
-    rootFolder: string;
-    documentType: 'REPORT' | 'QUOTE' | 'SIGNED_QUOTE';
-    indexRows: string[];
-  }): Promise<{ docs: number; included: number; skipped: number; customers: number; bytes: number }> {
-    const { zip, rootFolder, documentType, indexRows } = opts;
+  async exportAllReportsAsZip(): Promise<{
+    zip: Buffer;
+    stats: {
+      documentsScanned: number;
+      filesIncluded: number;
+      filesSkippedEmpty: number;
+      customersWithReports: number;
+      totalBytes: number;
+    };
+  }> {
+    const PizZip = require('pizzip');
 
-    // שלב 1 — רק מטא-דאטה (בלי dataBase64). שאילתה קלה וזריזה גם במיליוני שורות.
-    const metas = await this.prisma.document.findMany({
-      where: { documentType: documentType as any, dataBase64: { not: null } },
+    // Document.documentType='REPORT' + dataBase64 not null. select רזה כדי לא
+    // למשוך base64 של מסמכים ריקים/לא רלוונטיים (כל שורה יכולה להיות מגה-בייטים).
+    const docs = await this.prisma.document.findMany({
+      where: {
+        documentType: 'REPORT' as any,
+        dataBase64: { not: null },
+      },
       select: {
-        id: true, name: true, mimeType: true,
-        documentDate: true, createdAt: true, customerId: true,
+        id: true,
+        name: true,
+        mimeType: true,
+        dataBase64: true,
+        sizeBytes: true,
+        documentDate: true,
+        createdAt: true,
+        customerId: true,
+        reportId: true,
         customer: { select: { name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const root = zip.folder(rootFolder);
-    let included = 0;
-    let skipped = 0;
-    let bytes = 0;
-    const customers = new Set<string>();
+    const zip = new PizZip();
+    let filesIncluded = 0;
+    let filesSkippedEmpty = 0;
+    let totalBytes = 0;
+    const customersSeen = new Set<string>();
 
-    // שלב 2 — שליפה פר-מסמך של ה-base64 (findUnique זול, לא ייגרף ל-timeout).
-    for (const d of metas) {
-      let b64: string | null = null;
-      try {
-        const row = await this.prisma.document.findUnique({
-          where: { id: d.id },
-          select: { dataBase64: true },
-        });
-        b64 = row?.dataBase64 ?? null;
-      } catch (e: any) {
-        this.logger.warn(`document ${d.id} fetch failed: ${e?.message || e}`);
-        skipped++;
-        continue;
-      }
-      if (!b64) { skipped++; continue; }
+    const indexRows: string[] = [
+      ['customer', 'file_name', 'document_date', 'created_at', 'mime_type', 'bytes', 'document_id'].join(','),
+    ];
 
-      let buf: Buffer;
+    const sanitize = (s: string, maxLen = 80) =>
+      (s || '')
+        .replace(/[\u0000-\u001f/\\?%*:|"<>]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLen) || 'untitled';
+
+    const extFromMime = (mime: string | null | undefined): string | null => {
+      if (!mime) return null;
+      const m = mime.toLowerCase();
+      if (m.includes('wordprocessingml')) return 'docx';
+      if (m.includes('msword')) return 'doc';
+      if (m === 'application/pdf') return 'pdf';
+      if (m.includes('spreadsheetml')) return 'xlsx';
+      if (m === 'application/vnd.ms-excel') return 'xls';
+      if (m.includes('image/jpeg')) return 'jpg';
+      if (m.includes('image/png')) return 'png';
+      return null;
+    };
+
+    for (const d of docs) {
+      if (!d.dataBase64) continue;
+      let bytes: Buffer;
       try {
-        buf = Buffer.from(b64, 'base64');
+        bytes = Buffer.from(d.dataBase64, 'base64');
       } catch {
-        skipped++;
+        filesSkippedEmpty++;
         continue;
       }
-      if (!buf.length) { skipped++; continue; }
+      if (!bytes.length) {
+        filesSkippedEmpty++;
+        continue;
+      }
 
       const customer = d.customer?.name || (d.customerId ? `cust-${d.customerId.slice(0, 8)}` : 'ללא לקוח');
-      const custFolder = BackupService.sanitizeName(customer, 70);
-      customers.add(custFolder);
+      const folderName = sanitize(customer, 70);
+      customersSeen.add(folderName);
 
       const dateStr = (d.documentDate ?? d.createdAt).toISOString().slice(0, 10);
-      const inferredExt = BackupService.extFromMime(d.mimeType);
-      const rawName = d.name && d.name.trim() ? d.name.trim() : `${documentType.toLowerCase()}-${d.id.slice(0, 8)}`;
+      const inferredExt = extFromMime(d.mimeType);
+      const rawName = d.name && d.name.trim() ? d.name.trim() : `report-${d.id.slice(0, 8)}`;
       const hasExt = /\.[A-Za-z0-9]{1,6}$/.test(rawName);
-      const finalName = BackupService.sanitizeName(
+      // תאריך-קידומת כדי לשמור על סדר כרונולוגי בתוך תיקיית הלקוח
+      const finalName = sanitize(
         hasExt ? `${dateStr} · ${rawName}` : `${dateStr} · ${rawName}.${inferredExt ?? 'bin'}`,
       );
 
-      root.folder(custFolder).file(finalName, buf);
-      included++;
-      bytes += buf.length;
+      zip.folder(folderName).file(finalName, bytes);
+      filesIncluded++;
+      totalBytes += bytes.length;
 
       indexRows.push(
         [
-          documentType,
           csvCell(customer),
           csvCell(finalName),
           d.documentDate ? d.documentDate.toISOString().slice(0, 10) : '',
           d.createdAt.toISOString(),
           d.mimeType || '',
-          buf.length,
+          bytes.length,
           d.id,
         ].join(','),
       );
     }
 
-    return { docs: metas.length, included, skipped, customers: customers.size, bytes };
-  }
-
-  /**
-   * ZIP של כל קבצי הדוחות (Document.documentType='REPORT' עם dataBase64).
-   * מקובץ לתיקיות משנה פר-לקוח, עם _INDEX.csv ב-root שמסכם כל קובץ שנכלל.
-   */
-  async exportReportsAsZip(): Promise<{
-    zip: Buffer;
-    stats: { docs: number; included: number; customers: number; bytes: number };
-  }> {
-    const PizZip = require('pizzip');
-    const zip = new PizZip();
-
-    const indexRows: string[] = [
-      ['type', 'customer', 'file_name', 'document_date', 'created_at', 'mime_type', 'bytes', 'document_id'].join(','),
-    ];
-    const stats = await this.addDocumentsOfTypeToZip({ zip, rootFolder: 'reports', documentType: 'REPORT', indexRows });
     zip.file('_INDEX.csv', '﻿' + indexRows.join('\n'));
 
     const buf: Buffer = zip.generate({
@@ -514,12 +489,18 @@ export class BackupService {
     });
 
     this.logger.log(
-      `reports export: docs=${stats.docs} included=${stats.included} customers=${stats.customers} bytes=${stats.bytes} zip=${buf.byteLength}`,
+      `reports export: docs=${docs.length} included=${filesIncluded} empty=${filesSkippedEmpty} customers=${customersSeen.size} bytes=${totalBytes} zip=${buf.byteLength}`,
     );
 
     return {
       zip: buf,
-      stats: { docs: stats.docs, included: stats.included, customers: stats.customers, bytes: stats.bytes },
+      stats: {
+        documentsScanned: docs.length,
+        filesIncluded,
+        filesSkippedEmpty,
+        customersWithReports: customersSeen.size,
+        totalBytes,
+      },
     };
   }
 }
