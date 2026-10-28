@@ -69,20 +69,21 @@ export class BackupController {
   }
 
   /**
-   * ייצוא ZIP של כל קבצי הדוחות (DOCX/PDF/וכו׳ ששמורים ב-Document.dataBase64).
-   * ADMIN בלבד. חוזר כ-attachment עם _INDEX.csv ב-root שמסכם כל הדוחות שנכללו.
+   * גיבוי מלא בלחיצה אחת: ZIP שמכיל את טבלת Customer כ-SQL, קבצי דוחות
+   * (REPORT), הצעות מחיר (QUOTE) והצעות חתומות (SIGNED_QUOTE). ADMIN בלבד.
+   * _INDEX.csv + README.txt ב-root. ה-URL נשאר `/reports/export-all` לתאימות
+   * לאחור עם הכפתור הקיים ב-UI; השם המקיף יותר כעת מופיע בשם הקובץ.
    */
   @Get('reports/export-all')
   async exportAllReports(@Res() res: Response) {
-    const { zip, stats } = await this.backup.exportAllReportsAsZip();
+    const { zip, stats } = await this.backup.exportFullBackupAsZip();
     const date = new Date().toISOString().slice(0, 10);
-    const fileName = `galit-reports-${date}.zip`;
+    const fileName = `galit-full-backup-${date}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${encodeURIComponent(fileName)}"`,
     );
-    // סטטיסטיקה — ממוקמת גם ב-header כדי שה-UI יוכל להציג אחרי ההורדה
     res.setHeader('X-Backup-Stats', JSON.stringify(stats));
     res.send(zip);
   }
