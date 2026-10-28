@@ -357,4 +357,131 @@ export class BackupService {
     const content = await this.graphFiles.downloadContent(meta.ownerUserId, meta.oneDriveItemId);
     return { fileName: meta.fileName, content };
   }
+
+  // ─── ייצוא ZIP של כל קבצי הדוחות ──────────────────────────────────────────
+
+  /**
+   * מייצא ZIP שמכיל את כל קבצי הדוחות ממודל Document (רק אלו ששייכים ל-Report
+   * ויש להם תוכן בפועל ב-dataBase64). שם המשפחה בתוך ה-ZIP נגזר מהלקוח/כותרת/תאריך,
+   * ובתוך כל תיקיית דוח יושב הקובץ (או מספר קבצים אם לדוח יש כמה).
+   *
+   * קובץ _INDEX.csv ב-root של ה-ZIP מסכם את כל הדוחות שנכללו/הושמטו.
+   *
+   * שימוש: ה-controller קורא לזה, מחזיר כ-attachment. ZIP נבנה ב-memory —
+   * ל-DB עם >100k דוחות עדיף להפנות כאן ל-archiver סטרימינג; לנפח גלית סביר.
+   */
+  async exportAllReportsAsZip(): Promise<{
+    zip: Buffer;
+    stats: { reports: number; files: number; reportsWithoutFiles: number; totalBytes: number };
+  }> {
+    const PizZip = require('pizzip');
+
+    const reports = await this.prisma.report.findMany({
+      select: {
+        id: true,
+        title: true,
+        reportType: true,
+        status: true,
+        reportDate: true,
+        createdAt: true,
+        customer: { select: { name: true } },
+        documents: {
+          where: { dataBase64: { not: null } },
+          select: { id: true, name: true, mimeType: true, dataBase64: true, sizeBytes: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const zip = new PizZip();
+    let fileCount = 0;
+    let totalBytes = 0;
+    let reportsWithoutFiles = 0;
+
+    const indexRows: string[] = [
+      ['report_id', 'customer', 'title', 'date', 'status', 'files_included'].join(','),
+    ];
+
+    const sanitize = (s: string, maxLen = 80) =>
+      (s || '')
+        .replace(/[\u0000-\u001f/\\?%*:|"<>]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, maxLen) || 'untitled';
+
+    const extFromMime = (mime: string | null | undefined): string | null => {
+      if (!mime) return null;
+      const m = mime.toLowerCase();
+      if (m.includes('wordprocessingml')) return 'docx';
+      if (m.includes('msword')) return 'doc';
+      if (m === 'application/pdf') return 'pdf';
+      if (m.includes('spreadsheetml')) return 'xlsx';
+      if (m === 'application/vnd.ms-excel') return 'xls';
+      if (m.includes('image/jpeg')) return 'jpg';
+      if (m.includes('image/png')) return 'png';
+      return null;
+    };
+
+    for (const r of reports) {
+      const dateStr = (r.reportDate ?? r.createdAt).toISOString().slice(0, 10);
+      const customer = r.customer?.name ?? 'ללא לקוח';
+      const folderName = sanitize(`${dateStr} · ${customer} · ${r.title} · ${r.id.slice(0, 8)}`);
+
+      if (!r.documents?.length) {
+        reportsWithoutFiles++;
+        indexRows.push(
+          [r.id, csvCell(customer), csvCell(r.title), dateStr, r.status, 0].join(','),
+        );
+        continue;
+      }
+
+      const folder = zip.folder(folderName);
+      let addedForReport = 0;
+      for (const doc of r.documents) {
+        if (!doc.dataBase64) continue;
+        let bytes: Buffer;
+        try {
+          bytes = Buffer.from(doc.dataBase64, 'base64');
+        } catch {
+          continue;
+        }
+        if (!bytes.length) continue;
+
+        const inferredExt = extFromMime(doc.mimeType);
+        const docName = doc.name && doc.name.trim() ? doc.name.trim() : `file-${doc.id.slice(0, 8)}`;
+        const hasExt = /\.[A-Za-z0-9]{1,6}$/.test(docName);
+        const finalName = sanitize(hasExt ? docName : `${docName}.${inferredExt ?? 'bin'}`);
+        folder.file(finalName, bytes);
+        fileCount++;
+        totalBytes += bytes.length;
+        addedForReport++;
+      }
+      indexRows.push(
+        [r.id, csvCell(customer), csvCell(r.title), dateStr, r.status, addedForReport].join(','),
+      );
+    }
+
+    zip.file('_INDEX.csv', '﻿' + indexRows.join('\n'));
+
+    const buf: Buffer = zip.generate({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 },
+    });
+
+    this.logger.log(
+      `reports export: reports=${reports.length} files=${fileCount} bytes=${totalBytes} zip=${buf.byteLength}`,
+    );
+
+    return {
+      zip: buf,
+      stats: { reports: reports.length, files: fileCount, reportsWithoutFiles, totalBytes },
+    };
+  }
+}
+
+/** Escape commas/quotes/newlines לתוך תא CSV. */
+function csvCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
