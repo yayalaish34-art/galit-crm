@@ -6980,7 +6980,6 @@ function DashboardPage({
   return (
     <div className="space-y-4" dir="rtl">
       <BackupReminderPopup currentUser={currentUser} />
-      <AdminBackupFab currentUser={currentUser} />
       {isGalit && <ReportsPaymentsSection currentUser={currentUser} />}
 
       {/* ── Hero ── */}
@@ -26999,6 +26998,9 @@ const processTaskTitle = (cust: Customer, contact?: ProcessContact) => {
 
   return (
     <div className="min-h-screen bg-slate-50" dir="rtl">
+      {/* ── כפתור צף של כלי גיבוי (אדמין בלבד) — גלוי בכל טאב, לא רק ב-DashboardPage ── */}
+      <AdminBackupFab currentUser={currentUser} />
+
       {/* ── התראות צידיות: משימות שהגיע מועד היעד שלהן (גלובלי, בכל עמוד) ── */}
       {dueTaskToasts.length > 0 && (
         <div className="fixed z-[10001] flex flex-col gap-2" style={{ top: 72, left: 16 }} dir="rtl">
