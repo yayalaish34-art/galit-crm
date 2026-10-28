@@ -40,7 +40,10 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
       if (stats) {
-        setMsg(`הורדה החלה · ${stats.reports} דוחות · ${stats.files} קבצים · ${Math.round((stats.totalBytes || 0) / (1024 * 1024))} MB`);
+        const mb = Math.round((stats.totalBytes || 0) / (1024 * 1024));
+        setMsg(
+          `הורדה החלה · ${stats.filesIncluded} דוחות · ${stats.customersWithReports} לקוחות · ${mb} MB`,
+        );
       } else {
         setMsg('ההורדה החלה');
       }

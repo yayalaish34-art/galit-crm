@@ -361,45 +361,59 @@ export class BackupService {
   // ─── ייצוא ZIP של כל קבצי הדוחות ──────────────────────────────────────────
 
   /**
-   * מייצא ZIP שמכיל את כל קבצי הדוחות ממודל Document (רק אלו ששייכים ל-Report
-   * ויש להם תוכן בפועל ב-dataBase64). שם המשפחה בתוך ה-ZIP נגזר מהלקוח/כותרת/תאריך,
-   * ובתוך כל תיקיית דוח יושב הקובץ (או מספר קבצים אם לדוח יש כמה).
+   * מייצא ZIP שמכיל את כל קבצי הדוחות — Document.documentType='REPORT' עם
+   * dataBase64 שאינו null. בפועל הדוחות של גלית נשמרים ישירות בטבלת Document
+   * (לרוב מקושרים ל-Customer, לפעמים גם ל-Report), ולכן השאילתה כאן על
+   * documentType ולא על ה-relation של Report.
    *
-   * קובץ _INDEX.csv ב-root של ה-ZIP מסכם את כל הדוחות שנכללו/הושמטו.
+   * מבנה ה-ZIP: תיקייה פר-לקוח, ובתוכה הקבצים (עם תאריך בשם לצורך סדר).
+   * קובץ _INDEX.csv ב-root מסכם כל קובץ שנכלל (לקוח, שם, תאריך, גודל, mime).
    *
    * שימוש: ה-controller קורא לזה, מחזיר כ-attachment. ZIP נבנה ב-memory —
-   * ל-DB עם >100k דוחות עדיף להפנות כאן ל-archiver סטרימינג; לנפח גלית סביר.
+   * ל-DB עם >100k מסמכים עדיף להפנות כאן ל-archiver סטרימינג; לנפח גלית סביר.
    */
   async exportAllReportsAsZip(): Promise<{
     zip: Buffer;
-    stats: { reports: number; files: number; reportsWithoutFiles: number; totalBytes: number };
+    stats: {
+      documentsScanned: number;
+      filesIncluded: number;
+      filesSkippedEmpty: number;
+      customersWithReports: number;
+      totalBytes: number;
+    };
   }> {
     const PizZip = require('pizzip');
 
-    const reports = await this.prisma.report.findMany({
+    // Document.documentType='REPORT' + dataBase64 not null. select רזה כדי לא
+    // למשוך base64 של מסמכים ריקים/לא רלוונטיים (כל שורה יכולה להיות מגה-בייטים).
+    const docs = await this.prisma.document.findMany({
+      where: {
+        documentType: 'REPORT' as any,
+        dataBase64: { not: null },
+      },
       select: {
         id: true,
-        title: true,
-        reportType: true,
-        status: true,
-        reportDate: true,
+        name: true,
+        mimeType: true,
+        dataBase64: true,
+        sizeBytes: true,
+        documentDate: true,
         createdAt: true,
+        customerId: true,
+        reportId: true,
         customer: { select: { name: true } },
-        documents: {
-          where: { dataBase64: { not: null } },
-          select: { id: true, name: true, mimeType: true, dataBase64: true, sizeBytes: true },
-        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
     const zip = new PizZip();
-    let fileCount = 0;
+    let filesIncluded = 0;
+    let filesSkippedEmpty = 0;
     let totalBytes = 0;
-    let reportsWithoutFiles = 0;
+    const customersSeen = new Set<string>();
 
     const indexRows: string[] = [
-      ['report_id', 'customer', 'title', 'date', 'status', 'files_included'].join(','),
+      ['customer', 'file_name', 'document_date', 'created_at', 'mime_type', 'bytes', 'document_id'].join(','),
     ];
 
     const sanitize = (s: string, maxLen = 80) =>
@@ -422,42 +436,47 @@ export class BackupService {
       return null;
     };
 
-    for (const r of reports) {
-      const dateStr = (r.reportDate ?? r.createdAt).toISOString().slice(0, 10);
-      const customer = r.customer?.name ?? 'ללא לקוח';
-      const folderName = sanitize(`${dateStr} · ${customer} · ${r.title} · ${r.id.slice(0, 8)}`);
-
-      if (!r.documents?.length) {
-        reportsWithoutFiles++;
-        indexRows.push(
-          [r.id, csvCell(customer), csvCell(r.title), dateStr, r.status, 0].join(','),
-        );
+    for (const d of docs) {
+      if (!d.dataBase64) continue;
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(d.dataBase64, 'base64');
+      } catch {
+        filesSkippedEmpty++;
+        continue;
+      }
+      if (!bytes.length) {
+        filesSkippedEmpty++;
         continue;
       }
 
-      const folder = zip.folder(folderName);
-      let addedForReport = 0;
-      for (const doc of r.documents) {
-        if (!doc.dataBase64) continue;
-        let bytes: Buffer;
-        try {
-          bytes = Buffer.from(doc.dataBase64, 'base64');
-        } catch {
-          continue;
-        }
-        if (!bytes.length) continue;
+      const customer = d.customer?.name || (d.customerId ? `cust-${d.customerId.slice(0, 8)}` : 'ללא לקוח');
+      const folderName = sanitize(customer, 70);
+      customersSeen.add(folderName);
 
-        const inferredExt = extFromMime(doc.mimeType);
-        const docName = doc.name && doc.name.trim() ? doc.name.trim() : `file-${doc.id.slice(0, 8)}`;
-        const hasExt = /\.[A-Za-z0-9]{1,6}$/.test(docName);
-        const finalName = sanitize(hasExt ? docName : `${docName}.${inferredExt ?? 'bin'}`);
-        folder.file(finalName, bytes);
-        fileCount++;
-        totalBytes += bytes.length;
-        addedForReport++;
-      }
+      const dateStr = (d.documentDate ?? d.createdAt).toISOString().slice(0, 10);
+      const inferredExt = extFromMime(d.mimeType);
+      const rawName = d.name && d.name.trim() ? d.name.trim() : `report-${d.id.slice(0, 8)}`;
+      const hasExt = /\.[A-Za-z0-9]{1,6}$/.test(rawName);
+      // תאריך-קידומת כדי לשמור על סדר כרונולוגי בתוך תיקיית הלקוח
+      const finalName = sanitize(
+        hasExt ? `${dateStr} · ${rawName}` : `${dateStr} · ${rawName}.${inferredExt ?? 'bin'}`,
+      );
+
+      zip.folder(folderName).file(finalName, bytes);
+      filesIncluded++;
+      totalBytes += bytes.length;
+
       indexRows.push(
-        [r.id, csvCell(customer), csvCell(r.title), dateStr, r.status, addedForReport].join(','),
+        [
+          csvCell(customer),
+          csvCell(finalName),
+          d.documentDate ? d.documentDate.toISOString().slice(0, 10) : '',
+          d.createdAt.toISOString(),
+          d.mimeType || '',
+          bytes.length,
+          d.id,
+        ].join(','),
       );
     }
 
@@ -470,12 +489,18 @@ export class BackupService {
     });
 
     this.logger.log(
-      `reports export: reports=${reports.length} files=${fileCount} bytes=${totalBytes} zip=${buf.byteLength}`,
+      `reports export: docs=${docs.length} included=${filesIncluded} empty=${filesSkippedEmpty} customers=${customersSeen.size} bytes=${totalBytes} zip=${buf.byteLength}`,
     );
 
     return {
       zip: buf,
-      stats: { reports: reports.length, files: fileCount, reportsWithoutFiles, totalBytes },
+      stats: {
+        documentsScanned: docs.length,
+        filesIncluded,
+        filesSkippedEmpty,
+        customersWithReports: customersSeen.size,
+        totalBytes,
+      },
     };
   }
 }
