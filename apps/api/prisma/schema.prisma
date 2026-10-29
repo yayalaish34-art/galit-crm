@@ -1854,6 +1854,9 @@ model Affiliate {
   salesNotes        String?
   /// תזכורת לפולו-אפ הבא עם החברה.
   nextFollowupAt    DateTime?
+  /// שמות האנשים אצל השותף שיכולים להפנות לקוחות — dropdown "מי הפנה" בטופס השליחה
+  /// ופירוט עמלות לפי מפנה בפורטל. ריק = השדה לא מוצג.
+  referrerOptions   String[] @default([])
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -1883,6 +1886,8 @@ model AffiliateReferral {
   customerEmail String?
   serviceType   String?
   note          String? @db.Text
+  /// מי אצל השותף הפנה את הלקוח (אחד מ-Affiliate.referrerOptions). אופציונלי.
+  referredBy    String?
 
   status AffiliateReferralStatus @default(NEW)
 

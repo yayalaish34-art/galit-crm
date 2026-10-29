@@ -204,7 +204,7 @@ export class AffiliateService {
   async me(affiliateId: string) {
     const a = await this.prisma.affiliate.findUnique({
       where: { id: affiliateId },
-      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true },
+      select: { id: true, name: true, username: true, commissionPct: true, contactName: true, email: true, phone: true, referrerOptions: true },
     });
     if (!a) throw new UnauthorizedException('שותף לא נמצא');
     const refs = await this.prisma.affiliateReferral.findMany({
@@ -214,6 +214,20 @@ export class AffiliateService {
     const totalCommission = refs.reduce((s, r) => s + (r.commissionAmount || 0), 0);
     const paidCommission = refs.filter((r) => r.commissionSettledAt).reduce((s, r) => s + (r.commissionAmount || 0), 0);
     const owedCommission = totalCommission - paidCommission;
+
+    // עמלה ששולמה / ממתינה לתשלום לכל מפנה — כל המפנים ברשימה (גם בלי הפניות),
+    // ועוד שמות ישנים שהוזנו בעבר ונמחקו מהרשימה.
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const byReferrer = new Map<string, { name: string; referrals: number; paidCommission: number; owedCommission: number }>();
+    for (const name of a.referrerOptions) byReferrer.set(name, { name, referrals: 0, paidCommission: 0, owedCommission: 0 });
+    for (const r of refs) {
+      if (!r.referredBy) continue;
+      const row = byReferrer.get(r.referredBy) ?? { name: r.referredBy, referrals: 0, paidCommission: 0, owedCommission: 0 };
+      row.referrals++;
+      if (r.commissionSettledAt) row.paidCommission += r.commissionAmount || 0;
+      else row.owedCommission += r.commissionAmount || 0;
+      byReferrer.set(r.referredBy, row);
+    }
 
     // מסע לקוח בן 4 שלבים (סגנון וולט) — נגזר אוטומטית מה-CRM לכל הפניה. best-effort.
     const journeyByReferral = await this.resolveJourney(refs);
@@ -227,7 +241,15 @@ export class AffiliateService {
         owedCommission: Math.round(owedCommission * 100) / 100,
         paidCommission: Math.round(paidCommission * 100) / 100,
       },
-      referrals: refs.map((r) => ({ ...this.publicReferral(r), journey: journeyByReferral.get(r.id) })),
+      byReferrer: [...byReferrer.values()].map((row) => ({
+        ...row,
+        paidCommission: round2(row.paidCommission),
+        owedCommission: round2(row.owedCommission),
+      })),
+      referrals: refs.map((r) => {
+        const journey = journeyByReferral.get(r.id);
+        return { ...this.publicReferral(r), journey, quoteAmount: journey?.quoteAmount ?? null };
+      }),
     };
   }
 
@@ -258,6 +280,7 @@ export class AffiliateService {
     refs: Array<{ id: string; taskId: string | null; leadId?: string | null; status: string; paidAt: Date | null; commissionSettledAt: Date | null; commissionAmount: number | null; createdAt: Date }>,
   ): Promise<Map<string, {
     step: number; totalSteps: number; title: string; message: string; done: boolean; lost: boolean; reason: string | null;
+    quoteAmount: number | null;
   }>> {
     const out = new Map<string, any>();
     const TOTAL = 11;
@@ -302,7 +325,7 @@ export class AffiliateService {
       ? await this.prisma.quote
           .findMany({
             where: { linkedEntityId: { in: Array.from(taskIds) } } as any,
-            select: { linkedEntityId: true, status: true, updatedAt: true },
+            select: { linkedEntityId: true, status: true, updatedAt: true, totalAmount: true, amount: true },
             orderBy: { updatedAt: 'desc' },
           })
           .catch(() => [] as any[])
@@ -312,6 +335,7 @@ export class AffiliateService {
       if (q.linkedEntityId && !quoteByTask.has(q.linkedEntityId)) quoteByTask.set(q.linkedEntityId, q);
     }
 
+    const quoteAmountByReferral = new Map<string, number | null>();
     for (const r of refs) {
       const il: any = r.leadId ? leadByKey.get(r.leadId.trim()) : null;
       const taskId = (r.taskId || '').trim() || (il?.taskId ? String(il.taskId).trim() : '');
@@ -319,6 +343,9 @@ export class AffiliateService {
       const cust: any = t?.customerId ? custById.get(t.customerId) : null;
       const quote: any = taskId ? quoteByTask.get(taskId) : null;
       const qStatus = String(quote?.status || '').toUpperCase();
+      // סכום ההצעה שניתנה ללקוח (כולל מע"מ; amount = שדה ישן כגיבוי) — מוצג לשותף בכרטיס
+      const quoteAmountRaw = Number(quote?.totalAmount) > 0 ? Number(quote.totalAmount) : Number(quote?.amount);
+      quoteAmountByReferral.set(r.id, Number.isFinite(quoteAmountRaw) && quoteAmountRaw > 0 ? quoteAmountRaw : null);
       const tStatus = String(t?.status || '').toUpperCase();
       const currentStage = Number.isFinite(t?.currentStage) ? Number(t?.currentStage) : -1;
       const hasNotes = typeof t?.processNotes === 'string' && t.processNotes.trim().length > 0;
@@ -453,6 +480,7 @@ export class AffiliateService {
         message: 'קיבלנו את הלקוח שהפנית — תודה רבה! הוא יועבר בקרוב לנציג המתאים, ונעדכן אותך בכל שלב.',
       });
     }
+    for (const [id, j] of out) j.quoteAmount = quoteAmountByReferral.get(id) ?? null;
     return out;
   }
 
@@ -579,11 +607,17 @@ export class AffiliateService {
   /** השותף שולח לנו לקוח חדש. */
   async submitReferral(affiliateId: string, input: {
     customerName?: string; customerPhone?: string; customerEmail?: string; serviceType?: string; note?: string;
+    referredBy?: string;
   }) {
     const customerName = (input.customerName || '').trim();
     if (!customerName) throw new BadRequestException('שם הלקוח חסר');
     if (!(input.customerPhone || '').trim() && !(input.customerEmail || '').trim()) {
       throw new BadRequestException('יש למלא טלפון או אימייל של הלקוח');
+    }
+    const referredBy = (input.referredBy || '').trim() || null;
+    if (referredBy) {
+      const aff = await this.prisma.affiliate.findUnique({ where: { id: affiliateId }, select: { referrerOptions: true } });
+      if (!aff?.referrerOptions.includes(referredBy)) throw new BadRequestException('המפנה שנבחר אינו ברשימה');
     }
     const r = await this.prisma.affiliateReferral.create({
       data: {
@@ -593,6 +627,7 @@ export class AffiliateService {
         customerEmail: input.customerEmail?.trim() || null,
         serviceType: input.serviceType?.trim() || null,
         note: input.note?.trim() || null,
+        referredBy,
         status: 'NEW',
       },
     });
@@ -608,6 +643,7 @@ export class AffiliateService {
         customerEmail: input.customerEmail?.trim() || null,
         serviceType: input.serviceType?.trim() || null,
         note: input.note?.trim() || null,
+        referredBy,
       });
     } catch (e: any) {
       this.logger.warn(`createIncomingLeadForReferral failed for ${r.id}: ${e?.message || e}`);
@@ -625,7 +661,7 @@ export class AffiliateService {
   private async createIncomingLeadForReferral(
     referralId: string,
     affiliateId: string,
-    c: { customerName: string; customerPhone: string | null; customerEmail: string | null; serviceType: string | null; note: string | null },
+    c: { customerName: string; customerPhone: string | null; customerEmail: string | null; serviceType: string | null; note: string | null; referredBy: string | null },
   ): Promise<void> {
     const aff = await this.prisma.affiliate.findUnique({ where: { id: affiliateId }, select: { name: true } });
     const affName = (aff?.name || 'שותף').trim();
@@ -653,6 +689,7 @@ export class AffiliateService {
       `תוכן הפנייה: ${c.note || 'הפניה מתוכנית השותפים'}`,
       '',
       `מקור: ${sourceLabel}`,
+      c.referredBy ? `הופנה ע״י: ${c.referredBy}` : '',
     ].filter(Boolean);
 
     await this.prisma.incomingLead.create({
@@ -688,7 +725,13 @@ export class AffiliateService {
       include: { affiliate: { select: { id: true, name: true, commissionPct: true } } },
       orderBy: { createdAt: 'desc' },
     });
-    return refs.map((r) => ({ ...this.publicReferral(r), affiliateName: r.affiliate.name, affiliateId: r.affiliateId }));
+    const journeyByReferral = await this.resolveJourney(refs);
+    return refs.map((r) => ({
+      ...this.publicReferral(r),
+      affiliateName: r.affiliate.name,
+      affiliateId: r.affiliateId,
+      quoteAmount: journeyByReferral.get(r.id)?.quoteAmount ?? null,
+    }));
   }
 
   /** עדכון סטטוס הפניה + קישור רופף ל-lead/task (לצוות). */
@@ -735,7 +778,7 @@ export class AffiliateService {
   /** צורה ציבורית של הפניה (בלי שדות פנימיים מיותרים). */
   private publicReferral(r: {
     id: string; customerName: string; customerPhone: string | null; customerEmail: string | null;
-    serviceType: string | null; note: string | null; status: string; leadId: string | null; taskId: string | null;
+    serviceType: string | null; note: string | null; referredBy: string | null; status: string; leadId: string | null; taskId: string | null;
     paidAmount: number | null; commissionPct: number | null; commissionAmount: number | null;
     paidAt: Date | null; commissionSettledAt: Date | null; createdAt: Date;
   }) {
@@ -746,6 +789,7 @@ export class AffiliateService {
       customerEmail: r.customerEmail,
       serviceType: r.serviceType,
       note: r.note,
+      referredBy: r.referredBy,
       status: r.status,
       leadId: r.leadId,
       taskId: r.taskId,

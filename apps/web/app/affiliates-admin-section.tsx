@@ -14,6 +14,8 @@ type ReferralRow = {
   paidAmount: number | null; commissionPct: number | null; commissionAmount: number | null;
   paidAt: string | null; commissionSettledAt: string | null; createdAt: string;
   affiliateName: string; affiliateId: string;
+  /** סכום הצעת המחיר שניתנה ללקוח (כולל מע"מ), אם יש */
+  quoteAmount?: number | null;
 };
 type AffiliateRow = {
   id: string; name: string; username: string; commissionPct: number;
@@ -122,6 +124,7 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
                   <th className="px-3 py-2 text-right">שותף</th>
                   <th className="px-3 py-2 text-right">שירות</th>
                   <th className="px-3 py-2 text-right">סטטוס</th>
+                  <th className="px-3 py-2 text-right">הצעת מחיר</th>
                   <th className="px-3 py-2 text-right">עמלה</th>
                   <th className="px-3 py-2 text-right">פעולות</th>
                 </tr>
@@ -134,12 +137,20 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
                       <div className="text-xs text-slate-500">{[formatIsraeliPhoneDisplay(r.customerPhone), r.customerEmail].filter(Boolean).join(' · ') || '—'}</div>
                     </td>
                     <td className="px-3 py-2 text-slate-600">{r.affiliateName}</td>
-                    <td className="px-3 py-2 text-slate-600">{r.serviceType || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600">
+                      <div>{r.serviceType || '—'}</div>
+                      {r.note && <div className="mt-0.5 max-w-xs whitespace-pre-wrap text-xs text-slate-500">{r.note}</div>}
+                    </td>
                     <td className="px-3 py-2">
                       <select value={r.status} onChange={(e) => void updateReferral(r.id, { status: e.target.value })}
                         className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs">
                         {STATUS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.quoteAmount != null
+                        ? <span className="font-bold text-slate-800">{ils(r.quoteAmount)}</span>
+                        : <span className="text-xs text-slate-400">אין הצעה</span>}
                     </td>
                     <td className="px-3 py-2">
                       {r.commissionAmount != null ? (

@@ -45,7 +45,12 @@ type Referral = {
   customerPhone: string | null;
   customerEmail: string | null;
   serviceType: string | null;
+  /** ההערה שהשותף כתב בהפניה — מה הפנה */
+  note?: string | null;
+  referredBy?: string | null;
   status: string;
+  /** סכום הצעת המחיר שניתנה ללקוח (כולל מע"מ), אם יש */
+  quoteAmount?: number | null;
   paidAmount: number | null;
   commissionAmount: number | null;
   commissionSettledAt: string | null;
@@ -54,7 +59,7 @@ type Referral = {
   journey?: Journey;
 };
 type MeData = {
-  affiliate: { name: string; username: string; commissionPct: number };
+  affiliate: { name: string; username: string; commissionPct: number; referrerOptions?: string[] };
   stats: {
     totalReferrals: number;
     won: number;
@@ -62,8 +67,11 @@ type MeData = {
     owedCommission: number;
     paidCommission: number;
   };
+  /** עמלות לפי "מי הפנה" — רק לשותפים שהוגדרה להם רשימת מפנים. */
+  byReferrer?: ReferrerStats[];
   referrals: Referral[];
 };
+type ReferrerStats = { name: string; referrals: number; paidCommission: number; owedCommission: number };
 
 /**
  * 8 שלבי מסע הלקוח — תואם לאינדקסים ש-resolveJourney בשרת מחזיר (1..8).
@@ -148,7 +156,7 @@ function nextMilestone(totalRefs: number, totalCommission: number): {
 
 /** הורדת CSV של הפניות — פיצ'ר "exports" לרשומות שלך. */
 function downloadReferralsCsv(referrals: Referral[], affiliateName: string) {
-  const header = ['מספר', 'שם לקוח', 'סוג שירות', 'טלפון', 'אימייל', 'סטטוס', 'סכום עמלה', 'שולם לך', 'תאריך הפניה', 'תאריך תשלום לקוח'];
+  const header = ['מספר', 'שם לקוח', 'סוג שירות', 'הערה', 'טלפון', 'אימייל', 'סטטוס', 'סכום הצעת מחיר', 'סכום עמלה', 'שולם לך', 'תאריך הפניה', 'תאריך תשלום לקוח'];
   const esc = (s: unknown) => {
     const v = s == null ? '' : String(s);
     return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
@@ -157,9 +165,11 @@ function downloadReferralsCsv(referrals: Referral[], affiliateName: string) {
     `#${refNumber(r.id)}`,
     r.customerName,
     r.serviceType || '',
+    r.note || '',
     r.customerPhone || '',
     r.customerEmail || '',
     r.status,
+    r.quoteAmount != null ? r.quoteAmount : '',
     r.commissionAmount != null ? r.commissionAmount : '',
     r.commissionSettledAt ? 'כן' : 'לא',
     r.createdAt ? new Date(r.createdAt).toLocaleDateString('he-IL') : '',
@@ -898,6 +908,9 @@ function Dashboard({
           <StatTile label="אחוז הצלחה" value={`${winRate}%`} icon="📈" tone="rate" />
         </div>
 
+        {/* ─── עמלות לפי מפנה ─── */}
+        {!!data.byReferrer?.length && <ReferrerCommissions rows={data.byReferrer} />}
+
         {/* ─── Next-milestone card: גיימיפיקציה — יעד בעמלות או הפניות ─── */}
         {total > 0 && (
           <div
@@ -1009,6 +1022,7 @@ function Dashboard({
         {showForm && (
           <SubmitForm
             token={token}
+            referrerOptions={data.affiliate.referrerOptions || []}
             onDone={(name) => {
               setShowForm(false);
               setToast(name ? `${name} נקלט אצלנו — ניצור קשר בקרוב 🎉` : 'הלקוח נקלט אצלנו 🎉');
@@ -1884,6 +1898,7 @@ function ReferralCard({ r, celebrate = false }: { r: Referral; celebrate?: boole
         <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           פנייה #{refNumber(r.id)}
           {r.serviceType ? <> · <span style={{ color: '#0f172a' }}>{r.serviceType}</span></> : null}
+          {r.referredBy ? <> · הפנה/תה: <span style={{ color: '#0f172a' }}>{r.referredBy}</span></> : null}
         </div>
         <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>
           {relativeTime(r.createdAt) || new Date(r.createdAt).toLocaleDateString('he-IL')}
@@ -1926,6 +1941,35 @@ function ReferralCard({ r, celebrate = false }: { r: Referral; celebrate?: boole
           </div>
         )}
       </div>
+
+      {/* ─── מה הפנית (ההערה מההפניה) + סכום הצעת המחיר שניתנה ללקוח ─── */}
+      {(r.note || r.quoteAmount != null) && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {r.note && (
+            <div
+              style={{
+                fontSize: 12.5,
+                color: '#334155',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: 10,
+                padding: '8px 10px',
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+              }}
+            >
+              <span style={{ fontWeight: 800, color: '#64748b' }}>מה הפנית: </span>
+              {r.note}
+            </div>
+          )}
+          {r.quoteAmount != null && (
+            <div style={{ fontSize: 13, color: '#334155' }}>
+              <span style={{ fontWeight: 800, color: '#64748b' }}>הצעת מחיר ללקוח: </span>
+              <span style={{ fontWeight: 900, color: BRAND.deep }}>{ils(r.quoteAmount)}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ─── קופסת הסטטוס הנוכחי: כותרת גדולה + משנה (ה-"הצעת מחיר נשלחה / ההצעה נשלחה ללקוח ואנחנו פועלים לקבלת אישור") ─── */}
       {!lost && j && (
@@ -2150,7 +2194,57 @@ const SERVICE_OPTIONS = [
   'אחר',
 ];
 
-function SubmitForm({ token, onDone }: { token: string; onDone: (name?: string) => void }) {
+/** טבלת עמלות לפי "מי הפנה": כמה הפניות, כמה עמלה שולמה וכמה ממתינה לתשלום. */
+function ReferrerCommissions({ rows }: { rows: ReferrerStats[] }) {
+  const cell: React.CSSProperties = { padding: '9px 8px', borderTop: `1px solid ${BRAND.softBorder}`, textAlign: 'right' };
+  const head: React.CSSProperties = { padding: '0 8px 8px', fontSize: 11.5, fontWeight: 700, color: '#64748b', textAlign: 'right' };
+  return (
+    <div
+      className="fade-up"
+      style={{
+        background: '#fff',
+        borderRadius: 16,
+        padding: '14px 16px',
+        marginBottom: 18,
+        border: `1px solid ${BRAND.softBorder}`,
+        boxShadow: '0 4px 14px rgba(29,122,61,.06)',
+        overflowX: 'auto',
+      }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 800, color: BRAND.deep, marginBottom: 10 }}>עמלות לפי מפנה</div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+        <thead>
+          <tr>
+            <th style={head}>מפנה</th>
+            <th style={head}>הפניות</th>
+            <th style={head}>שולם</th>
+            <th style={head}>ממתין לתשלום</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.name}>
+              <td style={{ ...cell, fontWeight: 700, color: '#0f172a' }}>{r.name}</td>
+              <td style={cell}>{r.referrals}</td>
+              <td style={{ ...cell, color: '#059669', fontWeight: 700 }}>{ils(r.paidCommission)}</td>
+              <td style={{ ...cell, color: '#b45309', fontWeight: 700 }}>{ils(r.owedCommission)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SubmitForm({
+  token,
+  referrerOptions,
+  onDone,
+}: {
+  token: string;
+  referrerOptions: string[];
+  onDone: (name?: string) => void;
+}) {
   const [mode, setMode] = useState<'manual' | 'paste'>('manual');
   const [pasted, setPasted] = useState('');
   const [parsing, setParsing] = useState(false);
@@ -2167,6 +2261,7 @@ function SubmitForm({ token, onDone }: { token: string; onDone: (name?: string) 
     address: '',
     city: '',
     note: '',
+    referredBy: '',
   });
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -2294,6 +2389,7 @@ function SubmitForm({ token, onDone }: { token: string; onDone: (name?: string) 
           customerEmail: f.customerEmail.trim(),
           serviceType: f.serviceType.trim(),
           note: noteFull,
+          referredBy: f.referredBy || undefined,
         }),
       });
       if (res.ok) {
@@ -2588,6 +2684,23 @@ function SubmitForm({ token, onDone }: { token: string; onDone: (name?: string) 
             ))}
           </select>
         </div>
+        {referrerOptions.length > 0 && (
+          <div>
+            <label style={lbl}>מי הפנה</label>
+            <select
+              style={{ ...inp, appearance: 'auto' }}
+              value={f.referredBy}
+              onChange={(e) => set('referredBy', e.target.value)}
+            >
+              <option value="">— אופציונלי —</option>
+              {referrerOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <label style={lbl}>כתובת</label>
           <input
