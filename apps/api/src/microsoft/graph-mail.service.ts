@@ -101,6 +101,76 @@ export class GraphMailService {
       }));
   }
 
+  /**
+   * מיילים של Hayes (reporting@hayesmicrobial.com) שהתקבלו מאז `sinceIso`, עם קובצי ה-PDF
+   * המצורפים להם — דוחות תוצאות העובשים. נסרקים באותם מקורות של הלידים (התיבה + "עומס").
+   * הודעה בלי PDF מצורף לא מוחזרת.
+   */
+  async listRecentHayesReports(
+    userId: string,
+    sinceIso: string,
+  ): Promise<
+    {
+      id: string;
+      internetMessageId: string;
+      subject: string;
+      receivedDateTime: string;
+      pdfs: { name: string; content: Buffer }[];
+    }[]
+  > {
+    const accessToken = await this.auth.getAccessToken(userId);
+    const sources = ['/me/messages'];
+    for (const folderName of GraphMailService.EXTRA_LEAD_FOLDERS) {
+      const fid = await this.findFolderIdByName(accessToken, userId, folderName);
+      if (fid) sources.push(`/me/mailFolders/${fid}/messages`);
+    }
+
+    const seen = new Set<string>();
+    const matches: any[] = [];
+    for (const path of sources) {
+      for (const m of await this.fetchMessagesFrom(accessToken, path, sinceIso, userId)) {
+        const from = String(m?.from?.emailAddress?.address || '').trim().toLowerCase();
+        if (m?.id && !seen.has(m.id) && GraphMailService.HAYES_REPORT_SENDERS.includes(from)) {
+          seen.add(m.id);
+          matches.push(m);
+        }
+      }
+    }
+
+    const out = [];
+    for (const m of matches) {
+      const res = await fetch(
+        `https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(m.id)}/attachments`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!res.ok) {
+        this.logger.warn(`Hayes attachments ${m.id} for ${userId}: ${res.status}`);
+        continue;
+      }
+      const data: any = await res.json();
+      const pdfs = (Array.isArray(data?.value) ? data.value : [])
+        .filter(
+          (a: any) =>
+            a?.['@odata.type'] === '#microsoft.graph.fileAttachment' &&
+            a?.contentBytes &&
+            (/pdf/i.test(String(a?.contentType || '')) || /\.pdf$/i.test(String(a?.name || ''))),
+        )
+        .map((a: any) => ({ name: String(a.name || 'report.pdf'), content: Buffer.from(a.contentBytes, 'base64') }));
+      if (pdfs.length === 0) continue;
+      out.push({
+        id: String(m.id),
+        internetMessageId: String(m?.internetMessageId || m.id),
+        subject: String(m.subject || ''),
+        receivedDateTime: String(m?.receivedDateTime || ''),
+        pdfs,
+      });
+    }
+    return out;
+  }
+
+  /** שולחי דוחות התוצאות של מעבדת Hayes. */
+  private static readonly HAYES_REPORT_SENDERS = ['reporting@hayesmicrobial.com'];
+
   /** רק מיילים מכתובת שולח מאושרת (טופס האתר / web3forms) נחשבים לידים. */
   private static isLeadSender(fromEmail?: string | null): boolean {
     return GraphMailService.LEAD_SENDER_ALLOWLIST.includes(String(fromEmail || '').trim().toLowerCase());
