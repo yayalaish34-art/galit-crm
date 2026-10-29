@@ -380,6 +380,7 @@ export class BackupService {
       filesSkippedEmpty: number;
       customersWithReports: number;
       totalBytes: number;
+      tables: Record<string, number>;
     };
   }> {
     const PizZip = require('pizzip');
@@ -482,6 +483,30 @@ export class BackupService {
 
     zip.file('_INDEX.csv', '﻿' + indexRows.join('\n'));
 
+    // ── טבלאות נתונים כ-CSV (בלי base64) — לקוחות, הצעות מחיר רגילות+חתומות, דוחות, מסמכים ──
+    const tables: Record<string, number> = {};
+    const addTable = async (table: string, fileName: string, opts: CsvTableOpts = {}) => {
+      const { csv, rowCount } = await this.exportTableAsCsv(table, opts);
+      zip.file(`data/${fileName}`, csv);
+      tables[fileName] = rowCount;
+    };
+    await addTable('Customer', 'customers.csv');
+    await addTable('Quote', 'quotes.csv', {
+      exclude: ['contentHtml'],
+      extra: (cols) => {
+        // רק עמודות שקיימות בפועל במסד — חלק מהן לא נוצרו ב-migrations
+        const conds = [`"status"::text = 'SIGNED'`];
+        if (cols.includes('digitalSignatureStatus')) conds.push(`"digitalSignatureStatus"::text = 'SIGNED'`);
+        if (cols.includes('signedAt')) conds.push(`"signedAt" IS NOT NULL`);
+        return `(${conds.join(' OR ')}) AS "isSigned"`;
+      },
+    });
+    await addTable('Report', 'reports.csv');
+    await addTable('Document', 'documents.csv', {
+      exclude: ['dataBase64'],
+      extra: () => `("dataBase64" IS NOT NULL) AS "hasFile"`,
+    });
+
     const buf: Buffer = zip.generate({
       type: 'nodebuffer',
       compression: 'DEFLATE',
@@ -489,7 +514,7 @@ export class BackupService {
     });
 
     this.logger.log(
-      `reports export: docs=${docs.length} included=${filesIncluded} empty=${filesSkippedEmpty} customers=${customersSeen.size} bytes=${totalBytes} zip=${buf.byteLength}`,
+      `reports export: docs=${docs.length} included=${filesIncluded} empty=${filesSkippedEmpty} customers=${customersSeen.size} bytes=${totalBytes} zip=${buf.byteLength} tables=${JSON.stringify(tables)}`,
     );
 
     return {
@@ -500,13 +525,64 @@ export class BackupService {
         filesSkippedEmpty,
         customersWithReports: customersSeen.size,
         totalBytes,
+        tables,
       },
     };
   }
+
+  /**
+   * מייצא טבלה שלמה כ-CSV (UTF-8 עם BOM, נפתח נכון באקסל). העמודות נשלפות
+   * מ-information_schema (כמו בגיבוי ה-SQL), חוץ מ-exclude — לשדות כבדים כמו
+   * dataBase64 שמנפחים את השאילתה ונופלים על statement_timeout.
+   * extra = עמודה מחושבת נוספת (למשל hasFile / isSigned). שליפה מדורגת לפי id.
+   */
+  private async exportTableAsCsv(
+    table: string,
+    opts: CsvTableOpts = {},
+  ): Promise<{ csv: string; rowCount: number }> {
+    const colsResult: Array<{ column_name: string }> = await this.prisma.$queryRawUnsafe(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = '${table}' AND table_schema = 'public'
+       ORDER BY ordinal_position`,
+    );
+    const allColumns = colsResult.map((c) => c.column_name);
+    const columns = allColumns.filter((c) => !opts.exclude?.includes(c));
+    if (columns.length === 0) return { csv: '﻿', rowCount: 0 };
+
+    const extra = opts.extra?.(allColumns);
+    const selectList = columns.map((c) => `"${c}"`).join(', ') + (extra ? `, ${extra}` : '');
+    const PAGE = 500;
+    const rows: any[] = [];
+    let cursor = '';
+    while (true) {
+      const whereClause = cursor ? `WHERE "id" > '${cursor.replace(/'/g, "''")}'` : '';
+      const page: any[] = await this.prisma.$queryRawUnsafe(
+        `SELECT ${selectList} FROM "${table}" ${whereClause} ORDER BY "id" LIMIT ${PAGE}`,
+      );
+      if (page.length === 0) break;
+      rows.push(...page);
+      cursor = String(page[page.length - 1].id || '');
+      if (page.length < PAGE) break;
+    }
+
+    const header = rows.length ? Object.keys(rows[0]) : columns;
+    const toCell = (v: unknown) => {
+      if (v instanceof Date) return v.toISOString();
+      // Prisma Decimal — מספר, לא JSON
+      if (v != null && typeof (v as any).toFixed === 'function') return csvCell(String(v));
+      if (v != null && typeof v === 'object') return csvCell(JSON.stringify(v));
+      return csvCell(v);
+    };
+    const lines = [header.map(csvCell).join(','), ...rows.map((r) => header.map((h) => toCell(r[h])).join(','))];
+    return { csv: '﻿' + lines.join('\n'), rowCount: rows.length };
+  }
 }
+
+/** exclude = עמודות שלא מייצאים; extra = עמודה מחושבת (מקבלת את עמודות הטבלה הקיימות). */
+type CsvTableOpts = { exclude?: string[]; extra?: (columns: string[]) => string };
 
 /** Escape commas/quotes/newlines לתוך תא CSV. */
 function csvCell(v: unknown): string {
   const s = v == null ? '' : String(v);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

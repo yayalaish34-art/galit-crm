@@ -25,7 +25,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
 
   async function downloadReports() {
     setBusy('reports');
-    setMsg('מכין ZIP של כל הדוחות — זה יכול לקחת זמן לפי כמות הדוחות…');
+    setMsg('מכין ZIP של דוחות + לקוחות + הצעות מחיר — זה יכול לקחת זמן…');
     try {
       const r = await apiFetch(apiUrl('/backup/reports/export-all'), { authUser: toAuth(currentUser) });
       if (!r?.ok) throw new Error(`בקשה נכשלה (${r?.status ?? '?'})`);
@@ -42,7 +42,10 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
       if (stats) {
         const mb = Math.round((stats.totalBytes || 0) / (1024 * 1024));
         setMsg(
-          `הורדה החלה · ${stats.filesIncluded} דוחות · ${stats.customersWithReports} לקוחות · ${mb} MB`,
+          `הורדה החלה · ${stats.filesIncluded} קבצי דוחות · ${mb} MB` +
+            (stats.tables
+              ? ` · ${stats.tables['customers.csv'] ?? 0} לקוחות · ${stats.tables['quotes.csv'] ?? 0} הצעות מחיר · ${stats.tables['documents.csv'] ?? 0} מסמכים`
+              : ''),
         );
       } else {
         setMsg('ההורדה החלה');
@@ -161,7 +164,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
                   textAlign: 'start',
                 }}
               >
-                {busy === 'reports' ? '📦 מכין ZIP…' : '📦 ייצוא כל הדוחות (ZIP)'}
+                {busy === 'reports' ? '📦 מכין ZIP…' : '📦 גיבוי מלא: דוחות + לקוחות + הצעות מחיר (ZIP)'}
               </button>
 
               <button
@@ -203,7 +206,7 @@ export function AdminBackupFab({ currentUser }: { currentUser: AppUser | null })
             )}
 
             <div style={{ marginTop: 12, fontSize: 11, color: '#64748b', lineHeight: 1.55 }}>
-              <strong>ZIP דוחות:</strong> כל קבצי ה-DOCX/PDF שמצורפים לדוחות ב-Document.dataBase64, עם _INDEX.csv בשורש.<br />
+              <strong>גיבוי מלא (ZIP):</strong> כל קבצי ה-DOCX/PDF של הדוחות + _INDEX.csv, ובתיקיית data/ קבצי CSV של כל הלקוחות, כל הצעות המחיר (רגילות + חתומות, עמודת isSigned), הדוחות וטבלת המסמכים (בלי dataBase64).<br />
               <strong>גיבוי לקוחות:</strong> דאמפ SQL של כל טבלת Customer ל-OneDrive בתיקיית CRM-Backups/.
             </div>
           </div>
