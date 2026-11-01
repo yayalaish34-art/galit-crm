@@ -1,4 +1,7 @@
-import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { createHash, randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -21,13 +24,71 @@ const PIPELINE_STAGES = [
 ];
 
 @Injectable()
-export class AffiliateService {
+export class AffiliateService implements OnModuleInit {
   private readonly logger = new Logger(AffiliateService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
   ) {}
+
+  onModuleInit() {
+    return this.ensureSchema().catch((e) =>
+      this.logger.error(`affiliate schema repair failed: ${e?.message || e}`),
+    );
+  }
+
+  /**
+   * מחיל את מיגרציות השותפים אם לא הוחלו — `prisma migrate deploy` נתקע מול ה-pooler ולכן
+   * לא רץ בפריסה, ובלי העמודות האלה כל שאילתה על השותפים נכשלת (500 גם בכניסה).
+   * אידמפוטנטי: כשהעמודות קיימות אין כאן אף פקודת DDL. כישלון נרשם בלוג ולא מפיל את השרת.
+   */
+  private async ensureSchema(): Promise<void> {
+    const rows = await this.prisma.$queryRawUnsafe<Array<{ column_name: string }>>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND ((table_name = 'Affiliate' AND column_name IN ('recruitedByUserId', 'salesNotes', 'nextFollowupAt', 'referrerOptions'))
+            OR (table_name = 'AffiliateReferral' AND column_name = 'referredBy'))`,
+    );
+    const present = new Set(rows.map((r) => r.column_name));
+    if (present.size === 5) return;
+
+    await this.prisma.$transaction(async (tx) => {
+      // לא ממתינים לנצח לנעילה על הטבלה — עדיף להיכשל ולנסות בעלייה הבאה.
+      await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '10s'`);
+      await tx.$executeRawUnsafe(`ALTER TABLE "Affiliate" ADD COLUMN IF NOT EXISTS "recruitedByUserId" TEXT`);
+      await tx.$executeRawUnsafe(`ALTER TABLE "Affiliate" ADD COLUMN IF NOT EXISTS "salesNotes" TEXT`);
+      await tx.$executeRawUnsafe(`ALTER TABLE "Affiliate" ADD COLUMN IF NOT EXISTS "nextFollowupAt" TIMESTAMP(3)`);
+      await tx.$executeRawUnsafe(
+        `CREATE INDEX IF NOT EXISTS "Affiliate_recruitedByUserId_idx" ON "Affiliate"("recruitedByUserId")`,
+      );
+      await tx.$executeRawUnsafe(
+        `ALTER TABLE "Affiliate" ADD COLUMN IF NOT EXISTS "referrerOptions" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`,
+      );
+      await tx.$executeRawUnsafe(`ALTER TABLE "AffiliateReferral" ADD COLUMN IF NOT EXISTS "referredBy" TEXT`);
+      // רק כשהעמודה נוספה עכשיו — אחרת רשימה שרוקנה בכוונה הייתה מתמלאת בכל עלייה.
+      if (!present.has('referrerOptions')) {
+        await tx.$executeRawUnsafe(
+          `UPDATE "Affiliate" SET "referrerOptions" = ARRAY['יניב', 'דפנה', 'ריקי', 'אתי', 'רון'] WHERE LOWER("username") = 'inspect'`,
+        );
+      }
+    });
+    this.logger.warn(`Applied missing affiliate columns (had ${present.size}/5)`);
+
+    // רישום בהיסטוריה (כמו scripts/record-migration.ts), כדי ש-migrate deploy עתידי לא יריץ שוב.
+    for (const name of ['20261006120000_affiliate_sales_tracking', '20261029120000_affiliate_referred_by']) {
+      const sql = readFileSync(join(process.cwd(), 'prisma', 'migrations', name, 'migration.sql'));
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO _prisma_migrations
+           (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count)
+         SELECT $1::text, $2::text, now(), $3::text, NULL, NULL, now(), 1
+          WHERE NOT EXISTS (SELECT 1 FROM _prisma_migrations WHERE migration_name = $3::text)`,
+        randomUUID(),
+        createHash('sha256').update(sql).digest('hex'),
+        name,
+      );
+    }
+  }
 
   // ── ניהול (צד הצוות שלנו) ──────────────────────────────────────────────────
 
