@@ -301,6 +301,12 @@ export class RadonController {
     });
   }
 
+  /** הגלאים שהותקנו ללקוח דרך מערכת הפקת הדוחות. */
+  @Get('installed/customer/:customerId')
+  installedForCustomer(@Param('customerId') customerId: string) {
+    return this.detectors.installedForCustomer(customerId);
+  }
+
   /** "גלאי חדש" — הוספה ידנית מכרטיס הלקוח, בלי משימה ובלי הודעת וואטסאפ. */
   @Post('kit/customer')
   kitCreateManual(@Body() body: any) {

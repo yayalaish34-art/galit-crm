@@ -8,6 +8,7 @@ import {
   isAvailableForAssignment,
   isUnusableStatus,
 } from './radon-detector-status';
+import { TABLE_EXISTS_SQL, installedDetectorsSql } from './radon-installed-query';
 
 /**
  * ניהול מלאי גלאי הראדון — "חיי הגלאי" (סעיף 7 + סעיף 11 באפיון).
@@ -265,6 +266,22 @@ export class RadonDetectorsService {
       });
     }
     return updated;
+  }
+
+  /**
+   * הגלאים שהותקנו ללקוח דרך מערכת הפקת הדוחות, עם תאריכי הבדיקה והתוצאה אם חזרה.
+   *
+   * טבלה שעוד לא קיימת היא מצב תקין — היא נוצרת בפעם הראשונה ששם סורקים גלאי.
+   */
+  async installedForCustomer(customerId: string) {
+    const exists = async (table: string) => {
+      const rows = await this.prisma.$queryRawUnsafe<Array<{ name: string | null }>>(TABLE_EXISTS_SQL, `"${table}"`);
+      return Boolean(rows[0]?.name);
+    };
+    if (!(await exists('RadonInstalledDetector'))) return [];
+
+    const hasReadings = await exists('RadonLabReading');
+    return this.prisma.$queryRawUnsafe<any[]>(installedDetectorsSql(hasReadings), customerId);
   }
 
   /** תמונת מצב של המלאי — לתצוגה בראש מסך הגלאים. */

@@ -171,6 +171,8 @@ export function RadonKitCustomerSection({
 
   return (
     <div dir="rtl">
+      <InstalledDetectors customerId={customerId} authUser={currentUser} />
+
       <div className="mb-3 flex justify-end">{addButton}</div>
 
       {loading ? (
@@ -204,6 +206,143 @@ export function RadonKitCustomerSection({
           }}
         />
       )}
+    </div>
+  );
+}
+
+type InstalledDetector = {
+  detectorNumber: string;
+  roomName: string;
+  floor: string;
+  testLength: string;
+  placedAt: string;
+  collectedAt: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  reportId: string;
+  concentration: string | null;
+  uncertainty: string | null;
+};
+
+/** כמה נשאר לבדיקה. קצר טווח נמדד בשעות — תאריך הסיום שלו כולל שעה. */
+function testProgress(detector: InstalledDetector): string {
+  if (!detector.endsAt) return '—';
+  const now = Date.now();
+  if (detector.startsAt && now < new Date(detector.startsAt).getTime()) return 'טרם התחיל';
+  const left = new Date(detector.endsAt).getTime() - now;
+  if (left <= 0) return 'הסתיים';
+  if (detector.collectedAt.includes(':')) {
+    const hours = Math.ceil(left / 3_600_000);
+    return hours === 1 ? 'נותרה שעה' : `נותרו ${hours} שעות`;
+  }
+  const days = Math.ceil(left / 86_400_000);
+  return days === 1 ? 'נותר יום אחד' : `נותרו ${days} ימים`;
+}
+
+/**
+ * הגלאים שהותקנו ללקוח דרך מערכת הפקת הדוחות — לקריאה בלבד, כי שם הם נסרקים ונערכים.
+ * לא מוצג כלום כשאין גלאים, כדי שלקוח בלי התקנה ימשיך לראות רק את מעקב הערכות.
+ */
+function InstalledDetectors({
+  customerId,
+  authUser,
+}: {
+  customerId?: string | null;
+  authUser?: ApiAuthUser | null;
+}) {
+  const [detectors, setDetectors] = useState<InstalledDetector[]>([]);
+  const [error, setError] = useState(false);
+
+  const authRef = useRef(authUser);
+  authRef.current = authUser;
+
+  useEffect(() => {
+    if (!customerId) return;
+    let live = true;
+    void (async () => {
+      try {
+        const res = await apiFetch(apiUrl(`/radon/installed/customer/${customerId}`), {
+          authUser: authRef.current,
+        });
+        if (!res.ok) throw new Error();
+        const data = await readJson(res);
+        if (live) {
+          setDetectors(Array.isArray(data) ? data : []);
+          setError(false);
+        }
+      } catch {
+        if (live) setError(true);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [customerId]);
+
+  if (error) {
+    return (
+      <div className="mb-3 rounded-lg bg-rose-50 p-3 text-[12px] font-semibold text-rose-700">
+        טעינת הגלאים שהותקנו נכשלה
+      </div>
+    );
+  }
+  if (!detectors.length) return null;
+
+  const withResult = detectors.filter((d) => (d.concentration ?? '').trim() !== '').length;
+
+  return (
+    <div className="mb-4 rounded-xl border border-slate-200 bg-white p-3">
+      <div className="mb-2 flex flex-wrap items-baseline gap-2">
+        <h3 className="text-[13px] font-bold text-slate-800">גלאים שהותקנו</h3>
+        <span className="text-[11px] text-slate-500">
+          {detectors.length} גלאים · {withResult} עם תוצאה
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-right text-[12px]">
+          <thead className="text-[11px] text-slate-500">
+            <tr className="border-b border-slate-200">
+              <th className="px-2 py-1.5 font-semibold">מס׳ גלאי</th>
+              <th className="px-2 py-1.5 font-semibold">חדר</th>
+              <th className="px-2 py-1.5 font-semibold">קומה</th>
+              <th className="px-2 py-1.5 font-semibold">סוג</th>
+              <th className="px-2 py-1.5 font-semibold">התחלה</th>
+              <th className="px-2 py-1.5 font-semibold">סיום</th>
+              <th className="px-2 py-1.5 font-semibold">מצב הבדיקה</th>
+              <th className="px-2 py-1.5 font-semibold">תוצאה [Bq/m³]</th>
+            </tr>
+          </thead>
+          <tbody>
+            {detectors.map((d) => {
+              const hasResult = (d.concentration ?? '').trim() !== '';
+              return (
+                <tr key={d.detectorNumber} className="border-b border-slate-100 last:border-0">
+                  <td className="px-2 py-1.5 font-semibold text-slate-800" dir="ltr" style={{ textAlign: 'right' }}>
+                    {d.detectorNumber}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-700">{d.roomName || '—'}</td>
+                  <td className="px-2 py-1.5 text-slate-700" dir="ltr" style={{ textAlign: 'right' }}>
+                    {d.floor || '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-700">
+                    {d.testLength ? (d.testLength === 'קצרה' ? 'קצר טווח' : 'ארוך טווח') : '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-700" dir="ltr" style={{ textAlign: 'right' }}>
+                    {d.placedAt || '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-slate-700" dir="ltr" style={{ textAlign: 'right' }}>
+                    {d.collectedAt || '—'}
+                  </td>
+                  <td className="px-2 py-1.5 font-semibold text-slate-700">{testProgress(d)}</td>
+                  <td className="px-2 py-1.5 text-slate-700" dir="ltr" style={{ textAlign: 'right' }}>
+                    {hasResult ? `${d.concentration}${d.uncertainty ? ` ± ${d.uncertainty}%` : ''}` : 'ממתין'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
