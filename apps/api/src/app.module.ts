@@ -40,8 +40,12 @@ import { BlogModule } from './blog/blog.module';
 import { MailingModule } from './mailing/mailing.module';
 import { ReferenceNumbersModule } from './reference-numbers/reference-numbers.module';
 
+// CRONS_DISABLED=1 runs a copy of the API without its scheduled jobs (e.g. while a second
+// deployment shares the database), so customers are not emailed twice.
+const schedule = process.env.CRONS_DISABLED === '1' ? [] : [ScheduleModule.forRoot()];
+
 @Module({
-  imports: [ScheduleModule.forRoot(), AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, CitiesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule, MailingModule, CallRecordingsModule, ReferenceNumbersModule],
+  imports: [...schedule, AuthModule, LeadsModule, UsersModule, CustomersModule, CustomerClassificationsModule, LeadSourcesModule, CitiesModule, TasksModule, QuotesModule, ReportsModule, ProjectsModule, OpportunitiesModule, DocumentsModule, LabSamplesModule, SearchModule, DashboardModule, SettingsModule, QuoteItemCatalogModule, QuoteTemplatesModule, FollowupImportModule, PaymentTermsModule, DevAgentModule, PublicModule, MicrosoftModule, AiMailModule, IncomingLeadsModule, BackupModule, VoiceAssistantModule, ApprovalsModule, RadonModule, AffiliateModule, OutlookModule, CaspitModule, BlogModule, MailingModule, CallRecordingsModule, ReferenceNumbersModule],
   controllers: [AppController],
   providers: [AppService],
 })
