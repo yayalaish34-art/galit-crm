@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { AffiliateService } from './affiliate.service';
@@ -66,6 +66,13 @@ export class AffiliateAdminController {
   @Roles('ADMIN', 'MANAGER', 'SALES', 'TECHNICIAN', 'EXPERT', 'BILLING')
   updateReferral(@Param('id') id: string, @Body() body: any) {
     return this.affiliate.updateReferral(id, body || {});
+  }
+
+  /** מחיקת הפניה (לקוח שהשותף הפנה). הליד/משימה שנוצרו ממנה לא נמחקים. */
+  @Delete('referrals/:id')
+  @Roles('ADMIN', 'MANAGER')
+  deleteReferral(@Param('id') id: string) {
+    return this.affiliate.deleteReferral(id);
   }
 
   @Post('referrals/:id/settle')

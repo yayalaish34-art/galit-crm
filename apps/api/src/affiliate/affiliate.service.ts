@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, OnModuleInit, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, OnModuleInit, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -803,6 +803,14 @@ export class AffiliateService implements OnModuleInit {
     if ('taskId' in patch) data.taskId = patch.taskId || null;
     const r = await this.prisma.affiliateReferral.update({ where: { id }, data });
     return this.publicReferral(r);
+  }
+
+  /** מחיקת הפניה (לצוות). קישורי lead/task רופפים — הישויות עצמן נשארות. */
+  async deleteReferral(id: string) {
+    const r = await this.prisma.affiliateReferral.findUnique({ where: { id }, select: { id: true } });
+    if (!r) throw new NotFoundException('ההפניה לא נמצאה');
+    await this.prisma.affiliateReferral.delete({ where: { id } });
+    return { ok: true, id };
   }
 
   /**

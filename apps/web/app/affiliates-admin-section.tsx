@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, apiUrl, type ApiAuthUser } from './lib/api-base';
 import { formatIsraeliPhoneDisplay } from './lib/phone-format';
-import { Handshake, Plus, RefreshCw, CheckCircle2, ArrowLeftRight } from 'lucide-react';
+import { Handshake, Plus, RefreshCw, CheckCircle2, ArrowLeftRight, Trash2 } from 'lucide-react';
 
 type AppUser = ApiAuthUser & { name?: string };
 
@@ -70,6 +70,13 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
     const res = await apiFetch(apiUrl(`/affiliate-admin/referrals/${id}/settle`), { method: 'POST', authUser: currentUser });
     if (res.ok) { const upd = await res.json(); setReferrals((p) => p.map((r) => r.id === id ? { ...r, ...upd } : r)); flash('סומן כשולם לשותף'); }
     else flash('לא ניתן לסמן — נדרשת הרשאת ADMIN/MANAGER/BILLING');
+  };
+
+  const deleteReferral = async (r: ReferralRow) => {
+    if (!window.confirm(`למחוק את ההפניה של ${r.customerName} (${r.affiliateName})?\nהליד שנוצר ממנה (אם יש) לא יימחק.`)) return;
+    const res = await apiFetch(apiUrl(`/affiliate-admin/referrals/${r.id}`), { method: 'DELETE', authUser: currentUser });
+    if (res.ok) { setReferrals((p) => p.filter((x) => x.id !== r.id)); flash('ההפניה נמחקה'); }
+    else flash('המחיקה נכשלה — נדרשת הרשאת ADMIN/MANAGER');
   };
 
   // הפיכת הפניה לליד (מהזרימה הקיימת) — יוצר Lead ומקשר את ההפניה אליו.
@@ -171,6 +178,11 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
                         {r.commissionAmount != null && !r.commissionSettledAt && (
                           <button onClick={() => void settle(r.id)} className="flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100">
                             <CheckCircle2 className="h-3 w-3" /> שולם לשותף
+                          </button>
+                        )}
+                        {isManager && (
+                          <button onClick={() => void deleteReferral(r)} className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100">
+                            <Trash2 className="h-3 w-3" /> מחק
                           </button>
                         )}
                       </div>
