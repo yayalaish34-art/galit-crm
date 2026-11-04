@@ -43,6 +43,13 @@ export class AffiliateAdminController {
     return this.affiliate.updateAffiliate(id, body || {}, opts);
   }
 
+  /** מחיקת שותף — ההפניות שלו נמחקות איתו (cascade). לידים/משימות שנוצרו מהן נשארים. */
+  @Delete('affiliates/:id')
+  @Roles('ADMIN', 'MANAGER')
+  deleteAffiliate(@Param('id') id: string) {
+    return this.affiliate.deleteAffiliate(id);
+  }
+
   @Post('affiliates/:idOrUsername/password')
   @Roles('ADMIN', 'MANAGER', 'SALES')
   setPassword(

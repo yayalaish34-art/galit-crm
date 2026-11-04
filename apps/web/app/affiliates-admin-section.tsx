@@ -31,6 +31,18 @@ const STATUS: { value: string; label: string }[] = [
 ];
 const statusLabel = (s: string) => STATUS.find((x) => x.value === s)?.label || s;
 const ils = (n: number | null | undefined) => (n == null ? '—' : `₪${Number(n).toLocaleString('he-IL')}`);
+const TZ = 'Asia/Jerusalem';
+/** מפתח חודש YYYY-MM לפי שעון ישראל. */
+const monthKey = (iso: string) => {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit' }).formatToParts(new Date(iso));
+  return `${p.find((x) => x.type === 'year')?.value}-${p.find((x) => x.type === 'month')?.value}`;
+};
+const monthLabel = (key: string) => {
+  const [y, m] = key.split('-').map(Number);
+  return new Date(y, m - 1, 15).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+};
+const fmtDateTime = (iso: string) =>
+  new Date(iso).toLocaleString('he-IL', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
   const [tab, setTab] = useState<'referrals' | 'affiliates'>('referrals');
@@ -39,6 +51,7 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
   const [showNew, setShowNew] = useState(false);
+  const [month, setMonth] = useState<string>(() => monthKey(new Date().toISOString()));
   const isManager = currentUser.role === 'admin' || currentUser.role === 'manager';
 
   const load = useCallback(async () => {
@@ -79,6 +92,20 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
     else flash('המחיקה נכשלה — נדרשת הרשאת ADMIN/MANAGER');
   };
 
+  const deleteAffiliate = async (a: AffiliateRow) => {
+    const n = a._count?.referrals ?? 0;
+    const warn = n ? `
+יימחקו גם ${n} ההפניות שלו (לידים שכבר נוצרו מהן יישארו).` : '';
+    if (!window.confirm(`למחוק את השותף ${a.name}?
+הוא לא יוכל להתחבר יותר לפורטל.${warn}`)) return;
+    const res = await apiFetch(apiUrl(`/affiliate-admin/affiliates/${a.id}`), { method: 'DELETE', authUser: currentUser });
+    if (res.ok) {
+      setAffiliates((p) => p.filter((x) => x.id !== a.id));
+      setReferrals((p) => p.filter((x) => x.affiliateId !== a.id));
+      flash('השותף נמחק');
+    } else flash('המחיקה נכשלה — נדרשת הרשאת ADMIN/MANAGER');
+  };
+
   // הפיכת הפניה לליד (מהזרימה הקיימת) — יוצר Lead ומקשר את ההפניה אליו.
   const convertToLead = async (r: ReferralRow) => {
     if (r.leadId) { flash('כבר מקושר לליד'); return; }
@@ -96,6 +123,12 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
       flash('נוצר ליד וקושר להפניה — אפשר לטפל בו במסך הלידים');
     } else { flash('יצירת הליד נכשלה'); }
   };
+
+  // חודשים שיש בהם הפניות (+ החודש הנוכחי), מהחדש לישן, עם ספירה.
+  const monthCounts = new Map<string, number>();
+  for (const r of referrals) { const k = monthKey(r.createdAt); monthCounts.set(k, (monthCounts.get(k) || 0) + 1); }
+  const months = Array.from(new Set([monthKey(new Date().toISOString()), ...monthCounts.keys()])).sort().reverse();
+  const shownReferrals = month === 'all' ? referrals : referrals.filter((r) => monthKey(r.createdAt) === month);
 
   const owedTotal = referrals.filter((r) => r.commissionAmount && !r.commissionSettledAt).reduce((s, r) => s + (r.commissionAmount || 0), 0);
 
@@ -120,13 +153,25 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
       {loading && <div className="py-8 text-center text-sm text-slate-400">טוען…</div>}
 
       {!loading && tab === 'referrals' && (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          {referrals.length === 0 ? (
-            <div className="py-10 text-center text-sm text-slate-400">אין הפניות עדיין. שותפים ישלחו לקוחות דרך פורטל /affiliate.</div>
+        <div>
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {months.map((k) => (
+            <button key={k} onClick={() => setMonth(k)} className={monthCls(month === k)}>
+              {monthLabel(k)} ({monthCounts.get(k) || 0})
+            </button>
+          ))}
+          <button onClick={() => setMonth('all')} className={monthCls(month === 'all')}>הכל ({referrals.length})</button>
+        </div>
+        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          {shownReferrals.length === 0 ? (
+            <div className="py-10 text-center text-sm text-slate-400">
+              {referrals.length === 0 ? 'אין הפניות עדיין. שותפים ישלחו לקוחות דרך פורטל /affiliate.' : 'אין הפניות בחודש הזה.'}
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs text-slate-500">
                 <tr>
+                  <th className="px-3 py-2 text-right">תאריך ושעה</th>
                   <th className="px-3 py-2 text-right">לקוח</th>
                   <th className="px-3 py-2 text-right">שותף</th>
                   <th className="px-3 py-2 text-right">שירות</th>
@@ -137,8 +182,9 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
                 </tr>
               </thead>
               <tbody>
-                {referrals.map((r) => (
+                {shownReferrals.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100">
+                    <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-600" dir="ltr">{fmtDateTime(r.createdAt)}</td>
                     <td className="px-3 py-2">
                       <div className="font-semibold text-slate-800">{r.customerName}</div>
                       <div className="text-xs text-slate-500">{[formatIsraeliPhoneDisplay(r.customerPhone), r.customerEmail].filter(Boolean).join(' · ') || '—'}</div>
@@ -193,6 +239,7 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
             </table>
           )}
         </div>
+        </div>
       )}
 
       {!loading && tab === 'affiliates' && (
@@ -211,7 +258,7 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
             ) : (
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-xs text-slate-500">
-                  <tr><th className="px-3 py-2 text-right">שם</th><th className="px-3 py-2 text-right">שם משתמש</th><th className="px-3 py-2 text-right">עמלה</th><th className="px-3 py-2 text-right">הפניות</th><th className="px-3 py-2 text-right">קשר</th></tr>
+                  <tr><th className="px-3 py-2 text-right">שם</th><th className="px-3 py-2 text-right">שם משתמש</th><th className="px-3 py-2 text-right">עמלה</th><th className="px-3 py-2 text-right">הפניות</th><th className="px-3 py-2 text-right">קשר</th>{isManager && <th className="px-3 py-2 text-right">פעולות</th>}</tr>
                 </thead>
                 <tbody>
                   {affiliates.map((a) => (
@@ -221,6 +268,13 @@ export function AffiliatesAdminPage({ currentUser }: { currentUser: AppUser }) {
                       <td className="px-3 py-2 text-slate-600">{a.commissionPct}%</td>
                       <td className="px-3 py-2 text-slate-600">{a._count?.referrals ?? 0}</td>
                       <td className="px-3 py-2 text-xs text-slate-500">{[a.contactName, a.email, formatIsraeliPhoneDisplay(a.phone)].filter(Boolean).join(' · ') || '—'}</td>
+                      {isManager && (
+                        <td className="px-3 py-2">
+                          <button onClick={() => void deleteAffiliate(a)} className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-bold text-red-700 hover:bg-red-100">
+                            <Trash2 className="h-3 w-3" /> מחק
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -268,6 +322,10 @@ function NewAffiliateForm({ currentUser, onDone }: { currentUser: AppUser; onDon
       {err && <div className="mt-2 text-sm text-red-600">{err}</div>}
     </form>
   );
+}
+
+function monthCls(active: boolean) {
+  return `rounded-full px-3 py-1 text-xs font-semibold transition ${active ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`;
 }
 
 function tabCls(active: boolean) {

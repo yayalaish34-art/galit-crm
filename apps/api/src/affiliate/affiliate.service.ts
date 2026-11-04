@@ -805,6 +805,14 @@ export class AffiliateService implements OnModuleInit {
     return this.publicReferral(r);
   }
 
+  /** מחיקת שותף (לצוות). ההפניות שלו נמחקות ב-cascade; הכניסה לפורטל נחסמת מיד. */
+  async deleteAffiliate(id: string) {
+    const a = await this.prisma.affiliate.findUnique({ where: { id }, select: { id: true } });
+    if (!a) throw new NotFoundException('השותף לא נמצא');
+    await this.prisma.affiliate.delete({ where: { id } });
+    return { ok: true, id };
+  }
+
   /** מחיקת הפניה (לצוות). קישורי lead/task רופפים — הישויות עצמן נשארות. */
   async deleteReferral(id: string) {
     const r = await this.prisma.affiliateReferral.findUnique({ where: { id }, select: { id: true } });
