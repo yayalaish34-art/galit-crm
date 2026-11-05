@@ -1,9 +1,50 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+/**
+ * תבניות DOCX שמגיעות עם הקוד ונרשמות בבסיס הנתונים בעלייה.
+ * אין גישה ישירה לבסיס הנתונים בפריסה (מיגרציות לא רצות מול ה-pooler), ולכן הרישום כאן.
+ */
+export const BUNDLED_TEMPLATES: { name: string; serviceType: string; docxTemplatePath: string }[] = [
+  {
+    name: 'קרינה - הצעת מחיר לבדיקת קרינה מרשת החשמל - מוסד חינוך',
+    serviceType: 'קרינה',
+    docxTemplatePath: 'קרינה-הצעת-מחיר-לבדיקת-קרינה-מרשת-החשמל-מוסד-חינוך.docx',
+  },
+  {
+    name: 'קרינה - הצעת מחיר לבדיקת קרינה מרשת החשמל - מקומות עבודה',
+    serviceType: 'קרינה',
+    docxTemplatePath: 'קרינה-הצעת-מחיר-לבדיקת-קרינה-מרשת-החשמל-מקומות-עבודה.docx',
+  },
+];
+
 @Injectable()
-export class QuoteTemplatesService {
+export class QuoteTemplatesService implements OnModuleInit {
+  private readonly logger = new Logger(QuoteTemplatesService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit() {
+    return this.registerBundledTemplates().catch((e) =>
+      this.logger.error(`bundled quote templates not registered: ${e?.message || e}`),
+    );
+  }
+
+  /**
+   * יוצר שורה לכל תבנית מצורפת שאין לה עדיין שורה (לפי נתיב הקובץ, גם אם כובתה).
+   * כך תבנית שמנהל השבית לא חוזרת לפעול; תבנית שנמחקה לגמרי תירשם שוב בעלייה הבאה.
+   */
+  async registerBundledTemplates(): Promise<void> {
+    for (const t of BUNDLED_TEMPLATES) {
+      const existing = await this.prisma.quoteTemplate.findFirst({
+        where: { docxTemplatePath: t.docxTemplatePath },
+        select: { id: true },
+      });
+      if (existing) continue;
+      await this.prisma.quoteTemplate.create({ data: { ...t, isActive: true } });
+      this.logger.log(`registered quote template: ${t.name}`);
+    }
+  }
 
   findAll(filters?: { serviceType?: string; activeOnly?: boolean }) {
     return this.prisma.quoteTemplate.findMany({
